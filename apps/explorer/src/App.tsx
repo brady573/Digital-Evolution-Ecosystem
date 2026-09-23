@@ -170,16 +170,24 @@ export function App(){
   const [resourceView,setResourceView]=useState<ResourceView>("combined");
   const [traitView,setTraitView]=useState<TraitView>("speed");
   const [selectedId,setSelectedId]=useState<number|null>(null);
+  // Backpressure: never queue an advance while the worker is still busy with
+  // the previous one. Without this, high speeds pile up work faster than the
+  // worker can drain it and the UI stalls instead of running fast.
+  const advanceDebt=useRef(false);
 
   useEffect(()=>{
-    const unsub=runtime.subscribe(s=>{setSnapshot(s);setStatus("")});
+    const unsub=runtime.subscribe(s=>{advanceDebt.current=false;setSnapshot(s);setStatus("")});
     runtime.create(configFromSettings(DEFAULT_SETTINGS));
     return()=>{unsub();runtime.destroy()};
   },[runtime]);
 
   useEffect(()=>{
     if(!running)return;
-    const id=window.setInterval(()=>runtime.advance(speed),40);
+    const id=window.setInterval(()=>{
+      if(advanceDebt.current)return;
+      advanceDebt.current=true;
+      runtime.advance(speed);
+    },40);
     return()=>window.clearInterval(id);
   },[running,speed,runtime]);
 

@@ -67,17 +67,19 @@ export class UniverseSession {
     return this.snapshot();
   }
 
+  #stepOnce(){
+    this.#experiment.step();
+    observeIfDue(this.#experiment,this.#analysis);
+    if(this.#control){
+      this.#control.step();
+      if(this.#controlAnalysis)observeIfDue(this.#control,this.#controlAnalysis);
+    }
+  }
+
   advance(ticks:number){
     if(!this.#experiment)throw new Error("Universe has not been created");
     const count=Math.max(0,Math.floor(ticks));
-    for(let i=0;i<count;i++){
-      this.#experiment.step();
-      observeIfDue(this.#experiment,this.#analysis);
-      if(this.#control){
-        this.#control.step();
-        if(this.#controlAnalysis)observeIfDue(this.#control,this.#controlAnalysis);
-      }
-    }
+    for(let i=0;i<count;i++)this.#stepOnce();
     return this.snapshot();
   }
 
@@ -85,8 +87,9 @@ export class UniverseSession {
     if(!this.#experiment)throw new Error("Universe has not been created");
     const startRecords=this.#analysis.records.length;
     const startEvents=this.#experiment.ev.length;
+    // Render only once at the end: per-tick snapshots made long scans hang.
     for(let i=0;i<Math.max(1,Math.floor(maxTicks));i++){
-      this.advance(1);
+      this.#stepOnce();
       if(this.#analysis.records.length>startRecords||this.#experiment.ev.length>startEvents||this.#experiment.extinctTick!==null)break;
     }
     return this.snapshot();
