@@ -24,8 +24,6 @@ legacy/prototype       Immutable prototype regression sources
 tools/validation       Migration and long-run validation tooling
 ```
 
-The existing repository-management foundation (repo-ai, policies, schemas, workflows, agent instructions, and Go tooling) remains in place and is not part of the product migration.
-
 ## Migration evidence
 
 The frozen prototypes remain under `legacy/prototype` as regression evidence. Repository validation protects deterministic engine behavior, analysis isolation, runtime parity, matched-control forks, resource accounting, checkpoint round-trip behavior, ecological validation, and production builds.
@@ -43,4 +41,13 @@ The browser smoke continues to run in CI but is temporarily non-blocking while i
 
 ## Repository setup
 
-The product workspace lives beside the existing repository-management foundation. The Go/repo-ai infrastructure remains in place and unchanged except where a dedicated repository-management task requires otherwise.
+Requires Node >= 24 (see `.nvmrc`) and pnpm 12.5.1 via corepack:
+
+```sh
+corepack enable
+corepack prepare pnpm@12.5.1 --activate
+pnpm install --frozen-lockfile
+pnpm verify
+```
+
+See `CONTRIBUTING.md` for the full workflow and `AGENTS.md` for agent working practices.

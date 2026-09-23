@@ -1,0 +1,16 @@
+---
+description: Digital Evolution project conventions
+globs:
+  - "apps/**/*.ts"
+  - "apps/**/*.tsx"
+  - "packages/**/*.ts"
+  - "tools/**/*.ts"
+alwaysApply: false
+---
+
+Follow `AGENTS.md`. Key conventions for this codebase:
+
+- Dependency direction: `apps/explorer` -> `sim-runtime` -> `sim-core`; `sim-analysis` is read-only and never changes biology.
+- `sim-core` must not use React, DOM APIs, workers, storage, filesystem APIs, `requestAnimationFrame`, or wall-clock time.
+- Same engine version + config + seed + command sequence must stay deterministic.
+- Never edit `legacy/prototype/`. Verify with `pnpm verify` before finishing.
