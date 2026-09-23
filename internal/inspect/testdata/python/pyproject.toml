@@ -1,0 +1,4 @@
+[project]
+name = "fixture"
+dependencies = ["pytest", "ruff", "black"]
+[tool.pytest.ini_options]

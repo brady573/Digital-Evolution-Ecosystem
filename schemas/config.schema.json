@@ -1,8 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "repo-ai config",
+  "title": "repo-ai config v1",
   "type": "object",
-  "required": [
-    "schema"
-  ]
+  "additionalProperties": false,
+  "required": ["schema", "policy"],
+  "properties": {
+    "schema": {"const": "repo-ai/config/v1"},
+    "policy": {"const": "core"}
+  }
 }

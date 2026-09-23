@@ -1,17 +1,25 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "repo-ai policy",
+  "title": "repo-ai policy pack v1",
+  "description": "Canonical policy-pack contents. The corresponding policy-pack integrity digest is stored in policy.lock and identifies this individual pack, not a resolved policy.",
   "type": "object",
-  "required": [
-    "schema",
-    "rules"
-  ],
+  "additionalProperties": false,
+  "required": ["schema", "rules"],
   "properties": {
-    "schema": {
-      "type": "string"
-    },
-    "rules": {
-      "type": "array"
+    "schema": {"const": "repo-ai/v1"},
+    "rules": {"type": "array", "items": {"$ref": "#/$defs/rule"}}
+  },
+  "$defs": {
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "level", "requirement"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(\\.[a-z][a-z0-9-]*)+$"},
+        "level": {"enum": ["guidance", "check", "enforce"]},
+        "requirement": {"type": "string", "minLength": 1},
+        "reason": {"type": "string"}
+      }
     }
   }
 }

@@ -1,11 +1,12 @@
 # Digital Evolution Ecosystem
 
-This repository hosts `repo-ai`, a local repository governance bootstrap. The Phase 2 core pack is checked by the [repo-ai workflow](.github/workflows/repo-ai.yml); Go tests, vet, and build run in [ci](.github/workflows/ci.yml).
+This repository hosts `repo-ai`, a local repository inspector and deterministic policy resolver. Phase 3 adds structured repository facts, local Go/JavaScript/TypeScript/Python policy selection, standards, overrides, provenance, policy-pack integrity digests, and resolved-policy digests.
 
 ```sh
 go test ./...
 go vet ./...
+go run ./cmd/repo-ai inspect --format=json
 go run ./cmd/repo-ai check --format=json
 ```
 
-Read the [deployment and policy reference](docs/repo-ai.md) before installing it into another repository.
+See the [repo-ai Phase 3 reference](docs/repo-ai.md) for supported evidence, precedence, and limitations.

@@ -9,10 +9,23 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/example/repo-ai/internal/inspect"
 	"github.com/example/repo-ai/internal/policy"
 )
 
-func TestInspectReturnsFacts(t *testing.T) { _ = inspect() }
+func TestInspectCLIJSONContract(t *testing.T) {
+	binary:=filepath.Join(t.TempDir(),"repo-ai")
+	if output,err:=exec.Command("go","build","-o",binary,".").CombinedOutput();err!=nil{t.Fatalf("build CLI: %v: %s",err,output)}
+	root:=filepath.Join("../../internal/inspect/testdata","npm-ts")
+	command:=exec.Command(binary,"inspect","--format=json");command.Dir=root
+	one,err:=command.Output();if err!=nil{t.Fatalf("inspect: %v",err)}
+	command=exec.Command(binary,"inspect","--format=json");command.Dir=root
+	two,err:=command.Output();if err!=nil{t.Fatalf("inspect repeat: %v",err)}
+	if string(one)!=string(two){t.Fatalf("inspect output changed:\n%s\n%s",one,two)}
+	var facts inspect.RepositoryFacts
+	if err:=json.Unmarshal(one,&facts);err!=nil{t.Fatalf("decode inspect facts: %v",err)}
+	if len(facts.Languages)!=1||facts.Languages[0]!="typescript"||len(facts.PackageManagers)!=1||facts.PackageManagers[0]!="npm"{t.Fatalf("unexpected facts: %#v",facts)}
+}
 
 func TestCheckCLIExitCodes(t *testing.T) {
 	binary := filepath.Join(t.TempDir(), "repo-ai")
@@ -29,7 +42,7 @@ func TestCheckCLIExitCodes(t *testing.T) {
 		if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil { t.Fatal(err) }
 		if err := os.WriteFile(full, []byte(contents), 0644); err != nil { t.Fatal(err) }
 	}
-	tests := []struct {
+		tests := []struct {
 		name, fixture, change, wantRule, wantStatus string
 		wantExit int
 	}{
@@ -40,6 +53,7 @@ func TestCheckCLIExitCodes(t *testing.T) {
 		{name: "invalid policy", fixture: "compliant", change: "invalid policy", wantStatus: "error", wantExit: 2},
 		{name: "lock mismatch", fixture: "compliant", change: "invalid lock", wantStatus: "error", wantExit: 2},
 		{name: "malformed config", fixture: "compliant", change: "invalid config", wantStatus: "error", wantExit: 2},
+		{name: "equivalent config formatting", fixture: "compliant", change: "format config", wantStatus: "compliant", wantExit: 0},
 		{name: "evaluation error", fixture: "compliant", change: "unreadable workflow", wantStatus: "error", wantExit: 2},
 	}
 	for _, tc := range tests {
@@ -60,6 +74,7 @@ func TestCheckCLIExitCodes(t *testing.T) {
 			case "invalid policy": write(t, root, ".repo-ai/packs/core/policy.yaml", "schema: wrong\n")
 			case "invalid lock": write(t, root, ".repo-ai/policy.lock", strings.Replace(lock, digest, "sha256:"+strings.Repeat("0", 64), 1))
 			case "invalid config": write(t, root, ".repo-ai/config.yaml", "schema: repo-ai/config/v1\npolicy: unsupported\n")
+			case "format config": write(t, root, ".repo-ai/config.yaml", "# format-only variation\npolicy : 'core'\nschema: \"repo-ai/config/v1\"\n")
 			case "unreadable workflow":
 				path := filepath.Join(root, ".github/workflows/repo-ai.yml")
 				if err := os.Remove(path); err != nil { t.Fatal(err) }
