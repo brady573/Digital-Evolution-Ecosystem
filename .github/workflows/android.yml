@@ -30,8 +30,8 @@ jobs:
       - run: pnpm --filter @digital-evolution/explorer exec cap sync android
       - name: Install Android SDK packages
         run: |
-          yes | sdkmanager --licenses >/dev/null
-          sdkmanager "platforms;android-36" "build-tools;36.0.0"
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0"
       - name: Assemble debug APK
         working-directory: apps/explorer/android
         run: ./gradlew assembleDebug --no-daemon
