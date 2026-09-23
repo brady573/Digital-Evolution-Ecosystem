@@ -119,18 +119,29 @@ func ValidateRule(r Rule) error {
 	return nil
 }
 
-func Canonical(pack Pack) ([]byte,error) { return json.Marshal(pack) }
+func Canonical(pack Pack) ([]byte,error) {
+	pack.Rules = append([]Rule(nil), pack.Rules...)
+	sort.Slice(pack.Rules,func(i,j int)bool{return pack.Rules[i].ID<pack.Rules[j].ID})
+	return json.Marshal(pack)
+}
 
-func Digest(pack Pack) (string,error) {
+// PackIntegrityDigest identifies the canonical contents of one policy pack.
+// It is the digest recorded for that pack in policy.lock; it does not identify
+// a resolved policy assembled from multiple sources.
+func PackIntegrityDigest(pack Pack) (string,error) {
 	b,err:=Canonical(pack); if err!=nil{return "",err}
 	return fmt.Sprintf("sha256:%x",sha256.Sum256(b)),nil
 }
+
+// Digest is retained for internal callers that used the Phase 2 name. New code
+// should use PackIntegrityDigest to distinguish pack integrity from resolution.
+func Digest(pack Pack) (string,error) { return PackIntegrityDigest(pack) }
 
 // VerifyLock binds the local policy bytes to the exact canonical content digest.
 func VerifyLock(data []byte, digest string) error {
 	want := "    digest: " + digest
 	if !bytes.Equal(data, []byte("schema: repo-ai/lock/v1\npacks:\n  - name: core\n    source: builtin:core\n    version: 0.2.0\n"+want+"\n")) {
-		return errors.New("invalid policy lock or core digest mismatch")
+		return errors.New("invalid policy lock or policy-pack integrity digest mismatch")
 	}
 	return nil
 }
@@ -194,12 +205,12 @@ func EvaluateCore(root string) ([]Result,error) {
 func LoadCore(root string) (Pack,error) {
 	b,err:=os.ReadFile(filepath.Join(root,".repo-ai/packs/core/policy.yaml"));if err!=nil{return Pack{},err}
 	pack,err:=Parse(b);if err!=nil{return Pack{},err}
-	digest,err:=Digest(pack);if err!=nil{return Pack{},err}
-	builtin,err:=Parse([]byte(CoreYAML));if err!=nil{return Pack{},err}
-	trustedDigest,err:=Digest(builtin);if err!=nil{return Pack{},err}
-	if digest!=trustedDigest {return Pack{},errors.New("local core policy differs from built-in core policy")}
+	digest,err:=PackIntegrityDigest(pack);if err!=nil{return Pack{},err}
 	lock,err:=os.ReadFile(filepath.Join(root,".repo-ai/policy.lock"));if err!=nil{return Pack{},err}
 	if err:=VerifyLock(lock,digest);err!=nil{return Pack{},err}
+	builtin,err:=Parse([]byte(CoreYAML));if err!=nil{return Pack{},err}
+	trustedDigest,err:=PackIntegrityDigest(builtin);if err!=nil{return Pack{},err}
+	if digest!=trustedDigest {return Pack{},errors.New("local core policy differs from built-in core policy")}
 	return pack,nil
 }
 

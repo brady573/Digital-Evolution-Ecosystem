@@ -79,7 +79,7 @@ func main() {
 		if err!=nil {fmt.Fprintln(os.Stderr,err);os.Exit(2)}
 		pack,err:=policy.Parse([]byte(policy.CoreYAML))
 		if err!=nil { fmt.Fprintln(os.Stderr,err); os.Exit(2) }
-		digest,err:=policy.Digest(pack)
+		digest,err:=policy.PackIntegrityDigest(pack)
 		if err!=nil { fmt.Fprintln(os.Stderr,err); os.Exit(2) }
 		targets:=map[string]string{
 			".repo-ai/config.yaml":"schema: repo-ai/config/v1\npolicy: core\n",

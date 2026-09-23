@@ -92,3 +92,16 @@ func TestConfigFormattingAndEffectivePolicyDigest(t *testing.T){root:=t.TempDir(
 	third:=resolve(t,root)
 	if second.Digest==third.Digest{t.Fatal("effective policy change did not change digest")}
 }
+
+func TestResolvedDigestExcludesProvenanceAndIsStable(t *testing.T) {
+	root:=t.TempDir();initRepo(t,root);write(t,root,"go.mod","module example.test/go\n\ngo 1.23\n")
+	first:=resolve(t,root)
+	second:=resolve(t,root)
+	if first.Digest!=second.Digest { t.Fatalf("identical effective rules have different digests: %s != %s",first.Digest,second.Digest) }
+	write(t,root,".repo-ai/standards/provenance.yaml","schema: repo-ai/v1\nrules:\n  - id: stack.go.manifest\n    level: check\n    requirement: go_mod_present\n    reason: provenance-only annotation\n")
+	withProvenance:=resolve(t,root)
+	before,after:=findRule(t,first,"stack.go.manifest"),findRule(t,withProvenance,"stack.go.manifest")
+	if !reflect.DeepEqual(before.Definition,after.Definition) { t.Fatalf("effective definitions differ: %#v != %#v",before.Definition,after.Definition) }
+	if reflect.DeepEqual(before.Provenance,after.Provenance) { t.Fatal("expected provenance to differ") }
+	if first.Digest!=withProvenance.Digest { t.Fatalf("provenance-only change altered resolved digest: %s != %s",first.Digest,withProvenance.Digest) }
+}

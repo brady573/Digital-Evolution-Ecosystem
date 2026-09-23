@@ -56,6 +56,24 @@ func TestRejectInvalidPolicy(t *testing.T) {
 func TestEvaluateCoreRejectsTamperedPack(t *testing.T) {
 	root:=t.TempDir()
 	if err:=os.MkdirAll(filepath.Join(root,".repo-ai/packs/core"),0755);err!=nil{t.Fatal(err)}
-	if err:=os.WriteFile(filepath.Join(root,".repo-ai/packs/core/policy.yaml"),[]byte(strings.Replace(CoreYAML,"level: enforce","level: guidance",1)),0644);err!=nil{t.Fatal(err)}
+	tampered:=strings.Replace(CoreYAML,"level: enforce","level: guidance",1)
+	if err:=os.WriteFile(filepath.Join(root,".repo-ai/packs/core/policy.yaml"),[]byte(tampered),0644);err!=nil{t.Fatal(err)}
+	pack,err:=Parse([]byte(tampered));if err!=nil{t.Fatal(err)}
+	digest,err:=PackIntegrityDigest(pack);if err!=nil{t.Fatal(err)}
+	lock:=[]byte("schema: repo-ai/lock/v1\npacks:\n  - name: core\n    source: builtin:core\n    version: 0.2.0\n    digest: "+digest+"\n")
+	if err:=os.WriteFile(filepath.Join(root,".repo-ai/policy.lock"),lock,0644);err!=nil{t.Fatal(err)}
 	if _,err:=EvaluateCore(root);err==nil || !strings.Contains(err.Error(),"differs from built-in") {t.Fatalf("tampered policy accepted: %v",err)}
+}
+
+func TestLockedPolicyPackTamperingWithoutDigestUpdateIsIntegrityError(t *testing.T) {
+	root:=t.TempDir()
+	packDir:=filepath.Join(root,".repo-ai/packs/core")
+	if err:=os.MkdirAll(packDir,0755);err!=nil{t.Fatal(err)}
+	pack,err:=Parse([]byte(CoreYAML));if err!=nil{t.Fatal(err)}
+	expected,err:=PackIntegrityDigest(pack);if err!=nil{t.Fatal(err)}
+	lock:=[]byte("schema: repo-ai/lock/v1\npacks:\n  - name: core\n    source: builtin:core\n    version: 0.2.0\n    digest: "+expected+"\n")
+	if err:=os.WriteFile(filepath.Join(root,".repo-ai/policy.lock"),lock,0644);err!=nil{t.Fatal(err)}
+	tampered:=strings.Replace(CoreYAML,"level: enforce","level: check",1)
+	if err:=os.WriteFile(filepath.Join(packDir,"policy.yaml"),[]byte(tampered),0644);err!=nil{t.Fatal(err)}
+	if _,err:=LoadCore(root);err==nil||!strings.Contains(err.Error(),"policy-pack integrity digest mismatch"){t.Fatalf("tampered locked pack error = %v",err)}
 }

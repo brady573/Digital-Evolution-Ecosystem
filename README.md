@@ -1,6 +1,6 @@
 # Digital Evolution Ecosystem
 
-This repository hosts `repo-ai`, a local repository inspector and deterministic policy resolver. Phase 3 adds structured repository facts, local Go/JavaScript/TypeScript/Python policy selection, standards, overrides, provenance, and effective policy digests.
+This repository hosts `repo-ai`, a local repository inspector and deterministic policy resolver. Phase 3 adds structured repository facts, local Go/JavaScript/TypeScript/Python policy selection, standards, overrides, provenance, policy-pack integrity digests, and resolved-policy digests.
 
 ```sh
 go test ./...

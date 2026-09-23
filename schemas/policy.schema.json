@@ -1,6 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "repo-ai policy v1",
+  "title": "repo-ai policy pack v1",
+  "description": "Canonical policy-pack contents. The corresponding policy-pack integrity digest is stored in policy.lock and identifies this individual pack, not a resolved policy.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema", "rules"],

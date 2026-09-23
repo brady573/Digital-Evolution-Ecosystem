@@ -31,7 +31,11 @@
       "required": ["schema", "digest", "rules"],
       "properties": {
         "schema": {"const": "repo-ai/resolved/v1"},
-        "digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "description": "Resolved-policy digest over canonical effective rule definitions; excludes provenance and environment-specific metadata. Not an individual policy-pack integrity digest."
+        },
         "rules": {"type": "array", "items": {"type": "object", "required": ["definition", "provenance"]}}
       }
     }

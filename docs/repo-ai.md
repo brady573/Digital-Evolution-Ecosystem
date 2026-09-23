@@ -44,7 +44,12 @@ overrides:
 
 ## Digests, checks, and CLI results
 
-`.repo-ai/policy.lock` continues to pin the canonical JSON digest of the compiled baseline core pack. The effective resolved policy has a separate SHA-256 digest over canonical JSON containing only its schema and sorted effective rule definitions. Provenance, filesystem paths, timestamps, and environment details are excluded. `check` returns the resolved policy, provenance, and digest in JSON, then evaluates those resolved rules.
+There are two distinct SHA-256 digest contracts:
+
+1. **Policy-pack integrity digest:** `policy.PackIntegrityDigest` identifies the canonical contents of one policy pack. `.repo-ai/policy.lock` records the expected digest for each locked pack. Loading a pack verifies its calculated digest against that expected value, then checks the trusted built-in core identity. Editing a locked pack without updating its expected digest is an integrity/configuration error (CLI exit 2). The lock is not the resolved-policy digest.
+2. **Resolved-policy digest:** `ResolvedPolicy.digest` identifies the effective rule definitions after baseline → detected stack → repository standards → explicit overrides resolution. It hashes canonical JSON containing the resolved schema and rules sorted by immutable rule ID. Provenance, source paths, reasons, timestamps, workspace paths, and environment-specific metadata are excluded. Consequently identical effective definitions have the same digest even when their provenance differs; changing an effective rule changes the digest.
+
+`check` returns the resolved policy, provenance, and resolved-policy digest in JSON, then evaluates those resolved rules. The two digest types have distinct descriptions in `schemas/policy-lock.schema.json`, `schemas/policy.schema.json`, and `schemas/resolved-policy.schema.json`.
 
 Exit codes remain stable:
 

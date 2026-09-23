@@ -32,6 +32,8 @@ type ResolvedRule struct {
 
 type ResolvedPolicy struct {
 	Schema string `json:"schema"`
+	// Digest is the resolved-policy digest: canonical effective rules only,
+	// deliberately excluding provenance and environment-specific metadata.
 	Digest string `json:"digest"`
 	Rules []ResolvedRule `json:"rules"`
 }
@@ -177,6 +179,9 @@ func Resolve(root string, facts inspect.RepositoryFacts) (ResolvedPolicy,error) 
 	canonical:=struct{Schema string `json:"schema"`;Rules []policy.Rule `json:"rules"`}{Schema:result.Schema}
 	for _,id:=range ids{rule:=resolved[id];result.Rules=append(result.Rules,rule);canonical.Rules=append(canonical.Rules,rule.Definition)}
 	bytes,err:=json.Marshal(canonical);if err!=nil{return ResolvedPolicy{},err}
+	// The resolved-policy digest is distinct from each source pack's integrity
+	// digest. Hash only canonical effective definitions in stable rule-ID order;
+	// never include provenance, paths, timestamps, or machine-specific values.
 	result.Digest=fmt.Sprintf("sha256:%x",sha256.Sum256(bytes))
 	return result,nil
 }
