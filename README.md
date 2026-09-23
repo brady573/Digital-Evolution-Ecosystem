@@ -9,7 +9,7 @@ The repository-native web product migration is complete and this repository is t
 - **Historical validated baseline:** prototype v0.28.2 / engine 0.18.2
 - **Canonical repository engine:** v0.29.0 / engine 0.19.0
 - **Architecture:** TypeScript modular monolith, worker-owned simulation runtime, React/Vite explorer, exact resumable checkpoints
-- **Next platform milestone:** Capacitor Android packaging and the first APK
+- **Next platform milestone:** Capacitor Android packaging and the first APK (in progress — `apps/explorer/android`, assembled in CI by `.github/workflows/android.yml`)
 - **Known browser issue:** [#5](https://github.com/brady573/Digital-Evolution-Ecosystem/issues/5) tracks the Chromium save/reload/resume acknowledgement integration defect. Lower-level checkpoint round-trip and deterministic continuation are validated; the issue is isolated to browser integration.
 
 ## Product architecture

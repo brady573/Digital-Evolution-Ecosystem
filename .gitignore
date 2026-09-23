@@ -6,6 +6,13 @@ dist/
 apps/*/dist/
 packages/*/dist/
 
+# Android (Capacitor) generated output — the platform project itself is committed
+apps/explorer/android/.gradle/
+apps/explorer/android/app/build/
+apps/explorer/android/app/src/main/assets/
+apps/explorer/android/local.properties
+apps/explorer/android/captain-hook.log
+
 # Runtime / OS
 .DS_Store
 *.log

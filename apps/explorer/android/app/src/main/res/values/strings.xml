@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Digital Evolution</string>
+    <string name="title_activity_main">Digital Evolution</string>
+    <string name="package_name">com.digitalevolution.explorer</string>
+    <string name="custom_url_scheme">com.digitalevolution.explorer</string>
+</resources>

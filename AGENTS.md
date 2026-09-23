@@ -32,6 +32,7 @@ See `README.md` for product direction and `docs/architecture/MIGRATION.md` for m
 | Deterministic parity gates | `pnpm test:migration` |
 | Ecological validation | `pnpm test:ecology` |
 | Production build | `pnpm build` |
+| Sync web assets to Android | `pnpm --filter @digital-evolution/explorer cap:sync` (after `build`) |
 | Full verification | `pnpm verify` (typecheck + migration + ecology + build) |
 | Browser smoke (needs Playwright Chromium) | `pnpm test:browser` against a `vite preview` server (see `.github/workflows/product.yml`) |
 | Dev server | `pnpm dev` |
