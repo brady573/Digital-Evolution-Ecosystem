@@ -24,7 +24,7 @@ jobs:
       - run: corepack enable
       - run: corepack prepare pnpm@12.5.1 --activate
       - run: pnpm install --frozen-lockfile
-      - run: pnpm test:survey -- --ticks=${{ inputs.ticks }} --out=ecology-survey.json
+      - run: pnpm test:survey -- --ticks=${{ inputs.ticks }} --full --out=ecology-survey.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ecology-survey-results
