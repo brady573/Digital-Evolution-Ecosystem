@@ -40,6 +40,31 @@ func emit(v any, jsonOut bool) {
 	if jsonOut { b,_:=json.MarshalIndent(v,"","  "); fmt.Println(string(b)); return }
 	fmt.Printf("%+v\n",v)
 }
+
+// checkRepository returns the stable CLI result and exit code: 0 for compliant
+// repositories (including guidance and check findings), 1 for enforce findings,
+// and 2 for invalid configuration, policy, lock, or evaluation errors.
+func checkRepository(root string) (Result, int) {
+	configuration, err := os.ReadFile(filepath.Join(root, ".repo-ai/config.yaml"))
+	if err != nil {
+		return Result{Status: "error", Warnings: []string{err.Error()}}, 2
+	}
+	if string(configuration) != "schema: repo-ai/config/v1\npolicy: core\n" {
+		return Result{Status: "error", Warnings: []string{"invalid .repo-ai/config.yaml: expected schema repo-ai/config/v1 and policy core"}}, 2
+	}
+	findings, err := policy.EvaluateCore(root)
+	if err != nil {
+		return Result{Status: "error", Warnings: []string{err.Error()}}, 2
+	}
+	result := Result{Status: "compliant", Findings: findings}
+	for _, finding := range findings {
+		if finding.Level == policy.Enforce {
+			result.Status = "failed"
+			return result, 1
+		}
+	}
+	return result, 0
+}
 func main() {
 	if len(os.Args)<2 { fmt.Println("repo-ai: init | inspect | deploy | generate | check | update"); os.Exit(2) }
 	cmd:=os.Args[1]
@@ -56,9 +81,9 @@ func main() {
 	case "init","deploy":
 		f:=inspect()
 		pack,err:=policy.Parse([]byte(policy.CoreYAML))
-		if err!=nil { fmt.Fprintln(os.Stderr,err); os.Exit(1) }
+		if err!=nil { fmt.Fprintln(os.Stderr,err); os.Exit(2) }
 		digest,err:=policy.Digest(pack)
-		if err!=nil { fmt.Fprintln(os.Stderr,err); os.Exit(1) }
+		if err!=nil { fmt.Fprintln(os.Stderr,err); os.Exit(2) }
 		targets:=map[string]string{
 			".repo-ai/config.yaml":"schema: repo-ai/config/v1\npolicy: core\n",
 			".repo-ai/overrides.yaml":"schema: repo-ai/overrides/v1\noverrides: {}\n",
@@ -84,13 +109,9 @@ func main() {
 	case "generate":
 		emit(Result{Status:"ok",Warnings:[]string{"bootstrap compiler: no regeneration required"}},j)
 	case "check":
-		if !exists(".repo-ai/config.yaml") { emit(Result{Status:"failed",Warnings:[]string{"missing .repo-ai/config.yaml"}},j); os.Exit(1) }
-		findings,err:=policy.EvaluateCore(".")
-		if err!=nil {emit(Result{Status:"failed",Warnings:[]string{err.Error()}},j);os.Exit(1)}
-		r:=Result{Status:"compliant",Findings:findings}
-		for _,finding:=range findings {if finding.Level==policy.Enforce || finding.Level==policy.Check {r.Status="failed"}}
+		r,code:=checkRepository(".")
 		emit(r,j)
-		if r.Status=="failed" {os.Exit(1)}
+		if code!=0 {os.Exit(code)}
 	case "update":
 		emit(Result{Status:"ok",Warnings:[]string{"bootstrap package uses builtin core policy; OCI resolver is extension point"}},j)
 	default:
