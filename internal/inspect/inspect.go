@@ -103,7 +103,14 @@ func Inspect(root string) (RepositoryFacts, error) {
 			isTypeScript := deps["typescript"]
 			if has, err := check(dir, "tsconfig.json"); err != nil { return err } else if has { isTypeScript = true }
 			for _, pattern := range []string{"*.ts", "*.tsx"} { matches, err := filepath.Glob(filepath.Join(dir, pattern)); if err != nil { return err }; if len(matches)>0 { isTypeScript = true } }
-			if isTypeScript { add(sets["languages"], "typescript") } else { add(sets["languages"], "javascript") }
+			workspaceRoot := dir == root && len(strings.TrimSpace(string(manifest.Workspaces))) > 0
+			if isTypeScript {
+				add(sets["languages"], "typescript")
+			} else if !workspaceRoot || len(deps) > 0 {
+				// A workspace aggregator's package.json is not evidence that the
+				// repository itself contains JavaScript source.
+				add(sets["languages"], "javascript")
+			}
 			for name, framework := range map[string]string{"react": "react", "next": "nextjs", "vue": "vue", "@angular/core": "angular", "svelte": "svelte"} {
 				if deps[name] { add(sets["frameworks"], framework) }
 			}

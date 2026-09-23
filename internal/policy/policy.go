@@ -137,7 +137,7 @@ func VerifyLock(data []byte, digest string) error {
 
 type coreChecker struct { facts *inspect.RepositoryFacts }
 
-func (coreChecker) Check(root string, rule Rule) ([]Finding,error) {
+func (c coreChecker) Check(root string, rule Rule) ([]Finding,error) {
 	add := func(path,message string) []Finding { return []Finding{Result{ID:rule.ID,Level:rule.Level,Path:path,Detail:message}} }
 	switch rule.Requirement {
 	case "github_actions_no_write_all":
