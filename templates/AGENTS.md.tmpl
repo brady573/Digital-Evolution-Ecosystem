@@ -1,0 +1,25 @@
+# Repository AI Governance
+
+Canonical governance is stored under `.repo-ai/`.
+
+Before changing code:
+
+1. Inspect existing implementations.
+2. Read applicable `.repo-ai/standards/`.
+3. Preserve existing architecture and conventions.
+4. Keep changes narrowly scoped.
+5. Prefer existing dependencies.
+6. Do not weaken tests, CI, security controls, or policy.
+7. Run `repo-ai check` before declaring work complete.
+8. Run applicable repository-native tests, lint and build commands.
+
+Stop and request human input when:
+
+- instructions conflict;
+- an enforce rule would need to be bypassed;
+- unowned files would need to be overwritten;
+- credentials or elevated permissions are required;
+- an existing security control would need to be weakened.
+
+Do not commit, push, merge, open a pull request, or alter remote
+repository settings unless explicitly authorized.

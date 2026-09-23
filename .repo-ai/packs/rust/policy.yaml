@@ -1,0 +1,9 @@
+schema: repo-ai/v1
+pack:
+  name: rust
+  version: 1.0.0
+rules:
+  - id: rust.test
+    level: enforce
+    requirement: command
+    command: cargo test

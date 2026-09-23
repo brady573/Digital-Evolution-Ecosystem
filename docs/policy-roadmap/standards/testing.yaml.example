@@ -1,0 +1,11 @@
+schema: repo-ai/v1
+rules:
+  - id: testing.existing-tests
+    level: enforce
+    scope: "**"
+    requirement: existing_tests_must_pass
+
+  - id: testing.changed-code
+    level: check
+    scope: "**"
+    requirement: changed_behavior_should_have_tests

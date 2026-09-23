@@ -1,0 +1,8 @@
+schema: repo-ai/v1
+pack:
+  name: typescript
+  version: 1.0.0
+rules:
+  - id: typescript.typecheck
+    level: check
+    requirement: detected_typecheck_command

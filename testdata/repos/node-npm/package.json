@@ -1,0 +1,8 @@
+{
+  "name": "fixture",
+  "private": true,
+  "scripts": {
+    "test": "echo test",
+    "lint": "echo lint"
+  }
+}
