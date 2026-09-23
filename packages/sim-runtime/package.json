@@ -1,0 +1,14 @@
+{
+  "name": "@digital-evolution/sim-runtime",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@digital-evolution/contracts": "workspace:*",
+    "@digital-evolution/sim-core": "workspace:*",
+    "@digital-evolution/sim-analysis": "workspace:*"
+  }
+}
