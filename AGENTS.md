@@ -31,6 +31,7 @@ See `README.md` for product direction and `docs/architecture/MIGRATION.md` for m
 | Typecheck all packages | `pnpm typecheck` |
 | Deterministic parity gates | `pnpm test:migration` |
 | Ecological validation | `pnpm test:ecology` |
+| Multi-seed survey (CI-scale) | `pnpm test:survey -- --ticks=250000` (manual; results artifact, not part of `verify`) |
 | Production build | `pnpm build` |
 | Sync web assets to Android | `pnpm --filter @digital-evolution/explorer cap:sync` (after `build`) |
 | Full verification | `pnpm verify` (typecheck + migration + ecology + build) |
