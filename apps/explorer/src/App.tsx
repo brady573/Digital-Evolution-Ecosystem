@@ -195,7 +195,14 @@ export function App(){
   const load=async()=>{
     const checkpoint=await repository.load("current");
     if(!checkpoint){setStatus("No saved universe found");return}
-    setRunning(false);runtime.loadCheckpoint(checkpoint);setStatus("Checkpoint restored");
+    setRunning(false);
+    setStatus("Restoring checkpoint…");
+    try{
+      await runtime.loadCheckpoint(checkpoint);
+      setStatus("Checkpoint restored");
+    }catch(error){
+      setStatus(`Restore failed: ${error instanceof Error?error.message:String(error)}`);
+    }
   };
   const exportEvidence=async()=>{
     const data=await runtime.requestExport();
