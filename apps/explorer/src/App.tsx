@@ -86,7 +86,7 @@ function WorldCanvas({
     const canvas=ref.current;if(!canvas)return;
     const ctx=canvas.getContext("2d");if(!ctx)return;
     const w=canvas.width,h=canvas.height,n=snapshot.resources.gridSize,cell=w/n;
-    ctx.fillStyle="#06100d";ctx.fillRect(0,0,w,h);
+    ctx.clearRect(0,0,w,h);
 
     const stocks=snapshot.resources.stock,caps=snapshot.resources.capacity;
     const drawEnvironment=lens==="normal"||lens==="nutrients";
@@ -170,17 +170,34 @@ export function App(){
   const [resourceView,setResourceView]=useState<ResourceView>("combined");
   const [traitView,setTraitView]=useState<TraitView>("speed");
   const [selectedId,setSelectedId]=useState<number|null>(null);
+  // Backpressure: never queue an advance while the worker is still busy with
+  // the previous one. Without this, high speeds pile up work faster than the
+  // worker can drain it and the UI stalls instead of running fast.
+  const advanceDebt=useRef(false);
 
   useEffect(()=>{
-    const unsub=runtime.subscribe(s=>{setSnapshot(s);setStatus("")});
+    const unsub=runtime.subscribe(s=>{advanceDebt.current=false;setSnapshot(s);setStatus("")});
     runtime.create(configFromSettings(DEFAULT_SETTINGS));
     return()=>{unsub();runtime.destroy()};
   },[runtime]);
 
   useEffect(()=>{
     if(!running)return;
-    const id=window.setInterval(()=>runtime.advance(speed),40);
-    return()=>window.clearInterval(id);
+    // Frame-paced loop (prototype-authentic feel): advance a speed-scaled
+    // slice of ticks every animation frame and render each snapshot, so
+    // ticks visibly count up and organisms glide instead of teleporting.
+    // Backpressure keeps slow workers responsive: a new slice is only sent
+    // once the previous snapshot has arrived.
+    let raf=0;
+    const frame=()=>{
+      if(!advanceDebt.current){
+        advanceDebt.current=true;
+        runtime.advance(Math.max(1,Math.round(speed/60)));
+      }
+      raf=requestAnimationFrame(frame);
+    };
+    raf=requestAnimationFrame(frame);
+    return()=>cancelAnimationFrame(raf);
   },[running,speed,runtime]);
 
   const newUniverse=()=>{
@@ -221,12 +238,12 @@ export function App(){
 
   return <div className="app-shell">
     <header className="topbar">
-      <div><span className="eyebrow">Living Evolution Explorer</span><strong>Digital Evolution Ecosystem</strong></div>
-      <div className="hud"><span data-testid="tick">Tick {snapshot.tick.toLocaleString()}</span><span>{snapshot.population} living</span><span>{snapshot.dormantPopulation} dormant</span><button onClick={()=>setSettingsOpen(true)}>World settings</button></div>
+      <div className="hud-cell brand-cell"><span className="eyebrow">Living Evolution Explorer</span><strong className="world-name">Digital Evolution Ecosystem</strong></div>
+      <div className="hud"><div className="hud-cell"><span className="hud-label">Tick</span><span className="hud-value" data-testid="tick">{snapshot.tick.toLocaleString()}</span></div><div className="hud-cell"><span className="hud-label">Living</span><span className="hud-value">{snapshot.population}</span></div><div className="hud-cell"><span className="hud-label">Dormant</span><span className="hud-value">{snapshot.dormantPopulation}</span></div><button className="hud-settings" onClick={()=>setSettingsOpen(true)}>World settings</button></div>
     </header>
 
     <nav className="rail" aria-label="Primary">
-      {(["world","history","tree","experiments"] as Surface[]).map(s=><button key={s} className={surface===s?"active":""} onClick={()=>setSurface(s)}>{s.charAt(0).toUpperCase()+s.slice(1)}</button>)}
+      {(["world","history","tree","experiments"] as Surface[]).map(s=><button key={s} className={surface===s?"active":""} onClick={()=>setSurface(s)}><span className="nav-ico" aria-hidden="true">{s==="world"?"◉":s==="history"?"◔":s==="tree"?"⌘":"⚗"}</span><span className="nav-label">{s.charAt(0).toUpperCase()+s.slice(1)}</span></button>)}
     </nav>
 
     <main className="surface">
@@ -237,7 +254,10 @@ export function App(){
           {lens==="traits"&&<select aria-label="Trait view" value={traitView} onChange={e=>setTraitView(e.target.value as TraitView)}>{Object.entries(TRAIT_RANGES).map(([key,[,,label]])=><option key={key} value={key}>{label}</option>)}</select>}
         </div>
         <div className="world-layout">
-          <WorldCanvas snapshot={snapshot} lens={lens} resourceView={resourceView} traitView={traitView} selectedId={selectedId} onSelect={setSelectedId}/>
+          <div className="world-wrap">
+            <div className="world-scene" aria-hidden="true"><div className="nutrient-cloud nc-a"/><div className="nutrient-cloud nc-b"/><div className="nutrient-cloud nc-c"/><div className="biofilm"/></div>
+            <WorldCanvas snapshot={snapshot} lens={lens} resourceView={resourceView} traitView={traitView} selectedId={selectedId} onSelect={setSelectedId}/>
+          </div>
           <aside className="inspector">
             {selected?<><span className="eyebrow">Selected organism</span><h2>#{selected.id}</h2><p>{selected.activity} · generation {selected.generation}</p><dl>
               <div><dt>Clade</dt><dd>L-{String(selected.cladeId).padStart(4,"0")}</dd></div>
@@ -276,6 +296,10 @@ export function App(){
         <div className="actions"><button onClick={()=>runtime.intervene("global")}>Global nutrient crash</button><button onClick={()=>runtime.intervene("droughtA")}>Nutrient A drought</button><button onClick={()=>runtime.intervene("droughtB")}>Nutrient B drought</button></div>
       </section>}
     </main>
+
+    <nav className="mobile-nav" aria-label="Mobile navigation">
+      {(["world","history","tree","experiments"] as Surface[]).map(s=><button key={s} className={surface===s?"active mnav-btn":"mnav-btn"} onClick={()=>setSurface(s)}><span aria-hidden="true">{s==="world"?"◉":s==="history"?"◔":s==="tree"?"⌘":"⚗"}</span><span>{s.charAt(0).toUpperCase()+s.slice(1)}</span></button>)}
+    </nav>
 
     <footer className="controls">
       <button onClick={()=>setRunning(v=>!v)}>{running?"Pause":"Play"}</button>
