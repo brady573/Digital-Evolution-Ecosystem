@@ -105,7 +105,7 @@ export function App(){
     </header>
 
     <nav className="rail">
-      {(["world","history","tree","experiments"] as Surface[]).map(s=><button key={s} className={surface===s?"active":""} onClick={()=>setSurface(s)}>{s[0].toUpperCase()+s.slice(1)}</button>)}
+      {(["world","history","tree","experiments"] as Surface[]).map(s=><button key={s} className={surface===s?"active":""} onClick={()=>setSurface(s)}>{s.charAt(0).toUpperCase()+s.slice(1)}</button>)}
     </nav>
 
     <main className="surface">
