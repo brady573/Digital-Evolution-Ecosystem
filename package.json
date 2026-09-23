@@ -1,0 +1,13 @@
+{
+  "name": "digital-evolution-ecosystem",
+  "private": true,
+  "packageManager": "pnpm@12.6.0",
+  "scripts": {
+    "typecheck": "pnpm exec tsc -b",
+    "build": "pnpm --filter @digital-evolution/explorer build",
+    "dev": "pnpm --filter @digital-evolution/explorer dev"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2"
+  }
+}
