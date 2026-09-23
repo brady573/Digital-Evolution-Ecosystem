@@ -1,24 +1,11 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "composite": true,
     "lib": [
       "ES2023",
-      "DOM",
       "WebWorker"
     ]
   },
-  "references": [
-    {
-      "path": "../contracts"
-    },
-    {
-      "path": "../sim-core"
-    },
-    {
-      "path": "../sim-analysis"
-    }
-  ],
   "include": [
     "src/**/*.ts"
   ]
