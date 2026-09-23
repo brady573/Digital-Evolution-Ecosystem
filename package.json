@@ -12,6 +12,7 @@
     "dev": "pnpm --filter @digital-evolution/explorer dev",
     "verify": "pnpm typecheck && pnpm test:migration && pnpm test:ecology && pnpm build",
     "test:ecology": "tsx tools/validation/ecology.ts",
+    "test:survey": "tsx tools/validation/ecology-survey.ts",
     "test:browser": "tsx tools/validation/browser-smoke.ts"
   },
   "devDependencies": {
