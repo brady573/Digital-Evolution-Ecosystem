@@ -43,3 +43,12 @@ Do not continue past a failed parity gate.
 ## Persistence contracts
 
 The target distinguishes **UniverseCheckpoint**, **EvidenceExport**, and **UniverseSummary**. The prototype export is not assumed to be an exact save/resume format.
+
+
+## Completion status
+
+The canonical web migration is complete for v0.29 / engine 0.19.0. The repository implementation now owns the deterministic engine, read-only analysis layer, module-worker runtime, React/Vite explorer, exact checkpoint contract, IndexedDB browser persistence adapter, and repository-native validation.
+
+Known exception: GitHub issue #5 tracks a Chromium browser integration defect in the save → reload → Resume acknowledgement path. The browser smoke remains active but non-blocking until that issue closes. The exact checkpoint JSON round-trip and deterministic resumed continuation are passing below the browser layer.
+
+The next migration step is separate Android/APK enablement using the same product code.

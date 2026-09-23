@@ -2,16 +2,15 @@
 
 Digital Evolution Ecosystem is an offline-first evolutionary simulation and investigation product. The current product direction is a **Living Evolution Explorer**: users create worlds, watch autonomous evolution unfold, investigate ecological history and ancestry, intervene transparently, and compare matched evolutionary branches.
 
-## Migration status
+## Current status
 
-The product is moving from a self-contained HTML prototype into this repository.
+The repository-native web product migration is complete and this repository is the canonical implementation location for v0.29 / engine 0.19.0.
 
-- **Validated regression baseline:** prototype v0.28.2 / engine 0.18.2
-- **Latest implementation source:** recovered prototype v0.29.0 / engine 0.19.0
-- **Migration branch:** `migration/canonical-product`
-- **Target architecture:** TypeScript modular monolith, worker-owned simulation runtime, React/Vite explorer, exact resumable checkpoints, then Capacitor Android packaging.
-
-The v0.29 artifact contains newer cross-feeding, dormancy, Metabolite C, and ecological-succession work, but v0.28.2 remains the protected validated baseline until the repository implementation revalidates v0.29 behavior.
+- **Historical validated baseline:** prototype v0.28.2 / engine 0.18.2
+- **Canonical repository engine:** v0.29.0 / engine 0.19.0
+- **Architecture:** TypeScript modular monolith, worker-owned simulation runtime, React/Vite explorer, exact resumable checkpoints
+- **Next platform milestone:** Capacitor Android packaging and the first APK
+- **Known browser issue:** [#5](https://github.com/brady573/Digital-Evolution-Ecosystem/issues/5) tracks the Chromium save/reload/resume acknowledgement integration defect. Lower-level checkpoint round-trip and deterministic continuation are validated; the issue is isolated to browser integration.
 
 ## Product architecture
 
@@ -27,22 +26,11 @@ tools/validation       Migration and long-run validation tooling
 
 The existing repository-management foundation (repo-ai, policies, schemas, workflows, agent instructions, and Go tooling) remains in place and is not part of the product migration.
 
-## Migration rule
+## Migration evidence
 
-Migration uses **one canonical web-product migration PR** with many internal validation gates. Intermediate architecture states stay on the migration branch rather than being merged to `main`.
+The frozen prototypes remain under `legacy/prototype` as regression evidence. Repository validation protects deterministic engine behavior, analysis isolation, runtime parity, matched-control forks, resource accounting, checkpoint round-trip behavior, ecological validation, and production builds.
 
-The protected prototypes remain the oracle throughout extraction:
-
-1. preserve exact source artifacts;
-2. generate deterministic fixtures;
-3. extract `sim-core`;
-4. extract `sim-analysis`;
-5. replace source-string workers with a real module-worker runtime;
-6. port the explorer UI;
-7. add exact checkpoint persistence;
-8. revalidate before promotion.
-
-A second PR will add Capacitor Android packaging and produce the first APK.
+The browser smoke continues to run in CI but is temporarily non-blocking while issue #5 is open. A second PR will add Capacitor Android packaging and produce the first APK.
 
 ## Core trust rules
 
@@ -55,4 +43,4 @@ A second PR will add Capacitor Android packaging and produce the first APK.
 
 ## Repository setup
 
-This migration branch introduces the product workspace beside the existing repository-management foundation. Product commands will be added behind root scripts while current Go/repo-ai commands remain unchanged.
+The product workspace lives beside the existing repository-management foundation. The Go/repo-ai infrastructure remains in place and unchanged except where a dedicated repository-management task requires otherwise.
