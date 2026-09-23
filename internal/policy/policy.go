@@ -13,6 +13,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/example/repo-ai/internal/inspect"
 )
 
 type Level string
@@ -27,6 +29,7 @@ type Rule struct {
 	ID          string `json:"id"`
 	Level       Level  `json:"level"`
 	Requirement string `json:"requirement"`
+	Reason      string `json:"reason,omitempty"`
 }
 
 type Pack struct {
@@ -90,6 +93,7 @@ func Parse(data []byte) (Pack, error) {
 			switch key {
 			case "level": r.Level = Level(value)
 			case "requirement": r.Requirement = value
+			case "reason": r.Reason = value
 			default: return pack, fmt.Errorf("line %d: unknown field %q", line, key)
 			}
 		default: return pack, fmt.Errorf("line %d: unsupported policy syntax", line)
@@ -99,13 +103,20 @@ func Parse(data []byte) (Pack, error) {
 	if pack.Schema != "repo-ai/v1" || !seenRules || len(pack.Rules)==0 { return pack, errors.New("invalid policy schema or empty rules") }
 	seen := make(map[string]bool)
 	for _, r := range pack.Rules {
-		if !ruleID.MatchString(r.ID) || seen[r.ID] || (r.Level!=Guidance && r.Level!=Check && r.Level!=Enforce) || r.Requirement=="" {
+		if ValidateRule(r)!=nil || seen[r.ID] {
 			return pack, fmt.Errorf("invalid or duplicate rule %q", r.ID)
 		}
 		seen[r.ID] = true
 	}
 	sort.Slice(pack.Rules,func(i,j int)bool{return pack.Rules[i].ID<pack.Rules[j].ID})
 	return pack,nil
+}
+
+func ValidateRule(r Rule) error {
+	if !ruleID.MatchString(r.ID) { return fmt.Errorf("invalid rule ID %q",r.ID) }
+	if r.Level!=Guidance && r.Level!=Check && r.Level!=Enforce { return fmt.Errorf("invalid rule level %q",r.Level) }
+	if strings.TrimSpace(r.Requirement)=="" || strings.ContainsAny(r.Requirement,"\r\n") { return fmt.Errorf("invalid requirement") }
+	return nil
 }
 
 func Canonical(pack Pack) ([]byte,error) { return json.Marshal(pack) }
@@ -124,7 +135,7 @@ func VerifyLock(data []byte, digest string) error {
 	return nil
 }
 
-type coreChecker struct{}
+type coreChecker struct { facts *inspect.RepositoryFacts }
 
 func (coreChecker) Check(root string, rule Rule) ([]Finding,error) {
 	add := func(path,message string) []Finding { return []Finding{Result{ID:rule.ID,Level:rule.Level,Path:path,Detail:message}} }
@@ -149,6 +160,16 @@ func (coreChecker) Check(root string, rule Rule) ([]Finding,error) {
 		if err!=nil{return nil,err}
 		if !strings.Contains(string(b),"repo-ai check"){return add("AGENTS.md","agent instructions should require repo-ai check"),nil}
 		return nil,nil
+	case "go_mod_present", "package_json_present", "python_manifest_present":
+		files := map[string][]string{"go_mod_present":{"go.mod"}, "package_json_present":{"package.json"}, "python_manifest_present":{"pyproject.toml","requirements.txt"}}
+		candidates:=[]string{"."}
+		if c.facts!=nil {candidates=append(candidates,c.facts.WorkspacePaths...)}
+		for _, candidate:=range candidates {
+			for _, file := range files[rule.Requirement] {
+				if _, err := os.Stat(filepath.Join(root,filepath.FromSlash(candidate),file)); err == nil { return nil,nil } else if !errors.Is(err,os.ErrNotExist) { return nil,err }
+			}
+		}
+		return add(".","detected stack manifest is missing"),nil
 	default: return nil,fmt.Errorf("no checker for requirement %q",rule.Requirement)
 	}
 }
@@ -164,13 +185,25 @@ func Evaluate(root string, pack Pack, checker Checker) ([]Result,error) {
 }
 
 func EvaluateCore(root string) ([]Result,error) {
-	b,err:=os.ReadFile(filepath.Join(root,".repo-ai/packs/core/policy.yaml"));if err!=nil{return nil,err}
-	pack,err:=Parse(b);if err!=nil{return nil,err}
-	digest,err:=Digest(pack);if err!=nil{return nil,err}
-	builtin,err:=Parse([]byte(CoreYAML));if err!=nil{return nil,err}
-	trustedDigest,err:=Digest(builtin);if err!=nil{return nil,err}
-	if digest!=trustedDigest {return nil,errors.New("local core policy differs from built-in core policy")}
-	lock,err:=os.ReadFile(filepath.Join(root,".repo-ai/policy.lock"));if err!=nil{return nil,err}
-	if err:=VerifyLock(lock,digest);err!=nil{return nil,err}
-	return Evaluate(root,pack,coreChecker{})
+	pack, err := LoadCore(root)
+	if err != nil { return nil, err }
+	return EvaluateRules(root, pack.Rules)
 }
+
+// LoadCore validates the repository's locked core pack against its compiled source.
+func LoadCore(root string) (Pack,error) {
+	b,err:=os.ReadFile(filepath.Join(root,".repo-ai/packs/core/policy.yaml"));if err!=nil{return Pack{},err}
+	pack,err:=Parse(b);if err!=nil{return Pack{},err}
+	digest,err:=Digest(pack);if err!=nil{return Pack{},err}
+	builtin,err:=Parse([]byte(CoreYAML));if err!=nil{return Pack{},err}
+	trustedDigest,err:=Digest(builtin);if err!=nil{return Pack{},err}
+	if digest!=trustedDigest {return Pack{},errors.New("local core policy differs from built-in core policy")}
+	lock,err:=os.ReadFile(filepath.Join(root,".repo-ai/policy.lock"));if err!=nil{return Pack{},err}
+	if err:=VerifyLock(lock,digest);err!=nil{return Pack{},err}
+	return pack,nil
+}
+
+// EvaluateRules applies the built-in deterministic checkers to resolved rules.
+func EvaluateRules(root string, rules []Rule) ([]Result,error) { return Evaluate(root, Pack{Schema:"repo-ai/v1",Rules:rules}, coreChecker{}) }
+
+func EvaluateRulesWithFacts(root string,rules []Rule,facts inspect.RepositoryFacts)([]Result,error){return Evaluate(root,Pack{Schema:"repo-ai/v1",Rules:rules},coreChecker{facts:&facts})}

@@ -8,34 +8,22 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/example/repo-ai/internal/config"
+	"github.com/example/repo-ai/internal/inspect"
 	"github.com/example/repo-ai/internal/policy"
+	"github.com/example/repo-ai/internal/resolver"
 )
 
-type Facts struct {
-	Languages []string `json:"languages"`
-	PackageManagers []string `json:"packageManagers"`
-	CI []string `json:"ci"`
-}
 type Result struct {
 	Status string `json:"status"`
-	Facts Facts `json:"facts,omitempty"`
+	Facts inspect.RepositoryFacts `json:"facts,omitempty"`
 	Created []string `json:"created,omitempty"`
 	Warnings []string `json:"warnings,omitempty"`
 	Findings []policy.Result `json:"findings,omitempty"`
+	ResolvedPolicy *resolver.ResolvedPolicy `json:"resolvedPolicy,omitempty"`
 }
 
 func exists(p string) bool { _, e := os.Stat(p); return e == nil }
-func inspect() Facts {
-	f := Facts{}
-	if exists("go.mod") { f.Languages=append(f.Languages,"go") }
-	if exists("package.json") { f.Languages=append(f.Languages,"javascript/typescript") }
-	if exists("pyproject.toml") || exists("requirements.txt") { f.Languages=append(f.Languages,"python") }
-	if exists("pnpm-lock.yaml") { f.PackageManagers=append(f.PackageManagers,"pnpm") }
-	if exists("package-lock.json") { f.PackageManagers=append(f.PackageManagers,"npm") }
-	if exists("yarn.lock") { f.PackageManagers=append(f.PackageManagers,"yarn") }
-	if exists(".github/workflows") { f.CI=append(f.CI,"github-actions") }
-	return f
-}
 func emit(v any, jsonOut bool) {
 	if jsonOut { b,_:=json.MarshalIndent(v,"","  "); fmt.Println(string(b)); return }
 	fmt.Printf("%+v\n",v)
@@ -49,14 +37,20 @@ func checkRepository(root string) (Result, int) {
 	if err != nil {
 		return Result{Status: "error", Warnings: []string{err.Error()}}, 2
 	}
-	if string(configuration) != "schema: repo-ai/config/v1\npolicy: core\n" {
-		return Result{Status: "error", Warnings: []string{"invalid .repo-ai/config.yaml: expected schema repo-ai/config/v1 and policy core"}}, 2
+	if _, err := config.Parse(configuration); err != nil {
+		return Result{Status: "error", Warnings: []string{fmt.Sprintf("invalid .repo-ai/config.yaml: %v", err)}}, 2
 	}
-	findings, err := policy.EvaluateCore(root)
+	facts, err := inspect.Inspect(root)
 	if err != nil {
-		return Result{Status: "error", Warnings: []string{err.Error()}}, 2
+		return Result{Status: "error", Warnings: []string{fmt.Sprintf("inspect: %v", err)}}, 2
 	}
-	result := Result{Status: "compliant", Findings: findings}
+	resolved, err := resolver.Resolve(root, facts)
+	if err != nil {
+		return Result{Status: "error", Facts: facts, Warnings: []string{fmt.Sprintf("resolve: %v", err)}}, 2
+	}
+	findings, err := policy.EvaluateRulesWithFacts(root, resolved.Definitions(), facts)
+	if err != nil { return Result{Status: "error", Facts: facts, Warnings: []string{fmt.Sprintf("evaluate: %v",err)}, ResolvedPolicy:&resolved}, 2 }
+	result := Result{Status: "compliant", Facts:facts, Findings: findings, ResolvedPolicy:&resolved}
 	for _, finding := range findings {
 		if finding.Level == policy.Enforce {
 			result.Status = "failed"
@@ -77,9 +71,12 @@ func main() {
 	j:=*format=="json"
 	switch cmd {
 	case "inspect":
-		emit(inspect(),j)
+		facts,err:=inspect.Inspect(".")
+		if err!=nil {emit(Result{Status:"error",Warnings:[]string{err.Error()}},j);os.Exit(2)}
+		emit(facts,j)
 	case "init","deploy":
-		f:=inspect()
+		f,err:=inspect.Inspect(".")
+		if err!=nil {fmt.Fprintln(os.Stderr,err);os.Exit(2)}
 		pack,err:=policy.Parse([]byte(policy.CoreYAML))
 		if err!=nil { fmt.Fprintln(os.Stderr,err); os.Exit(2) }
 		digest,err:=policy.Digest(pack)

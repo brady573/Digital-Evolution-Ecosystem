@@ -1,8 +1,39 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "repo-ai report",
+  "title": "repo-ai report v1",
   "type": "object",
-  "required": [
-    "status"
-  ]
+  "required": ["status"],
+  "properties": {
+    "status": {"enum": ["compliant", "failed", "error"]},
+    "facts": {"$ref": "#/$defs/repositoryFacts"},
+    "findings": {"type": "array", "items": {"type": "object"}},
+    "resolvedPolicy": {"$ref": "#/$defs/resolvedPolicy"},
+    "warnings": {"type": "array", "items": {"type": "string"}}
+  },
+  "$defs": {
+    "repositoryFacts": {
+      "type": "object",
+      "required": ["languages", "packageManagers", "frameworks", "testRunners", "linters", "formatters", "ciSystems", "monorepo", "workspacePaths"],
+      "properties": {
+        "languages": {"type": "array", "items": {"type": "string"}},
+        "packageManagers": {"type": "array", "items": {"type": "string"}},
+        "frameworks": {"type": "array", "items": {"type": "string"}},
+        "testRunners": {"type": "array", "items": {"type": "string"}},
+        "linters": {"type": "array", "items": {"type": "string"}},
+        "formatters": {"type": "array", "items": {"type": "string"}},
+        "ciSystems": {"type": "array", "items": {"type": "string"}},
+        "monorepo": {"type": "boolean"},
+        "workspacePaths": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "resolvedPolicy": {
+      "type": "object",
+      "required": ["schema", "digest", "rules"],
+      "properties": {
+        "schema": {"const": "repo-ai/resolved/v1"},
+        "digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+        "rules": {"type": "array", "items": {"type": "object", "required": ["definition", "provenance"]}}
+      }
+    }
+  }
 }
