@@ -20,7 +20,7 @@ jobs:
           package-manager-cache: false
       - run: corepack enable
       - run: corepack prepare pnpm@12.5.1 --activate
-      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm install --frozen-lockfile
       - run: pnpm verify
       - run: pnpm exec playwright install --with-deps chromium
       # Known browser resume integration defect tracked in #5.

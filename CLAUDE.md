@@ -1,13 +1,9 @@
 # Claude Code Instructions
 
-Read and follow `AGENTS.md`.
+Read and follow `AGENTS.md`. It is the single source of truth for working practices in this repository.
 
-Canonical repository governance is under `.repo-ai/`.
+Quick reference:
 
-Run:
-
-    repo-ai check
-
-before considering a change complete.
-
-Never bypass enforce-level findings.
+- Install: `pnpm install --frozen-lockfile`
+- Verify before completion: `pnpm verify`
+- Full check matrix and CI behavior: see `AGENTS.md` and `.github/workflows/product.yml`

@@ -1,4 +1,0 @@
-name: repo-ai
-permissions: write-all
-on:
-  pull_request:

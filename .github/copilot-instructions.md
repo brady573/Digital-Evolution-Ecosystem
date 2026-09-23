@@ -1,7 +1,10 @@
-Follow `AGENTS.md` and canonical policy under `.repo-ai/`.
+# Copilot Instructions
 
-Inspect existing implementations before creating new abstractions.
+Follow `AGENTS.md` for all work in this repository.
 
-Run `repo-ai check` plus applicable repository tests before completion.
+Key points:
 
-Never weaken security, CI, tests, or governance merely to make a change pass.
+- TypeScript monorepo (pnpm workspaces): `apps/explorer`, `packages/*`, `tools/validation`.
+- Verify with `pnpm verify` before considering a change complete.
+- Respect the dependency direction: UI -> runtime -> sim-core; analysis is read-only and never changes biology.
+- Never edit `legacy/prototype/`; never weaken tests, validation gates, or CI to make a change pass.

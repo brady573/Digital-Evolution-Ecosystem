@@ -1,0 +1,14 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+apps/*/dist/
+packages/*/dist/
+
+# Runtime / OS
+.DS_Store
+*.log
+
+# Local tooling
+.playwright/
