@@ -1,0 +1,28 @@
+exit=0
+STDOUT:
+ok  	github.com/example/repo-ai/cmd/repo-ai	0.002s
+{
+  "status": "ready",
+  "facts": {
+    "languages": null,
+    "packageManagers": null,
+    "ci": null
+  },
+  "created": [
+    ".repo-ai/overrides.yaml",
+    ".repo-ai/policy.lock",
+    ".github/workflows/repo-ai.yml",
+    ".repo-ai/config.yaml",
+    "AGENTS.md"
+  ]
+}
+{
+  "status": "compliant",
+  "facts": {
+    "languages": null,
+    "packageManagers": null,
+    "ci": null
+  }
+}
+
+STDERR:

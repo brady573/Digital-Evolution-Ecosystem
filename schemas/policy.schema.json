@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "repo-ai policy",
+  "type": "object",
+  "required": [
+    "schema",
+    "rules"
+  ],
+  "properties": {
+    "schema": {
+      "type": "string"
+    },
+    "rules": {
+      "type": "array"
+    }
+  }
+}

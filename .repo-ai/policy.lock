@@ -1,0 +1,6 @@
+schema: repo-ai/lock/v1
+packs:
+  - name: core
+    source: builtin:core
+    version: 0.1.0
+    digest: sha256:bootstrap
