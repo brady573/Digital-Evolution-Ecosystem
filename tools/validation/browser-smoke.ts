@@ -33,7 +33,7 @@ async function main(){
     await page.getByRole("button",{name:"Global nutrient crash"}).click();
     await page.getByText("Untouched twin").waitFor();
 
-    await page.getByRole("button",{name:"World"}).click();
+    await page.getByRole("button",{name:"World",exact:true}).click();
     await page.getByRole("button",{name:"Normal"}).waitFor();
     await page.getByRole("button",{name:"Nutrients"}).click();
     await page.getByLabel("Resource view").selectOption("c");
