@@ -2,6 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { EngineConfig, RenderOrganism, RenderSnapshot } from "@digital-evolution/contracts";
 import { ENGINE_VERSION } from "@digital-evolution/sim-core";
 import { WorkerRuntimeClient } from "@digital-evolution/sim-runtime";
+import { Capacitor } from "@capacitor/core";
+import { Directory, Encoding, Filesystem } from "@capacitor/filesystem";
+import { Share } from "@capacitor/share";
 import { IndexedDbWorldRepository } from "./persistence";
 
 type Surface="world"|"history"|"tree"|"experiments";
@@ -223,10 +226,32 @@ export function App(){
   };
   const exportEvidence=async()=>{
     const data=await runtime.requestExport();
-    const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
+    const text=JSON.stringify(data,null,2);
+    const filename=`ecosystem-v029-tick-${snapshot?.tick??0}.json`;
+    setStatus("Preparing evidence export…");
+    try{
+      // Blob-anchor downloads do not work inside the native WebView, so on
+      // Android the export is staged to a real file and handed to the OS
+      // share sheet instead. Browsers keep the direct download path.
+      if(Capacitor.isNativePlatform()){
+        const saved=await Filesystem.writeFile({path:filename,data:text,directory:Directory.Cache,encoding:Encoding.UTF8});
+        try{
+          await Share.share({title:"Ecosystem evidence export",text:`Digital Evolution evidence export, tick ${snapshot?.tick??0}`,files:[saved.uri],dialogTitle:"Share evidence export"});
+          setStatus(`Export shared (tick ${(snapshot?.tick??0).toLocaleString()})`);
+        }finally{
+          await Filesystem.deleteFile({path:filename,directory:Directory.Cache}).catch(()=>{});
+        }
+        return;
+      }
+    }catch(error){
+      setStatus(`Export failed: ${error instanceof Error?error.message:String(error)}`);
+      return;
+    }
+    const blob=new Blob([text],{type:"application/json"});
     const url=URL.createObjectURL(blob);
-    const a=document.createElement("a");a.href=url;a.download=`ecosystem-v029-tick-${snapshot?.tick??0}.json`;a.click();
+    const a=document.createElement("a");a.href=url;a.download=filename;a.click();
     URL.revokeObjectURL(url);
+    setStatus(`Exported ${filename}`);
   };
 
   if(!snapshot)return <main className="loading">{status}</main>;
