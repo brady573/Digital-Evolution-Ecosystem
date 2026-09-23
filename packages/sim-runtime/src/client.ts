@@ -9,15 +9,19 @@ import type {
 export interface RuntimeClient {
   command(command: RuntimeCommand): void;
   subscribe(listener: (snapshot: RenderSnapshot) => void): () => void;
+  loadCheckpoint(checkpoint: UniverseCheckpoint): Promise<RenderSnapshot>;
   requestCheckpoint(): Promise<UniverseCheckpoint>;
   requestExport(): Promise<unknown>;
   destroy(): void;
 }
 
+const LOAD_TIMEOUT_MS = 10_000;
+
 export class WorkerRuntimeClient implements RuntimeClient {
   #worker:Worker;
   #listeners=new Set<(snapshot:RenderSnapshot)=>void>();
   #pending=new Map<string,{resolve:(value:any)=>void,reject:(reason?:any)=>void}>();
+  #pendingLoad:{expectedTick:number,resolve:(snapshot:RenderSnapshot)=>void,reject:(reason?:any)=>void,timer:ReturnType<typeof setTimeout>}|null=null;
   #seq=0;
 
   constructor(){
@@ -31,7 +35,31 @@ export class WorkerRuntimeClient implements RuntimeClient {
   intervene(intervention:"global"|"droughtA"|"droughtB"){this.command({type:"APPLY_INTERVENTION",intervention})}
   runToNextEvent(maxTicks=100_000){this.command({type:"RUN_TO_NEXT_EVENT",maxTicks})}
   createControlFork(){this.command({type:"CREATE_CONTROL_FORK"})}
-  loadCheckpoint(checkpoint:UniverseCheckpoint){this.command({type:"LOAD_CHECKPOINT",checkpoint})}
+  loadCheckpoint(checkpoint:UniverseCheckpoint){
+    // Acknowledged restore: resolves only after the worker has restored the
+    // checkpoint and emitted the corresponding snapshot. Rejects on worker
+    // error or timeout instead of silently falling back.
+    if(this.#pendingLoad){
+      clearTimeout(this.#pendingLoad.timer);
+      this.#pendingLoad.reject(new Error("Superseded by a newer restore request"));
+      this.#pendingLoad=null;
+    }
+    return new Promise<RenderSnapshot>((resolve,reject)=>{
+      this.#pendingLoad={
+        expectedTick:checkpoint.createdTick,
+        resolve:(snapshot)=>{
+          if(this.#pendingLoad){clearTimeout(this.#pendingLoad.timer);this.#pendingLoad=null}
+          resolve(snapshot);
+        },
+        reject:(reason)=>{
+          if(this.#pendingLoad){clearTimeout(this.#pendingLoad.timer);this.#pendingLoad=null}
+          reject(reason);
+        },
+        timer:setTimeout(()=>this.#failPendingLoad(new Error(`Restore timed out waiting for tick ${checkpoint.createdTick}`)),LOAD_TIMEOUT_MS),
+      };
+      this.command({type:"LOAD_CHECKPOINT",checkpoint});
+    });
+  }
 
   command(command:RuntimeCommand){this.#worker.postMessage(command)}
 
@@ -52,7 +80,14 @@ export class WorkerRuntimeClient implements RuntimeClient {
     this.#worker.terminate();
     for(const pending of this.#pending.values())pending.reject(new Error("Runtime destroyed"));
     this.#pending.clear();
+    this.#failPendingLoad(new Error("Runtime destroyed"));
     this.#listeners.clear();
+  }
+
+  #failPendingLoad(reason:Error){
+    const pending=this.#pendingLoad;
+    this.#pendingLoad=null;
+    if(pending){clearTimeout(pending.timer);pending.reject(reason)}
   }
 
   #request<T>(type:"REQUEST_CHECKPOINT"|"REQUEST_EXPORT"):Promise<T>{
@@ -65,6 +100,8 @@ export class WorkerRuntimeClient implements RuntimeClient {
 
   #receive(response:RuntimeResponse){
     if(response.type==="SNAPSHOT"){
+      const pendingLoad=this.#pendingLoad;
+      if(pendingLoad&&response.snapshot.tick===pendingLoad.expectedTick)pendingLoad.resolve(response.snapshot);
       for(const listener of this.#listeners)listener(response.snapshot);
       return;
     }
@@ -76,6 +113,10 @@ export class WorkerRuntimeClient implements RuntimeClient {
       return;
     }
     if(response.type==="ERROR"){
+      // A fire-and-forget command (e.g. LOAD_CHECKPOINT) reports errors
+      // without a requestId. Attribute such errors to a pending restore so
+      // failures surface explicitly instead of falling back silently.
+      if(!response.requestId)this.#failPendingLoad(new Error(response.message));
       if(response.requestId){
         const pending=this.#pending.get(response.requestId);
         if(pending){this.#pending.delete(response.requestId);pending.reject(new Error(response.message))}
