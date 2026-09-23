@@ -1,0 +1,8 @@
+{
+  "schema": "repo-ai/manifest/v1",
+  "files": [
+    {"path":"CLAUDE.md","sha256":"6b046258e9a6ce375f77eff0fe2cf7b2fb989235f1d723c1cc7f5e1d17e0bb38"},
+    {"path":".github/copilot-instructions.md","sha256":"e6ab8b43cda13f3854ace1006bb3daa0c38e151ee0bd1c47af19d94c16f27f98"},
+    {"path":".cursor/rules/repo-ai.mdc","sha256":"ffee88c121d118231eb71decb43cb0f377ae335ac5aff6b6e826fc1219308508"}
+  ]
+}

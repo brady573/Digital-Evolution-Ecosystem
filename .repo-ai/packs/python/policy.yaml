@@ -1,0 +1,8 @@
+schema: repo-ai/v1
+pack:
+  name: python
+  version: 1.0.0
+rules:
+  - id: python.tests
+    level: check
+    requirement: detected_test_command

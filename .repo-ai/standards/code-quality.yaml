@@ -1,0 +1,16 @@
+schema: repo-ai/v1
+rules:
+  - id: quality.format
+    level: enforce
+    scope: "**"
+    requirement: existing_formatter_must_pass
+
+  - id: quality.lint
+    level: check
+    scope: "**"
+    requirement: existing_linter_should_pass
+
+  - id: quality.no-generated-tampering
+    level: enforce
+    scope: "**"
+    requirement: generated_files_match_manifest

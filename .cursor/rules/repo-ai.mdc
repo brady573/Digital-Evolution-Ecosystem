@@ -1,0 +1,11 @@
+---
+description: Canonical repository AI governance
+alwaysApply: true
+---
+
+Follow AGENTS.md and `.repo-ai/`.
+
+Before completion run `repo-ai check`.
+
+Preserve existing architecture and repository conventions.
+Do not bypass enforce-level findings.
