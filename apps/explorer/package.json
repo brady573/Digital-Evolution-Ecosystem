@@ -1,0 +1,23 @@
+{
+  "name": "@digital-evolution/explorer",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@digital-evolution/contracts": "workspace:*",
+    "@digital-evolution/sim-core": "workspace:*",
+    "@digital-evolution/sim-analysis": "workspace:*",
+    "@digital-evolution/sim-runtime": "workspace:*",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "vite": "8.3.0",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0"
+  }
+}
