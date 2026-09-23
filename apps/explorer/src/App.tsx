@@ -183,12 +183,21 @@ export function App(){
 
   useEffect(()=>{
     if(!running)return;
-    const id=window.setInterval(()=>{
-      if(advanceDebt.current)return;
-      advanceDebt.current=true;
-      runtime.advance(speed);
-    },40);
-    return()=>window.clearInterval(id);
+    // Frame-paced loop (prototype-authentic feel): advance a speed-scaled
+    // slice of ticks every animation frame and render each snapshot, so
+    // ticks visibly count up and organisms glide instead of teleporting.
+    // Backpressure keeps slow workers responsive: a new slice is only sent
+    // once the previous snapshot has arrived.
+    let raf=0;
+    const frame=()=>{
+      if(!advanceDebt.current){
+        advanceDebt.current=true;
+        runtime.advance(Math.max(1,Math.round(speed/60)));
+      }
+      raf=requestAnimationFrame(frame);
+    };
+    raf=requestAnimationFrame(frame);
+    return()=>cancelAnimationFrame(raf);
   },[running,speed,runtime]);
 
   const newUniverse=()=>{
