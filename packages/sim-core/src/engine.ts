@@ -188,6 +188,48 @@ class S{
 
 }
 
+
+const CHECKPOINT_TAG="__digital_evolution_type";
+function encodeCheckpointValue(v){
+ if(v===undefined)return{[CHECKPOINT_TAG]:"undefined"};
+ if(typeof v==="number"&&!Number.isFinite(v))return{[CHECKPOINT_TAG]:"number",value:String(v)};
+ if(typeof v==="function"&&typeof v.getState==="function")return{[CHECKPOINT_TAG]:"rng",state:v.getState()};
+ if(v instanceof S)return{[CHECKPOINT_TAG]:"simulation",props:Object.fromEntries(Object.entries(v).map(([k,x])=>[k,encodeCheckpointValue(x)]))};
+ if(v instanceof RS)return{[CHECKPOINT_TAG]:"resource-system",props:Object.fromEntries(Object.entries(v).map(([k,x])=>[k,encodeCheckpointValue(x)]))};
+ if(v instanceof EcologyObserver)return{[CHECKPOINT_TAG]:"legacy-observer",props:Object.fromEntries(Object.entries(v).map(([k,x])=>[k,encodeCheckpointValue(x)]))};
+ if(v instanceof Map)return{[CHECKPOINT_TAG]:"map",entries:[...v].map(([k,x])=>[encodeCheckpointValue(k),encodeCheckpointValue(x)])};
+ if(ArrayBuffer.isView(v)&&!(v instanceof DataView))return{[CHECKPOINT_TAG]:"typed-array",ctor:v.constructor.name,values:Array.from(v)};
+ if(Array.isArray(v))return v.map(encodeCheckpointValue);
+ if(v&&typeof v==="object")return Object.fromEntries(Object.entries(v).map(([k,x])=>[k,encodeCheckpointValue(x)]));
+ return v;
+}
+function decodeCheckpointValue(v){
+ if(Array.isArray(v))return v.map(decodeCheckpointValue);
+ if(!v||typeof v!=="object")return v;
+ let tag=v[CHECKPOINT_TAG];
+ if(tag==="undefined")return undefined;
+ if(tag==="number")return v.value==="NaN"?NaN:v.value==="Infinity"?Infinity:-Infinity;
+ if(tag==="rng"){let r=R(0);r.setState(v.state);return r}
+ if(tag==="typed-array"){let C={Float32Array,Float64Array,Int32Array,Uint32Array,Uint16Array,Uint8Array,Int16Array,Int8Array}[v.ctor];if(!C)throw new Error("Unsupported checkpoint typed array: "+v.ctor);return new C(v.values)}
+ if(tag==="map")return new Map(v.entries.map(([k,x])=>[decodeCheckpointValue(k),decodeCheckpointValue(x)]));
+ if(tag==="simulation"||tag==="resource-system"||tag==="legacy-observer"){
+  let o=Object.create(tag==="simulation"?S.prototype:tag==="resource-system"?RS.prototype:EcologyObserver.prototype);
+  for(const [k,x] of Object.entries(v.props))o[k]=decodeCheckpointValue(x);
+  return o;
+ }
+ return Object.fromEntries(Object.entries(v).map(([k,x])=>[k,decodeCheckpointValue(x)]));
+}
+function createSimulationCheckpoint(sim){
+ return{checkpoint_schema_version:"0.1",engine_version:ENGINE_VERSION,tick:sim.t,seed:sim.c.seed,state:encodeCheckpointValue(sim)};
+}
+function restoreSimulationCheckpoint(checkpoint){
+ if(!checkpoint||checkpoint.checkpoint_schema_version!=="0.1")throw new Error("Unsupported checkpoint schema");
+ if(checkpoint.engine_version!==ENGINE_VERSION)throw new Error(`Checkpoint engine ${checkpoint.engine_version} cannot be restored by engine ${ENGINE_VERSION}`);
+ let sim=decodeCheckpointValue(checkpoint.state);
+ if(!(sim instanceof S))throw new Error("Checkpoint did not contain a simulation");
+ return sim;
+}
+
 export {
   S as Simulation,
   RS as ResourceSystem,
@@ -199,4 +241,6 @@ export {
   FIELD_CELLS,
   FIELD_CELL,
   EVENT_STRIDE,
+  createSimulationCheckpoint,
+  restoreSimulationCheckpoint,
 };

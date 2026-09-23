@@ -8,7 +8,7 @@ export {
 export {
   Simulation,
   ResourceSystem,
-  EcologyObserver,
+  EcologyObserver as LegacyEcologyObserver,
   createLegacyRng,
   TRAIT_DEFINITIONS,
   SCIENTIFIC_BASIS,
@@ -16,4 +16,6 @@ export {
   FIELD_CELLS,
   FIELD_CELL,
   EVENT_STRIDE,
+  createSimulationCheckpoint,
+  restoreSimulationCheckpoint,
 } from "./engine";

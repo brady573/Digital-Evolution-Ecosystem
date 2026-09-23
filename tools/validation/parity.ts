@@ -9,6 +9,9 @@ import {
   createLegacyRng,
 } from "../../packages/sim-core/src/engine.ts";
 import { DeterministicRng } from "../../packages/sim-core/src/rng.ts";
+import { UniverseSession } from "../../packages/sim-runtime/src/session.ts";
+import { EcologyObserver } from "../../packages/sim-analysis/src/index.ts";
+import { createSimulationCheckpoint, restoreSimulationCheckpoint, EVENT_STRIDE } from "../../packages/sim-core/src/engine.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const prototypePath = resolve(
@@ -286,3 +289,56 @@ runLegacyParity(3543950664, "balanced", 2000);
 runLegacyParity(912367481, "harsh", 1500);
 
 console.log("migration parity: PASS");
+
+
+function runExternalAnalysisIsolation(){
+  const cfg=config(821947219,"balanced");
+  const observed=new Simulation(cfg);
+  const untouched=new Simulation(cfg);
+  const observer=new EcologyObserver();
+  for(let i=0;i<3000;i++){
+    observed.step();
+    if(observed.t%EVENT_STRIDE===0)observer.observe(observed.observerSnapshot(observed.metrics(),observed.last));
+    untouched.step();
+  }
+  assertSame("external analysis must not change biology",observed,untouched);
+}
+
+function runCheckpointParity(){
+  const cfg=config(3543950664,"balanced");
+  const uninterrupted=new Simulation(cfg);
+  for(let i=0;i<1600;i++)uninterrupted.step();
+  const checkpoint=JSON.parse(JSON.stringify(createSimulationCheckpoint(uninterrupted)));
+  const restored=restoreSimulationCheckpoint(checkpoint);
+  assertSame("checkpoint immediate restore",uninterrupted,restored);
+  for(let i=0;i<1200;i++){uninterrupted.step();restored.step()}
+  assertSame("checkpoint resumed continuation",uninterrupted,restored);
+}
+
+function runSessionParity(){
+  const cfg=config(912367481,"harsh");
+  const direct=new Simulation(cfg);
+  const session=new UniverseSession();
+  session.create(cfg as any);
+  for(let block=0;block<8;block++){
+    const ticks=251;
+    for(let i=0;i<ticks;i++)direct.step();
+    session.advance(ticks);
+    assertSame(`session parity block ${block}`,direct,session.simulation);
+  }
+  session.createControlFork();
+  const before=session.control.clone();
+  session.intervene("global");
+  assertSame("matched control remains exact at fork",before,session.control);
+  session.advance(500);
+  const checkpoint=JSON.parse(JSON.stringify(session.checkpoint()));
+  const restored=new UniverseSession();
+  restored.restore(checkpoint);
+  assertSame("runtime checkpoint experiment",session.simulation,restored.simulation);
+  assertSame("runtime checkpoint control",session.control,restored.control);
+}
+
+runExternalAnalysisIsolation();
+runCheckpointParity();
+runSessionParity();
+console.log("analysis/runtime/checkpoint parity: PASS");
