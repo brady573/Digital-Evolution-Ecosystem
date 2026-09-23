@@ -1,13 +1,20 @@
 {
   "name": "digital-evolution-ecosystem",
   "private": true,
-  "packageManager": "pnpm@12.6.0",
+  "packageManager": "pnpm@12.5.1",
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
-    "typecheck": "pnpm exec tsc -b",
+    "typecheck": "pnpm -r --if-present exec tsc --noEmit",
+    "test:migration": "tsx tools/validation/parity.ts",
     "build": "pnpm --filter @digital-evolution/explorer build",
-    "dev": "pnpm --filter @digital-evolution/explorer dev"
+    "dev": "pnpm --filter @digital-evolution/explorer dev",
+    "verify": "pnpm typecheck && pnpm test:migration && pnpm build"
   },
   "devDependencies": {
+    "@types/node": "24.10.0",
+    "tsx": "4.23.15",
     "typescript": "7.0.2"
   }
 }
