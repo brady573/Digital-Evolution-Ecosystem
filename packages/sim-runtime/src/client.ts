@@ -29,6 +29,7 @@ export class WorkerRuntimeClient implements RuntimeClient {
   create(config:EngineConfig){this.command({type:"CREATE_UNIVERSE",config})}
   advance(ticks:number){this.command({type:"ADVANCE_TICKS",ticks})}
   intervene(intervention:"global"|"droughtA"|"droughtB"){this.command({type:"APPLY_INTERVENTION",intervention})}
+  runToNextEvent(maxTicks=100_000){this.command({type:"RUN_TO_NEXT_EVENT",maxTicks})}
   createControlFork(){this.command({type:"CREATE_CONTROL_FORK"})}
   loadCheckpoint(checkpoint:UniverseCheckpoint){this.command({type:"LOAD_CHECKPOINT",checkpoint})}
 

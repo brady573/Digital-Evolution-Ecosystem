@@ -50,10 +50,17 @@ export interface RenderOrganism {
   readonly parent: number | null;
   readonly generation: number;
   readonly lineageId: number;
+  readonly cladeId: number;
   readonly x: number;
   readonly y: number;
   readonly energy: number;
   readonly activity: "active" | "dormant";
+  readonly speed: number;
+  readonly sensing: number;
+  readonly metabolism: number;
+  readonly reproduction: number;
+  readonly diet: number;
+  readonly habitat: number;
   readonly byproductUse: number;
   readonly dormancyResponse: number;
 }
@@ -66,6 +73,7 @@ export interface RenderResourceField {
 
 export interface RenderSnapshot {
   readonly tick: number;
+  readonly seed: number;
   readonly population: number;
   readonly activePopulation: number;
   readonly dormantPopulation: number;
@@ -94,6 +102,7 @@ export interface UniverseCheckpoint {
 export type RuntimeCommand =
   | { readonly type: "CREATE_UNIVERSE"; readonly config: EngineConfig }
   | { readonly type: "ADVANCE_TICKS"; readonly ticks: number }
+  | { readonly type: "RUN_TO_NEXT_EVENT"; readonly maxTicks?: number }
   | { readonly type: "APPLY_INTERVENTION"; readonly intervention: "global" | "droughtA" | "droughtB" }
   | { readonly type: "CREATE_CONTROL_FORK" }
   | { readonly type: "LOAD_CHECKPOINT"; readonly checkpoint: UniverseCheckpoint }

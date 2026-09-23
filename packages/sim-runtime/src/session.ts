@@ -32,6 +32,8 @@ function renderSnapshot(sim:any,analysis:EcologyObserver,control:any|null):Rende
     organisms:sim.o.map((o:any)=>({
       id:o.id,parent:o.parent??null,generation:o.generation||0,lineageId:o.l,
       x:o.x,y:o.y,energy:o.en,activity:o.activity||"active",
+      cladeId:sim.cladeRoot(o.l),
+      speed:o.sp,sensing:o.se,metabolism:o.me,reproduction:o.rp,diet:o.di,habitat:o.ha,
       byproductUse:o.bu||0,dormancyResponse:o.dr||0,
     })),
     resources:{
@@ -74,6 +76,17 @@ export class UniverseSession {
         this.#control.step();
         if(this.#controlAnalysis)observeIfDue(this.#control,this.#controlAnalysis);
       }
+    }
+    return this.snapshot();
+  }
+
+  runToNextEvent(maxTicks=100_000){
+    if(!this.#experiment)throw new Error("Universe has not been created");
+    const startRecords=this.#analysis.records.length;
+    const startEvents=this.#experiment.ev.length;
+    for(let i=0;i<Math.max(1,Math.floor(maxTicks));i++){
+      this.advance(1);
+      if(this.#analysis.records.length>startRecords||this.#experiment.ev.length>startEvents||this.#experiment.extinctTick!==null)break;
     }
     return this.snapshot();
   }
@@ -140,6 +153,7 @@ export class UniverseSession {
       switch(command.type){
         case "CREATE_UNIVERSE":return[{type:"SNAPSHOT",snapshot:this.create(command.config)}];
         case "ADVANCE_TICKS":return[{type:"SNAPSHOT",snapshot:this.advance(command.ticks)}];
+        case "RUN_TO_NEXT_EVENT":return[{type:"SNAPSHOT",snapshot:this.runToNextEvent(command.maxTicks)}];
         case "CREATE_CONTROL_FORK":return[{type:"SNAPSHOT",snapshot:this.createControlFork()}];
         case "APPLY_INTERVENTION":return[{type:"SNAPSHOT",snapshot:this.intervene(command.intervention)}];
         case "LOAD_CHECKPOINT":return[{type:"SNAPSHOT",snapshot:this.restore(command.checkpoint)}];

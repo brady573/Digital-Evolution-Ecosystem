@@ -22,3 +22,12 @@ jobs:
       - run: corepack prepare pnpm@12.5.1 --activate
       - run: pnpm install --no-frozen-lockfile
       - run: pnpm verify
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Browser smoke
+        run: |
+          pnpm --filter @digital-evolution/explorer exec vite preview --host 127.0.0.1 --port 4173 >/tmp/digital-evolution-vite.log 2>&1 &
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:4173 >/dev/null; then break; fi
+            sleep 1
+          done
+          DEE_BASE_URL=http://127.0.0.1:4173 pnpm test:browser
