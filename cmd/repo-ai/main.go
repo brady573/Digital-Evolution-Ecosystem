@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
+	"sort"
+
+	"github.com/example/repo-ai/internal/policy"
 )
 
 type Facts struct {
@@ -19,6 +21,7 @@ type Result struct {
 	Facts Facts `json:"facts,omitempty"`
 	Created []string `json:"created,omitempty"`
 	Warnings []string `json:"warnings,omitempty"`
+	Findings []policy.Result `json:"findings,omitempty"`
 }
 
 func exists(p string) bool { _, e := os.Stat(p); return e == nil }
@@ -37,6 +40,31 @@ func emit(v any, jsonOut bool) {
 	if jsonOut { b,_:=json.MarshalIndent(v,"","  "); fmt.Println(string(b)); return }
 	fmt.Printf("%+v\n",v)
 }
+
+// checkRepository returns the stable CLI result and exit code: 0 for compliant
+// repositories (including guidance and check findings), 1 for enforce findings,
+// and 2 for invalid configuration, policy, lock, or evaluation errors.
+func checkRepository(root string) (Result, int) {
+	configuration, err := os.ReadFile(filepath.Join(root, ".repo-ai/config.yaml"))
+	if err != nil {
+		return Result{Status: "error", Warnings: []string{err.Error()}}, 2
+	}
+	if string(configuration) != "schema: repo-ai/config/v1\npolicy: core\n" {
+		return Result{Status: "error", Warnings: []string{"invalid .repo-ai/config.yaml: expected schema repo-ai/config/v1 and policy core"}}, 2
+	}
+	findings, err := policy.EvaluateCore(root)
+	if err != nil {
+		return Result{Status: "error", Warnings: []string{err.Error()}}, 2
+	}
+	result := Result{Status: "compliant", Findings: findings}
+	for _, finding := range findings {
+		if finding.Level == policy.Enforce {
+			result.Status = "failed"
+			return result, 1
+		}
+	}
+	return result, 0
+}
 func main() {
 	if len(os.Args)<2 { fmt.Println("repo-ai: init | inspect | deploy | generate | check | update"); os.Exit(2) }
 	cmd:=os.Args[1]
@@ -52,39 +80,38 @@ func main() {
 		emit(inspect(),j)
 	case "init","deploy":
 		f:=inspect()
+		pack,err:=policy.Parse([]byte(policy.CoreYAML))
+		if err!=nil { fmt.Fprintln(os.Stderr,err); os.Exit(2) }
+		digest,err:=policy.Digest(pack)
+		if err!=nil { fmt.Fprintln(os.Stderr,err); os.Exit(2) }
 		targets:=map[string]string{
 			".repo-ai/config.yaml":"schema: repo-ai/config/v1\npolicy: core\n",
 			".repo-ai/overrides.yaml":"schema: repo-ai/overrides/v1\noverrides: {}\n",
-			".repo-ai/policy.lock":"schema: repo-ai/lock/v1\npacks:\n  - name: core\n    source: builtin:core\n    version: 0.1.0\n    digest: sha256:bootstrap\n",
-			".github/workflows/repo-ai.yml":"name: repo-ai\non: [pull_request]\npermissions:\n  contents: read\njobs:\n  policy:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4 # Replace with full commit SHA before enforce mode\n      - uses: actions/setup-go@v5 # Replace with full commit SHA before enforce mode\n        with:\n          go-version: '1.23'\n      - run: go run ./cmd/repo-ai check --format=json\n",
+			".repo-ai/packs/core/policy.yaml":policy.CoreYAML,
+			".repo-ai/policy.lock":"schema: repo-ai/lock/v1\npacks:\n  - name: core\n    source: builtin:core\n    version: 0.2.0\n    digest: "+digest+"\n",
+			".github/workflows/repo-ai.yml":"name: repo-ai\non:\n  pull_request:\n  push:\n    branches: [main]\n  workflow_dispatch:\npermissions:\n  contents: read\njobs:\n  policy:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0\n        with:\n          go-version-file: go.mod\n          cache: false\n      - run: go run ./cmd/repo-ai check --format=json\n",
 		}
 		r:=Result{Status:"ready",Facts:f}
-		for p,c:=range targets {
+		keys:=make([]string,0,len(targets)); for p:=range targets {keys=append(keys,p)}; sort.Strings(keys)
+		for _,p:=range keys { c:=targets[p]
 			if exists(p) { r.Warnings=append(r.Warnings,"preserved existing "+p); continue }
 			r.Created=append(r.Created,p)
-			if !*dry { os.MkdirAll(filepath.Dir(p),0755); os.WriteFile(p,[]byte(c),0644) }
+			if !*dry { if err:=os.MkdirAll(filepath.Dir(p),0755);err!=nil{fmt.Fprintln(os.Stderr,err);os.Exit(1)};if err:=os.WriteFile(p,[]byte(c),0644);err!=nil{fmt.Fprintln(os.Stderr,err);os.Exit(1)} }
 		}
+		if !exists("AGENTS.md") { r.Created=append(r.Created,"AGENTS.md")} else {r.Warnings=append(r.Warnings,"preserved existing AGENTS.md")}
 		if !*dry {
 			// Never overwrite an existing unowned AGENTS.md.
 			if !exists("AGENTS.md") {
-				os.WriteFile("AGENTS.md",[]byte("# Repository AI Instructions\n\nFollow `.repo-ai/` policy. Before completion run `repo-ai check`. Never bypass enforce-level failures.\n"),0644)
-				r.Created=append(r.Created,"AGENTS.md")
-			} else { r.Warnings=append(r.Warnings,"preserved existing AGENTS.md") }
+				if err:=os.WriteFile("AGENTS.md",[]byte("# Repository AI Instructions\n\nFollow `.repo-ai/` policy. Before completion run `repo-ai check`. Never bypass enforce-level failures.\n"),0644);err!=nil{fmt.Fprintln(os.Stderr,err);os.Exit(1)}
+			}
 		}
 		emit(r,j)
 	case "generate":
 		emit(Result{Status:"ok",Warnings:[]string{"bootstrap compiler: no regeneration required"}},j)
 	case "check":
-		var warnings []string
-		if !exists(".repo-ai/config.yaml") { warnings=append(warnings,"missing .repo-ai/config.yaml") }
-		if !exists(".repo-ai/policy.lock") { warnings=append(warnings,"missing .repo-ai/policy.lock") }
-		if len(warnings)>0 { emit(Result{Status:"failed",Warnings:warnings},j); os.Exit(1) }
-		// Basic deterministic safety checks.
-		if exists(".github/workflows/repo-ai.yml") {
-			b,_:=os.ReadFile(".github/workflows/repo-ai.yml")
-			if strings.Contains(string(b),"permissions: write-all") { emit(Result{Status:"failed",Warnings:[]string{"write-all GitHub permissions prohibited"}},j); os.Exit(1) }
-		}
-		emit(Result{Status:"compliant"},j)
+		r,code:=checkRepository(".")
+		emit(r,j)
+		if code!=0 {os.Exit(code)}
 	case "update":
 		emit(Result{Status:"ok",Warnings:[]string{"bootstrap package uses builtin core policy; OCI resolver is extension point"}},j)
 	default:
