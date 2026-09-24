@@ -103,6 +103,11 @@ async function main(){
     await mobile.setViewportSize({width:390,height:844});
     await mobile.goto(baseUrl,{waitUntil:"networkidle"});
     await mobile.getByLabel("Evolution world").waitFor();
+    // A4: on a phone viewport the living world dominates the frame instead
+    // of shrinking to a card in a scroll stack.
+    const box=await mobile.getByLabel("Evolution world").boundingBox();
+    const vp=mobile.viewportSize()??{width:390,height:844};
+    assert.ok(box&&box.height>=vp.height*0.5,"world canvas dominates the phone viewport (A4)");
     await mobile.getByRole("button",{name:"History"}).click();
     await mobile.getByRole("heading",{name:"History"}).waitFor();
 
