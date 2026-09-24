@@ -187,5 +187,10 @@ button,input{outline:none}
   .surface-world .world-wrap{position:absolute;inset:0}
   .surface-world .world-canvas{width:100%;height:100%;aspect-ratio:auto;border:0;border-radius:0}
   .surface-world .investigation-rail{position:absolute;left:10px;right:10px;bottom:10px;z-index:10}
-  .surface-world .inspector.sheet{background:rgba(8,17,25,.86);backdrop-filter:blur(14px);max-height:44%;overflow:auto}
+  .surface-world .inspector.sheet{background:rgba(8,17,25,.86);backdrop-filter:blur(14px);max-height:44vh;max-height:44dvh;overflow:auto}
+  /* Collapsed sheet is a compact floating bar. (A percentage max-height here
+     resolves against the auto-height rail and clamps to a sliver, so the
+     collapsed state uses no max-height at all.) */
+  .surface-world .inspector.sheet.collapsed{max-height:none;overflow:visible;padding:8px 10px}
+  .surface-world .inspector.sheet.collapsed .sheet-toggle{margin:0}
 }

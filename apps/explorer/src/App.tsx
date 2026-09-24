@@ -406,7 +406,7 @@ export function App(){
         </div>
       </section>
       <aside className="investigation-rail" aria-label="Investigation">
-        {surface==="world"&&<div className="inspector sheet">
+        {surface==="world"&&<div className={inspectorOpen?"inspector sheet":"inspector sheet collapsed"}>
           <button className="sheet-toggle" onClick={()=>setInspectorOpen(v=>!v)}>{inspectorOpen?"Hide details":"Show details"}</button>
           {inspectorOpen&&<>{selected?<><span className="eyebrow">Selected organism</span><h2>#{selected.id}</h2><p>{selected.activity} · generation {selected.generation}</p><p className="breadcrumb">Organism #{selected.id} → Lineage {`L-${String(selected.lineageId).padStart(4,"0")}`} → Clade {`L-${String(selected.cladeId).padStart(4,"0")}`}</p><dl>
             <div><dt>Clade</dt><dd>L-{String(selected.cladeId).padStart(4,"0")}</dd></div>
