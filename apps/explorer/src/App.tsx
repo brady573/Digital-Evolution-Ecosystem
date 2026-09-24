@@ -35,6 +35,14 @@ const DEFAULT_SETTINGS:WorldSettings={
   pressure:.45,
 };
 
+// Named world archetypes (M4 Phase A). Values are the v0.28.2 prototype
+// preset sliders verbatim; the engine mapping is unchanged.
+const PRESETS:Record<string,{settings:Omit<WorldSettings,"seed">,note:string}>={
+  Balanced:{settings:{richness:.6,separation:.6,variety:1,population:30,variation:.35,mutation:.03,pressure:.45},note:"Balanced starts with a small founder population and a nutrient field that can support expansion, overshoot, stability, or decline."},
+  Patchwork:{settings:{richness:.68,separation:.9,variety:1,population:34,variation:.45,mutation:.03,pressure:.42},note:"Patchwork starts below its potential scale and strongly separates nutrient zones, giving divergent clades room to expand into different niches."},
+  Harsh:{settings:{richness:.38,separation:.55,variety:.8,population:30,variation:.35,mutation:.04,pressure:.78},note:"Harsh starts small with slower recovery and high survival pressure; growth is possible, but collapse or extinction remains a natural outcome."},
+};
+
 const TRAIT_RANGES:Record<TraitView,[number,number,string]>={
   speed:[.25,4,"Movement"],
   sensing:[10,180,"Nutrient sensing"],
@@ -176,6 +184,7 @@ export function App(){
   const [selectedId,setSelectedId]=useState<number|null>(null);
   const [selectedStoryId,setSelectedStoryId]=useState<string|null>(null);
   const [selectedCladeId,setSelectedCladeId]=useState<number|null>(null);
+  const [preset,setPreset]=useState<string>("Balanced");
   // Backpressure: never queue an advance while the worker is still busy with
   // the previous one. Without this, high speeds pile up work faster than the
   // worker can drain it and the UI stalls instead of running fast.
@@ -206,6 +215,16 @@ export function App(){
     return()=>cancelAnimationFrame(raf);
   },[running,speed,runtime]);
 
+  const updateSettings=(patch:Partial<WorldSettings>)=>{
+    setSettings(v=>({...v,...patch}));setPreset("Custom");
+  };
+  const applyPreset=(name:string)=>{
+    const p=PRESETS[name];if(!p)return;
+    setSettings(v=>({...v,...p.settings}));setPreset(name);
+  };
+  const randomizeSeed=()=>{
+    setSettings(v=>({...v,seed:Math.floor(Math.random()*4294967294)+1}));setPreset("Custom");
+  };
   const newUniverse=()=>{
     setRunning(false);setSelectedId(null);runtime.create(configFromSettings(settings));setSettingsOpen(false);setStatus("New universe created");
   };
@@ -344,14 +363,16 @@ export function App(){
 
     {settingsOpen&&<div className="modal-backdrop" role="presentation"><section className="modal" role="dialog" aria-modal="true" aria-label="World settings">
       <div className="panel-head"><div><span className="eyebrow">Create / inspect</span><h2>World settings</h2></div><button onClick={()=>setSettingsOpen(false)}>Close</button></div>
-      <label className="seed"><span>World seed</span><input value={settings.seed} type="number" onChange={e=>setSettings(v=>({...v,seed:Number(e.target.value)}))}/></label>
-      <Slider label="Nutrient supply" value={settings.richness} min={0} max={1} step={.01} onChange={v=>setSettings(s=>({...s,richness:v}))}/>
-      <Slider label="Nutrient-zone separation" value={settings.separation} min={0} max={1} step={.01} onChange={v=>setSettings(s=>({...s,separation:v}))}/>
-      <Slider label="Nutrient variety" value={settings.variety} min={0} max={1} step={.01} onChange={v=>setSettings(s=>({...s,variety:v}))}/>
-      <Slider label="Founding population" value={settings.population} min={5} max={120} step={1} onChange={v=>setSettings(s=>({...s,population:v}))}/>
-      <Slider label="Starting differences" value={settings.variation} min={0} max={1} step={.01} onChange={v=>setSettings(s=>({...s,variation:v}))}/>
-      <Slider label="Mutation chance" value={settings.mutation} min={0} max={.15} step={.005} onChange={v=>setSettings(s=>({...s,mutation:v}))}/>
-      <Slider label="Survival pressure" value={settings.pressure} min={0} max={1} step={.01} onChange={v=>setSettings(s=>({...s,pressure:v}))}/>
+      <div className="preset-row" role="group" aria-label="World presets">{Object.keys(PRESETS).map(name=><button key={name} className={preset===name?"active":""} aria-pressed={preset===name} onClick={()=>applyPreset(name)}>{name}</button>)}</div>
+      <p className="preset-note">{preset==="Custom"?"Custom world — your controls define the conditions.":PRESETS[preset]?.note}</p>
+      <div className="seed-row"><label className="seed"><span>World seed</span><input aria-label="World seed" value={settings.seed} type="number" onChange={e=>updateSettings({seed:Number(e.target.value)})}/></label><button onClick={randomizeSeed}>New random seed</button></div>
+      <Slider label="Nutrient supply" value={settings.richness} min={0} max={1} step={.01} onChange={v=>updateSettings({richness:v})}/>
+      <Slider label="Nutrient-zone separation" value={settings.separation} min={0} max={1} step={.01} onChange={v=>updateSettings({separation:v})}/>
+      <Slider label="Nutrient variety" value={settings.variety} min={0} max={1} step={.01} onChange={v=>updateSettings({variety:v})}/>
+      <Slider label="Founding population" value={settings.population} min={5} max={120} step={1} onChange={v=>updateSettings({population:Math.round(v)})}/>
+      <Slider label="Starting differences" value={settings.variation} min={0} max={1} step={.01} onChange={v=>updateSettings({variation:v})}/>
+      <Slider label="Mutation chance" value={settings.mutation} min={0} max={.15} step={.005} onChange={v=>updateSettings({mutation:v})}/>
+      <Slider label="Survival pressure" value={settings.pressure} min={0} max={1} step={.01} onChange={v=>updateSettings({pressure:v})}/>
       <div className="actions"><button className="primary" onClick={newUniverse}>Create universe</button><button onClick={()=>setDiagnosticsOpen(v=>!v)}>Developer diagnostics</button></div>
       {diagnosticsOpen&&<div className="diagnostics">
         <strong>Engine {ENGINE_VERSION}</strong>

@@ -45,7 +45,7 @@ button,input{outline:none}
 .rail button.active,.lensbar button.active,.primary{background:#143041!important;color:#eaffef!important;border-color:#47ddd4!important}
 
 /* surface: persistent world hero + investigation rail */
-.surface{min-width:0;min-height:0;padding:18px;overflow:auto;display:grid;grid-template-columns:minmax(0,1.65fr) minmax(300px,1fr);gap:18px;align-items:start}
+.surface{min-width:0;min-height:0;padding:18px;overflow:auto;display:grid;grid-template-columns:minmax(0,2fr) minmax(280px,1fr);gap:18px;align-items:start}
 .world-column{display:grid;gap:10px;min-width:0}
 .lensbar{display:flex;gap:7px;flex-wrap:wrap}
 .lensbar select,.controls select{background:var(--panel2);color:#dcece4;border:1px solid var(--line2);border-radius:8px;padding:8px}
@@ -64,7 +64,7 @@ button,input{outline:none}
 .biofilm{position:absolute;inset:0;opacity:.4;background:
   radial-gradient(ellipse at 17% 35%,rgba(89,255,192,.10),transparent 20%),
   radial-gradient(ellipse at 79% 33%,rgba(255,177,67,.09),transparent 19%)}
-.world-canvas{position:relative;z-index:1;display:block;width:min(100%,780px);aspect-ratio:1;border-radius:14px;border:1px solid var(--line);background:transparent}
+.world-canvas{position:relative;z-index:1;display:block;width:min(100%,960px);aspect-ratio:1;border-radius:14px;border:1px solid var(--line);background:transparent}
 .inspector,.panel{background:linear-gradient(180deg,#09131d,#0a131c);border:1px solid var(--line);border-radius:14px;padding:18px}
 .inspector h2,.panel h2,.modal h2{margin:4px 0 10px;letter-spacing:-.01em}
 .inspector p{color:var(--green);font-weight:700}
@@ -99,7 +99,13 @@ button,input{outline:none}
 .slider{display:grid;gap:6px;padding:10px 0;border-top:1px solid #193128}
 .slider span{display:flex;justify-content:space-between;color:#b9ccc3}
 .slider input{width:100%;accent-color:var(--teal2)}
-.seed{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:12px 0}
+.seed{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:12px 0;flex:1;min-width:0}
+.seed-row{display:flex;gap:10px;align-items:center}
+.seed-row>button{flex:none}
+.preset-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:14px 0 4px}
+.preset-row button{min-height:44px}
+.preset-row button.active{background:#143041!important;color:#eaffef!important;border-color:#47ddd4!important}
+.preset-note{color:#8ca49a;font-size:.82rem;margin:4px 0 6px;min-height:2.2em}
 .seed input{width:180px;background:#091411;color:#edf6f1;border:1px solid #29443a;border-radius:8px;padding:8px}
 .diagnostics{display:grid;gap:8px;margin-top:14px;padding:12px;background:#07110f;border:1px solid #21392f;border-radius:9px;color:#a9beb5;font-size:.84rem}
 
