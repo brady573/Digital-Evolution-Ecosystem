@@ -61,6 +61,13 @@ async function main(){
 
     await page.getByRole("button",{name:"World settings"}).click();
     await page.getByRole("dialog",{name:"World settings"}).waitFor();
+    // M4 presets: applying Patchwork sets its founding population; a random
+    // seed must differ from the previous one. Neither creates a universe.
+    await page.getByRole("button",{name:"Patchwork"}).click();
+    assert.equal(await page.getByLabel(/Founding population/).inputValue(),"34","patchwork preset applies");
+    const seedBefore=await page.getByLabel("World seed").inputValue();
+    await page.getByRole("button",{name:"New random seed"}).click();
+    assert.notEqual(await page.getByLabel("World seed").inputValue(),seedBefore,"random seed generates a new seed");
     await page.getByRole("button",{name:"Developer diagnostics"}).click();
     await page.getByText(/Engine 0\.19\.0/).waitFor();
     await page.getByRole("button",{name:"Close"}).click();
