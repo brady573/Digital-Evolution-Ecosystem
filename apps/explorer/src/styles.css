@@ -102,7 +102,7 @@ button,input{outline:none}
 .seed{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:12px 0;flex:1;min-width:0}
 .seed-row{display:flex;gap:10px;align-items:center}
 .seed-row>button{flex:none}
-.preset-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:14px 0 4px}
+.preset-row{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:14px 0 4px}
 .preset-row button{min-height:44px}
 .preset-row button.active{background:#143041!important;color:#eaffef!important;border-color:#47ddd4!important}
 .preset-note{color:#8ca49a;font-size:.82rem;margin:4px 0 6px;min-height:2.2em}

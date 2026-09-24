@@ -1,6 +1,6 @@
 // @ts-nocheck
 /**
- * Compatibility extraction of the v0.29.0 / engine 0.19.0 prototype core.
+ * Compatibility extraction of the v0.29.0 / engine 0.19.0 prototype core, extended to 0.20.0 (rich clamp only).
  *
  * MIGRATION RULE: preserve this algorithm byte-for-byte in behavior while the
  * repository parity harness is active. Structural/type cleanup follows parity,
@@ -9,7 +9,7 @@
 const Q=(v,a,b)=>Math.max(a,Math.min(b,v));
 const A=a=>a.length?a.reduce((s,v)=>s+v,0)/a.length:0;
 const R=s=>{let a=s>>>0;let f=()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296};f.getState=()=>a>>>0;f.setState=v=>{a=v>>>0};return f};
-const APP_VERSION='0.29.0',ENGINE_VERSION='0.19.0',EXPORT_VERSION='0.29';
+const APP_VERSION='0.30.0',ENGINE_VERSION='0.20.0',EXPORT_VERSION='0.30';
 const C_BYPRODUCT_YIELD=.32,C_ENERGY_YIELD=9,C_DECAY_RATE=.00022,C_DIFFUSION_RATE=.06,BU_MAINT_COST=.010,DORMANT_MAINTENANCE=.12,DORMANCY_CHECK=40,CROSSFEED_FORM=.035,CROSSFEED_EST=.055,CROSSFEED_PERSIST=5000,DORMANCY_PERSIST=5000,ERA_PERSIST=7500;
 const H01=(seed,id,salt=0)=>{let x=(seed^(Math.imul(id+salt,0x9E3779B1)))>>>0;x^=x>>>16;x=Math.imul(x,0x7FEB352D);x^=x>>>15;x=Math.imul(x,0x846CA68B);x^=x>>>16;return(x>>>0)/4294967296};
 const C_ACCESS=bu=>{let v=Q(bu,0,1.5);return v<=0?0:(v*v)/(v*v+.1024)};
@@ -79,7 +79,9 @@ class RS{
   this.stock=Array.from({length:3},()=>new Float32Array(this.size));this.cap=Array.from({length:3},()=>new Float32Array(this.size));this.source=Array.from({length:3},()=>new Float32Array(this.size));
   this.input=[0,0,0];this.biologicalProduction=[0,0,0];this.consumed=[0,0,0];this.decayed=[0,0,0];this.externalRemoved=[0,0,0];this.removalEvents=[];this.diffusionAdjustment=[0,0,0];this.minFraction=1;this.maxFraction=0;this.lastInput=[0,0,0];this.diffusionRate=[.08,.08,C_DIFFUSION_RATE];this.delta=Array.from({length:3},()=>new Float32Array(this.size));
   this.sourceBoost=Array.from({length:3},()=>new Float64Array(this.size));this.right=new Int32Array(this.size);this.down=new Int32Array(this.size);this.minCapRight=Array.from({length:3},()=>new Float64Array(this.size));this.minCapDown=Array.from({length:3},()=>new Float64Array(this.size));this.totalStock=[0,0,0];this.totalCapacity=[0,0,0];this.regenLast=new Int32Array(this.size);this.regenBuckets=Array.from({length:this.updateStride},()=>[]);
-  let rr=R((c.seed^0x51ED270B)>>>0),rich=Q(c.prod/1.23,0,1.25),totalCap=(900+2200*rich)*4,shares=[Math.max(0,1-c.resource_b_fraction),Math.max(0,c.resource_b_fraction)],sumShare=shares[0]+shares[1]||1;shares=shares.map(v=>v/sumShare);this.regenRate=(.0005+.00135*rich)/4;this.defs[0].regeneration_rate=this.regenRate;this.defs[1].regeneration_rate=this.regenRate;this.totalCapTarget=totalCap;this.initialFraction=.28+.48*Q(c.start,0,1);
+  // 0.20.0: rich clamp raised 1.25 -> 8 for larger populations. The formula
+  // itself is unchanged, so rich <= 1.25 replays bit-identically to 0.19.0.
+  let rr=R((c.seed^0x51ED270B)>>>0),rich=Q(c.prod/1.23,0,8),totalCap=(900+2200*rich)*4,shares=[Math.max(0,1-c.resource_b_fraction),Math.max(0,c.resource_b_fraction)],sumShare=shares[0]+shares[1]||1;shares=shares.map(v=>v/sumShare);this.regenRate=(.0005+.00135*rich)/4;this.defs[0].regeneration_rate=this.regenRate;this.defs[1].regeneration_rate=this.regenRate;this.totalCapTarget=totalCap;this.initialFraction=.28+.48*Q(c.start,0,1);
   for(let kind=0;kind<2;kind++){let weights=new Float64Array(this.size),sum=0,cx=kind?445:155,cy=kind?390:210,sigma=205-105*Q(c.patch,0,1),sep=Q(c.patch,0,1);for(let iy=0;iy<this.n;iy++)for(let ix=0;ix<this.n;ix++){let idx=iy*this.n+ix,x=(ix+.5)*this.cell,y=(iy+.5)*this.cell,dx=WD(x,cx),dy=WD(y,cy),g=Math.exp(-(dx*dx+dy*dy)/(2*sigma*sigma)),noise=.88+.24*rr(),w=(1-sep*.82)+sep*(.22+2.6*g);w*=noise;weights[idx]=w;sum+=w}let kindCap=totalCap*shares[kind];for(let i=0;i<this.size;i++){let ccap=kindCap?kindCap*weights[i]/sum:0;this.cap[kind][i]=ccap;this.source[kind][i]=weights[i];this.stock[kind][i]=ccap*this.initialFraction*(.92+.16*rr());this.sourceBoost[kind][i]=.55+.45*Math.min(2,this.source[kind][i]);this.totalStock[kind]+=this.stock[kind][i];this.totalCapacity[kind]+=this.cap[kind][i]}}
   let cCap=this.enabledByproduct?totalCap*1.5:0,per=cCap/this.size;for(let i=0;i<this.size;i++){this.cap[2][i]=per;this.source[2][i]=0;this.sourceBoost[2][i]=0;this.totalCapacity[2]+=per}
   for(let iy=0;iy<this.n;iy++)for(let ix=0;ix<this.n;ix++){let i=iy*this.n+ix;this.right[i]=iy*this.n+((ix+1)%this.n);this.down[i]=((iy+1)%this.n)*this.n+ix}

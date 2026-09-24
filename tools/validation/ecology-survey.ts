@@ -2,7 +2,7 @@ import { writeFileSync } from "node:fs";
 import { UniverseSession } from "../../packages/sim-runtime/src/session.ts";
 import type { EngineConfig } from "../../packages/contracts/src/index.ts";
 
-// Multi-seed ecological survey on engine 0.19.0, mirroring the v0.28.2
+// Multi-seed ecological survey on engine 0.20.0, mirroring the v0.28.2
 // headless validation design (shared seeds x regimes, long runs).
 //
 // Regime inference (prototype defaults, NOT the approximations in ecology.ts):
@@ -167,7 +167,7 @@ if (FULL) {
 }
 
 const result = {
-  engine: "0.19.0",
+  engine: "0.20.0",
   ticks: TICKS,
   full: FULL,
   regimes: REGIMES,
