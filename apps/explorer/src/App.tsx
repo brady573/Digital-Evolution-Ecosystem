@@ -124,8 +124,19 @@ type Camera={x:number;y:number};
 const wrapDelta=(a:number,b:number)=>{let d=(a-b)%WORLD_EXTENT;if(d>WORLD_EXTENT/2)d-=WORLD_EXTENT;else if(d<-WORLD_EXTENT/2)d+=WORLD_EXTENT;return d};
 const wrapCoord=(v:number)=>((v%WORLD_EXTENT)+WORLD_EXTENT)%WORLD_EXTENT;
 
-function cladeColor(id:number){
-  const hue=(id*137.508)%360;
+/** Choice labels come from the runtime's recorded spec, not from UI copy, so
+ *  History cannot drift from what was actually applied. */
+function pendingChoiceLabel(choiceId:string){
+  switch(choiceId){
+    case "keep-watching":return "You kept watching (no change)";
+    case "drought-a":return "You applied a Nutrient A drought";
+    case "drought-b":return "You applied a Nutrient B drought";
+    case "global-crash":return "You applied a global nutrient crash";
+    default:return `You chose ${choiceId}`;
+  }
+}
+
+function cladeColor(id:number){  const hue=(id*137.508)%360;
   return `hsl(${hue} 58% 63%)`;
 }
 function traitColor(value:number,[lo,hi]:[number,number]){
@@ -396,7 +407,12 @@ export function App(){
   const advanceDebt=useRef(false);
 
   useEffect(()=>{
-    const unsub=runtime.subscribe(s=>{advanceDebt.current=false;setSnapshot(s);setStatus("")});
+    const unsub=runtime.subscribe(s=>{
+      advanceDebt.current=false;setSnapshot(s);setStatus("");
+      // A pending decision is a visible pause: the player must choose before
+      // time moves again (A13). Runtime enforces the same gate independently.
+      if(s.pendingDecision)setRunning(false);
+    });
     runtime.create(configFromSettings(DEFAULT_SETTINGS));
     return()=>{unsub();runtime.destroy()};
   },[runtime]);
@@ -430,6 +446,20 @@ export function App(){
   const randomizeSeed=()=>{
     setSettings(v=>({...v,seed:Math.floor(Math.random()*4294967294)+1}));setPreset("Custom");
   };
+  // A7/A8: record the choice through runtime. It applies at most one
+  // intervention, clears the gate, and never advances a tick.
+  const resolveDecision=async(choiceId:string)=>{
+    const pending=snapshot?.pendingDecision;if(!pending)return;
+    setStatus("Recording your decision…");
+    try{
+      await runtime.resolveEventDecision(pending.opportunityId,choiceId);
+      setStatus("Decision recorded. The world stays paused until you resume.");
+    }catch(error){
+      setStatus(`Decision failed: ${error instanceof Error?error.message:String(error)}`);
+    }
+  };
+  // While a decision is pending these must not advance time; they focus it.
+  const blockWhilePending=()=>{if(!snapshot?.pendingDecision)return false;setStatus("A decision is waiting — choose how to respond.");return true};
   const newUniverse=()=>{
     setRunning(false);setSelectedId(null);
     runtime.create(configFromSettings(settings));
@@ -490,6 +520,7 @@ export function App(){
 
   if(!snapshot)return <main className="loading">{status}</main>;
   const m=snapshot.metrics;
+  const pending=snapshot.pendingDecision;
   const records=(snapshot.analysis.records as any[])||[];
   const clades=m.clades?.top||[];
   const selected=snapshot.organisms.find(o=>o.id===selectedId)??null;
@@ -524,6 +555,20 @@ export function App(){
               <button aria-label="Reset view" onClick={()=>{setZoom(1);setCam({x:300,y:300})}}>⌂</button>
             </div>
           </div>
+          {pending&&<section className="decision-sheet" role="dialog" aria-modal="false" aria-label="Event decision" data-testid="decision-sheet">
+            <span className="eyebrow">A decision is waiting</span>
+            <h2>{pending.prompt}</h2>
+            <p className="decision-context">{pending.context}</p>
+            <p className="decision-tick">World paused at tick {pending.createdTick.toLocaleString()}</p>
+            <div className="decision-choices">
+              {pending.choices.map(choice=><button key={choice.choiceId} data-choice={choice.choiceId}
+                onClick={()=>resolveDecision(choice.choiceId)}>
+                <strong>{choice.title}</strong>
+                <span>{choice.directEffectDescription}</span>
+              </button>)}
+            </div>
+            <p className="decision-foot">Time stays paused until you choose. Leaving an intervention out changes nothing.</p>
+          </section>}
         </div>
       </section>
       <aside className="investigation-rail" aria-label="Investigation">
@@ -551,6 +596,19 @@ export function App(){
         <div className="panel-head"><div><span className="eyebrow">What happened here?</span><h2>History</h2></div><span>{records.length} durable ecological records</span></div>
         {(()=>{const story=records.find((r:any)=>r.id===selectedStoryId);if(!story)return null;const ev=story.evidence||{};return<article key={story.id} className="story-detail"><span>{formatTickAge(story.tick)} · {story.phase}</span><h3>{story.title}</h3><p>{story.summary}</p>{typeof ev.population==="number"&&<dl className="evidence"><div><dt>Population then</dt><dd>{ev.population}</dd></div><div><dt>Dormant share</dt><dd>{Math.round((ev.dormant_fraction||0)*100)}%</dd></div><div><dt>Metabolite C energy</dt><dd>{Math.round((ev.c_energy_share||0)*100)}%</dd></div><div><dt>Leading way of life</dt><dd>{String(ev.dominant_role||"—")}</dd></div></dl>}<button onClick={()=>setSelectedStoryId(null)}>Back to all stories</button></article>})()}
         {records.length===0?<><p>No durable ecological arc has been established yet.</p><h3>Recent simulation events</h3>{snapshot.events.slice(-8).reverse().map((e,i)=><article key={`${e.tick}-${i}`}><span>Tick {e.tick.toLocaleString()}</span><p>{e.label}</p></article>)}</>:records.slice().reverse().map((r:any)=><article key={r.id}><button className="record-button" onClick={()=>setSelectedStoryId(r.id)}><span>{formatTickAge(r.tick)} · {r.phase}</span><h3>{r.title}</h3><p>{r.summary}</p></button></article>)}
+        {snapshot.resolvedDecisions.length>0&&<>
+          <h3>Your decisions</h3>
+          <p>Actions you took, in order. A decision is an action followed by later outcomes, not a proven cause.</p>
+          {snapshot.resolvedDecisions.slice().reverse().map(d=>{
+            const source=records.find((r:any)=>r.id===d.sourceEventId);
+            const title=(pendingChoiceLabel(d.choiceId));
+            return <article key={d.commandId} className="decision-record">
+              <span>Tick {d.tick.toLocaleString()}</span>
+              <h3>{title}</h3>
+              <p>{source?`After: ${source.title}.`:"No linked event."} {d.intervention?"An intervention was applied.":"Nothing was changed."}</p>
+            </article>;
+          })}
+        </>}
       </section>}
 
       {surface==="tree"&&<section className="panel">
@@ -574,9 +632,9 @@ export function App(){
     </nav>
 
     <footer className="controls">
-      <button onClick={()=>setRunning(v=>!v)}>{running?"Pause":"Play"}</button>
+      <button onClick={()=>{if(blockWhilePending())return;setRunning(v=>!v)}}>{running?"Pause":"Play"}</button>
       <select aria-label="Simulation speed" value={speed} onChange={e=>setSpeed(Number(e.target.value))}><option value={1}>1×</option><option value={10}>10×</option><option value={100}>100×</option><option value={500}>Max</option></select>
-      <button onClick={()=>{setRunning(false);runtime.runToNextEvent()}}>Next meaningful change</button>
+      <button onClick={()=>{if(blockWhilePending())return;setRunning(false);runtime.runToNextEvent()}}>Next meaningful change</button>
       <button onClick={save}>Save</button>
       <button onClick={load}>Resume</button>
       <button onClick={exportEvidence}>Export</button>

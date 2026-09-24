@@ -9,6 +9,7 @@
   "dependencies": {
     "@digital-evolution/contracts": "workspace:*",
     "@digital-evolution/sim-core": "workspace:*",
-    "@digital-evolution/sim-analysis": "workspace:*"
+    "@digital-evolution/sim-analysis": "workspace:*",
+    "@digital-evolution/sim-decisions": "workspace:*"
   }
 }

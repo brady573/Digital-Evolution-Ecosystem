@@ -47,7 +47,7 @@ The target distinguishes **UniverseCheckpoint**, **EvidenceExport**, and **Unive
 
 ## Completion status
 
-The canonical web migration is complete for v0.30 / engine 0.20.0. The repository implementation now owns the deterministic engine, read-only analysis layer, module-worker runtime, React/Vite explorer, exact checkpoint contract, IndexedDB browser persistence adapter, and repository-native validation.
+The canonical web migration is complete for v0.31 / engine 0.20.0. The repository implementation now owns the deterministic engine, read-only analysis layer, module-worker runtime, React/Vite explorer, exact checkpoint contract, IndexedDB browser persistence adapter, and repository-native validation.
 
 Known exception: GitHub issue #5 tracks a Chromium browser integration defect in the save → reload → Resume acknowledgement path. The browser smoke remains active but non-blocking until that issue closes. The exact checkpoint JSON round-trip and deterministic resumed continuation are passing below the browser layer.
 

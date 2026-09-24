@@ -6,14 +6,15 @@
     "node": ">=24"
   },
   "scripts": {
-    "typecheck": "pnpm exec tsc -p packages/contracts/tsconfig.json --noEmit --pretty false && pnpm exec tsc -p packages/sim-core/tsconfig.json --noEmit --pretty false && pnpm exec tsc -p packages/sim-analysis/tsconfig.json --noEmit --pretty false && pnpm exec tsc -p packages/sim-runtime/tsconfig.json --noEmit --pretty false && pnpm exec tsc -p apps/explorer/tsconfig.json --noEmit --pretty false",
+    "typecheck": "pnpm exec tsc -p packages/contracts/tsconfig.json --noEmit --pretty false && pnpm exec tsc -p packages/sim-core/tsconfig.json --noEmit --pretty false && pnpm exec tsc -p packages/sim-analysis/tsconfig.json --noEmit --pretty false && pnpm exec tsc -p packages/sim-decisions/tsconfig.json --noEmit --pretty false && pnpm exec tsc -p packages/sim-runtime/tsconfig.json --noEmit --pretty false && pnpm exec tsc -p apps/explorer/tsconfig.json --noEmit --pretty false",
     "test:migration": "tsx tools/validation/parity.ts",
     "build": "pnpm --filter @digital-evolution/explorer build",
     "dev": "pnpm --filter @digital-evolution/explorer dev",
-    "verify": "pnpm typecheck && pnpm test:migration && pnpm test:ecology && pnpm build",
+    "verify": "pnpm typecheck && pnpm test:migration && pnpm test:decisions && pnpm test:ecology && pnpm build",
     "test:ecology": "tsx tools/validation/ecology.ts",
     "test:survey": "tsx tools/validation/ecology-survey.ts",
-    "test:browser": "tsx tools/validation/browser-smoke.ts"
+    "test:browser": "tsx tools/validation/browser-smoke.ts",
+    "test:decisions": "tsx tools/validation/decisions.ts"
   },
   "devDependencies": {
     "@types/node": "26.6.2",

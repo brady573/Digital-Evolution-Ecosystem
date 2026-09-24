@@ -239,6 +239,12 @@ importers:
         specifier: workspace:*
         version: link:../contracts
 
+  packages/sim-decisions:
+    dependencies:
+      '@digital-evolution/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+
   packages/sim-runtime:
     dependencies:
       '@digital-evolution/contracts':
@@ -250,6 +256,9 @@ importers:
       '@digital-evolution/sim-core':
         specifier: workspace:*
         version: link:../sim-core
+      '@digital-evolution/sim-decisions':
+        specifier: workspace:*
+        version: link:../sim-decisions
 
 packages:
 

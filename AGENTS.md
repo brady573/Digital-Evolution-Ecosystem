@@ -12,6 +12,7 @@ packages/contracts     Cross-boundary configuration, snapshot, command, checkpoi
 packages/sim-core      Deterministic biological simulation authority
 packages/sim-analysis  Read-only ecological interpretation, clades, metrics, and history
 packages/sim-runtime   Worker/session orchestration, speed control, matched forks, persistence handoff
+packages/sim-decisions  Pure event-to-choice policy: ObservedEvent -> DecisionOpportunity (read-only)
 legacy/prototype       Immutable prototype regression sources (do not edit)
 tools/validation       Parity, ecology, and browser validation tooling
 ```
@@ -47,13 +48,16 @@ Dependency direction:
 ```text
 apps/explorer -> sim-runtime -> sim-core
 apps/explorer -> sim-analysis
-sim-runtime   -> sim-analysis
+sim-runtime   -> sim-analysis, sim-decisions
+sim-decisions -> contracts (pure policy; never sim-core)
 all product packages -> contracts
 ```
 
 - `sim-core` is the biological authority. It must not depend on React, DOM APIs, workers, storage, filesystem APIs, `requestAnimationFrame`, or wall-clock time.
 - `sim-analysis` interprets immutable / read-only simulation observations. Analysis output may affect presentation and fast-forward stopping conditions, never biology.
 - `sim-runtime` owns the live session and the module worker. The application never directly owns mutable simulation state.
+- `sim-decisions` is pure read-only choice policy. It maps observed events to offered choices and may never mutate simulation state, advance time, create comparison worlds, or predict outcomes.
+- A pending decision opportunity is a hard pause gate owned by `sim-runtime`: while one is pending, no further tick may execute through any command path.
 - Same engine version + resolved config + seed + command sequence must remain deterministic.
 - Population abundance, ecological structure, dormancy, and cross-feeding must remain emergent — never scripted.
 - Matched-control forks clone exact state and RNG streams.

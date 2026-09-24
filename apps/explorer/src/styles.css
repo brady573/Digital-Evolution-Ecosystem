@@ -100,6 +100,21 @@ button,input{outline:none}
 .status{margin-left:auto;color:#91aa9f;font-size:.85rem}
 .loading{min-height:100vh;min-height:100dvh;display:grid;place-items:center;color:#a9beb5}
 
+/* M3 event decision: a contextual sheet over the living world. The world stays
+   the hero surface; this only covers it while a choice is genuinely pending. */
+.decision-sheet{position:absolute;left:10px;right:10px;bottom:10px;z-index:20;display:grid;gap:6px;padding:14px;
+  background:rgba(8,18,26,.93);backdrop-filter:blur(16px);border:1px solid #2c4a5c;border-radius:16px;
+  box-shadow:0 -14px 44px rgba(0,0,0,.55);max-height:62%;overflow:auto}
+.decision-sheet h2{margin:2px 0 4px;font-size:1.02rem;letter-spacing:-.01em}
+.decision-context{margin:0;color:#a9c2b8;font-size:.86rem;line-height:1.5}
+.decision-tick{margin:0;color:var(--teal2);font-size:.74rem}
+.decision-choices{display:grid;gap:8px;margin:6px 0 2px}
+.decision-choices button{display:grid;gap:3px;text-align:left;padding:10px 12px;border:1px solid #2a4458;border-radius:11px;background:#0e1c28;color:#dce9e4}
+.decision-choices button:hover{background:#16293a;border-color:#47ddd4}
+.decision-choices button strong{font-size:.92rem;color:#eefaf6}
+.decision-choices button span{font-size:.78rem;color:#9fb6ad;line-height:1.45}
+.decision-foot{margin:2px 0 0;color:#7d938b;font-size:.74rem}
+
 /* World view overlay: minimap + zoom controls float on the world (reference
    style). The container is inert; only the controls take pointer input. */
 .world-overlay{position:absolute;top:8px;right:8px;z-index:6;display:grid;gap:8px;justify-items:end;pointer-events:none}
