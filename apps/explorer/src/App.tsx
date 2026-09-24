@@ -127,11 +127,29 @@ function WorldCanvas({
   selectedId:number|null;onSelect:(id:number|null)=>void;
 }){
   const ref=useRef<HTMLCanvasElement>(null);
+  // Backing store follows the displayed size so the world fills its stage on
+  // any viewport. The sim mapping stays resolution-independent; only the
+  // presentation transform changes.
+  const [size,setSize]=useState<[number,number]>([720,720]);
+  useEffect(()=>{
+    const canvas=ref.current,host=canvas?.parentElement;if(!canvas||!host)return;
+    const ro=new ResizeObserver(entries=>{
+      const r=entries[0]?.contentRect;if(!r)return;
+      const w=Math.max(160,Math.min(1400,Math.round(r.width)));
+      const h=Math.max(160,Math.min(1400,Math.round(r.height)));
+      setSize(([pw,ph])=>pw===w&&ph===h?[pw,ph]:[w,h]);
+    });
+    ro.observe(host);
+    return()=>ro.disconnect();
+  },[]);
 
   useEffect(()=>{
     const canvas=ref.current;if(!canvas)return;
     const ctx=canvas.getContext("2d");if(!ctx)return;
-    const w=canvas.width,h=canvas.height,n=snapshot.resources.gridSize,cell=w/n;
+    const w=canvas.width,h=canvas.height,n=snapshot.resources.gridSize;
+    // Uniform world scale, centered: the 600x600 toroidal field never
+    // stretches; surrounding space stays ambience (A4 without distortion).
+    const s=Math.min(w,h)/600,ox=(w-600*s)/2,oy=(h-600*s)/2,cell=10*s;
     ctx.clearRect(0,0,w,h);
 
     const stocks=snapshot.resources.stock,caps=snapshot.resources.capacity;
@@ -147,13 +165,13 @@ function WorldCanvas({
         else if(resourceView==="c"){r+=190*c;g+=115*c;bl+=35*c}
         else {r+=72*b+95*c;g+=105*a+55*c;bl+=92*b+35*c}
         ctx.fillStyle=`rgb(${Math.min(255,Math.round(r))},${Math.min(255,Math.round(g))},${Math.min(255,Math.round(bl))})`;
-        ctx.fillRect((i%n)*cell,Math.floor(i/n)*cell,cell+1,cell+1);
+        ctx.fillRect(ox+(i%n)*cell,oy+Math.floor(i/n)*cell,cell+1,cell+1);
       }
     }
 
     const traitRange=TRAIT_RANGES[traitView];
     for(const o of snapshot.organisms){
-      const px=o.x/600*w,py=o.y/600*h;
+      const px=ox+o.x*s,py=oy+o.y*s;
       let color="#d8f0df";
       if(o.activity==="dormant")color="#7f9189";
       else if(lens==="clades")color=cladeColor(o.cladeId);
@@ -166,7 +184,7 @@ function WorldCanvas({
       // texture is a deterministic function of organism id (stable per frame),
       // and density follows diet family. Positions are untouched, so
       // click-selection mapping is unchanged.
-      const unit=Math.max(2,(w/600)*2.2);
+      const unit=Math.max(2,s*2.2);
       const energyClass=o.activity==="dormant"?0:(o.energy>120?2:o.energy>60?1:0);
       const span=2+energyClass;
       let hsh=Math.imul(o.id,2654435761)^0x9e3779b9;hsh^=hsh>>>15;hsh=Math.imul(hsh,0x85ebca6b)>>>0;
@@ -207,12 +225,16 @@ function WorldCanvas({
         ctx.lineWidth=1;
       }
     }
-  },[snapshot,lens,resourceView,traitView,selectedId]);
+  },[snapshot,lens,resourceView,traitView,selectedId,size]);
 
   const click=(event:React.MouseEvent<HTMLCanvasElement>)=>{
     const rect=event.currentTarget.getBoundingClientRect();
-    const x=(event.clientX-rect.left)/rect.width*600;
-    const y=(event.clientY-rect.top)/rect.height*600;
+    const w=rect.width,h=rect.height,s=Math.min(w,h)/600;
+    const ox=(w-600*s)/2,oy=(h-600*s)/2;
+    const x=(event.clientX-rect.left-ox)/s;
+    const y=(event.clientY-rect.top-oy)/s;
+    // Taps in the ambience margin deselect instead of wrapping weirdly.
+    if(x<0||y<0||x>=600||y>=600){onSelect(null);return}
     let best:RenderOrganism|null=null,bestD=18;
     for(const o of snapshot.organisms){
       const dx=Math.abs(o.x-x),dy=Math.abs(o.y-y);
@@ -223,7 +245,7 @@ function WorldCanvas({
     onSelect(best?.id??null);
   };
 
-  return <canvas aria-label="Evolution world" className="world-canvas" ref={ref} width={720} height={720} onClick={click}/>;
+  return <canvas aria-label="Evolution world" className="world-canvas" ref={ref} width={size[0]} height={size[1]} onClick={click}/>;
 }
 
 function Slider({label,value,min,max,step,onChange}:{label:string;value:number;min:number;max:number;step:number;onChange:(v:number)=>void}){
@@ -251,7 +273,10 @@ export function App(){
   const [selectedId,setSelectedId]=useState<number|null>(null);
   const [selectedStoryId,setSelectedStoryId]=useState<string|null>(null);
   const [selectedCladeId,setSelectedCladeId]=useState<number|null>(null);
-  const [inspectorOpen,setInspectorOpen]=useState(true);
+  // On phone the inspector is a floating sheet over the world, so it starts
+  // collapsed there (world-first first impression); desktop keeps the open
+  // investigation panel. Presentation-only.
+  const [inspectorOpen,setInspectorOpen]=useState(()=>typeof window!=="undefined"&&typeof window.matchMedia==="function"?window.matchMedia("(max-width: 900px)").matches?false:true:true);
   const [preset,setPreset]=useState<string>("Balanced");
   // Backpressure: never queue an advance while the worker is still busy with
   // the previous one. Without this, high speeds pile up work faster than the
@@ -368,7 +393,7 @@ export function App(){
       {(["world","history","tree","experiments"] as Surface[]).map(s=><button key={s} className={surface===s?"active":""} onClick={()=>setSurface(s)}><span className="nav-ico" aria-hidden="true">{s==="world"?"◉":s==="history"?"◔":s==="tree"?"⌘":"⚗"}</span><span className="nav-label">{s.charAt(0).toUpperCase()+s.slice(1)}</span></button>)}
     </nav>
 
-    <main className="surface">
+    <main className={surface==="world"?"surface surface-world":"surface"}>
       <section className="world-column" aria-label="Living world">
         <div className="lensbar">
           {(["normal","nutrients","clades","traits"] as Lens[]).map(v=><button key={v} className={lens===v?"active":""} onClick={()=>setLens(v)}>{v.charAt(0).toUpperCase()+v.slice(1)}</button>)}
