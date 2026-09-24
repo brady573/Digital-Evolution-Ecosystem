@@ -73,6 +73,10 @@ export interface RenderResourceField {
 
 export interface RenderSnapshot {
   readonly tick: number;
+  /** Exact resolved engine configuration of the running universe (0.20.0+).
+   *  Presentation uses it to show the active recipe without ever restaging
+   *  it as pending. Read-only: it never changes simulation behavior. */
+  readonly config: EngineConfig;
   readonly seed: number;
   readonly population: number;
   readonly activePopulation: number;

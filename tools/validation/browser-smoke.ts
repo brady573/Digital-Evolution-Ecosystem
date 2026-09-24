@@ -74,6 +74,31 @@ async function main(){
     await page.getByText(/Engine 0\.20\.0/).waitFor();
     await page.getByRole("button",{name:"Close"}).click();
 
+    // M4A: active-vs-pending recipe clarity. Staged settings stay visibly
+    // pending; only Create universe applies them to a new universe.
+    await page.getByRole("button",{name:"World settings"}).click();
+    await page.getByRole("dialog",{name:"World settings"}).waitFor();
+    // The running universe (the resumed world) is shown as the active recipe,
+    // while the Abundant/random-seed recipe staged earlier stays pending.
+    assert.match(await page.getByTestId("active-config").innerText(),/Active: Balanced · seed 821947219/,"resumed universe shown as active config (A3)");
+    await page.getByTestId("pending-note").waitFor();
+    assert.match(await page.getByTestId("pending-note").innerText(),/Unapplied changes/,"staged recipe visibly pending (A1)");
+    await page.getByRole("button",{name:"Close"}).click();
+    assert.equal(await tick(page),saved,"closing settings does not alter the running universe (A2)");
+    assert.ok(await page.getByTestId("settings-pending").isVisible(),"pending state stays visible outside the modal");
+    // Applying the pending recipe: Create universe starts a fresh world and
+    // the staged recipe becomes the active configuration.
+    await page.getByRole("button",{name:"World settings"}).click();
+    await page.getByRole("button",{name:"Create universe"}).click();
+    await page.getByText("New universe created").waitFor();
+    let rebuilt=await tick(page);
+    for(let i=0;i<30&&rebuilt!==0;i++){await page.waitForTimeout(100);rebuilt=await tick(page)}
+    assert.equal(rebuilt,0,"create universe starts a fresh world");
+    await page.getByRole("button",{name:"World settings"}).click();
+    assert.match(await page.getByTestId("active-config").innerText(),/Active: Abundant/,"created recipe becomes the active config");
+    await page.getByTestId("active-note").waitFor();
+    assert.match(await page.getByTestId("active-note").innerText(),/match the running universe/,"pending indicator clears after create");
+
     const mobile=await context.newPage();
     await mobile.setViewportSize({width:390,height:844});
     await mobile.goto(baseUrl,{waitUntil:"networkidle"});

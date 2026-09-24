@@ -77,6 +77,39 @@ function configFromSettings(s:WorldSettings):EngineConfig{
   };
 }
 
+// M4A: the UI must distinguish the running universe from settings staged for
+// the next one. `activeSettings` is the recipe of the live world; `settings`
+// is what Create universe will use. These helpers map between the two so a
+// resumed checkpoint can be shown (and re-staged) faithfully.
+function settingsEqual(a:WorldSettings,b:WorldSettings,tol=1e-6){
+  return a.seed===b.seed&&a.population===b.population
+    &&Math.abs(a.richness-b.richness)<tol&&Math.abs(a.separation-b.separation)<tol
+    &&Math.abs(a.variety-b.variety)<tol&&Math.abs(a.variation-b.variation)<tol
+    &&Math.abs(a.mutation-b.mutation)<tol&&Math.abs(a.pressure-b.pressure)<tol;
+}
+function presetForSettings(s:WorldSettings):string{
+  for(const [name,p] of Object.entries(PRESETS)){
+    if(settingsEqual(s,{...s,...p.settings}))return name;
+  }
+  return "Custom";
+}
+// Invert configFromSettings for the fields we expose. Rounding snaps to the
+// slider step so a staged recipe round-trips through the pre-existing mapping.
+function settingsFromConfig(c:EngineConfig|undefined|null):WorldSettings{
+  const step=(v:number,unit=100)=>Math.round(v*unit)/unit;
+  const clamped=(v:number,lo=0,hi=1)=>Math.max(lo,Math.min(hi,v));
+  return{
+    seed:(c?.seed??DEFAULT_SETTINGS.seed)>>>0,
+    richness:clamped(step(((c?.prod??0)-.08)/1.15),0,4),
+    separation:clamped(step(c?.patch??.6),0,1),
+    variety:clamped(step((c?.resource_b_fraction??.5)/.5),0,1),
+    population:clamped(Math.round(c?.pop??30),1,120),
+    variation:clamped(c?.div??.35,0,1),
+    mutation:clamped(step(c?.mr??.03,200),0,.15),
+    pressure:clamped(step(((c?.press??1.0875)-.75)/.75),0,1),
+  };
+}
+
 function cladeColor(id:number){
   const hue=(id*137.508)%360;
   return `hsl(${hue} 58% 63%)`;
@@ -155,7 +188,23 @@ function WorldCanvas({
       ctx.globalAlpha=1;
 
       if(o.id===selectedId){
-        ctx.strokeStyle="#ffffff";ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(px,py,7,0,Math.PI*2);ctx.stroke();
+        // Luminous focus marker: soft halo + double ring + diagonal ticks.
+        // The surrounding ecosystem stays fully visible (A6).
+        const halo=ctx.createRadialGradient(px,py,2,px,py,15);
+        halo.addColorStop(0,"rgba(235,255,255,.55)");
+        halo.addColorStop(.4,"rgba(120,240,255,.22)");
+        halo.addColorStop(1,"rgba(120,240,255,0)");
+        ctx.fillStyle=halo;ctx.beginPath();ctx.arc(px,py,15,0,Math.PI*2);ctx.fill();
+        ctx.strokeStyle="#eaffff";ctx.lineWidth=1.6;ctx.beginPath();ctx.arc(px,py,7,0,Math.PI*2);ctx.stroke();
+        ctx.strokeStyle="#7fe9ff";ctx.lineWidth=1;ctx.beginPath();ctx.arc(px,py,9.5,0,Math.PI*2);ctx.stroke();
+        ctx.strokeStyle="rgba(170,245,255,.95)";ctx.lineWidth=1.2;
+        for(let k=0;k<4;k++){const ang=k*Math.PI/2+Math.PI/4;
+          ctx.beginPath();
+          ctx.moveTo(px+Math.cos(ang)*11.5,py+Math.sin(ang)*11.5);
+          ctx.lineTo(px+Math.cos(ang)*14,py+Math.sin(ang)*14);
+          ctx.stroke();
+        }
+        ctx.lineWidth=1;
       }
     }
   },[snapshot,lens,resourceView,traitView,selectedId]);
@@ -190,6 +239,10 @@ export function App(){
   const [speed,setSpeed]=useState(100);
   const [status,setStatus]=useState("Creating universe…");
   const [settings,setSettings]=useState(DEFAULT_SETTINGS);
+  // Recipe of the running universe (set on create/load). Settings staged in
+  // the modal stay pending until Create universe applies them.
+  const [activeSettings,setActiveSettings]=useState(DEFAULT_SETTINGS);
+  const pendingDirty=!settingsEqual(settings,activeSettings);
   const [settingsOpen,setSettingsOpen]=useState(false);
   const [diagnosticsOpen,setDiagnosticsOpen]=useState(false);
   const [lens,setLens]=useState<Lens>("normal");
@@ -241,7 +294,10 @@ export function App(){
     setSettings(v=>({...v,seed:Math.floor(Math.random()*4294967294)+1}));setPreset("Custom");
   };
   const newUniverse=()=>{
-    setRunning(false);setSelectedId(null);runtime.create(configFromSettings(settings));setSettingsOpen(false);setStatus("New universe created");
+    setRunning(false);setSelectedId(null);
+    runtime.create(configFromSettings(settings));
+    setActiveSettings(settings);setPreset(presetForSettings(settings));
+    setSettingsOpen(false);setStatus("New universe created — settings now active");
   };
   const save=async()=>{
     setStatus("Saving exact checkpoint…");
@@ -255,8 +311,12 @@ export function App(){
     setRunning(false);
     setStatus("Restoring checkpoint…");
     try{
-      await runtime.loadCheckpoint(checkpoint);
-      setStatus("Checkpoint restored");
+      const restored=await runtime.loadCheckpoint(checkpoint);
+      // A3: the resumed universe becomes the active recipe; pending resets to
+      // match it so staged settings can never be mistaken for the live world.
+      const mapped=settingsFromConfig(restored.config);
+      setSettings(mapped);setActiveSettings(mapped);setPreset(presetForSettings(mapped));
+      setStatus("Checkpoint restored — active settings match the resumed universe");
     }catch(error){
       setStatus(`Restore failed: ${error instanceof Error?error.message:String(error)}`);
     }
@@ -301,7 +361,7 @@ export function App(){
   return <div className="app-shell">
     <header className="topbar">
       <div className="hud-cell brand-cell"><span className="eyebrow">Living Evolution Explorer</span><strong className="world-name">Digital Evolution Ecosystem</strong></div>
-      <div className="hud"><div className="hud-cell"><span className="hud-label">Tick</span><span className="hud-value" data-testid="tick">{snapshot.tick.toLocaleString()}</span><span className="hud-sub">{formatYear(snapshot.tick)}</span></div><div className="hud-cell"><span className="hud-label">Living</span><span className="hud-value">{snapshot.population}</span></div><div className="hud-cell"><span className="hud-label">Dormant</span><span className="hud-value">{snapshot.dormantPopulation}</span></div><button className="hud-settings" onClick={()=>setSettingsOpen(true)}>World settings</button></div>
+      <div className="hud"><div className="hud-cell"><span className="hud-label">Tick</span><span className="hud-value" data-testid="tick">{snapshot.tick.toLocaleString()}</span><span className="hud-sub">{formatYear(snapshot.tick)}</span></div><div className="hud-cell"><span className="hud-label">Living</span><span className="hud-value">{snapshot.population}</span></div><div className="hud-cell"><span className="hud-label">Dormant</span><span className="hud-value">{snapshot.dormantPopulation}</span></div><button className="hud-settings" onClick={()=>setSettingsOpen(true)}>World settings{pendingDirty&&<span className="pending-dot" data-testid="settings-pending" aria-hidden="true"/>}</button></div>
     </header>
 
     <nav className="rail" aria-label="Primary">
@@ -316,7 +376,7 @@ export function App(){
           {lens==="traits"&&<select aria-label="Trait view" value={traitView} onChange={e=>setTraitView(e.target.value as TraitView)}>{Object.entries(TRAIT_RANGES).map(([key,[,,label]])=><option key={key} value={key}>{label}</option>)}</select>}
         </div>
         <div className="world-wrap">
-          <div className="world-scene" aria-hidden="true"><div className="nutrient-cloud nc-a"/><div className="nutrient-cloud nc-b"/><div className="nutrient-cloud nc-c"/><div className="biofilm"/></div>
+          <div className="world-scene" aria-hidden="true"><div className="glow g-a"/><div className="glow g-b"/><div className="glow g-c"/><div className="ambient"/></div>
           <WorldCanvas snapshot={snapshot} lens={lens} resourceView={resourceView} traitView={traitView} selectedId={selectedId} onSelect={setSelectedId}/>
         </div>
       </section>
@@ -379,6 +439,7 @@ export function App(){
 
     {settingsOpen&&<div className="modal-backdrop" role="presentation"><section className="modal" role="dialog" aria-modal="true" aria-label="World settings">
       <div className="panel-head"><div><span className="eyebrow">Create / inspect</span><h2>World settings</h2></div><button onClick={()=>setSettingsOpen(false)}>Close</button></div>
+      <div className="config-chip-row"><span className="eyebrow">Active universe</span><strong data-testid="active-config">Active: {presetForSettings(activeSettings)} · seed {activeSettings.seed}</strong></div>
       <div className="preset-row" role="group" aria-label="World presets">{Object.keys(PRESETS).map(name=><button key={name} className={preset===name?"active":""} aria-pressed={preset===name} onClick={()=>applyPreset(name)}>{name}</button>)}</div>
       <p className="preset-note">{preset==="Custom"?"Custom world — your controls define the conditions.":PRESETS[preset]?.note}</p>
       <div className="seed-row"><label className="seed"><span>World seed</span><input aria-label="World seed" value={settings.seed} type="number" onChange={e=>updateSettings({seed:Number(e.target.value)})}/></label><button onClick={randomizeSeed}>New random seed</button></div>
@@ -390,6 +451,7 @@ export function App(){
       <Slider label="Mutation chance" value={settings.mutation} min={0} max={.15} step={.005} onChange={v=>updateSettings({mutation:v})}/>
       <Slider label="Survival pressure" value={settings.pressure} min={0} max={1} step={.01} onChange={v=>updateSettings({pressure:v})}/>
       <div className="actions"><button className="primary" onClick={newUniverse}>Create universe</button><button onClick={()=>setDiagnosticsOpen(v=>!v)}>Developer diagnostics</button></div>
+      {pendingDirty?<p className="pending-note" data-testid="pending-note">Unapplied changes — Create universe to apply</p>:<p className="active-note" data-testid="active-note">Settings match the running universe</p>}
       {diagnosticsOpen&&<div className="diagnostics">
         <strong>Engine {ENGINE_VERSION}</strong>
         <span>Resource accounting residuals: {accounting.length?accounting.map((v:number)=>Number(v).toExponential(2)).join(" / "):"—"}</span>

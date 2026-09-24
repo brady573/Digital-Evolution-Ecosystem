@@ -26,6 +26,7 @@ function renderSnapshot(sim:any,analysis:EcologyObserver,control:any|null):Rende
   const metrics=sim.metrics();
   return{
     tick:sim.t,
+    config:sim.c,
     seed:sim.c.seed,
     population:metrics.population,
     activePopulation:metrics.active_population,
