@@ -27,6 +27,13 @@ async function main(){
     await page.getByRole("heading",{name:"History"}).waitFor();
     await page.getByRole("button",{name:"Tree"}).click();
     await page.getByRole("heading",{name:"Tree"}).waitFor();
+    // M3 walkthrough: drill into the first clade lineage, then locate it.
+    const cladeCard=page.locator(".cards .record-button").first();
+    await cladeCard.waitFor();
+    await cladeCard.click();
+    await page.getByRole("button",{name:"Back to all clades"}).waitFor();
+    await page.getByRole("button",{name:"Locate in world"}).click();
+    await page.getByText("Selected organism").waitFor();
     await page.getByRole("button",{name:"Experiments"}).click();
     await page.getByRole("heading",{name:"Experiments"}).waitFor();
 

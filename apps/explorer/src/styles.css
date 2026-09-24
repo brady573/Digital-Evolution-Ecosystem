@@ -111,6 +111,22 @@ button,input{outline:none}
   .nutrient-cloud,.biofilm{animation:none!important;transition:none!important}
 }
 
+/* investigation flows (M3) */
+.hud-sub{font-size:10px;color:var(--teal2);white-space:nowrap}
+.gloss{color:#9fd8bb!important;font-weight:400!important;font-size:.9rem;line-height:1.5}
+.breadcrumb{color:#8fa3b7!important;font-size:.78rem!important;font-weight:400!important}
+.record-button{display:block;width:100%;text-align:left;border:0;background:transparent;color:inherit;padding:0;cursor:pointer;border-radius:8px}
+.record-button:hover h3{color:var(--teal)}
+.record-button h3{margin:4px 0}
+.story-detail,.lineage-detail{border:1px solid var(--line2);border-radius:12px;padding:16px;margin-bottom:14px;background:var(--panel2)}
+.story-detail h3,.lineage-detail h3{margin:6px 0 8px}
+.evidence{display:grid;gap:0;margin:12px 0}
+.evidence div{display:flex;justify-content:space-between;gap:12px;border-top:1px solid #1a2e40;padding:8px 0}
+.evidence div:first-child{border-top:0}
+.evidence dt{font-size:.82rem;color:#8fa3b7}
+.evidence dd{margin:0;font-weight:700;font-size:.88rem;color:#d8e2eb}
+.story-detail button,.lineage-detail button{border:1px solid var(--line2);background:var(--panel2);color:#cde0d7;border-radius:9px;padding:9px 11px;margin-right:8px;margin-top:4px}
+
 /* responsive */
 @media (max-width:900px){
   html,body{overflow-x:hidden}

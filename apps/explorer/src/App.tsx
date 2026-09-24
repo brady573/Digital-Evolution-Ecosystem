@@ -6,6 +6,7 @@ import { Capacitor } from "@capacitor/core";
 import { Directory, Encoding, Filesystem } from "@capacitor/filesystem";
 import { Share } from "@capacitor/share";
 import { IndexedDbWorldRepository } from "./persistence";
+import { formatTickAge, formatYear, glossOutcome } from "./language";
 
 type Surface="world"|"history"|"tree"|"experiments";
 type Lens="normal"|"nutrients"|"clades"|"traits";
@@ -173,6 +174,8 @@ export function App(){
   const [resourceView,setResourceView]=useState<ResourceView>("combined");
   const [traitView,setTraitView]=useState<TraitView>("speed");
   const [selectedId,setSelectedId]=useState<number|null>(null);
+  const [selectedStoryId,setSelectedStoryId]=useState<string|null>(null);
+  const [selectedCladeId,setSelectedCladeId]=useState<number|null>(null);
   // Backpressure: never queue an advance while the worker is still busy with
   // the previous one. Without this, high speeds pile up work faster than the
   // worker can drain it and the UI stalls instead of running fast.
@@ -264,7 +267,7 @@ export function App(){
   return <div className="app-shell">
     <header className="topbar">
       <div className="hud-cell brand-cell"><span className="eyebrow">Living Evolution Explorer</span><strong className="world-name">Digital Evolution Ecosystem</strong></div>
-      <div className="hud"><div className="hud-cell"><span className="hud-label">Tick</span><span className="hud-value" data-testid="tick">{snapshot.tick.toLocaleString()}</span></div><div className="hud-cell"><span className="hud-label">Living</span><span className="hud-value">{snapshot.population}</span></div><div className="hud-cell"><span className="hud-label">Dormant</span><span className="hud-value">{snapshot.dormantPopulation}</span></div><button className="hud-settings" onClick={()=>setSettingsOpen(true)}>World settings</button></div>
+      <div className="hud"><div className="hud-cell"><span className="hud-label">Tick</span><span className="hud-value" data-testid="tick">{snapshot.tick.toLocaleString()}</span><span className="hud-sub">{formatYear(snapshot.tick)}</span></div><div className="hud-cell"><span className="hud-label">Living</span><span className="hud-value">{snapshot.population}</span></div><div className="hud-cell"><span className="hud-label">Dormant</span><span className="hud-value">{snapshot.dormantPopulation}</span></div><button className="hud-settings" onClick={()=>setSettingsOpen(true)}>World settings</button></div>
     </header>
 
     <nav className="rail" aria-label="Primary">
@@ -285,15 +288,15 @@ export function App(){
       </section>
       <aside className="investigation-rail" aria-label="Investigation">
         {surface==="world"&&<div className="inspector">
-          {selected?<><span className="eyebrow">Selected organism</span><h2>#{selected.id}</h2><p>{selected.activity} · generation {selected.generation}</p><dl>
+          {selected?<><span className="eyebrow">Selected organism</span><h2>#{selected.id}</h2><p>{selected.activity} · generation {selected.generation}</p><p className="breadcrumb">Organism #{selected.id} → Lineage {`L-${String(selected.lineageId).padStart(4,"0")}`} → Clade {`L-${String(selected.cladeId).padStart(4,"0")}`}</p><dl>
             <div><dt>Clade</dt><dd>L-{String(selected.cladeId).padStart(4,"0")}</dd></div>
             <div><dt>Energy</dt><dd>{selected.energy.toFixed(1)}</dd></div>
             <div><dt>Movement</dt><dd>{selected.speed.toFixed(2)}</dd></div>
             <div><dt>Sensing</dt><dd>{selected.sensing.toFixed(1)}</dd></div>
             <div><dt>Byproduct use</dt><dd>{selected.byproductUse.toFixed(2)}</dd></div>
             <div><dt>Dormancy response</dt><dd>{selected.dormancyResponse.toFixed(2)}</dd></div>
-          </dl><button onClick={()=>setSelectedId(null)}>Clear selection</button></>:<>
-            <span className="eyebrow">World now</span><h2>{m.ecological_outcome}</h2><p>{m.population} living · peak {m.peak_population}</p><dl>
+          </dl><button onClick={()=>{setSelectedCladeId(selected.cladeId);setSurface("tree")}}>View lineage in Tree</button><button onClick={()=>setSelectedId(null)}>Clear selection</button></>:<>
+            <span className="eyebrow">World now</span><h2>{m.ecological_outcome}</h2><p className="gloss">{glossOutcome(m.ecological_outcome)}</p><p>{m.population} living · peak {m.peak_population}</p><dl>
               <div><dt>Active</dt><dd>{snapshot.activePopulation}</dd></div>
               <div><dt>Dormant</dt><dd>{snapshot.dormantPopulation}</dd></div>
               <div><dt>Effective niches</dt><dd>{Number(m.effective_niches||0).toFixed(2)}</dd></div>
@@ -305,19 +308,22 @@ export function App(){
 
         {surface==="history"&&<section className="panel">
         <div className="panel-head"><div><span className="eyebrow">What happened here?</span><h2>History</h2></div><span>{records.length} durable ecological records</span></div>
-        {records.length===0?<><p>No durable ecological arc has been established yet.</p><h3>Recent simulation events</h3>{snapshot.events.slice(-8).reverse().map((e,i)=><article key={`${e.tick}-${i}`}><span>Tick {e.tick.toLocaleString()}</span><p>{e.label}</p></article>)}</>:records.slice().reverse().map((r:any)=><article key={r.id}><span>Tick {r.tick.toLocaleString()} · {r.phase}</span><h3>{r.title}</h3><p>{r.summary}</p></article>)}
+        {(()=>{const story=records.find((r:any)=>r.id===selectedStoryId);if(!story)return null;const ev=story.evidence||{};return<article key={story.id} className="story-detail"><span>{formatTickAge(story.tick)} · {story.phase}</span><h3>{story.title}</h3><p>{story.summary}</p>{typeof ev.population==="number"&&<dl className="evidence"><div><dt>Population then</dt><dd>{ev.population}</dd></div><div><dt>Dormant share</dt><dd>{Math.round((ev.dormant_fraction||0)*100)}%</dd></div><div><dt>Metabolite C energy</dt><dd>{Math.round((ev.c_energy_share||0)*100)}%</dd></div><div><dt>Leading way of life</dt><dd>{String(ev.dominant_role||"—")}</dd></div></dl>}<button onClick={()=>setSelectedStoryId(null)}>Back to all stories</button></article>})()}
+        {records.length===0?<><p>No durable ecological arc has been established yet.</p><h3>Recent simulation events</h3>{snapshot.events.slice(-8).reverse().map((e,i)=><article key={`${e.tick}-${i}`}><span>Tick {e.tick.toLocaleString()}</span><p>{e.label}</p></article>)}</>:records.slice().reverse().map((r:any)=><article key={r.id}><button className="record-button" onClick={()=>setSelectedStoryId(r.id)}><span>{formatTickAge(r.tick)} · {r.phase}</span><h3>{r.title}</h3><p>{r.summary}</p></button></article>)}
       </section>}
 
       {surface==="tree"&&<section className="panel">
         <div className="panel-head"><div><span className="eyebrow">Evolutionary branches</span><h2>Tree</h2></div><span>{m.clades?.active??0} active clades</span></div>
         <p>{m.clades?.definition}</p>
-        <div className="cards">{clades.map((c:any)=><article key={c.id} style={{borderTopColor:cladeColor(c.id)}}><h3>L-{String(c.id).padStart(4,"0")}</h3><p>{c.count} living · {(c.share*100).toFixed(0)}%</p><small>{(c.mutations||[]).join(" + ")||"founder ancestry"} · age {Number(c.age||0).toLocaleString()} ticks</small></article>)}</div>
+        {(()=>{const clade=clades.find((c:any)=>c.id===selectedCladeId);if(!clade)return null;const members=snapshot.organisms.filter(o=>o.cladeId===clade.id);return<article key={`detail-${clade.id}`} className="lineage-detail"><span className="breadcrumb">Tree → Clade {`L-${String(clade.id).padStart(4,"0")}`}</span><h3>{`L-${String(clade.id).padStart(4,"0")}`}</h3><p>{clade.count} living · {((clade.share||0)*100).toFixed(0)}% of the world · {members.filter(o=>o.activity==="dormant").length} dormant right now</p><p>{(clade.mutations||[]).join(" + ")||"founder ancestry"} · {formatTickAge(Number(clade.age||0))} old</p><p className="gloss">{clade.count>0?"This family is alive in the world right now.":"No living members — this branch survives only in history."}</p><button onClick={()=>{const first=members[0];if(first){setSelectedId(first.id);setSurface("world")}}}>Locate in world</button><button onClick={()=>setSelectedCladeId(null)}>Back to all clades</button></article>})()}
+        <div className="cards">{clades.map((c:any)=><article key={c.id} style={{borderTopColor:cladeColor(c.id)}}><button className="record-button" onClick={()=>setSelectedCladeId(c.id)}><h3>L-{String(c.id).padStart(4,"0")}</h3><p>{c.count} living · {(c.share*100).toFixed(0)}%</p><small>{(c.mutations||[]).join(" + ")||"founder ancestry"} · {formatTickAge(Number(c.age||0))} old</small></button></article>)}</div>
       </section>}
 
       {surface==="experiments"&&<section className="panel">
         <span className="eyebrow">What if this world changed?</span><h2>Experiments</h2>
-        {snapshot.control?<div className="compare"><div><strong>Experiment</strong><span>{snapshot.population} living</span><span>{m.ecological_outcome}</span></div><div><strong>Untouched twin</strong><span>{snapshot.control.population} living</span><span>{snapshot.control.metrics.ecological_outcome}</span></div></div>:<p>No matched control exists yet. Applying an intervention creates an exact twin first.</p>}
+        {snapshot.control?<div className="compare"><div><strong>Experiment</strong><span>{snapshot.population} living</span><span>{m.ecological_outcome}</span><span>{formatYear(snapshot.tick)}</span></div><div><strong>Untouched twin</strong><span>{snapshot.control.population} living</span><span>{snapshot.control.metrics.ecological_outcome}</span><span>{formatYear(snapshot.control.tick)}</span></div></div>:<p>No matched control exists yet. Applying an intervention creates an exact twin first.</p>}
         <div className="actions"><button onClick={()=>runtime.intervene("global")}>Global nutrient crash</button><button onClick={()=>runtime.intervene("droughtA")}>Nutrient A drought</button><button onClick={()=>runtime.intervene("droughtB")}>Nutrient B drought</button></div>
+        {records.length>0&&<><h3>Histories so far</h3><p>What the experiment branch has lived through — the untouched twin keeps its own time.</p>{records.slice(-4).reverse().map((r:any)=><article key={r.id}><span>{formatTickAge(r.tick)} · {r.phase}</span><h3>{r.title}</h3></article>)}</>}
       </section>}
       </aside>
     </main>
