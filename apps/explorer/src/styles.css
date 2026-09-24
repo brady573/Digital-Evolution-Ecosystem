@@ -20,7 +20,7 @@ button,input{outline:none}
 .app-shell{min-height:100vh;min-height:100dvh;display:grid;grid-template-columns:150px minmax(0,1fr);grid-template-rows:auto minmax(0,1fr) auto;background:linear-gradient(180deg,#08111a 0%,#071018 100%)}
 
 /* topbar HUD */
-.topbar{grid-column:1/-1;display:flex;justify-content:space-between;align-items:stretch;gap:24px;padding:calc(14px + env(safe-area-inset-top)) 20px 14px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,#0a131d,#08121b);box-shadow:0 5px 20px rgba(0,0,0,.16);z-index:3}
+.topbar{grid-column:1/-1;display:flex;justify-content:space-between;align-items:stretch;gap:24px;padding:calc(14px + env(safe-area-inset-top)) 20px 14px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,rgba(10,19,29,.9),rgba(8,18,27,.84));backdrop-filter:blur(12px) saturate(1.06);box-shadow:0 5px 20px rgba(0,0,0,.16);z-index:3}
 .brand-cell{display:flex;flex-direction:column;justify-content:center;gap:2px}
 .eyebrow{color:var(--teal2);text-transform:uppercase;font-size:.68rem;font-weight:800;letter-spacing:.13em}
 .world-name{font-size:1rem;letter-spacing:-.02em}
@@ -57,11 +57,13 @@ button,input{outline:none}
   radial-gradient(ellipse at 86% 32%,rgba(255,176,59,.12),transparent 18%),
   linear-gradient(145deg,#08141f 0%,#05111b 45%,#07111a 100%)}
 .world-scene:after{content:"";position:absolute;inset:0;background:radial-gradient(circle at center,transparent 55%,rgba(0,0,0,.34) 100%)}
-.nutrient-cloud{position:absolute;border-radius:50%;filter:blur(22px);opacity:.5;mix-blend-mode:screen}
-.nc-a{width:33%;height:34%;left:3%;top:15%;background:radial-gradient(circle,#5cf6c5 0,#24b695 36%,transparent 72%)}
-.nc-b{width:28%;height:29%;left:31%;top:40%;background:radial-gradient(circle,#40e4df 0,#118195 38%,transparent 72%)}
-.nc-c{width:26%;height:28%;right:2%;top:22%;background:radial-gradient(circle,#ffbf4c 0,#8d541b 42%,transparent 73%)}
-.biofilm{position:absolute;inset:0;opacity:.4;background:
+/* Decorative atmosphere only. These layers are ambience, not renderings of
+   simulated biological structure (A8) — no cloud/biofilm claim is implied. */
+.glow{position:absolute;border-radius:50%;filter:blur(22px);opacity:.5;mix-blend-mode:screen}
+.g-a{width:33%;height:34%;left:3%;top:15%;background:radial-gradient(circle,#5cf6c5 0,#24b695 36%,transparent 72%)}
+.g-b{width:28%;height:29%;left:31%;top:40%;background:radial-gradient(circle,#40e4df 0,#118195 38%,transparent 72%)}
+.g-c{width:26%;height:28%;right:2%;top:22%;background:radial-gradient(circle,#ffbf4c 0,#8d541b 42%,transparent 73%)}
+.ambient{position:absolute;inset:0;opacity:.4;background:
   radial-gradient(ellipse at 17% 35%,rgba(89,255,192,.10),transparent 20%),
   radial-gradient(ellipse at 79% 33%,rgba(255,177,67,.09),transparent 19%)}
 .world-canvas{position:relative;z-index:1;display:block;width:min(100%,960px);aspect-ratio:1;border-radius:14px;border:1px solid var(--line);background:transparent}
@@ -89,7 +91,7 @@ button,input{outline:none}
 .actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
 
 /* controls */
-.controls{grid-column:1/-1;display:flex;align-items:center;gap:8px;padding:10px 14px calc(10px + env(safe-area-inset-bottom));border-top:1px solid var(--line);background:linear-gradient(180deg,#08121b,#08131d)}
+.controls{grid-column:1/-1;display:flex;align-items:center;gap:8px;padding:10px 14px calc(10px + env(safe-area-inset-bottom));border-top:1px solid var(--line);background:linear-gradient(180deg,rgba(8,18,27,.92),rgba(8,19,29,.88));backdrop-filter:blur(12px)}
 .status{margin-left:auto;color:#91aa9f;font-size:.85rem}
 .loading{min-height:100vh;min-height:100dvh;display:grid;place-items:center;color:#a9beb5}
 
@@ -109,12 +111,21 @@ button,input{outline:none}
 .seed input{width:180px;background:#091411;color:#edf6f1;border:1px solid #29443a;border-radius:8px;padding:8px}
 .diagnostics{display:grid;gap:8px;margin-top:14px;padding:12px;background:#07110f;border:1px solid #21392f;border-radius:9px;color:#a9beb5;font-size:.84rem}
 
+/* M4A: active-vs-pending recipe clarity */
+.config-chip-row{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin:2px 0 4px;padding:10px 12px;background:#0a1511;border:1px solid #1d352b;border-radius:10px}
+.config-chip-row .eyebrow{font-size:.6rem}
+.config-chip-row strong{font-size:.85rem;color:#cfe9dd;font-weight:650}
+.pending-note{color:var(--amber);font-weight:650;font-size:.85rem;margin:10px 0 0;display:flex;gap:8px;align-items:center}
+.pending-note:before{content:"◍";font-size:1.1em}
+.active-note{color:var(--dim);font-size:.82rem;margin:10px 0 0}
+.pending-dot{display:inline-block;width:8px;height:8px;margin-left:8px;border-radius:50%;background:var(--amber);box-shadow:0 0 8px rgba(245,188,67,.9);vertical-align:middle}
+
 /* mobile bottom nav */
 .mobile-nav{display:none}
 
 /* motion */
 @media (prefers-reduced-motion:reduce){
-  .nutrient-cloud,.biofilm{animation:none!important;transition:none!important}
+  .glow,.ambient{animation:none!important;transition:none!important}
 }
 
 /* investigation flows (M3) */
