@@ -118,8 +118,10 @@ function settingsFromConfig(c:EngineConfig|undefined|null):WorldSettings{
 const WORLD_EXTENT=600;
 const ZOOM_MIN=1,ZOOM_MAX=3;
 type Camera={x:number;y:number};
-// Shortest toroidal delta from a to b.
-const wrapDelta=(a:number,b:number)=>{let d=a-b;if(d>WORLD_EXTENT/2)d-=WORLD_EXTENT;else if(d<-WORLD_EXTENT/2)d+=WORLD_EXTENT;return d};
+// Shortest toroidal delta from a to b. Correct for any separation, not just
+// one period: normalizing the camera during pan keeps this well-conditioned,
+// and the modulo keeps it correct regardless.
+const wrapDelta=(a:number,b:number)=>{let d=(a-b)%WORLD_EXTENT;if(d>WORLD_EXTENT/2)d-=WORLD_EXTENT;else if(d<-WORLD_EXTENT/2)d+=WORLD_EXTENT;return d};
 const wrapCoord=(v:number)=>((v%WORLD_EXTENT)+WORLD_EXTENT)%WORLD_EXTENT;
 
 function cladeColor(id:number){
@@ -260,10 +262,11 @@ function WorldCanvas({
     const {rect,s}=viewOf(canvas);
     const x=wrapCoord(cam.x+(clientX-rect.left-rect.width/2)/s);
     const y=wrapCoord(cam.y+(clientY-rect.top-rect.height/2)/s);
-    // Constant on-screen hit radius, so zooming never changes feel.
+    // Constant on-screen hit radius, so zooming never changes feel. Distance is
+    // toroidal: an organism across the seam is one tap away, not across the map.
     let best:RenderOrganism|null=null,bestD=26/s;
     for(const o of snapshot.organisms){
-      const d=Math.hypot(Math.abs(o.x-x),Math.abs(o.y-y));
+      const d=Math.hypot(wrapDelta(o.x,x),wrapDelta(o.y,y));
       if(d<bestD){bestD=d;best=o}
     }
     onSelect(best?.id??null);
@@ -282,7 +285,9 @@ function WorldCanvas({
     if(!d.moved&&Math.hypot(dx,dy)<6)return;
     d.moved=true;
     const {s}=viewOf(event.currentTarget);
-    onCamera({x:d.cx-dx/s,y:d.cy-dy/s});
+    // Normalize while panning: the camera center can then never drift more
+    // than one period from the field, so wrapDelta stays exact.
+    onCamera({x:wrapCoord(d.cx-dx/s),y:wrapCoord(d.cy-dy/s)});
   };
   const onPointerUp=(event:React.PointerEvent<HTMLCanvasElement>)=>{
     const d=drag.current;drag.current=null;
@@ -294,10 +299,12 @@ function WorldCanvas({
     onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={()=>{drag.current=null}}/>;
 }
 
-function WorldMinimap({snapshot,cam,zoom,view}:{
-  snapshot:RenderSnapshot;cam:Camera;zoom:number;view:{w:number;h:number}|null;
+function WorldMinimap({snapshot,cam,view}:{
+  snapshot:RenderSnapshot;cam:Camera;view:{w:number;h:number}|null;
 }){
   const ref=useRef<HTMLCanvasElement>(null);
+  // Single source for the drawn marker geometry and the published geometry.
+  const rect=view?{w:view.w,h:view.h}:null;
   useEffect(()=>{
     const canvas=ref.current;if(!canvas)return;
     const ctx=canvas.getContext("2d");if(!ctx)return;
@@ -305,15 +312,17 @@ function WorldMinimap({snapshot,cam,zoom,view}:{
     ctx.clearRect(0,0,w,h);
     ctx.fillStyle="#06121a";ctx.fillRect(0,0,w,h);
     // Coarse real resource field (every other cell) - an overview, not a claim.
+    // Grid indices are scaled by the world size of one cell, not by k alone,
+    // or the field collapses into the top-left tenth of the minimap.
     const n=snapshot.resources.gridSize,stocks=snapshot.resources.stock,caps=snapshot.resources.capacity;
-    const step=n>40?2:1,px=(WORLD_EXTENT/(n/step))*k;
+    const cellWorld=WORLD_EXTENT/n,step=n>40?2:1,px=cellWorld*step*k;
     for(let y=0;y<n;y+=step)for(let x=0;x<n;x+=step){
       const i=y*n+x;
       const a=(caps[0]?.[i]||0)>0?(stocks[0]?.[i]||0)/(caps[0]?.[i]||1):0;
       const b=(caps[1]?.[i]||0)>0?(stocks[1]?.[i]||0)/(caps[1]?.[i]||1):0;
       const c=(caps[2]?.[i]||0)>0?(stocks[2]?.[i]||0)/(caps[2]?.[i]||1):0;
       ctx.fillStyle=`rgb(${Math.round(8+34*a+64*b)},${Math.round(16+64*a+48*c)},${Math.round(20+54*b+28*c)})`;
-      ctx.fillRect(x*k,y*k,px+1,px+1);
+      ctx.fillRect(x*cellWorld*k,y*cellWorld*k,px+1,px+1);
     }
     // Real organisms; thinned above 2500 so a 5k world stays cheap on a phone.
     const thin=snapshot.organisms.length>2500?2:1;
@@ -322,20 +331,25 @@ function WorldMinimap({snapshot,cam,zoom,view}:{
       const o=snapshot.organisms[i];if(!o)continue;
       ctx.fillRect(o.x*k,o.y*k,1,1);
     }
-    // Visible window marker. Panning may sit outside [0,600], so draw the
-    // wrapped copies the rectangle actually overlaps.
-    if(view){
-      const unitsW=view.w/zoom,unitsH=view.h/zoom;
-      const x0=wrapCoord(cam.x-unitsW/2),y0=wrapCoord(cam.y-unitsH/2);
+    // Visible window marker. WorldCanvas already reports the visible size in
+    // world units (w/s), so it must not be divided by zoom again. Panning is
+    // normalized, but draw the wrapped copies defensively.
+    if(rect){
+      const x0=wrapCoord(cam.x-rect.w/2),y0=wrapCoord(cam.y-rect.h/2);
       ctx.strokeStyle="rgba(120,240,255,.95)";ctx.lineWidth=1;
       for(let ox=-1;ox<=1;ox++)for(let oy=-1;oy<=1;oy++){
         const x=(x0+ox*WORLD_EXTENT)*k,y=(y0+oy*WORLD_EXTENT)*k;
-        if(x>w||y>h||x+unitsW*k<0||y+unitsH*k<0)continue;
-        ctx.strokeRect(x+.5,y+.5,unitsW*k,unitsH*k);
+        if(x>w||y>h||x+rect.w*k<0||y+rect.h*k<0)continue;
+        ctx.strokeRect(x+.5,y+.5,rect.w*k,rect.h*k);
       }
     }
-  },[snapshot,cam,zoom,view]);
-  return <canvas aria-label="World minimap" className="minimap-canvas" ref={ref} width={108} height={108}/>;
+  },[snapshot,cam,view]);
+  // data-* publishes the geometry the marker is actually drawn from, so the
+  // smoke test can assert it against the canvas instead of trusting the code.
+  return <canvas aria-label="World minimap" className="minimap-canvas" ref={ref} width={108} height={108}
+    data-testid="world-minimap"
+    data-cam-x={cam.x.toFixed(2)} data-cam-y={cam.y.toFixed(2)}
+    data-window-w={rect?rect.w.toFixed(2):""} data-window-h={rect?rect.h.toFixed(2):""}/>;
 }
 
 function Slider({label,value,min,max,step,onChange}:{label:string;value:number;min:number;max:number;step:number;onChange:(v:number)=>void}){
@@ -502,7 +516,7 @@ export function App(){
           <div className="world-scene" aria-hidden="true"><div className="glow g-a"/><div className="glow g-b"/><div className="glow g-c"/><div className="ambient"/></div>
           <WorldCanvas snapshot={snapshot} lens={lens} resourceView={resourceView} traitView={traitView} selectedId={selectedId} onSelect={setSelectedId} cam={cam} zoom={zoom} onCamera={setCam} onView={reportView}/>
           <div className="world-overlay">
-            <div className="minimap-frame"><WorldMinimap snapshot={snapshot} cam={cam} zoom={zoom} view={view}/></div>
+            <div className="minimap-frame"><WorldMinimap snapshot={snapshot} cam={cam} view={view}/></div>
             <div className="zoom-controls" role="group" aria-label="World view">
               <button aria-label="Zoom out" onClick={()=>setZoomClamped(zoom-.5)} disabled={zoom<=ZOOM_MIN}>−</button>
               <span className="zoom-readout" data-testid="zoom-level">{zoom.toFixed(1)}×</span>

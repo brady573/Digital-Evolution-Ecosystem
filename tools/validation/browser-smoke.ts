@@ -1,11 +1,24 @@
 import assert from "node:assert/strict";
-import { chromium, type Page } from "playwright";
+import { chromium, type Locator, type Page } from "playwright";
 
 const baseUrl=process.env.DEE_BASE_URL||"http://127.0.0.1:4173";
 
 async function tick(page:Page){
   const text=await page.getByTestId("tick").innerText();
   return Number(text.replace(/[^0-9]/g,""));
+}
+
+// Renderer geometry is published after the canvas paints, so poll for the
+// expectation instead of sampling once (a single read can catch a stale value).
+async function expectAttr(locator:Locator,name:string,match:(v:number)=>boolean,label:string){
+  const deadline=Date.now()+5000;
+  let last=Number.NaN;
+  while(Date.now()<deadline){
+    last=Number(await locator.getAttribute(name));
+    if(Number.isFinite(last)&&match(last))return last;
+    await new Promise(r=>setTimeout(r,100));
+  }
+  throw new Error(`assertion failed: ${label} (last ${name}=${last})`);
 }
 
 async function main(){
@@ -61,12 +74,52 @@ async function main(){
 
     // World view: minimap + zoom controls (uniform zoom into the same world).
     await page.getByLabel("World minimap").waitFor();
+    const minimap=page.getByTestId("world-minimap");
+    const worldBox=await page.getByLabel("Evolution world").boundingBox();
+    assert.ok(worldBox,"world canvas measurable");
+    // Mirrors the renderer's fit rule so the expectation is independent of it.
+    const fit=worldBox!.height>worldBox!.width
+      ?worldBox!.height/600
+      :Math.min(worldBox!.width,worldBox!.height)/600;
     assert.equal(await page.getByTestId("zoom-level").innerText(),"1.0×","camera starts unzoomed");
+    await expectAttr(minimap,"data-window-w",v=>Math.abs(v-worldBox!.width/fit)<1,
+      `minimap window matches visible world at 1x (~${(worldBox!.width/fit).toFixed(1)} world units)`);
     await page.getByRole("button",{name:"Zoom in"}).click();
     assert.equal(await page.getByTestId("zoom-level").innerText(),"1.5×","zoom changes the view only");
+    // The drawn rect must be the true visible width, not width/zoom again.
+    const expectedZoomed=worldBox!.width/(fit*1.5);
+    const windowW1=await expectAttr(minimap,"data-window-w",v=>Math.abs(v-expectedZoomed)<1,
+      `minimap window tracks true zoom (~${expectedZoomed.toFixed(1)} world units, not /zoom twice)`);
+    assert.ok(windowW1<expectedZoomed+1,"zooming in shrinks the visible world window");
     assert.equal(await tick(page),saved,"zooming never advances biology");
     await page.getByRole("button",{name:"Reset view"}).click();
     assert.equal(await page.getByTestId("zoom-level").innerText(),"1.0×","reset restores the view");
+
+    // The minimap resource field must cover the whole world, not a fraction.
+    // Real stocks exist in every cell, so all four quadrants are inked; a
+    // top-left-only regression drops the others to near-background.
+    const quadrantInk=await page.evaluate(`(()=>{
+      const c=document.querySelector('canvas[aria-label="World minimap"]');
+      const ctx=c.getContext('2d');
+      const ink=(x,y,w,h)=>{const d=ctx.getImageData(x,y,w,h).data;let n=0;
+        for(let i=0;i<d.length;i+=4){if(Math.abs(d[i]-6)+Math.abs(d[i+1]-18)+Math.abs(d[i+2]-26)>12)n++}
+        return n;};
+      const w=c.width,h=c.height,q=Math.floor(w*0.3);
+      return[ink(0,0,q,q),ink(w-q,0,q,q),ink(0,h-q,q,q),ink(w-q,h-q,q,q)];
+    })()`);
+    assert.ok(Math.min(...quadrantInk)>400,`minimap field covers the whole world (quadrants ${quadrantInk.join("/")})`);
+
+    // Panning across the torus must keep the camera normalized: drag well past
+    // one world width and the center stays inside [0,600).
+    for(let i=0;i<6;i++){
+      await page.mouse.move(700,520);await page.mouse.down();
+      await page.mouse.move(300,520,{steps:8});await page.mouse.up();
+    }
+    await expectAttr(minimap,"data-cam-x",v=>v>=0&&v<600,"camera x normalized after panning past a world width");
+    await expectAttr(minimap,"data-cam-y",v=>v>=0&&v<600,"camera y normalized after panning past a world width");
+    await expectAttr(minimap,"data-window-w",v=>Math.abs(v-worldBox!.width/fit)<1,"view size is stable after panning");
+    await page.getByRole("button",{name:"Reset view"}).click();
+    assert.equal(await tick(page),saved,"camera work never advances biology");
 
     await page.getByRole("button",{name:"World settings"}).click();
     await page.getByRole("dialog",{name:"World settings"}).waitFor();
