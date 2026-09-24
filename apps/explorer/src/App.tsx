@@ -41,6 +41,7 @@ const PRESETS:Record<string,{settings:Omit<WorldSettings,"seed">,note:string}>={
   Balanced:{settings:{richness:.6,separation:.6,variety:1,population:30,variation:.35,mutation:.03,pressure:.45},note:"Balanced starts with a small founder population and a nutrient field that can support expansion, overshoot, stability, or decline."},
   Patchwork:{settings:{richness:.68,separation:.9,variety:1,population:34,variation:.45,mutation:.03,pressure:.42},note:"Patchwork starts below its potential scale and strongly separates nutrient zones, giving divergent clades room to expand into different niches."},
   Harsh:{settings:{richness:.38,separation:.55,variety:.8,population:30,variation:.35,mutation:.04,pressure:.78},note:"Harsh starts small with slower recovery and high survival pressure; growth is possible, but collapse or extinction remains a natural outcome."},
+  Abundant:{settings:{richness:3.2,separation:.6,variety:1,population:30,variation:.35,mutation:.03,pressure:.45},note:"Abundant turns nutrient production far beyond balanced levels to sustain thousands of living organisms; built for large populations and deep-time runs."},
 };
 
 const TRAIT_RANGES:Record<TraitView,[number,number,string]>={
@@ -263,7 +264,7 @@ export function App(){
   const exportEvidence=async()=>{
     const data=await runtime.requestExport();
     const text=JSON.stringify(data,null,2);
-    const filename=`ecosystem-v029-tick-${snapshot?.tick??0}.json`;
+    const filename=`ecosystem-v030-tick-${snapshot?.tick??0}.json`;
     setStatus("Preparing evidence export…");
     try{
       // Blob-anchor downloads do not work inside the native WebView, so on
@@ -381,7 +382,7 @@ export function App(){
       <div className="preset-row" role="group" aria-label="World presets">{Object.keys(PRESETS).map(name=><button key={name} className={preset===name?"active":""} aria-pressed={preset===name} onClick={()=>applyPreset(name)}>{name}</button>)}</div>
       <p className="preset-note">{preset==="Custom"?"Custom world — your controls define the conditions.":PRESETS[preset]?.note}</p>
       <div className="seed-row"><label className="seed"><span>World seed</span><input aria-label="World seed" value={settings.seed} type="number" onChange={e=>updateSettings({seed:Number(e.target.value)})}/></label><button onClick={randomizeSeed}>New random seed</button></div>
-      <Slider label="Nutrient supply" value={settings.richness} min={0} max={1} step={.01} onChange={v=>updateSettings({richness:v})}/>
+      <Slider label="Nutrient supply" value={settings.richness} min={0} max={4} step={.01} onChange={v=>updateSettings({richness:v})}/>
       <Slider label="Nutrient-zone separation" value={settings.separation} min={0} max={1} step={.01} onChange={v=>updateSettings({separation:v})}/>
       <Slider label="Nutrient variety" value={settings.variety} min={0} max={1} step={.01} onChange={v=>updateSettings({variety:v})}/>
       <Slider label="Founding population" value={settings.population} min={5} max={120} step={1} onChange={v=>updateSettings({population:Math.round(v)})}/>

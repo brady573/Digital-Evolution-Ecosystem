@@ -65,11 +65,13 @@ async function main(){
     // seed must differ from the previous one. Neither creates a universe.
     await page.getByRole("button",{name:"Patchwork"}).click();
     assert.equal(await page.getByLabel(/Founding population/).inputValue(),"34","patchwork preset applies");
+    await page.getByRole("button",{name:"Abundant"}).click();
+    assert.equal(await page.getByLabel(/Nutrient supply/).inputValue(),"3.2","abundant preset applies");
     const seedBefore=await page.getByLabel("World seed").inputValue();
     await page.getByRole("button",{name:"New random seed"}).click();
     assert.notEqual(await page.getByLabel("World seed").inputValue(),seedBefore,"random seed generates a new seed");
     await page.getByRole("button",{name:"Developer diagnostics"}).click();
-    await page.getByText(/Engine 0\.19\.0/).waitFor();
+    await page.getByText(/Engine 0\.20\.0/).waitFor();
     await page.getByRole("button",{name:"Close"}).click();
 
     const mobile=await context.newPage();
