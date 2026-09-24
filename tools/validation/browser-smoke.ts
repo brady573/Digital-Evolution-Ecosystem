@@ -1,11 +1,24 @@
 import assert from "node:assert/strict";
-import { chromium, type Page } from "playwright";
+import { chromium, type Locator, type Page } from "playwright";
 
 const baseUrl=process.env.DEE_BASE_URL||"http://127.0.0.1:4173";
 
 async function tick(page:Page){
   const text=await page.getByTestId("tick").innerText();
   return Number(text.replace(/[^0-9]/g,""));
+}
+
+// Renderer geometry is published after the canvas paints, so poll for the
+// expectation instead of sampling once (a single read can catch a stale value).
+async function expectAttr(locator:Locator,name:string,match:(v:number)=>boolean,label:string){
+  const deadline=Date.now()+5000;
+  let last=Number.NaN;
+  while(Date.now()<deadline){
+    last=Number(await locator.getAttribute(name));
+    if(Number.isFinite(last)&&match(last))return last;
+    await new Promise(r=>setTimeout(r,100));
+  }
+  throw new Error(`assertion failed: ${label} (last ${name}=${last})`);
 }
 
 async function main(){
@@ -59,6 +72,55 @@ async function main(){
     await page.waitForTimeout(150);
     assert.equal(await tick(page),saved,"IndexedDB checkpoint restores exact tick");
 
+    // World view: minimap + zoom controls (uniform zoom into the same world).
+    await page.getByLabel("World minimap").waitFor();
+    const minimap=page.getByTestId("world-minimap");
+    const worldBox=await page.getByLabel("Evolution world").boundingBox();
+    assert.ok(worldBox,"world canvas measurable");
+    // Mirrors the renderer's fit rule so the expectation is independent of it.
+    const fit=worldBox!.height>worldBox!.width
+      ?worldBox!.height/600
+      :Math.min(worldBox!.width,worldBox!.height)/600;
+    assert.equal(await page.getByTestId("zoom-level").innerText(),"1.0×","camera starts unzoomed");
+    await expectAttr(minimap,"data-window-w",v=>Math.abs(v-worldBox!.width/fit)<1,
+      `minimap window matches visible world at 1x (~${(worldBox!.width/fit).toFixed(1)} world units)`);
+    await page.getByRole("button",{name:"Zoom in"}).click();
+    assert.equal(await page.getByTestId("zoom-level").innerText(),"1.5×","zoom changes the view only");
+    // The drawn rect must be the true visible width, not width/zoom again.
+    const expectedZoomed=worldBox!.width/(fit*1.5);
+    const windowW1=await expectAttr(minimap,"data-window-w",v=>Math.abs(v-expectedZoomed)<1,
+      `minimap window tracks true zoom (~${expectedZoomed.toFixed(1)} world units, not /zoom twice)`);
+    assert.ok(windowW1<expectedZoomed+1,"zooming in shrinks the visible world window");
+    assert.equal(await tick(page),saved,"zooming never advances biology");
+    await page.getByRole("button",{name:"Reset view"}).click();
+    assert.equal(await page.getByTestId("zoom-level").innerText(),"1.0×","reset restores the view");
+
+    // The minimap resource field must cover the whole world, not a fraction.
+    // Real stocks exist in every cell, so all four quadrants are inked; a
+    // top-left-only regression drops the others to near-background.
+    const quadrantInk=await page.evaluate(`(()=>{
+      const c=document.querySelector('canvas[aria-label="World minimap"]');
+      const ctx=c.getContext('2d');
+      const ink=(x,y,w,h)=>{const d=ctx.getImageData(x,y,w,h).data;let n=0;
+        for(let i=0;i<d.length;i+=4){if(Math.abs(d[i]-6)+Math.abs(d[i+1]-18)+Math.abs(d[i+2]-26)>12)n++}
+        return n;};
+      const w=c.width,h=c.height,q=Math.floor(w*0.3);
+      return[ink(0,0,q,q),ink(w-q,0,q,q),ink(0,h-q,q,q),ink(w-q,h-q,q,q)];
+    })()`);
+    assert.ok(Math.min(...quadrantInk)>400,`minimap field covers the whole world (quadrants ${quadrantInk.join("/")})`);
+
+    // Panning across the torus must keep the camera normalized: drag well past
+    // one world width and the center stays inside [0,600).
+    for(let i=0;i<6;i++){
+      await page.mouse.move(700,520);await page.mouse.down();
+      await page.mouse.move(300,520,{steps:8});await page.mouse.up();
+    }
+    await expectAttr(minimap,"data-cam-x",v=>v>=0&&v<600,"camera x normalized after panning past a world width");
+    await expectAttr(minimap,"data-cam-y",v=>v>=0&&v<600,"camera y normalized after panning past a world width");
+    await expectAttr(minimap,"data-window-w",v=>Math.abs(v-worldBox!.width/fit)<1,"view size is stable after panning");
+    await page.getByRole("button",{name:"Reset view"}).click();
+    assert.equal(await tick(page),saved,"camera work never advances biology");
+
     await page.getByRole("button",{name:"World settings"}).click();
     await page.getByRole("dialog",{name:"World settings"}).waitFor();
     // M4 presets: applying Patchwork sets its founding population; a random
@@ -98,6 +160,39 @@ async function main(){
     assert.match(await page.getByTestId("active-config").innerText(),/Active: Abundant/,"created recipe becomes the active config");
     await page.getByTestId("active-note").waitFor();
     assert.match(await page.getByTestId("active-note").innerText(),/match the running universe/,"pending indicator clears after create");
+
+    // Touch ownership on phone: the world canvas must keep its own gestures
+    // (WebView scroll/pinch would otherwise cancel a pan mid-drag), and a real
+    // touch pan must move the camera without advancing simulation time.
+    const touchCtx=await browser.newContext({viewport:{width:390,height:844},hasTouch:true,isMobile:true});
+    const touchPage=await touchCtx.newPage();
+    await touchPage.goto(baseUrl,{waitUntil:"networkidle"});
+    await touchPage.getByLabel("Evolution world").waitFor();
+    await touchPage.getByText("Show details").waitFor();
+    const touchAction=await touchPage.evaluate(`getComputedStyle(document.querySelector('canvas[aria-label="Evolution world"]')).touchAction`);
+    assert.equal(touchAction,"none","world canvas owns touch gestures (touch-action:none)");
+    const tickBeforeTouch=await tick(touchPage);
+    const camBefore=await touchPage.getByTestId("world-minimap").getAttribute("data-cam-x");
+    const cdp=await touchCtx.newCDPSession(touchPage);
+    const touchBox=(await touchPage.getByLabel("Evolution world").boundingBox())!;
+    const ty=Math.round(touchBox.y+touchBox.height*0.45);
+    const tx0=Math.round(touchBox.x+touchBox.width*0.5);
+    const tx1=Math.round(touchBox.x+touchBox.width*0.2);
+    await cdp.send("Input.dispatchTouchEvent",{type:"touchStart",touchPoints:[{x:tx0,y:ty,id:1}]});
+    for(let step=1;step<=6;step++){
+      await cdp.send("Input.dispatchTouchEvent",{type:"touchMove",touchPoints:[{x:tx0+(tx1-tx0)*step/6,y:ty,id:1}]});
+    }
+    await cdp.send("Input.dispatchTouchEvent",{type:"touchEnd",touchPoints:[]});
+    const camAfter=await expectAttr(touchPage.getByTestId("world-minimap"),"data-cam-x",
+      v=>Math.abs(v-Number(camBefore))>1,"touch pan moves the camera");
+    assert.ok(Number(camAfter)>=0&&Number(camAfter)<600,`touch pan keeps the camera normalized (${camAfter})`);
+    assert.equal(await tick(touchPage),tickBeforeTouch,"touch pan never advances simulation time");
+    // A tap is a selection gesture, not a pan: the camera must not drift.
+    const camBeforeTap=await touchPage.getByTestId("world-minimap").getAttribute("data-cam-x");
+    await touchPage.getByLabel("Evolution world").tap({position:{x:Math.round(touchBox.width*0.5),y:Math.round(touchBox.height*0.4)}});
+    assert.equal(await touchPage.getByTestId("world-minimap").getAttribute("data-cam-x"),camBeforeTap,"tap does not pan the camera");
+    assert.equal(await tick(touchPage),tickBeforeTouch,"tap never advances simulation time");
+    await touchCtx.close();
 
     const mobile=await context.newPage();
     await mobile.setViewportSize({width:390,height:844});

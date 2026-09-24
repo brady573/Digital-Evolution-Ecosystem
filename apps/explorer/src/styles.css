@@ -66,7 +66,12 @@ button,input{outline:none}
 .ambient{position:absolute;inset:0;opacity:.4;background:
   radial-gradient(ellipse at 17% 35%,rgba(89,255,192,.10),transparent 20%),
   radial-gradient(ellipse at 79% 33%,rgba(255,177,67,.09),transparent 19%)}
-.world-canvas{position:relative;z-index:1;display:block;width:min(100%,960px);aspect-ratio:1;border-radius:14px;border:1px solid var(--line);background:transparent}
+/* touch-action:none hands this canvas's drag/zoom to the camera instead of the
+   WebView's scroll/pinch gestures; without it Android may claim the gesture and
+   emit pointercancel mid-pan. Scoped to the canvas so the rest of the page
+   still scrolls normally. */
+.world-canvas{position:relative;z-index:1;display:block;width:min(100%,960px);aspect-ratio:1;border-radius:14px;border:1px solid var(--line);background:transparent;touch-action:none;user-select:none;-webkit-user-select:none;cursor:grab}
+.world-canvas:active{cursor:grabbing}
 .inspector,.panel{background:linear-gradient(180deg,#09131d,#0a131c);border:1px solid var(--line);border-radius:14px;padding:18px}
 .inspector h2,.panel h2,.modal h2{margin:4px 0 10px;letter-spacing:-.01em}
 .inspector p{color:var(--green);font-weight:700}
@@ -94,6 +99,17 @@ button,input{outline:none}
 .controls{grid-column:1/-1;display:flex;align-items:center;gap:8px;padding:10px 14px calc(10px + env(safe-area-inset-bottom));border-top:1px solid var(--line);background:linear-gradient(180deg,rgba(8,18,27,.92),rgba(8,19,29,.88));backdrop-filter:blur(12px)}
 .status{margin-left:auto;color:#91aa9f;font-size:.85rem}
 .loading{min-height:100vh;min-height:100dvh;display:grid;place-items:center;color:#a9beb5}
+
+/* World view overlay: minimap + zoom controls float on the world (reference
+   style). The container is inert; only the controls take pointer input. */
+.world-overlay{position:absolute;top:8px;right:8px;z-index:6;display:grid;gap:8px;justify-items:end;pointer-events:none}
+.minimap-frame{pointer-events:none;border:1px solid var(--line2);border-radius:10px;padding:4px;background:rgba(6,13,20,.66);backdrop-filter:blur(8px);box-shadow:0 6px 20px rgba(0,0,0,.35)}
+.minimap-canvas{display:block;width:96px;height:96px;border-radius:6px}
+.zoom-controls{pointer-events:auto;display:flex;align-items:center;gap:2px;padding:3px;border:1px solid var(--line2);border-radius:9px;background:rgba(6,13,20,.72);backdrop-filter:blur(8px)}
+.zoom-controls button{border:0;background:transparent;color:#cde0d7;border-radius:7px;min-width:30px;min-height:30px;padding:0 6px;font-size:1rem}
+.zoom-controls button:hover{background:#143041}
+.zoom-controls button:disabled{opacity:.4;cursor:default}
+.zoom-readout{color:var(--teal2);font-size:.72rem;min-width:32px;text-align:center}
 
 /* modal */
 .modal-backdrop{position:fixed;inset:0;background:#020706cc;display:grid;place-items:center;padding:16px;z-index:50}
@@ -160,6 +176,8 @@ button,input{outline:none}
   .world-column{position:sticky;top:0;z-index:1;background:var(--bg);padding-bottom:10px}
   .world-wrap{position:relative;z-index:auto;background:transparent}
   .lensbar{position:absolute;top:8px;left:10px;right:10px;z-index:6;background:rgba(6,13,20,.72);backdrop-filter:blur(8px);border:1px solid var(--line);border-radius:12px;padding:6px}
+  .world-overlay{top:58px;right:8px}
+  .minimap-frame,.zoom-controls{transform:scale(.88);transform-origin:top right}
   .world-canvas{width:100%}
   .lensbar button{padding:6px 10px;font-size:.8rem}
   .investigation-rail{position:relative;z-index:10}
@@ -187,5 +205,10 @@ button,input{outline:none}
   .surface-world .world-wrap{position:absolute;inset:0}
   .surface-world .world-canvas{width:100%;height:100%;aspect-ratio:auto;border:0;border-radius:0}
   .surface-world .investigation-rail{position:absolute;left:10px;right:10px;bottom:10px;z-index:10}
-  .surface-world .inspector.sheet{background:rgba(8,17,25,.86);backdrop-filter:blur(14px);max-height:44%;overflow:auto}
+  .surface-world .inspector.sheet{background:rgba(8,17,25,.86);backdrop-filter:blur(14px);max-height:44vh;max-height:44dvh;overflow:auto}
+  /* Collapsed sheet is a compact floating bar. (A percentage max-height here
+     resolves against the auto-height rail and clamps to a sliver, so the
+     collapsed state uses no max-height at all.) */
+  .surface-world .inspector.sheet.collapsed{max-height:none;overflow:visible;padding:8px 10px}
+  .surface-world .inspector.sheet.collapsed .sheet-toggle{margin:0}
 }
