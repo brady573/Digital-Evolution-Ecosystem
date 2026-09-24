@@ -66,7 +66,12 @@ button,input{outline:none}
 .ambient{position:absolute;inset:0;opacity:.4;background:
   radial-gradient(ellipse at 17% 35%,rgba(89,255,192,.10),transparent 20%),
   radial-gradient(ellipse at 79% 33%,rgba(255,177,67,.09),transparent 19%)}
-.world-canvas{position:relative;z-index:1;display:block;width:min(100%,960px);aspect-ratio:1;border-radius:14px;border:1px solid var(--line);background:transparent}
+/* touch-action:none hands this canvas's drag/zoom to the camera instead of the
+   WebView's scroll/pinch gestures; without it Android may claim the gesture and
+   emit pointercancel mid-pan. Scoped to the canvas so the rest of the page
+   still scrolls normally. */
+.world-canvas{position:relative;z-index:1;display:block;width:min(100%,960px);aspect-ratio:1;border-radius:14px;border:1px solid var(--line);background:transparent;touch-action:none;user-select:none;-webkit-user-select:none;cursor:grab}
+.world-canvas:active{cursor:grabbing}
 .inspector,.panel{background:linear-gradient(180deg,#09131d,#0a131c);border:1px solid var(--line);border-radius:14px;padding:18px}
 .inspector h2,.panel h2,.modal h2{margin:4px 0 10px;letter-spacing:-.01em}
 .inspector p{color:var(--green);font-weight:700}

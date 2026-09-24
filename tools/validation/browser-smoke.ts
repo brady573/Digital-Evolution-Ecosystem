@@ -161,6 +161,39 @@ async function main(){
     await page.getByTestId("active-note").waitFor();
     assert.match(await page.getByTestId("active-note").innerText(),/match the running universe/,"pending indicator clears after create");
 
+    // Touch ownership on phone: the world canvas must keep its own gestures
+    // (WebView scroll/pinch would otherwise cancel a pan mid-drag), and a real
+    // touch pan must move the camera without advancing simulation time.
+    const touchCtx=await browser.newContext({viewport:{width:390,height:844},hasTouch:true,isMobile:true});
+    const touchPage=await touchCtx.newPage();
+    await touchPage.goto(baseUrl,{waitUntil:"networkidle"});
+    await touchPage.getByLabel("Evolution world").waitFor();
+    await touchPage.getByText("Show details").waitFor();
+    const touchAction=await touchPage.evaluate(`getComputedStyle(document.querySelector('canvas[aria-label="Evolution world"]')).touchAction`);
+    assert.equal(touchAction,"none","world canvas owns touch gestures (touch-action:none)");
+    const tickBeforeTouch=await tick(touchPage);
+    const camBefore=await touchPage.getByTestId("world-minimap").getAttribute("data-cam-x");
+    const cdp=await touchCtx.newCDPSession(touchPage);
+    const touchBox=(await touchPage.getByLabel("Evolution world").boundingBox())!;
+    const ty=Math.round(touchBox.y+touchBox.height*0.45);
+    const tx0=Math.round(touchBox.x+touchBox.width*0.5);
+    const tx1=Math.round(touchBox.x+touchBox.width*0.2);
+    await cdp.send("Input.dispatchTouchEvent",{type:"touchStart",touchPoints:[{x:tx0,y:ty,id:1}]});
+    for(let step=1;step<=6;step++){
+      await cdp.send("Input.dispatchTouchEvent",{type:"touchMove",touchPoints:[{x:tx0+(tx1-tx0)*step/6,y:ty,id:1}]});
+    }
+    await cdp.send("Input.dispatchTouchEvent",{type:"touchEnd",touchPoints:[]});
+    const camAfter=await expectAttr(touchPage.getByTestId("world-minimap"),"data-cam-x",
+      v=>Math.abs(v-Number(camBefore))>1,"touch pan moves the camera");
+    assert.ok(Number(camAfter)>=0&&Number(camAfter)<600,`touch pan keeps the camera normalized (${camAfter})`);
+    assert.equal(await tick(touchPage),tickBeforeTouch,"touch pan never advances simulation time");
+    // A tap is a selection gesture, not a pan: the camera must not drift.
+    const camBeforeTap=await touchPage.getByTestId("world-minimap").getAttribute("data-cam-x");
+    await touchPage.getByLabel("Evolution world").tap({position:{x:Math.round(touchBox.width*0.5),y:Math.round(touchBox.height*0.4)}});
+    assert.equal(await touchPage.getByTestId("world-minimap").getAttribute("data-cam-x"),camBeforeTap,"tap does not pan the camera");
+    assert.equal(await tick(touchPage),tickBeforeTouch,"tap never advances simulation time");
+    await touchCtx.close();
+
     const mobile=await context.newPage();
     await mobile.setViewportSize({width:390,height:844});
     await mobile.goto(baseUrl,{waitUntil:"networkidle"});
