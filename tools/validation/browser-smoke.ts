@@ -152,7 +152,9 @@ async function main(){
     // the staged recipe becomes the active configuration.
     await page.getByRole("button",{name:"World settings"}).click();
     await page.getByRole("button",{name:"Create universe"}).click();
-    await page.getByText("New universe created").waitFor();
+    // The status text is transient (the fresh snapshot clears it), so wait for
+    // the deterministic effects instead: modal closed, world rebuilt at tick 0.
+    await page.getByRole("dialog",{name:"World settings"}).waitFor({state:"detached"});
     let rebuilt=await tick(page);
     for(let i=0;i<30&&rebuilt!==0;i++){await page.waitForTimeout(100);rebuilt=await tick(page)}
     assert.equal(rebuilt,0,"create universe starts a fresh world");
@@ -201,11 +203,21 @@ async function main(){
     await decisionPage.goto(baseUrl,{waitUntil:"networkidle"});
     await decisionPage.getByLabel("Evolution world").waitFor();
     await decisionPage.getByRole("button",{name:"World settings"}).click();
-    // Balanced with this seed reaches the mapped crossfeeding event earliest of
+    // Balanced with this seed reaches a mapped formation event earliest of
     // the surveyed seeds, so the decision path is provable in smoke time.
     await decisionPage.getByLabel("World seed").fill("24681357");
     await decisionPage.getByRole("button",{name:"Create universe"}).click();
-    await decisionPage.getByText("New universe created").waitFor();
+    // Same transient-status reasoning as above: the modal closing plus the
+    // requested seed in the HUD-adjacent active config proves the rebuild.
+    await decisionPage.getByRole("dialog",{name:"World settings"}).waitFor({state:"detached"});
+    // Prove the rebuild used the requested seed: the active recipe reflects it.
+    await decisionPage.getByRole("button",{name:"World settings"}).click();
+    assert.match(
+      await decisionPage.getByTestId("active-config").innerText(),
+      /seed 24681357/,
+      "rebuilt world runs the requested seed",
+    );
+    await decisionPage.getByRole("button",{name:"Close"}).click();
     const sheet=decisionPage.getByTestId("decision-sheet");
     for(let i=0;i<20&&!(await sheet.isVisible().catch(()=>false));i++){
       await decisionPage.getByRole("button",{name:"Next meaningful change"}).click();
@@ -234,7 +246,8 @@ async function main(){
     await decisionPage.getByRole("button",{name:"Pause"}).click();
     await decisionPage.getByRole("button",{name:"History"}).click();
     await decisionPage.getByText("Your decisions").waitFor();
-    await decisionPage.getByText("You kept watching (no change)").waitFor();
+    // History renders the recorded choice copy, never a UI-side label.
+    await decisionPage.getByText("Keep watching",{exact:true}).waitFor();
     await decisionPage.getByText(/not a proven cause/).waitFor();
     await decisionPage.close();
 

@@ -41,33 +41,53 @@ interface EventPolicy {
 }
 
 /**
- * Initial vertical slice: one mapped event. Everything else is deliberately
- * unmapped, so the architecture is proven without inventing a choice catalog.
+ * Shared response palette: keep watching plus the three current nutrient
+ * interventions, framed mechanically. Reused by every mapped formation event
+ * so the catalog grows by registering event keys, not by duplicating choices.
+ */
+function nutrientResponseChoices(): readonly DecisionChoice[] {
+  return [
+    keepWatching,
+    {
+      choiceId: "drought-a",
+      title: "Nutrient A drought",
+      directEffectDescription: "Reduce Nutrient A availability using the existing drought intervention.",
+      intervention: nutrientDisturbance("drought_a"),
+    },
+    {
+      choiceId: "drought-b",
+      title: "Nutrient B drought",
+      directEffectDescription: "Reduce Nutrient B availability using the existing drought intervention.",
+      intervention: nutrientDisturbance("drought_b"),
+    },
+    {
+      choiceId: "global-crash",
+      title: "Global nutrient crash",
+      directEffectDescription: "Reduce all nutrient availability using the existing global intervention.",
+      intervention: nutrientDisturbance("global_crash"),
+    },
+  ];
+}
+
+/**
+ * Mapped events: durable formations the observer persists (persistence-gated
+ * records), each a genuine moment of ecological change worth a decision.
+ * Disrupted/recovered transitions stay ordinary history for now: mapping every
+ * transition would nag the player on each swing, and that is catalog design,
+ * not architecture.
  */
 const REGISTRY: Readonly<Record<string, EventPolicy>> = {
   "crossfeeding:established": {
     prompt: (event) => `${event.title}. How do you want to respond?`,
-    buildChoices: () => [
-      keepWatching,
-      {
-        choiceId: "drought-a",
-        title: "Nutrient A drought",
-        directEffectDescription: "Reduce Nutrient A availability using the existing drought intervention.",
-        intervention: nutrientDisturbance("drought_a"),
-      },
-      {
-        choiceId: "drought-b",
-        title: "Nutrient B drought",
-        directEffectDescription: "Reduce Nutrient B availability using the existing drought intervention.",
-        intervention: nutrientDisturbance("drought_b"),
-      },
-      {
-        choiceId: "global-crash",
-        title: "Global nutrient crash",
-        directEffectDescription: "Reduce all nutrient availability using the existing global intervention.",
-        intervention: nutrientDisturbance("global_crash"),
-      },
-    ],
+    buildChoices: () => nutrientResponseChoices(),
+  },
+  "dormancy:established": {
+    prompt: (event) => `${event.title}. How do you want to respond?`,
+    buildChoices: () => nutrientResponseChoices(),
+  },
+  "era:established": {
+    prompt: (event) => `${event.title}. How do you want to respond?`,
+    buildChoices: () => nutrientResponseChoices(),
   },
 };
 
@@ -102,6 +122,7 @@ export function buildDecisionOpportunity(
     status: "pending",
     prompt: policy.prompt(event),
     context: event.summary,
+    contextSnapshot: { ...context },
     choices,
   };
 }

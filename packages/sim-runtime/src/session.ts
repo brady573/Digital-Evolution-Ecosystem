@@ -101,13 +101,17 @@ export class UniverseSession {
 
   /** Bounded, read-only context the decision policy may consult. */
   #decisionContext():DecisionContext{
-    const metrics=this.#experiment.metrics();
+    // The authoritative frame analysis observes. metrics() has no top-level
+    // c_energy_share/crossfeeder_fraction in engine 0.20; reading them there
+    // silently yields 0 and would poison any future policy that consults
+    // context. analysisFrame is a pure read with no biological side effects.
+    const frame=analysisFrame(this.#experiment);
     return{
       tick:this.#experiment.t,
-      population:metrics.population,
-      dormantPopulation:metrics.dormant_population,
-      cEnergyShare:Number(metrics.c_energy_share||0),
-      crossfeederFraction:Number(metrics.crossfeeder_fraction||0),
+      population:frame.population,
+      dormantPopulation:frame.dormant_population,
+      cEnergyShare:frame.c_energy_share,
+      crossfeederFraction:frame.crossfeeder_fraction,
     };
   }
 
@@ -229,8 +233,13 @@ export class UniverseSession {
       opportunityId:pending.opportunityId,
       sourceEventId:pending.sourceEventId,
       choiceId:choice.choiceId,
+      choiceTitle:choice.title,
+      directEffectDescription:choice.directEffectDescription,
       intervention:choice.intervention,
       source:"event_decision",
+      // The opportunity's version, not the generator's: a restored pending
+      // keeps the catalog it was offered under, so the record stays
+      // interpretable even after the catalog evolves.
       policyVersion:pending.policyVersion,
     };
     this.#decisionResolutions.push(resolution);
@@ -278,7 +287,11 @@ export class UniverseSession {
       const decisions=(checkpoint as UniverseCheckpoint).decisions;
       this.#pendingDecision=decisions?.pending?JSON.parse(JSON.stringify(decisions.pending)):null;
       this.#decisionResolutions=decisions?.resolutions?JSON.parse(JSON.stringify(decisions.resolutions)):[];
-      this.#policyVersion=decisions?.policyVersion||DECISION_POLICY_VERSION;
+      // Generator version is always the running code's. A resumed checkpoint must
+    // never stamp newly generated opportunities with an older catalog's
+    // version. Persisted pending opportunities and resolutions keep their own
+    // embedded versions and restore exactly as stored.
+    this.#policyVersion=DECISION_POLICY_VERSION;
     }else{
       this.#pendingDecision=null;
       this.#decisionResolutions=[];

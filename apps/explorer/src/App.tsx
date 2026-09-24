@@ -124,18 +124,6 @@ type Camera={x:number;y:number};
 const wrapDelta=(a:number,b:number)=>{let d=(a-b)%WORLD_EXTENT;if(d>WORLD_EXTENT/2)d-=WORLD_EXTENT;else if(d<-WORLD_EXTENT/2)d+=WORLD_EXTENT;return d};
 const wrapCoord=(v:number)=>((v%WORLD_EXTENT)+WORLD_EXTENT)%WORLD_EXTENT;
 
-/** Choice labels come from the runtime's recorded spec, not from UI copy, so
- *  History cannot drift from what was actually applied. */
-function pendingChoiceLabel(choiceId:string){
-  switch(choiceId){
-    case "keep-watching":return "You kept watching (no change)";
-    case "drought-a":return "You applied a Nutrient A drought";
-    case "drought-b":return "You applied a Nutrient B drought";
-    case "global-crash":return "You applied a global nutrient crash";
-    default:return `You chose ${choiceId}`;
-  }
-}
-
 function cladeColor(id:number){  const hue=(id*137.508)%360;
   return `hsl(${hue} 58% 63%)`;
 }
@@ -601,11 +589,10 @@ export function App(){
           <p>Actions you took, in order. A decision is an action followed by later outcomes, not a proven cause.</p>
           {snapshot.resolvedDecisions.slice().reverse().map(d=>{
             const source=records.find((r:any)=>r.id===d.sourceEventId);
-            const title=(pendingChoiceLabel(d.choiceId));
             return <article key={d.commandId} className="decision-record">
               <span>Tick {d.tick.toLocaleString()}</span>
-              <h3>{title}</h3>
-              <p>{source?`After: ${source.title}.`:"No linked event."} {d.intervention?"An intervention was applied.":"Nothing was changed."}</p>
+              <h3>{d.choiceTitle}</h3>
+              <p>{source?`After: ${source.title}.`:"No linked event."} {d.directEffectDescription}</p>
             </article>;
           })}
         </>}

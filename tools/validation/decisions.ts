@@ -34,9 +34,9 @@ import {
 
 /**
  * Balanced keeps the population small enough for a CI-sized run while still
- * reaching the mapped event. The seed is chosen because this exact universe
- * establishes crossfeeding earliest among the surveyed seeds; the config is a
- * config choice only, never an engine change.
+ * reaching mapped events. Seed 24681357 yields three natural decisions
+ * (dormancy, then crossfeeding, then era formation); the config is a config
+ * choice only, never an engine change.
  */
 const FIXTURE_SEED = 24681357;
 const config = (seed: number): EngineConfig => ({
@@ -91,7 +91,11 @@ function atDecision(): { session: UniverseSession; pending: DecisionOpportunity 
 // --- A2/A3: policy layer is pure, versioned, extensible, unmapped-safe --------
 
 function testPolicyLayer() {
-  assert.deepEqual(mappedPolicyKeys(), ["crossfeeding:established"], "only the vertical-slice event is mapped");
+  assert.deepEqual(
+    mappedPolicyKeys(),
+    ["crossfeeding:established", "dormancy:established", "era:established"],
+    "durable formations are mapped; transitions stay ordinary history",
+  );
   const event = {
     schemaVersion: 1 as const,
     eventId: "eco-crossfeeding-1-established-55000",
@@ -129,11 +133,21 @@ function testPolicyLayer() {
     JSON.stringify(opportunity),
     "policy output is deterministic",
   );
-  assert.equal(isDecisionEligible({ ...event, phase: "disrupted" }), false, "unmapped event is not decision-eligible");
+  assert.equal(isDecisionEligible({ ...event, phase: "disrupted" }), false, "unmapped transition is not decision-eligible");
   assert.equal(
     buildDecisionOpportunity({ ...event, phase: "disrupted" }, context),
     null,
-    "unmapped event yields no opportunity",
+    "unmapped transition yields no opportunity",
+  );
+  assert.equal(
+    isDecisionEligible({ ...event, kind: "dormancy", phase: "established" }),
+    true,
+    "dormancy formation is decision-eligible",
+  );
+  assert.equal(
+    isDecisionEligible({ ...event, kind: "era", phase: "established" }),
+    true,
+    "era formation is decision-eligible",
   );
   // Copy must not promise outcomes.
   for (const choice of opportunity.choices) {
@@ -170,10 +184,26 @@ function testVerticalSliceAndGate() {
   const triggerTick = session.snapshot().tick;
   assert.equal(pending.createdTick, triggerTick, "opportunity created at the current tick");
   assert.equal(
-    pending.sourceEventId.startsWith("eco-crossfeeding-1-established-"),
-    true,
-    "sourced from the real observed event",
+    pending.sourceEventId,
+    "eco-seedbank-1-established-7530",
+    "first decision comes from the earliest durable formation (deterministic)",
   );
+  // The policy saw the same context the evidence supports: contextSnapshot must
+  // match the triggering observed event, not zeros from a wrong metrics path.
+  const exported = session.exportEvidence() as any;
+  const triggering = (exported.observed_events as any[]).find((e: any) => e.eventId === pending.sourceEventId);
+  assert.ok(triggering, "triggering observed event is exported");
+  assert.equal(
+    pending.contextSnapshot.cEnergyShare,
+    (triggering.evidence as any).c_energy_share,
+    "context c_energy_share matches triggering evidence",
+  );
+  assert.equal(
+    pending.contextSnapshot.crossfeederFraction,
+    (triggering.evidence as any).crossfeeder_fraction,
+    "context crossfeeder_fraction matches triggering evidence",
+  );
+  assert.ok(pending.contextSnapshot.cEnergyShare > 0, "context is real observed state, not a zero default");
   const stateAtTrigger = JSON.stringify(session.checkpoint().experiment);
 
   // A6: while pending, no advance or run-to-event may change anything.
@@ -197,6 +227,13 @@ function testVerticalSliceAndGate() {
   assert.equal(session.decisionResolutions[0]!.intervention, null, "no intervention applied");
   assert.equal(session.decisionResolutions[0]!.source, "event_decision", "recorded as an event decision");
   assert.equal(session.decisionResolutions[0]!.sourceEventId, pending.sourceEventId, "command links to the source event");
+  // History renders from the recorded copy, so it cannot drift from the offer.
+  assert.equal(session.decisionResolutions[0]!.choiceTitle, "Keep watching", "resolution records the offered title");
+  assert.equal(
+    session.decisionResolutions[0]!.directEffectDescription,
+    "Change nothing. The world stays exactly as it is.",
+    "resolution records the offered effect text",
+  );
 
   // Validation: mismatched or unknown choices are refused.
   const other = atDecision();
@@ -213,6 +250,57 @@ function testVerticalSliceAndGate() {
   assert.equal(other.session.snapshot().pendingDecision?.opportunityId, other.pending.opportunityId, "refused resolution leaves it pending");
   assert.equal(other.session.snapshot().tick, triggerTick, "refused resolution advances nothing");
   console.log("vertical slice + pause gate: PASS");
+}
+
+// --- Forward compatibility: old checkpoints never mislabel new decisions ----
+
+function testForwardCompatPolicyVersion() {
+  // Age a real checkpoint as if saved under an older catalog version.
+  const aged = fixture();
+  aged.decisions.policyVersion = "m3-events-0.0-ancient";
+  aged.decisions.pending = JSON.parse(
+    JSON.stringify(aged.decisions.pending).replaceAll(DECISION_POLICY_VERSION, "m3-events-0.0-ancient"),
+  );
+
+  const session = new UniverseSession();
+  const snap = session.restore(aged);
+  const pending = snap.pendingDecision as DecisionOpportunity;
+  // The persisted opportunity restores exactly as stored, old version included.
+  assert.deepEqual(pending, aged.decisions.pending, "persisted pending restores unchanged");
+  // But the session generator is the running code, never the stored version.
+  assert.equal(
+    session.checkpoint().decisions.policyVersion,
+    DECISION_POLICY_VERSION,
+    "generator version is current after restoring an old checkpoint",
+  );
+
+  // Resolving the old pending records under the catalog it was offered under.
+  session.resolveEventDecision(pending.opportunityId, "keep-watching");
+  assert.equal(
+    session.decisionResolutions[0]!.policyVersion,
+    "m3-events-0.0-ancient",
+    "resolution inherits the opportunity's version, not the generator's",
+  );
+
+  // The next natural event is stamped with the current policy version, and so
+  // is its resolution: no stale labels leak into new decisions or evidence.
+  const second = session.advance(120_000).pendingDecision as DecisionOpportunity;
+  assert.ok(second, "a second natural decision follows");
+  assert.equal(second.sourceEventId, "eco-crossfeeding-1-established-45431", "second decision is deterministic");
+  assert.equal(second.policyVersion, DECISION_POLICY_VERSION, "new opportunity stamped current");
+  assert.equal(
+    second.contextSnapshot.cEnergyShare,
+    ((session.exportEvidence() as any).observed_events as any[]).find((e: any) => e.eventId === second.sourceEventId)
+      .evidence.c_energy_share,
+    "second context matches its triggering evidence",
+  );
+  session.resolveEventDecision(second.opportunityId, "drought-a");
+  assert.equal(
+    session.decisionResolutions[1]!.policyVersion,
+    DECISION_POLICY_VERSION,
+    "new resolution stamped current",
+  );
+  console.log("forward-compat policy version: PASS");
 }
 
 // --- A8/A9: intervention application and control separation -------------------
@@ -349,6 +437,7 @@ function testDeterministicReplay() {
 
 testPolicyLayer();
 testVerticalSliceAndGate();
+testForwardCompatPolicyVersion();
 testInterventionAndControlSeparation();
 testCheckpointRoundTripAndMigration();
 testEvidenceSeparation();

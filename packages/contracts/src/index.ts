@@ -104,6 +104,9 @@ export interface DecisionOpportunity {
   readonly status: "pending" | "resolved";
   readonly prompt: string;
   readonly context: string;
+  /** The exact bounded context the policy saw. Persisted so a restored or
+   *  exported opportunity stays interpretable without re-derivation. */
+  readonly contextSnapshot: DecisionContext;
   readonly choices: readonly DecisionChoice[];
 }
 
@@ -116,6 +119,10 @@ export interface DecisionResolution {
   readonly opportunityId: string;
   readonly sourceEventId: string;
   readonly choiceId: string;
+  /** Presentation copy as offered, recorded so History never needs its own
+   *  choice catalog and cannot drift from what was actually applied. */
+  readonly choiceTitle: string;
+  readonly directEffectDescription: string;
   readonly intervention: InterventionSpec | null;
   readonly source: "event_decision";
   readonly policyVersion: string;
