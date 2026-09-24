@@ -272,39 +272,38 @@ export function App(){
     </nav>
 
     <main className="surface">
-      {surface==="world"&&<section className="world-surface">
+      <section className="world-column" aria-label="Living world">
         <div className="lensbar">
           {(["normal","nutrients","clades","traits"] as Lens[]).map(v=><button key={v} className={lens===v?"active":""} onClick={()=>setLens(v)}>{v.charAt(0).toUpperCase()+v.slice(1)}</button>)}
           {lens==="nutrients"&&<select aria-label="Resource view" value={resourceView} onChange={e=>setResourceView(e.target.value as ResourceView)}><option value="combined">Combined</option><option value="a">Nutrient A</option><option value="b">Nutrient B</option><option value="c">Metabolite C</option></select>}
           {lens==="traits"&&<select aria-label="Trait view" value={traitView} onChange={e=>setTraitView(e.target.value as TraitView)}>{Object.entries(TRAIT_RANGES).map(([key,[,,label]])=><option key={key} value={key}>{label}</option>)}</select>}
         </div>
-        <div className="world-layout">
-          <div className="world-wrap">
-            <div className="world-scene" aria-hidden="true"><div className="nutrient-cloud nc-a"/><div className="nutrient-cloud nc-b"/><div className="nutrient-cloud nc-c"/><div className="biofilm"/></div>
-            <WorldCanvas snapshot={snapshot} lens={lens} resourceView={resourceView} traitView={traitView} selectedId={selectedId} onSelect={setSelectedId}/>
-          </div>
-          <aside className="inspector">
-            {selected?<><span className="eyebrow">Selected organism</span><h2>#{selected.id}</h2><p>{selected.activity} · generation {selected.generation}</p><dl>
-              <div><dt>Clade</dt><dd>L-{String(selected.cladeId).padStart(4,"0")}</dd></div>
-              <div><dt>Energy</dt><dd>{selected.energy.toFixed(1)}</dd></div>
-              <div><dt>Movement</dt><dd>{selected.speed.toFixed(2)}</dd></div>
-              <div><dt>Sensing</dt><dd>{selected.sensing.toFixed(1)}</dd></div>
-              <div><dt>Byproduct use</dt><dd>{selected.byproductUse.toFixed(2)}</dd></div>
-              <div><dt>Dormancy response</dt><dd>{selected.dormancyResponse.toFixed(2)}</dd></div>
-            </dl><button onClick={()=>setSelectedId(null)}>Clear selection</button></>:<>
-              <span className="eyebrow">World now</span><h2>{m.ecological_outcome}</h2><p>{m.population} living · peak {m.peak_population}</p><dl>
-                <div><dt>Active</dt><dd>{snapshot.activePopulation}</dd></div>
-                <div><dt>Dormant</dt><dd>{snapshot.dormantPopulation}</dd></div>
-                <div><dt>Effective niches</dt><dd>{Number(m.effective_niches||0).toFixed(2)}</dd></div>
-                <div><dt>Metabolite C</dt><dd>{((m.metabolite_c?.fraction||0)*100).toFixed(0)}%</dd></div>
-                <div><dt>Cross-feeders</dt><dd>{((m.metabolic_roles?.crossfeeder_fraction||0)*100).toFixed(0)}%</dd></div>
-              </dl>
-            </>}
-          </aside>
+        <div className="world-wrap">
+          <div className="world-scene" aria-hidden="true"><div className="nutrient-cloud nc-a"/><div className="nutrient-cloud nc-b"/><div className="nutrient-cloud nc-c"/><div className="biofilm"/></div>
+          <WorldCanvas snapshot={snapshot} lens={lens} resourceView={resourceView} traitView={traitView} selectedId={selectedId} onSelect={setSelectedId}/>
         </div>
-      </section>}
+      </section>
+      <aside className="investigation-rail" aria-label="Investigation">
+        {surface==="world"&&<div className="inspector">
+          {selected?<><span className="eyebrow">Selected organism</span><h2>#{selected.id}</h2><p>{selected.activity} · generation {selected.generation}</p><dl>
+            <div><dt>Clade</dt><dd>L-{String(selected.cladeId).padStart(4,"0")}</dd></div>
+            <div><dt>Energy</dt><dd>{selected.energy.toFixed(1)}</dd></div>
+            <div><dt>Movement</dt><dd>{selected.speed.toFixed(2)}</dd></div>
+            <div><dt>Sensing</dt><dd>{selected.sensing.toFixed(1)}</dd></div>
+            <div><dt>Byproduct use</dt><dd>{selected.byproductUse.toFixed(2)}</dd></div>
+            <div><dt>Dormancy response</dt><dd>{selected.dormancyResponse.toFixed(2)}</dd></div>
+          </dl><button onClick={()=>setSelectedId(null)}>Clear selection</button></>:<>
+            <span className="eyebrow">World now</span><h2>{m.ecological_outcome}</h2><p>{m.population} living · peak {m.peak_population}</p><dl>
+              <div><dt>Active</dt><dd>{snapshot.activePopulation}</dd></div>
+              <div><dt>Dormant</dt><dd>{snapshot.dormantPopulation}</dd></div>
+              <div><dt>Effective niches</dt><dd>{Number(m.effective_niches||0).toFixed(2)}</dd></div>
+              <div><dt>Metabolite C</dt><dd>{((m.metabolite_c?.fraction||0)*100).toFixed(0)}%</dd></div>
+              <div><dt>Cross-feeders</dt><dd>{((m.metabolic_roles?.crossfeeder_fraction||0)*100).toFixed(0)}%</dd></div>
+            </dl>
+          </>}
+        </div>}
 
-      {surface==="history"&&<section className="panel">
+        {surface==="history"&&<section className="panel">
         <div className="panel-head"><div><span className="eyebrow">What happened here?</span><h2>History</h2></div><span>{records.length} durable ecological records</span></div>
         {records.length===0?<><p>No durable ecological arc has been established yet.</p><h3>Recent simulation events</h3>{snapshot.events.slice(-8).reverse().map((e,i)=><article key={`${e.tick}-${i}`}><span>Tick {e.tick.toLocaleString()}</span><p>{e.label}</p></article>)}</>:records.slice().reverse().map((r:any)=><article key={r.id}><span>Tick {r.tick.toLocaleString()} · {r.phase}</span><h3>{r.title}</h3><p>{r.summary}</p></article>)}
       </section>}
@@ -320,6 +319,7 @@ export function App(){
         {snapshot.control?<div className="compare"><div><strong>Experiment</strong><span>{snapshot.population} living</span><span>{m.ecological_outcome}</span></div><div><strong>Untouched twin</strong><span>{snapshot.control.population} living</span><span>{snapshot.control.metrics.ecological_outcome}</span></div></div>:<p>No matched control exists yet. Applying an intervention creates an exact twin first.</p>}
         <div className="actions"><button onClick={()=>runtime.intervene("global")}>Global nutrient crash</button><button onClick={()=>runtime.intervene("droughtA")}>Nutrient A drought</button><button onClick={()=>runtime.intervene("droughtB")}>Nutrient B drought</button></div>
       </section>}
+      </aside>
     </main>
 
     <nav className="mobile-nav" aria-label="Mobile navigation">

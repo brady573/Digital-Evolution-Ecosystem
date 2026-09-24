@@ -44,12 +44,12 @@ button,input{outline:none}
 .lensbar button{border:1px solid var(--line2);background:var(--panel2);color:#cde0d7;border-radius:8px;padding:8px 14px}
 .rail button.active,.lensbar button.active,.primary{background:#143041!important;color:#eaffef!important;border-color:#47ddd4!important}
 
-/* surface */
-.surface{min-width:0;min-height:0;padding:18px;overflow:auto}
-.world-surface{display:grid;gap:10px}
+/* surface: persistent world hero + investigation rail */
+.surface{min-width:0;min-height:0;padding:18px;overflow:auto;display:grid;grid-template-columns:minmax(0,1.65fr) minmax(300px,1fr);gap:18px;align-items:start}
+.world-column{display:grid;gap:10px;min-width:0}
 .lensbar{display:flex;gap:7px;flex-wrap:wrap}
 .lensbar select,.controls select{background:var(--panel2);color:#dcece4;border:1px solid var(--line2);border-radius:8px;padding:8px}
-.world-layout{position:relative;display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:18px;align-items:start}
+.investigation-rail{min-width:0;display:grid;gap:18px;align-content:start}
 .world-wrap{position:relative;min-width:0}
 .world-scene{position:absolute;inset:0;overflow:hidden;border-radius:14px;pointer-events:none;background:
   radial-gradient(ellipse at 20% 29%,rgba(74,255,193,.10),transparent 19%),
@@ -122,8 +122,8 @@ button,input{outline:none}
   .hud-label{font-size:9px}
   .hud-settings{padding-left:10px;font-size:.8rem}
   .rail{display:none}
-  .surface{padding:10px}
-  .world-layout{grid-template-columns:minmax(0,1fr)}
+  .surface{padding:10px;grid-template-columns:minmax(0,1fr)}
+  .world-wrap{position:sticky;top:0;z-index:5;background:var(--bg)}
   .world-canvas{width:100%}
   .inspector{display:block}
   .controls{overflow:auto;white-space:nowrap;scrollbar-width:thin}
