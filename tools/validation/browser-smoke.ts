@@ -59,6 +59,15 @@ async function main(){
     await page.waitForTimeout(150);
     assert.equal(await tick(page),saved,"IndexedDB checkpoint restores exact tick");
 
+    // World view: minimap + zoom controls (uniform zoom into the same world).
+    await page.getByLabel("World minimap").waitFor();
+    assert.equal(await page.getByTestId("zoom-level").innerText(),"1.0×","camera starts unzoomed");
+    await page.getByRole("button",{name:"Zoom in"}).click();
+    assert.equal(await page.getByTestId("zoom-level").innerText(),"1.5×","zoom changes the view only");
+    assert.equal(await tick(page),saved,"zooming never advances biology");
+    await page.getByRole("button",{name:"Reset view"}).click();
+    assert.equal(await page.getByTestId("zoom-level").innerText(),"1.0×","reset restores the view");
+
     await page.getByRole("button",{name:"World settings"}).click();
     await page.getByRole("dialog",{name:"World settings"}).waitFor();
     // M4 presets: applying Patchwork sets its founding population; a random

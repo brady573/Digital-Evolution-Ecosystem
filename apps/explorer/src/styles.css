@@ -95,6 +95,17 @@ button,input{outline:none}
 .status{margin-left:auto;color:#91aa9f;font-size:.85rem}
 .loading{min-height:100vh;min-height:100dvh;display:grid;place-items:center;color:#a9beb5}
 
+/* World view overlay: minimap + zoom controls float on the world (reference
+   style). The container is inert; only the controls take pointer input. */
+.world-overlay{position:absolute;top:8px;right:8px;z-index:6;display:grid;gap:8px;justify-items:end;pointer-events:none}
+.minimap-frame{pointer-events:none;border:1px solid var(--line2);border-radius:10px;padding:4px;background:rgba(6,13,20,.66);backdrop-filter:blur(8px);box-shadow:0 6px 20px rgba(0,0,0,.35)}
+.minimap-canvas{display:block;width:96px;height:96px;border-radius:6px}
+.zoom-controls{pointer-events:auto;display:flex;align-items:center;gap:2px;padding:3px;border:1px solid var(--line2);border-radius:9px;background:rgba(6,13,20,.72);backdrop-filter:blur(8px)}
+.zoom-controls button{border:0;background:transparent;color:#cde0d7;border-radius:7px;min-width:30px;min-height:30px;padding:0 6px;font-size:1rem}
+.zoom-controls button:hover{background:#143041}
+.zoom-controls button:disabled{opacity:.4;cursor:default}
+.zoom-readout{color:var(--teal2);font-size:.72rem;min-width:32px;text-align:center}
+
 /* modal */
 .modal-backdrop{position:fixed;inset:0;background:#020706cc;display:grid;place-items:center;padding:16px;z-index:50}
 .modal{width:min(640px,100%);max-height:92vh;max-height:92dvh;overflow:auto;background:#0b1714;border:1px solid #315145;border-radius:16px;padding:20px;box-shadow:var(--shadow)}
@@ -160,6 +171,8 @@ button,input{outline:none}
   .world-column{position:sticky;top:0;z-index:1;background:var(--bg);padding-bottom:10px}
   .world-wrap{position:relative;z-index:auto;background:transparent}
   .lensbar{position:absolute;top:8px;left:10px;right:10px;z-index:6;background:rgba(6,13,20,.72);backdrop-filter:blur(8px);border:1px solid var(--line);border-radius:12px;padding:6px}
+  .world-overlay{top:58px;right:8px}
+  .minimap-frame,.zoom-controls{transform:scale(.88);transform-origin:top right}
   .world-canvas{width:100%}
   .lensbar button{padding:6px 10px;font-size:.8rem}
   .investigation-rail{position:relative;z-index:10}

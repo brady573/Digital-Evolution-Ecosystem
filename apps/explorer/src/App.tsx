@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { EngineConfig, RenderOrganism, RenderSnapshot } from "@digital-evolution/contracts";
 import { ENGINE_VERSION } from "@digital-evolution/sim-core";
 import { WorkerRuntimeClient } from "@digital-evolution/sim-runtime";
@@ -110,6 +110,18 @@ function settingsFromConfig(c:EngineConfig|undefined|null):WorldSettings{
   };
 }
 
+// The simulated field is a 600x600 torus (engine constant, unchanged). On a
+// portrait phone we cannot show a square world without letterboxing or
+// distortion, so the phone shows a uniform-zoom *window* into that same
+// toroidal world: wrap-aware panning, honest density (no tiling), and a
+// minimap of the whole field. Presentation only; the simulation is untouched.
+const WORLD_EXTENT=600;
+const ZOOM_MIN=1,ZOOM_MAX=3;
+type Camera={x:number;y:number};
+// Shortest toroidal delta from a to b.
+const wrapDelta=(a:number,b:number)=>{let d=a-b;if(d>WORLD_EXTENT/2)d-=WORLD_EXTENT;else if(d<-WORLD_EXTENT/2)d+=WORLD_EXTENT;return d};
+const wrapCoord=(v:number)=>((v%WORLD_EXTENT)+WORLD_EXTENT)%WORLD_EXTENT;
+
 function cladeColor(id:number){
   const hue=(id*137.508)%360;
   return `hsl(${hue} 58% 63%)`;
@@ -121,10 +133,11 @@ function traitColor(value:number,[lo,hi]:[number,number]){
 }
 
 function WorldCanvas({
-  snapshot,lens,resourceView,traitView,selectedId,onSelect,
+  snapshot,lens,resourceView,traitView,selectedId,onSelect,cam,zoom,onCamera,onView,
 }:{
   snapshot:RenderSnapshot;lens:Lens;resourceView:ResourceView;traitView:TraitView;
   selectedId:number|null;onSelect:(id:number|null)=>void;
+  cam:Camera;zoom:number;onCamera:(c:Camera)=>void;onView:(u:{w:number;h:number})=>void;
 }){
   const ref=useRef<HTMLCanvasElement>(null);
   // Backing store follows the displayed size so the world fills its stage on
@@ -147,15 +160,24 @@ function WorldCanvas({
     const canvas=ref.current;if(!canvas)return;
     const ctx=canvas.getContext("2d");if(!ctx)return;
     const w=canvas.width,h=canvas.height,n=snapshot.resources.gridSize;
-    // Uniform world scale, centered: the 600x600 toroidal field never
-    // stretches; surrounding space stays ambience (A4 without distortion).
-    const s=Math.min(w,h)/600,ox=(w-600*s)/2,oy=(h-600*s)/2,cell=10*s;
+    // Uniform scale, never a stretch. Portrait stages fit by height so the
+    // world fills the frame; the zoomed-out baseline on wide stages still
+    // shows the whole 600x600 field.
+    const fit=h>w?h/WORLD_EXTENT:Math.min(w,h)/WORLD_EXTENT;
+    const s=fit*zoom;
+    const toX=(wx:number)=>w/2+wrapDelta(wx,cam.x)*s;
+    const toY=(wy:number)=>h/2+wrapDelta(wy,cam.y)*s;
+    const cell=(WORLD_EXTENT/n)*s;
     ctx.clearRect(0,0,w,h);
+    // Report the visible window (in world units) so the minimap can mark it.
+    onView({w:w/s,h:h/s});
 
     const stocks=snapshot.resources.stock,caps=snapshot.resources.capacity;
     const drawEnvironment=lens==="normal"||lens==="nutrients";
     if(drawEnvironment){
       for(let i=0;i<n*n;i++){
+        const px=toX((i%n+.5)*(WORLD_EXTENT/n)),py=toY((Math.floor(i/n)+.5)*(WORLD_EXTENT/n));
+        if(px<-cell||py<-cell||px>w+cell||py>h+cell)continue;
         const frac=(k:number)=>((caps[k]?.[i]||0)>0?(stocks[k]?.[i]||0)/(caps[k]?.[i]||1):0);
         const a=frac(0),b=frac(1),c=frac(2);
         let r=8,g=14,bl=16;
@@ -165,13 +187,14 @@ function WorldCanvas({
         else if(resourceView==="c"){r+=190*c;g+=115*c;bl+=35*c}
         else {r+=72*b+95*c;g+=105*a+55*c;bl+=92*b+35*c}
         ctx.fillStyle=`rgb(${Math.min(255,Math.round(r))},${Math.min(255,Math.round(g))},${Math.min(255,Math.round(bl))})`;
-        ctx.fillRect(ox+(i%n)*cell,oy+Math.floor(i/n)*cell,cell+1,cell+1);
+        ctx.fillRect(px-cell/2,py-cell/2,cell+1,cell+1);
       }
     }
 
     const traitRange=TRAIT_RANGES[traitView];
     for(const o of snapshot.organisms){
-      const px=ox+o.x*s,py=oy+o.y*s;
+      const px=toX(o.x),py=toY(o.y);
+      if(px<-24||py<-24||px>w+24||py>h+24)continue;
       let color="#d8f0df";
       if(o.activity==="dormant")color="#7f9189";
       else if(lens==="clades")color=cladeColor(o.cladeId);
@@ -225,27 +248,94 @@ function WorldCanvas({
         ctx.lineWidth=1;
       }
     }
-  },[snapshot,lens,resourceView,traitView,selectedId,size]);
+  },[snapshot,lens,resourceView,traitView,selectedId,size,cam,zoom,onView]);
 
-  const click=(event:React.MouseEvent<HTMLCanvasElement>)=>{
-    const rect=event.currentTarget.getBoundingClientRect();
-    const w=rect.width,h=rect.height,s=Math.min(w,h)/600;
-    const ox=(w-600*s)/2,oy=(h-600*s)/2;
-    const x=(event.clientX-rect.left-ox)/s;
-    const y=(event.clientY-rect.top-oy)/s;
-    // Taps in the ambience margin deselect instead of wrapping weirdly.
-    if(x<0||y<0||x>=600||y>=600){onSelect(null);return}
-    let best:RenderOrganism|null=null,bestD=18;
+  // Screen-space helpers for pointer input (CSS pixels, not backing store).
+  const viewOf=(canvas:HTMLCanvasElement)=>{
+    const rect=canvas.getBoundingClientRect();
+    const fit=rect.height>rect.width?rect.height/WORLD_EXTENT:Math.min(rect.width,rect.height)/WORLD_EXTENT;
+    return{rect,s:fit*zoom};
+  };
+  const selectAt=(clientX:number,clientY:number,canvas:HTMLCanvasElement)=>{
+    const {rect,s}=viewOf(canvas);
+    const x=wrapCoord(cam.x+(clientX-rect.left-rect.width/2)/s);
+    const y=wrapCoord(cam.y+(clientY-rect.top-rect.height/2)/s);
+    // Constant on-screen hit radius, so zooming never changes feel.
+    let best:RenderOrganism|null=null,bestD=26/s;
     for(const o of snapshot.organisms){
-      const dx=Math.abs(o.x-x),dy=Math.abs(o.y-y);
-      const tx=Math.min(dx,600-dx),ty=Math.min(dy,600-dy);
-      const d=Math.hypot(tx,ty);
+      const d=Math.hypot(Math.abs(o.x-x),Math.abs(o.y-y));
       if(d<bestD){bestD=d;best=o}
     }
     onSelect(best?.id??null);
   };
 
-  return <canvas aria-label="Evolution world" className="world-canvas" ref={ref} width={size[0]} height={size[1]} onClick={click}/>;
+  // Drag pans (wrapping freely across the torus); a tap without movement
+  // selects, so one pointer does both.
+  const drag=useRef<{x:number;y:number;cx:number;cy:number;moved:boolean}|null>(null);
+  const onPointerDown=(event:React.PointerEvent<HTMLCanvasElement>)=>{
+    event.currentTarget.setPointerCapture(event.pointerId);
+    drag.current={x:event.clientX,y:event.clientY,cx:cam.x,cy:cam.y,moved:false};
+  };
+  const onPointerMove=(event:React.PointerEvent<HTMLCanvasElement>)=>{
+    const d=drag.current;if(!d)return;
+    const dx=event.clientX-d.x,dy=event.clientY-d.y;
+    if(!d.moved&&Math.hypot(dx,dy)<6)return;
+    d.moved=true;
+    const {s}=viewOf(event.currentTarget);
+    onCamera({x:d.cx-dx/s,y:d.cy-dy/s});
+  };
+  const onPointerUp=(event:React.PointerEvent<HTMLCanvasElement>)=>{
+    const d=drag.current;drag.current=null;
+    if(!d||d.moved)return;
+    selectAt(event.clientX,event.clientY,event.currentTarget);
+  };
+
+  return <canvas aria-label="Evolution world" className="world-canvas" ref={ref} width={size[0]} height={size[1]}
+    onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={()=>{drag.current=null}}/>;
+}
+
+function WorldMinimap({snapshot,cam,zoom,view}:{
+  snapshot:RenderSnapshot;cam:Camera;zoom:number;view:{w:number;h:number}|null;
+}){
+  const ref=useRef<HTMLCanvasElement>(null);
+  useEffect(()=>{
+    const canvas=ref.current;if(!canvas)return;
+    const ctx=canvas.getContext("2d");if(!ctx)return;
+    const w=canvas.width,h=canvas.height,k=w/WORLD_EXTENT;
+    ctx.clearRect(0,0,w,h);
+    ctx.fillStyle="#06121a";ctx.fillRect(0,0,w,h);
+    // Coarse real resource field (every other cell) - an overview, not a claim.
+    const n=snapshot.resources.gridSize,stocks=snapshot.resources.stock,caps=snapshot.resources.capacity;
+    const step=n>40?2:1,px=(WORLD_EXTENT/(n/step))*k;
+    for(let y=0;y<n;y+=step)for(let x=0;x<n;x+=step){
+      const i=y*n+x;
+      const a=(caps[0]?.[i]||0)>0?(stocks[0]?.[i]||0)/(caps[0]?.[i]||1):0;
+      const b=(caps[1]?.[i]||0)>0?(stocks[1]?.[i]||0)/(caps[1]?.[i]||1):0;
+      const c=(caps[2]?.[i]||0)>0?(stocks[2]?.[i]||0)/(caps[2]?.[i]||1):0;
+      ctx.fillStyle=`rgb(${Math.round(8+34*a+64*b)},${Math.round(16+64*a+48*c)},${Math.round(20+54*b+28*c)})`;
+      ctx.fillRect(x*k,y*k,px+1,px+1);
+    }
+    // Real organisms; thinned above 2500 so a 5k world stays cheap on a phone.
+    const thin=snapshot.organisms.length>2500?2:1;
+    ctx.fillStyle="#cfeede";
+    for(let i=0;i<snapshot.organisms.length;i+=thin){
+      const o=snapshot.organisms[i];if(!o)continue;
+      ctx.fillRect(o.x*k,o.y*k,1,1);
+    }
+    // Visible window marker. Panning may sit outside [0,600], so draw the
+    // wrapped copies the rectangle actually overlaps.
+    if(view){
+      const unitsW=view.w/zoom,unitsH=view.h/zoom;
+      const x0=wrapCoord(cam.x-unitsW/2),y0=wrapCoord(cam.y-unitsH/2);
+      ctx.strokeStyle="rgba(120,240,255,.95)";ctx.lineWidth=1;
+      for(let ox=-1;ox<=1;ox++)for(let oy=-1;oy<=1;oy++){
+        const x=(x0+ox*WORLD_EXTENT)*k,y=(y0+oy*WORLD_EXTENT)*k;
+        if(x>w||y>h||x+unitsW*k<0||y+unitsH*k<0)continue;
+        ctx.strokeRect(x+.5,y+.5,unitsW*k,unitsH*k);
+      }
+    }
+  },[snapshot,cam,zoom,view]);
+  return <canvas aria-label="World minimap" className="minimap-canvas" ref={ref} width={108} height={108}/>;
 }
 
 function Slider({label,value,min,max,step,onChange}:{label:string;value:number;min:number;max:number;step:number;onChange:(v:number)=>void}){
@@ -273,6 +363,14 @@ export function App(){
   const [selectedId,setSelectedId]=useState<number|null>(null);
   const [selectedStoryId,setSelectedStoryId]=useState<string|null>(null);
   const [selectedCladeId,setSelectedCladeId]=useState<number|null>(null);
+  // Camera: uniform zoom + toroidal pan into the same 600x600 world.
+  const [cam,setCam]=useState<Camera>({x:300,y:300});
+  const [zoom,setZoom]=useState(1);
+  const [view,setView]=useState<{w:number;h:number}|null>(null);
+  const setZoomClamped=(next:number)=>setZoom(Math.max(ZOOM_MIN,Math.min(ZOOM_MAX,Math.round(next*10)/10)));
+  const reportView=useCallback((u:{w:number;h:number})=>{
+    setView(prev=>prev&&Math.abs(prev.w-u.w)<.5&&Math.abs(prev.h-u.h)<.5?prev:u);
+  },[]);
   // On phone the inspector is a floating sheet over the world, so it starts
   // collapsed there (world-first first impression); desktop keeps the open
   // investigation panel. Presentation-only.
@@ -402,7 +500,16 @@ export function App(){
         </div>
         <div className="world-wrap">
           <div className="world-scene" aria-hidden="true"><div className="glow g-a"/><div className="glow g-b"/><div className="glow g-c"/><div className="ambient"/></div>
-          <WorldCanvas snapshot={snapshot} lens={lens} resourceView={resourceView} traitView={traitView} selectedId={selectedId} onSelect={setSelectedId}/>
+          <WorldCanvas snapshot={snapshot} lens={lens} resourceView={resourceView} traitView={traitView} selectedId={selectedId} onSelect={setSelectedId} cam={cam} zoom={zoom} onCamera={setCam} onView={reportView}/>
+          <div className="world-overlay">
+            <div className="minimap-frame"><WorldMinimap snapshot={snapshot} cam={cam} zoom={zoom} view={view}/></div>
+            <div className="zoom-controls" role="group" aria-label="World view">
+              <button aria-label="Zoom out" onClick={()=>setZoomClamped(zoom-.5)} disabled={zoom<=ZOOM_MIN}>−</button>
+              <span className="zoom-readout" data-testid="zoom-level">{zoom.toFixed(1)}×</span>
+              <button aria-label="Zoom in" onClick={()=>setZoomClamped(zoom+.5)} disabled={zoom>=ZOOM_MAX}>+</button>
+              <button aria-label="Reset view" onClick={()=>{setZoom(1);setCam({x:300,y:300})}}>⌂</button>
+            </div>
+          </div>
         </div>
       </section>
       <aside className="investigation-rail" aria-label="Investigation">
