@@ -128,17 +128,30 @@ function WorldCanvas({
       else if(o.diet<-.25)color="#7bd3c4";
       else if(o.diet>.25)color="#b79de4";
 
-      ctx.fillStyle=color;
-      ctx.beginPath();
-      if(o.diet<-.25){
-        ctx.arc(px,py,o.activity==="dormant"?2.2:3.2,0,Math.PI*2);
-      }else if(o.diet>.25){
-        const s=o.activity==="dormant"?4:6;ctx.rect(px-s/2,py-s/2,s,s);
-      }else{
-        const s=o.activity==="dormant"?4:7;
-        ctx.moveTo(px,py-s/2);ctx.lineTo(px+s/2,py+s/2);ctx.lineTo(px-s/2,py+s/2);ctx.closePath();
+      // Voxel sprite: chunky pixel cluster whose size follows stored energy,
+      // texture is a deterministic function of organism id (stable per frame),
+      // and density follows diet family. Positions are untouched, so
+      // click-selection mapping is unchanged.
+      const unit=Math.max(2,(w/600)*2.2);
+      const energyClass=o.activity==="dormant"?0:(o.energy>120?2:o.energy>60?1:0);
+      const span=2+energyClass;
+      let hsh=Math.imul(o.id,2654435761)^0x9e3779b9;hsh^=hsh>>>15;hsh=Math.imul(hsh,0x85ebca6b)>>>0;
+      const dormant=o.activity==="dormant";
+      ctx.fillStyle=color;ctx.strokeStyle=color;ctx.lineWidth=1;
+      ctx.globalAlpha=dormant?0.55:1;
+      for(let gy=0;gy<span;gy++)for(let gx=0;gx<span;gx++){
+        const edge=gx===0||gy===0||gx===span-1||gy===span-1;
+        let solid=true;
+        if(edge){
+          if(o.diet<-.25)solid=((hsh>>((gy*span+gx)%24))&1)===1;
+          else if(o.diet>.25)solid=true;
+          else solid=((gx*7+gy*13+(hsh&3))&3)!==0;
+        }
+        if(!solid)continue;
+        const bx=px+(gx-span/2)*unit,by=py+(gy-span/2)*unit;
+        if(dormant)ctx.strokeRect(bx,by,unit,unit);else ctx.fillRect(bx,by,unit,unit);
       }
-      ctx.fill();
+      ctx.globalAlpha=1;
 
       if(o.id===selectedId){
         ctx.strokeStyle="#ffffff";ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(px,py,7,0,Math.PI*2);ctx.stroke();
@@ -184,6 +197,7 @@ export function App(){
   const [selectedId,setSelectedId]=useState<number|null>(null);
   const [selectedStoryId,setSelectedStoryId]=useState<string|null>(null);
   const [selectedCladeId,setSelectedCladeId]=useState<number|null>(null);
+  const [inspectorOpen,setInspectorOpen]=useState(true);
   const [preset,setPreset]=useState<string>("Balanced");
   // Backpressure: never queue an advance while the worker is still busy with
   // the previous one. Without this, high speeds pile up work faster than the
@@ -306,8 +320,9 @@ export function App(){
         </div>
       </section>
       <aside className="investigation-rail" aria-label="Investigation">
-        {surface==="world"&&<div className="inspector">
-          {selected?<><span className="eyebrow">Selected organism</span><h2>#{selected.id}</h2><p>{selected.activity} · generation {selected.generation}</p><p className="breadcrumb">Organism #{selected.id} → Lineage {`L-${String(selected.lineageId).padStart(4,"0")}`} → Clade {`L-${String(selected.cladeId).padStart(4,"0")}`}</p><dl>
+        {surface==="world"&&<div className="inspector sheet">
+          <button className="sheet-toggle" onClick={()=>setInspectorOpen(v=>!v)}>{inspectorOpen?"Hide details":"Show details"}</button>
+          {inspectorOpen&&<>{selected?<><span className="eyebrow">Selected organism</span><h2>#{selected.id}</h2><p>{selected.activity} · generation {selected.generation}</p><p className="breadcrumb">Organism #{selected.id} → Lineage {`L-${String(selected.lineageId).padStart(4,"0")}`} → Clade {`L-${String(selected.cladeId).padStart(4,"0")}`}</p><dl>
             <div><dt>Clade</dt><dd>L-{String(selected.cladeId).padStart(4,"0")}</dd></div>
             <div><dt>Energy</dt><dd>{selected.energy.toFixed(1)}</dd></div>
             <div><dt>Movement</dt><dd>{selected.speed.toFixed(2)}</dd></div>
@@ -322,7 +337,7 @@ export function App(){
               <div><dt>Metabolite C</dt><dd>{((m.metabolite_c?.fraction||0)*100).toFixed(0)}%</dd></div>
               <div><dt>Cross-feeders</dt><dd>{((m.metabolic_roles?.crossfeeder_fraction||0)*100).toFixed(0)}%</dd></div>
             </dl>
-          </>}
+          </>}</>}
         </div>}
 
         {surface==="history"&&<section className="panel">

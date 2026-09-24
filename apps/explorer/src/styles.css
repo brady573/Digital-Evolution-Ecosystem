@@ -131,7 +131,7 @@ button,input{outline:none}
 .evidence div:first-child{border-top:0}
 .evidence dt{font-size:.82rem;color:#8fa3b7}
 .evidence dd{margin:0;font-weight:700;font-size:.88rem;color:#d8e2eb}
-.story-detail button,.lineage-detail button{border:1px solid var(--line2);background:var(--panel2);color:#cde0d7;border-radius:9px;padding:9px 11px;margin-right:8px;margin-top:4px}
+.story-detail button,.lineage-detail button,.sheet-toggle{border:1px solid var(--line2);background:var(--panel2);color:#cde0d7;border-radius:9px;padding:9px 11px;margin-right:8px;margin-top:4px}
 
 /* responsive */
 @media (max-width:900px){
@@ -144,8 +144,14 @@ button,input{outline:none}
   .hud-label{font-size:9px}
   .hud-settings{padding-left:10px;font-size:.8rem}
   .rail{display:none}
-  .surface{padding:10px;grid-template-columns:minmax(0,1fr)}
-  .world-wrap{position:sticky;top:0;z-index:5;background:var(--bg)}
+  .surface{padding:10px 10px 0;grid-template-columns:minmax(0,1fr)}
+  .world-column{position:sticky;top:0;z-index:1;background:var(--bg);padding-bottom:10px}
+  .world-wrap{position:relative;z-index:auto;background:transparent}
+  .lensbar{background:rgba(6,13,20,.72);backdrop-filter:blur(8px);border:1px solid var(--line);border-radius:12px;padding:6px}
+  .lensbar button{padding:6px 10px;font-size:.8rem}
+  .investigation-rail{position:relative;z-index:10}
+  .inspector.sheet{border-radius:18px 18px 14px 14px;box-shadow:0 -12px 40px rgba(0,0,0,.45)}
+  .sheet-toggle{width:100%;margin-bottom:6px}
   .world-canvas{width:100%}
   .inspector{display:block}
   .controls{overflow:auto;white-space:nowrap;scrollbar-width:thin}
