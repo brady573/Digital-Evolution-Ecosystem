@@ -258,6 +258,29 @@ function testTradeoffHolds() {
   console.log("tradeoff holds: PASS");
 }
 
+function testMultiSeedPossibility() {
+  // Possibility, not frequency: the guild must be realizable without being
+  // required everywhere. Non-establishment on other seeds is retained
+  // evidence, not failure. Pinned deterministically on fixed seeds.
+  const established: string[] = [];
+  for (const seed of [821947219, 2088626459, 3543950664, 2121676508]) {
+    const session = new UniverseSession();
+    session.create(fixtureConfig(seed));
+    settle(session, 60000);
+    const records = (session.analysis as any).records.filter(
+      (r: any) => r.kind === "dependency" && r.phase === "established",
+    );
+    if (records.length > 0) established.push(`${seed}@${records[0].tick}`);
+  }
+  assert.ok(established.length >= 1, "dependency establishment must be realizable");
+  assert.ok(
+    established.some((s) => s === "3543950664@42670"),
+    "pinned establishment reproduces exactly",
+  );
+  console.log(`dependency multi-seed possibility [${established.join(", ")}]: PASS`);
+}
+
 testFixtureArc();
+testMultiSeedPossibility();
 testTradeoffHolds();
 console.log(`dependency validation: PASS (engine ${ENGINE_VERSION})`);
