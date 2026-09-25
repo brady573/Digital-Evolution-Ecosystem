@@ -304,6 +304,24 @@ function runExternalAnalysisIsolation(){
   assertSame("external analysis must not change biology",observed,untouched);
 }
 
+function runSingleAnalysisAuthority(){
+  // Issue #30 A1: sim-core no longer instantiates or advances its own
+  // ecological observer. sim-analysis is the sole interpretation authority,
+  // reading immutable facts via observerSnapshot().
+  const cfg=config(821947219,"balanced");
+  const sim=new Simulation(cfg);
+  for(let i=0;i<600;i++)sim.step();
+  assert.equal((sim as any).observer,undefined,"sim-core carries no internal observer");
+  const session=new UniverseSession();
+  session.create(cfg as any);
+  session.advance(1200);
+  assert.equal((session.simulation as any).observer,undefined,"session experiment carries no internal observer");
+  const evidence=session.exportEvidence() as any;
+  assert.ok(!("ecology_observer" in evidence),"evidence no longer embeds the internal observer export");
+  assert.ok(evidence.repository_analysis,"sim-analysis remains the sole interpretation export");
+  assert.ok(Array.isArray(evidence.observed_events),"observed events still exported");
+}
+
 function runCheckpointParity(){
   const cfg=config(3543950664,"balanced");
   const uninterrupted=new Simulation(cfg);
@@ -339,6 +357,7 @@ function runSessionParity(){
 }
 
 runExternalAnalysisIsolation();
+runSingleAnalysisAuthority();
 runCheckpointParity();
 runSessionParity();
 console.log("analysis/runtime/checkpoint parity: PASS");
