@@ -176,7 +176,8 @@ function testRecoveryReplacement() {
   observer.observe(frame(62500, { scav: 28, intervalProd: 60, top: { id: 41, share: 0.35 } }));
   const records = depRecords(observer);
   assert.equal(records.length, 3, "establishment + disruption + replacement records");
-  assert.ok(records[2].title.includes("took over"), "new lineage worded as replacement");
+  assert.equal(records[2].title, "A new lineage became a major C consumer", "new lineage worded as major consumer, not takeover");
+  assert.ok(records[2].summary.includes("succeeding L-0009"), "replaced lineage named factually");
   assert.deepEqual(records[2].entity_refs, [41], "replacing lineage referenced");
   console.log("dependency replacement: PASS");
 }
@@ -232,6 +233,15 @@ function testDiffuseGuildNamesNobody() {
   const records = depRecords(observer);
   assert.equal(records.length, 1, "diffuse guild still establishes");
   assert.deepEqual(records[0].entity_refs, [], "no lineage named without a meaningful consumer");
+  // Review defect: disruption unconditionally emitted the stored consumer,
+  // reintroducing attribution the establishment record had refused. A diffuse
+  // establishment must disrupt anonymously too.
+  observer.observe(frame(47500, { scav: 4, intervalProd: 20 }));
+  observer.observe(frame(52500, { scav: 4, intervalProd: 20 }));
+  assert.equal((observer as any).dep.state, "disrupted", "diffuse guild still disrupts");
+  const after = depRecords(observer);
+  assert.equal(after.length, 2, "establishment + disruption records");
+  assert.deepEqual(after[1].entity_refs, [], "disruption names nobody when establishment named nobody");
   console.log("dependency diffuse guild: PASS");
 }
 

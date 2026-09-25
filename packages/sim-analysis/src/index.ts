@@ -136,7 +136,7 @@ export class EcologyObserver {
       if(!depForm){dd.state="absent";dd.candidateSince=null}
       else if(depEst&&dd.candidateSince!==null&&s.tick-dd.candidateSince>=DEP_PERSIST){
         dd.state="established";dd.establishedTick=s.tick;dd.estScav=scav;dd.baselineProduced=s.interval.producedC;
-        dd.topConsumer=topConsumer;dd.topConsumerShare=topConsumerShare;dd.lowSince=null;dd.candidateSince=null;
+        dd.topConsumer=topMeaningful?topConsumer:null;dd.topConsumerShare=topConsumerShare;dd.lowSince=null;dd.candidateSince=null;
         this.add("dependency",dd.id,s.tick,"established","A C-dependent guild became established",`${Math.round(scav*100)}% of living organisms meet the byproduct-scavenger evidence rule while ${Math.round(s.c_energy_share*100)}% of living energy history comes from biologically produced Metabolite C.`,"major",s,topRefs);
       }
     } else if(dd.state==="established"){
@@ -161,10 +161,14 @@ export class EcologyObserver {
           }else if(same){
             this.add("dependency",dd.id,s.tick,"recovered","The C-dependent lineage recovered",`Lineage L-${String(topConsumer).padStart(4,"0")} again realizes ${Math.round(topConsumerShare*100)}% of its energy from biologically produced Metabolite C after disruption.`,"major",s,[topConsumer]);
           }else{
-            this.add("dependency",dd.id,s.tick,"recovered","A new lineage took over C-dependent life",`Lineage L-${String(topConsumer).padStart(4,"0")} now realizes ${Math.round(topConsumerShare*100)}% of its energy from C, occupying the niche the disrupted guild left behind.`,"major",s,[topConsumer]);
+            // 10% marks a major consumer, never dominance: in a near-even
+            // guild the top lineage leads by deterministic ordering, so the
+            // record claims plurality factually (largest share) without a
+            // takeover/dominance conclusion.
+            this.add("dependency",dd.id,s.tick,"recovered","A new lineage became a major C consumer",`Lineage L-${String(topConsumer).padStart(4,"0")} now realizes ${Math.round(topConsumerShare*100)}% of its energy from C, the largest share among living lineages${dd.topConsumer===null?"":`, succeeding L-${String(dd.topConsumer).padStart(4,"0")} after disruption`}.`,"major",s,[topConsumer]);
           }
           dd.state="established";dd.establishedTick=s.tick;dd.estScav=scav;dd.baselineProduced=s.interval.producedC;
-          dd.topConsumer=topConsumer;dd.topConsumerShare=topConsumerShare;dd.candidateSince=null;dd.lowSince=null;
+          dd.topConsumer=topMeaningful?topConsumer:null;dd.topConsumerShare=topConsumerShare;dd.candidateSince=null;dd.lowSince=null;
         }
       } else dd.candidateSince=null;
     }
