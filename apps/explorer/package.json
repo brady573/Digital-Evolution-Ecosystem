@@ -14,6 +14,7 @@
     "@capacitor/filesystem": "8.1.3",
     "@capacitor/share": "8.0.2",
     "@digital-evolution/contracts": "workspace:*",
+    "@digital-evolution/phenotype": "workspace:*",
     "@digital-evolution/sim-analysis": "workspace:*",
     "@digital-evolution/sim-core": "workspace:*",
     "@digital-evolution/sim-runtime": "workspace:*",

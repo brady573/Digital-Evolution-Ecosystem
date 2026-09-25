@@ -7,6 +7,7 @@ import { Directory, Encoding, Filesystem } from "@capacitor/filesystem";
 import { Share } from "@capacitor/share";
 import { IndexedDbWorldRepository } from "./persistence";
 import { formatTickAge, formatYear, glossOutcome } from "./language";
+import { drawPhenotypeOrganism, phenotypeCache, tierForZoom } from "./phenotype";
 
 type Surface="world"|"history"|"tree"|"experiments";
 type Lens="normal"|"nutrients"|"clades"|"traits";
@@ -193,6 +194,14 @@ function WorldCanvas({
     }
 
     const traitRange=TRAIT_RANGES[traitView];
+    // Lane 2 M4B: normal-lens morphology delegates to the phenotype engine.
+    // Every other lens keeps the legacy voxel path exactly, so analytical
+    // meaning always outranks decorative morphology. Phenotype resolutions
+    // are memoized per organism across snapshots (traits/ancestry are fixed
+    // at birth); only the visible tier renders each frame.
+    const phenoTier=tierForZoom(zoom);
+    const pheno=lens==="normal"?phenotypeCache.resolveSnapshot(snapshot):null;
+    const unit=Math.max(2,s*2.2);
     for(const o of snapshot.organisms){
       const px=toX(o.x),py=toY(o.y);
       if(px<-24||py<-24||px>w+24||py>h+24)continue;
@@ -204,11 +213,20 @@ function WorldCanvas({
       else if(o.diet<-.25)color="#7bd3c4";
       else if(o.diet>.25)color="#b79de4";
 
+      if(lens==="normal"&&pheno){
+        // Phenotype morphology: grid shape encodes family/traits/dormancy,
+        // lens color and dormancy dimming stay exactly as before.
+        const res=pheno.get(o.id);
+        const dormant=o.activity==="dormant";
+        ctx.fillStyle=color;
+        ctx.globalAlpha=dormant?0.55:1;
+        if(res)drawPhenotypeOrganism(ctx,o,res,phenotypeCache,phenoTier,px,py,unit);
+        ctx.globalAlpha=1;
+      }else{
       // Voxel sprite: chunky pixel cluster whose size follows stored energy,
       // texture is a deterministic function of organism id (stable per frame),
       // and density follows diet family. Positions are untouched, so
       // click-selection mapping is unchanged.
-      const unit=Math.max(2,s*2.2);
       const energyClass=o.activity==="dormant"?0:(o.energy>120?2:o.energy>60?1:0);
       const span=2+energyClass;
       let hsh=Math.imul(o.id,2654435761)^0x9e3779b9;hsh^=hsh>>>15;hsh=Math.imul(hsh,0x85ebca6b)>>>0;
@@ -228,6 +246,7 @@ function WorldCanvas({
         if(dormant)ctx.strokeRect(bx,by,unit,unit);else ctx.fillRect(bx,by,unit,unit);
       }
       ctx.globalAlpha=1;
+      }
 
       if(o.id===selectedId){
         // Luminous focus marker: soft halo + double ring + diagonal ticks.

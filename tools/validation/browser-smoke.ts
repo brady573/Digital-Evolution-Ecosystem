@@ -60,6 +60,50 @@ async function main(){
     await page.getByRole("button",{name:"Traits"}).click();
     await page.getByLabel("Trait view").selectOption("byproductUse");
 
+    // Lane 2 M4B: the normal lens delegates morphology to the phenotype
+    // engine while every other lens keeps the legacy voxel path. Both must
+    // paint in-browser, render differently, and survive inspection zoom.
+    const worldInk=()=>page.evaluate(`(()=>{
+      const c=document.querySelector('canvas[aria-label="Evolution world"]');
+      const ctx=c.getContext('2d',{willReadFrequently:true});
+      const d=ctx.getImageData(0,0,c.width,c.height).data;
+      let bright=0;const sig=[];
+      const nx=32,ny=18;
+      for(let gy=0;gy<ny;gy++)for(let gx=0;gx<nx;gx++){
+        let sum=0,n=0;
+        const x0=Math.floor(gx*c.width/nx),x1=Math.floor((gx+1)*c.width/nx);
+        const y0=Math.floor(gy*c.height/ny),y1=Math.floor((gy+1)*c.height/ny);
+        for(let y=y0;y<y1;y+=3)for(let x=x0;x<x1;x+=3){
+          const i=(y*c.width+x)*4,l=(d[i]+d[i+1]+d[i+2])/3;
+          sum+=l;n++;if(l>90)bright++;
+        }
+        sig.push(Math.round(sum/Math.max(1,n)));
+      }
+      return{bright,sig};
+    })()`);
+    await page.getByRole("button",{name:"Normal"}).click();
+    await page.waitForTimeout(300);
+    const normalInk=await worldInk();
+    console.log(`phenotype normal-lens ink: ${normalInk.bright} bright px`);
+    assert.ok(normalInk.bright>50,`phenotype path paints organisms in normal lens (${normalInk.bright} bright px)`);
+    await page.getByRole("button",{name:"Traits"}).click();
+    await page.waitForTimeout(300);
+    const traitsInk=await worldInk();
+    console.log(`legacy traits-lens ink: ${traitsInk.bright} bright px`);
+    assert.ok(traitsInk.bright>50,`legacy voxel path paints organisms in traits lens (${traitsInk.bright} bright px)`);
+    let changedCells=0;
+    for(let i=0;i<normalInk.sig.length;i++)if(Math.abs(normalInk.sig[i]-traitsInk.sig[i])>12)changedCells++;
+    assert.ok(changedCells>20,`normal and traits lenses render differently (${changedCells}/576 cells)`);
+    await page.getByRole("button",{name:"Normal"}).click();
+    for(let i=0;i<4;i++)await page.getByRole("button",{name:"Zoom in"}).click();
+    assert.equal(await page.getByTestId("zoom-level").innerText(),"3.0×","reached inspection zoom");
+    await page.waitForTimeout(300);
+    const inspInk=await worldInk();
+    console.log(`inspection-lens ink at 3.0x: ${inspInk.bright} bright px`);
+    assert.ok(inspInk.bright>50,"inspection LOD paints at 3.0x");
+    await page.getByRole("button",{name:"Reset view"}).click();
+    assert.equal(await page.getByTestId("zoom-level").innerText(),"1.0×","reset restores the view");
+
     await page.getByRole("button",{name:"Save"}).click();
     await page.getByText(/Saved tick/).waitFor();
     const saved=await tick(page);
