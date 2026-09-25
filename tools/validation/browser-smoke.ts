@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { chromium, type Locator, type Page } from "playwright";
+import { ENGINE_VERSION } from "../../packages/sim-core/src/index.ts";
 
 const baseUrl=process.env.DEE_BASE_URL||"http://127.0.0.1:4173";
 
@@ -133,7 +134,8 @@ async function main(){
     await page.getByRole("button",{name:"New random seed"}).click();
     assert.notEqual(await page.getByLabel("World seed").inputValue(),seedBefore,"random seed generates a new seed");
     await page.getByRole("button",{name:"Developer diagnostics"}).click();
-    await page.getByText(/Engine 0\.20\.0/).waitFor();
+    // Diagnostics shows the running engine version (tracks version.ts, never pinned).
+    await page.getByText(new RegExp(`Engine ${ENGINE_VERSION.replaceAll(".","\\.")}`)).waitFor();
     await page.getByRole("button",{name:"Close"}).click();
 
     // M4A: active-vs-pending recipe clarity. Staged settings stay visibly

@@ -2,6 +2,11 @@ import assert from "node:assert/strict";
 import { EcologyObserver, type ObservationFrame } from "../../packages/sim-analysis/src/index.ts";
 import { UniverseSession } from "../../packages/sim-runtime/src/session.ts";
 import type { EngineConfig } from "../../packages/contracts/src/index.ts";
+import {
+  catalystIds,
+  engineCatalystModeFor,
+  isSupportedIntervention,
+} from "../../packages/sim-decisions/src/index.ts";
 import { ENGINE_VERSION } from "../../packages/sim-core/src/index.ts";
 import { CHECKPOINT_SCHEMA_VERSION } from "../../packages/sim-runtime/src/session.ts";
 
@@ -59,11 +64,19 @@ function frame(
       consumedA: 0, consumedB: 0, consumedC: 0,
       energyA: 0, energyB: 0, energyC: 0, births: 0, deaths: 0,
     },
+    intervalFlows: {
+      tick, strideTicks: 251, lineages: [],
+      totals: {
+        netMembers: 0, consumedA: 0, consumedB: 0, consumedC: 0,
+        energyA: 0, energyB: 0, energyC: 0, producedC: o.intervalProd ?? 60,
+        births: 0, deaths: 0,
+      },
+    },
   };
 }
 
 function depRecords(observer: EcologyObserver) {
-  return observer.records.filter((r: any) => r.kind === "dependency");
+  return observer.records.filter((r: any) => r.kind === "cuse");
 }
 
 function testFormAndEstablish() {
@@ -121,7 +134,7 @@ function testDisruption() {
   const records = depRecords(observer);
   assert.equal(records.length, 2, "establishment + disruption records");
   assert.equal(records[1].phase, "disrupted", "disrupted phase");
-  assert.equal(records[1].title, "The C-dependent guild collapsed", "collapse titled plainly");
+  assert.equal(records[1].title, "The C-using guild collapsed", "collapse titled plainly");
   assert.ok(records[1].summary.includes("Scavenger share fell from 7%"), "guild loss quantified");
   assert.ok(records[1].summary.includes("per-stride C production stood at"), "production reported as measured context");
   assert.deepEqual(records[1].entity_refs, [9], "prior top consumer referenced");
@@ -303,7 +316,7 @@ function testFixtureArc() {
     "dependency validation",
   );
   settle(session, 120000);
-  const records = (session.analysis as any).records.filter((r: any) => r.kind === "dependency");
+  const records = (session.analysis as any).records.filter((r: any) => r.kind === "cuse");
   assert.equal(records.length, 3, "establishment, disruption, and replacement all fire");
   assert.equal(records[0].phase, "established", "first record establishes");
   assert.equal(records[0].tick, 45431, "establishment is deterministic");
@@ -313,7 +326,7 @@ function testFixtureArc() {
   assert.deepEqual(records[1].entity_refs, [906], "disruption names the fallen consumer");
   assert.equal(records[2].phase, "recovered", "third record recovers");
   assert.equal(records[2].tick, 91113, "recovery is deterministic");
-  assert.equal(records[2].title, "The C-dependent guild recovered", "diffuse return stays generic");
+  assert.equal(records[2].title, "The C-using guild recovered", "diffuse return stays generic");
   assert.deepEqual(records[2].entity_refs, [], "no lineage named without a meaningful consumer");
   assert.ok(records[2].summary.includes("attribution threshold"), "generic wording stays evidence-bounded");
   console.log("dependency fixture arc: PASS");
@@ -350,7 +363,7 @@ function testMultiSeedPossibility() {
     session.create(fixtureConfig(seed));
     settle(session, 60000);
     const records = (session.analysis as any).records.filter(
-      (r: any) => r.kind === "dependency" && r.phase === "established",
+      (r: any) => r.kind === "cuse" && r.phase === "established",
     );
     if (records.length > 0) established.push(`${seed}@${records[0].tick}`);
   }
@@ -362,7 +375,106 @@ function testMultiSeedPossibility() {
   console.log(`dependency multi-seed possibility [${established.join(", ")}]: PASS`);
 }
 
+function testWashoutReliance() {
+  // Washout is validation-internal: applicable through the recorded path but
+  // never offered in windows and without an Experiments button.
+  assert.equal(
+    engineCatalystModeFor({ schemaVersion: 1, kind: "nutrient_disturbance", mode: "c_washout" }),
+    "cWashout",
+    "washout maps to the engine sink mode",
+  );
+  assert.ok(
+    isSupportedIntervention({ schemaVersion: 1, kind: "nutrient_disturbance", mode: "c_washout" }),
+    "washout applies through the recorded path",
+  );
+  assert.ok(!catalystIds().some((id) => String(id).includes("washout")), "washout never offered");
+  assert.equal(catalystIds().length, 3, "window catalog unchanged");
+  // Stage 2 Level-3: matched C-availability perturbation. An established
+  // guild (20% scavengers) faces a recorded environmental C sink on the live
+  // branch while the exact control twin runs untouched. The guild collapses
+  // to 4-6% against 20-27% control while population holds: material reliance
+  // on continued C availability, demonstrated by controlled comparison
+  // rather than temporal order. Deterministic on the fixture seed.
+  const session = new UniverseSession();
+  session.create(fixtureConfig(FIXTURE_SEED));
+  settle(session, 60000);
+  session.createControlFork();
+  session.applyIntervention(
+    { schemaVersion: 1, kind: "nutrient_disturbance", mode: "c_washout" },
+    "reliance assay",
+  );
+  settle(session, 75000);
+  const snap = session.snapshot();
+  const live = snap.metrics as any;
+  const control = snap.control!.metrics as any;
+  const liveShare = (live.metabolic_roles?.counts?.byproduct_scavenger || 0) / live.population;
+  const controlShare = (control.metabolic_roles?.counts?.byproduct_scavenger || 0) / control.population;
+  assert.ok(liveShare < 0.1, `washed guild collapses (live ${liveShare.toFixed(3)})`);
+  assert.ok(controlShare > 0.15, `control guild holds (control ${controlShare.toFixed(3)})`);
+  assert.ok(liveShare < controlShare / 2, "guild effect is large, not marginal");
+  assert.ok(
+    live.population > control.population * 0.8,
+    `no wipeout: live ${live.population} vs control ${control.population}`,
+  );
+  assert.ok(
+    live.metabolite_c.stock < control.metabolite_c.stock / 2,
+    "sink suppresses C re-accumulation",
+  );
+  const liveRemovals = live.nutrient_field.accounting.removal_events as any[];
+  const controlRemovals = control.nutrient_field.accounting.removal_events as any[];
+  assert.ok(liveRemovals.some((e: any) => e.type === "cWashout"), "washout recorded on live");
+  assert.ok(
+    liveRemovals.every((e: any) => e.type === "cWashout"),
+    "washout touches C only: no A/B removal on live",
+  );
+  assert.equal(controlRemovals.length, 0, "control records no removals");
+  console.log(
+    `washout reliance (live ${(liveShare * 100).toFixed(1)}% vs control ${(controlShare * 100).toFixed(1)}%): PASS`,
+  );
+}
+
+function testWashoutCheckpoint() {
+  // Review 3: a timed sink is future-biology state. Prove a checkpoint taken
+  // mid-sink restores the remaining duration/strength exactly and both
+  // branches continue identically through expiry.
+  const session = new UniverseSession();
+  session.create(fixtureConfig(FIXTURE_SEED));
+  settle(session, 60000);
+  session.applyIntervention(
+    { schemaVersion: 1, kind: "nutrient_disturbance", mode: "c_washout" },
+    "checkpoint assay",
+  );
+  const washTick = session.snapshot().tick;
+  settle(session, washTick + 5000);
+  const liveSink = (session.simulation as any).resources.cSink;
+  assert.deepEqual(liveSink, { end: washTick + 15000, factor: 50 }, "sink state exact mid-window");
+  const restored = new UniverseSession();
+  restored.restore(JSON.parse(JSON.stringify(session.checkpoint())));
+  assert.deepEqual(
+    (restored.simulation as any).resources.cSink,
+    { end: washTick + 15000, factor: 50 },
+    "restored sink keeps remaining duration and strength",
+  );
+  settle(session, washTick + 25000);
+  settle(restored, washTick + 25000);
+  const state = (s: UniverseSession) => {
+    const m = s.snapshot().metrics as any;
+    return {
+      tick: s.snapshot().tick,
+      pop: m.population,
+      scav: m.metabolic_roles?.counts?.byproduct_scavenger || 0,
+      cStock: Math.round(m.metabolite_c.stock * 1000),
+      sink: (s.simulation as any).resources.cSink,
+    };
+  };
+  assert.deepEqual(state(restored), state(session), "branches continue identically through expiry");
+  assert.equal(state(session).sink, null, "sink expired on both branches");
+  console.log("washout checkpoint continuation: PASS");
+}
+
 testFixtureArc();
+testWashoutCheckpoint();
 testMultiSeedPossibility();
 testTradeoffHolds();
+testWashoutReliance();
 console.log(`dependency validation: PASS (engine ${ENGINE_VERSION})`);

@@ -1,5 +1,8 @@
 /**
- * Compatibility extraction of the v0.29.0 / engine 0.19.0 prototype core, extended to engine 0.20.0 (rich clamp only). APP_VERSION tracks the product app version (0.31.0); it is metadata and affects no biological behavior.
+ * Compatibility extraction of the v0.29.0 / engine 0.19.0 prototype core, extended to engine 0.20.0 (rich clamp only).
+ * Engine 0.21.0 adds the c_washout environmental command (Stage 2); default
+ * biological paths are bit-identical, parity-proven. APP_VERSION tracks the
+ * product app version (0.31.0); it is metadata and affects no biological behavior.
  *
  * MIGRATION RULE: preserve this algorithm byte-for-byte in behavior while the
  * repository parity harness is active. Structural/type cleanup follows parity,
@@ -10,13 +13,13 @@
  * immutable facts via observerSnapshot(). The class stays only to decode old
  * checkpoints. Parity proves zero biological change.
  */
-import type { EngineConfig, FlowFacts } from "@digital-evolution/contracts";
+import type { EngineConfig, FlowFacts, IntervalFlowFacts } from "@digital-evolution/contracts";
+import { APP_VERSION, ENGINE_VERSION, EXPORT_FORMAT_VERSION as EXPORT_VERSION } from "./version";
 const Q=(v:number,a:number,b:number):number=>Math.max(a,Math.min(b,v));
 const A=(a:number[]):number=>a.length?a.reduce((s,v)=>s+v,0)/a.length:0;
 /** Seeded callable RNG stream with serializable state (legacy extraction; new code prefers DeterministicRng). */
 interface LegacyRng{():number;getState():number;setState(v:number):void}
 const R=(s:number):LegacyRng=>{let a=s>>>0;let f=(()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}) as LegacyRng;f.getState=()=>a>>>0;f.setState=(v:number)=>{a=v>>>0};return f};
-const APP_VERSION='0.31.0',ENGINE_VERSION='0.20.0',EXPORT_VERSION='0.30';
 const C_BYPRODUCT_YIELD=.32,C_ENERGY_YIELD=9,C_DECAY_RATE=.00022,C_DIFFUSION_RATE=.06,BU_MAINT_COST=.010,DORMANT_MAINTENANCE=.12,DORMANCY_CHECK=40,CROSSFEED_FORM=.035,CROSSFEED_EST=.055,CROSSFEED_PERSIST=5000,DORMANCY_PERSIST=5000,ERA_PERSIST=7500;
 const H01=(seed:number,id:number,salt=0):number=>{let x=(seed^(Math.imul(id+salt,0x9E3779B1)))>>>0;x^=x>>>16;x=Math.imul(x,0x7FEB352D);x^=x>>>15;x=Math.imul(x,0x846CA68B);x^=x>>>16;return(x>>>0)/4294967296};
 const C_ACCESS=(bu:number):number=>{let v=Q(bu,0,1.5);return v<=0?0:(v*v)/(v*v+.1024)};
@@ -27,8 +30,9 @@ const STRAT_CUT=.25,REALIZED_CUT=.70,REALIZED_MIN_GAIN=45,PART_MIN=.12,PART_WIND
 const F=(n:number):string=>`L-${String(n).padStart(4,'0')}`;
 const B=():Record<string,[number,number]>=>Object.fromEntries(Object.keys(T).map(k=>[k,[0,0]])) as Record<string,[number,number]>;
 /** Per-stride biological interval counters (births, deaths, resource flows, dormancy transitions). */
-interface Interval{births:number;deaths:number;mutation_attempts:number;effective_mutations:number;resources_spawned:number;resources_suppressed:number;resources_consumed:number;spawned_a:number;spawned_b:number;consumed_a:number;consumed_b:number;consumed_c:number;produced_c:number;decayed_c:number;energy_a:number;energy_b:number;energy_c:number;repro_supported_a:number;repro_supported_b:number;repro_supported_mixed:number;repro_supported_c:number;dormancy_entries:number;wakes:number;wake_clades:Record<string,number>;[k:string]:number|Record<string,number>}
-const I=():Interval=>({births:0,deaths:0,mutation_attempts:0,effective_mutations:0,resources_spawned:0,resources_suppressed:0,resources_consumed:0,spawned_a:0,spawned_b:0,consumed_a:0,consumed_b:0,consumed_c:0,produced_c:0,decayed_c:0,energy_a:0,energy_b:0,energy_c:0,repro_supported_a:0,repro_supported_b:0,repro_supported_mixed:0,repro_supported_c:0,dormancy_entries:0,wakes:0,wake_clades:{}});
+interface LineageDelta{consumedA:number;consumedB:number;consumedC:number;energyA:number;energyB:number;energyC:number;producedC:number;births:number;deaths:number}
+interface Interval{births:number;deaths:number;mutation_attempts:number;effective_mutations:number;resources_spawned:number;resources_suppressed:number;resources_consumed:number;spawned_a:number;spawned_b:number;consumed_a:number;consumed_b:number;consumed_c:number;produced_c:number;decayed_c:number;energy_a:number;energy_b:number;energy_c:number;repro_supported_a:number;repro_supported_b:number;repro_supported_mixed:number;repro_supported_c:number;dormancy_entries:number;wakes:number;wake_clades:Record<string,number>;proc_exec_a:number;proc_exec_b:number;proc_exec_c:number;[k:string]:number|Record<string,number>}
+const I=():Interval=>({births:0,deaths:0,mutation_attempts:0,effective_mutations:0,resources_spawned:0,resources_suppressed:0,resources_consumed:0,spawned_a:0,spawned_b:0,consumed_a:0,consumed_b:0,consumed_c:0,produced_c:0,decayed_c:0,energy_a:0,energy_b:0,energy_c:0,repro_supported_a:0,repro_supported_b:0,repro_supported_mixed:0,repro_supported_c:0,dormancy_entries:0,wakes:0,wake_clades:{},proc_exec_a:0,proc_exec_b:0,proc_exec_c:0});
 const H_STD=[50000,100000,200000,300000],H_DEEP=[100000,300000,500000,1000000];
 const SCI={disclaimer:'Sources inform experimental design and interpretation; the exact simulation equations remain deliberate abstractions.',sources:[
 {key:'avida',authors:'Ofria & Wilke',year:2004,title:'Avida: A Software Platform for Research in Computational Evolutionary Biology',doi:'10.1162/106454604773563612',url:'https://doi.org/10.1162/106454604773563612',informs:['digital evolution','controlled experiments']},
@@ -67,6 +71,27 @@ const MUTATION_NAMES:Record<string,string>={speed:'movement',sensing:'nutrient-s
 const friendlyMutation=(a:string[]):string=>!a||!a.length?'founder':a.map(v=>MUTATION_NAMES[v]||v).join(' + ');
 
 const metabolicRole=(o:Organism):string=>{let total=(o.ga||0)+(o.gb||0)+(o.gc||0);if(total<REALIZED_MIN_GAIN)return'unresolved';let cs=(o.gc||0)/total;if(cs>=.15&&C_ACCESS(o.bu||0)>=.35)return'byproduct_scavenger';let p=(o.ga||0)+(o.gb||0);if(p<=0)return'unresolved';let a=(o.ga||0)/p;return a>=REALIZED_CUT?'primary_a':a<=1-REALIZED_CUT?'primary_b':'mixed_primary'};
+/**
+ * Stage 2 (issue #30) process foundation: the three supported metabolisms as
+ * explicit engine-owned processes. Identity, environmental input (field
+ * kind), capability/expression factor (access), byproduct output, and
+ * execution attribution route through these descriptors; consume() executes
+ * them without re-deriving the math. Capability rule: access derives ONLY
+ * from inherited organism state (AE/HP/C_ACCESS); analysis never activates,
+ * suppresses, or modifies it. Energy yields stay authoritative in the RS
+ * field definitions and are read through processYield, so no number here
+ * can drift from the fields.
+ */
+interface BioProcess{id:'primary_a'|'primary_b'|'c_scavenge';kind:0|1|2;access:(o:Organism)=>number;producesByproduct:boolean}
+const PROCESSES:Record<number,BioProcess>={
+ 0:{id:'primary_a',kind:0,access:(o)=>AE(o.di,0)*HP(o.ha,0),producesByproduct:true},
+ 1:{id:'primary_b',kind:1,access:(o)=>AE(o.di,1)*HP(o.ha,1),producesByproduct:true},
+ 2:{id:'c_scavenge',kind:2,access:(o)=>C_ACCESS(o.bu||0),producesByproduct:false},
+};
+function processFor(kind:number):BioProcess{return PROCESSES[kind]!}
+function processYield(defs:FieldDef[],kind:number):number{return defs[kind]!.energy_yield}
+/** Empty interval facts for pre-first-stride and pre-counter restores. Never mutated. */
+const EMPTY_INTERVAL_FLOWS:IntervalFlowFacts={tick:0,strideTicks:EVENT_STRIDE,lineages:[],totals:{netMembers:0,consumedA:0,consumedB:0,consumedC:0,energyA:0,energyB:0,energyC:0,producedC:0,births:0,deaths:0}};
 /**
  * RETAINED ONLY to decode pre-removal checkpoints carrying the
  * "legacy-observer" tag. Never instantiated or advanced: ecological
@@ -115,6 +140,8 @@ class RS{
  declare input:number[];declare biologicalProduction:number[];declare consumed:number[];declare decayed:number[];declare externalRemoved:number[];declare removalEvents:RemovalEvent[];declare diffusionAdjustment:number[];declare minFraction:number;declare maxFraction:number;declare lastInput:number[];declare diffusionRate:number[];declare delta:Float32Array[];
  declare sourceBoost:Float64Array[];declare right:Int32Array;declare down:Int32Array;declare minCapRight:Float64Array[];declare minCapDown:Float64Array[];declare totalStock:number[];declare totalCapacity:number[];declare regenLast:Int32Array;declare regenBuckets:number[][];
  declare regenRate:number;declare totalCapTarget:number;declare initialFraction:number;declare initialStock:number[];
+ /** Temporary external C sink (validation washout assays): multiplies C decay while active. Null when absent. */
+ declare cSink:{end:number;factor:number}|null;
  constructor(c:EngineConfig){
   this.n=FIELD_N;this.cell=FIELD_CELL;this.size=FIELD_CELLS;this.updateStride=FIELD_UPDATE;this.uptake=FIELD_UPTAKE;this.enabledByproduct=c.enable_byproduct!==false;
   this.defs=[
@@ -133,21 +160,24 @@ class RS{
   for(let iy=0;iy<this.n;iy++)for(let ix=0;ix<this.n;ix++){let i=iy*this.n+ix;this.right[i]=iy*this.n+((ix+1)%this.n);this.down[i]=((iy+1)%this.n)*this.n+ix}
   let regenLoad=new Float64Array(this.updateStride);for(let i=0;i<this.size;i++){let phase=0;for(let q=1;q<this.updateStride;q++)if((regenLoad[q]!)<(regenLoad[phase]!))phase=q;this.regenBuckets[phase]!.push(i);regenLoad[phase]!+=this.cap[0]![i]!+this.cap[1]![i]!}
   for(let k=0;k<3;k++)for(let i=0;i<this.size;i++){this.minCapRight[k]![i]=Math.min(this.cap[k]![i]!,this.cap[k]![this.right[i]!]!);this.minCapDown[k]![i]=Math.min(this.cap[k]![i]!,this.cap[k]![this.down[i]!]!)}
-  this.initialStock=[...this.totalStock];this.recalcBounds();
+  this.initialStock=[...this.totalStock];this.cSink=null;this.recalcBounds();
  }
  idx(x:number,y:number):number{let ix=Math.floor((((x%600)+600)%600)/this.cell)%this.n,iy=Math.floor((((y%600)+600)%600)/this.cell)%this.n;return iy*this.n+ix}
  fractionAt(kind:number,x:number,y:number):number{let i=this.idx(x,y),c=this.cap[kind]![i]!;return c>1e-9?this.stock[kind]![i]!/c:0}
  amountAt(kind:number,x:number,y:number):number{return this.stock[kind]![this.idx(x,y)]!}
- access(o:Organism,k:number):number{return k===2?C_ACCESS(o.bu||0):AE(o.di,k)*HP(o.ha,k)}
+ access(o:Organism,k:number):number{return processFor(k).access(o)}
  scoreIndex(o:Organism,i:number):{score:number;kind:number}{let best=-1,bestKind=0,limit=this.enabledByproduct?3:2;for(let k=0;k<limit;k++){let amt=this.stock[k]![i]!,c=this.cap[k]![i]!;if(c<=1e-9||amt<=1e-9)continue;let score=amt*this.access(o,k);if(score>best){best=score;bestKind=k}}return{score:Math.max(0,best),kind:bestKind}}
  scoreAt(o:Organism,x:number,y:number):{score:number;kind:number}{return this.scoreIndex(o,this.idx(x,y))}
  opportunity(o:Organism):number{let i=this.idx(o.x,o.y),best=0,limit=this.enabledByproduct?3:2;for(let k=0;k<limit;k++){let c=this.cap[k]![i]!,f=c>1e-9?this.stock[k]![i]!/c:0;best=Math.max(best,f*this.access(o,k))}return best}
  sense(o:Organism){let best={score:0,kind:0,angle:o.h},ds=[Q(o.se*.45,15,75),Q(o.se,25,150)];for(const d of ds)for(let j=0;j<8;j++){let a=o.h+j*Math.PI/4,x=(o.x+Math.cos(a)*d+600)%600,y=(o.y+Math.sin(a)*d+600)%600,q=this.scoreIndex(o,this.idx(x,y));if(q.score>best.score){best={...q,angle:a}}}let local=this.scoreIndex(o,this.idx(o.x,o.y));if(local.score>best.score*1.12)best={...local,angle:o.h};return best}
  deposit(kind:number,x:number,y:number,amount:number,cause:string|null=null,interval:Interval|null=null):number{if(amount<=0||kind<0||kind>=this.stock.length)return 0;let i=this.idx(x,y),st=this.stock[kind]!,cp=this.cap[kind]!,room=Math.max(0,cp[i]!-st[i]!),add=Math.min(room,amount);if(add<=0)return 0;st[i]!+=add;this.totalStock[kind]!+=add;this.biologicalProduction[kind]!+=add;if(interval&&kind===2)interval.produced_c+=add;return add}
- consume(o:Organism,interval:Interval){let i=this.idx(o.x,o.y),best=-1,kind=0,limit=this.enabledByproduct?3:2;for(let k=0;k<limit;k++){let amt=this.stock[k]![i]!;if(amt<=1e-9)continue;let score=amt*this.access(o,k);if(score>best){best=score;kind=k}}if(best<=0)return null;let cap=this.cap[kind]![i]!,conc=cap>1e-9?this.stock[kind]![i]!/cap:0,take=Math.min(this.stock[kind]![i]!,this.uptake*(.55+.45*Q(conc,0,1)));if(take<=1e-6)return null;let before=this.stock[kind]![i]!;this.stock[kind]![i]!-=take;this.totalStock[kind]!+=this.stock[kind]![i]!-before;this.consumed[kind]!+=take;if(interval){interval.resources_consumed+=take;if(kind===0)interval.consumed_a+=take;else if(kind===1)interval.consumed_b+=take;else interval.consumed_c+=take}let gain=take*this.defs[kind]!.energy_yield*(kind===2?C_ACCESS(o.bu||0):AE(o.di,kind));if(this.enabledByproduct&&kind<2){let made=this.deposit(2,o.x,o.y,take*C_BYPRODUCT_YIELD,'primary metabolism',interval);o.pc=(o.pc||0)+made}return{kind,amount:take,gain}}
+ consume(o:Organism,interval:Interval){let i=this.idx(o.x,o.y),best=-1,kind=0,limit=this.enabledByproduct?3:2;for(let k=0;k<limit;k++){let amt=this.stock[k]![i]!;if(amt<=1e-9)continue;let score=amt*this.access(o,k);if(score>best){best=score;kind=k}}if(best<=0)return null;let cap=this.cap[kind]![i]!,conc=cap>1e-9?this.stock[kind]![i]!/cap:0,take=Math.min(this.stock[kind]![i]!,this.uptake*(.55+.45*Q(conc,0,1)));if(take<=1e-6)return null;let before=this.stock[kind]![i]!;this.stock[kind]![i]!-=take;this.totalStock[kind]!+=this.stock[kind]![i]!-before;this.consumed[kind]!+=take;if(interval){interval.resources_consumed+=take;if(kind===0){interval.consumed_a+=take;interval.proc_exec_a=(interval.proc_exec_a||0)+1}else if(kind===1){interval.consumed_b+=take;interval.proc_exec_b=(interval.proc_exec_b||0)+1}else{interval.consumed_c+=take;interval.proc_exec_c=(interval.proc_exec_c||0)+1}}/* Frozen asymmetry (parity-protected): habitat preference shapes food
+   discovery (selection access) but not digestion yield (AE-only gain).
+   Do not 'fix' without an engine-version change. */
+   let gain=take*processYield(this.defs,kind)*(kind===2?C_ACCESS(o.bu||0):AE(o.di,kind));let made=0;if(this.enabledByproduct&&processFor(kind).producesByproduct){made=this.deposit(2,o.x,o.y,take*C_BYPRODUCT_YIELD,'primary metabolism',interval);o.pc=(o.pc||0)+made}return{kind,amount:take,gain,produced:made}}
  diffuse(k:number):void{let st=this.stock[k]!,cp=this.cap[k]!,d=this.delta[k]!,right=this.right,down=this.down,mr=this.minCapRight[k]!,md=this.minCapDown[k]!,rate=this.diffusionRate[k]!;d.fill(0);for(let i=0;i<this.size;i++){let ci=cp[i]!>1e-9?st[i]!/cp[i]!:0,j=right[i]!,cj=cp[j]!>1e-9?st[j]!/cp[j]!:0,flux=rate*(ci-cj)*mr[i]!;d[i]!-=flux;d[j]!+=flux;j=down[i]!;cj=cp[j]!>1e-9?st[j]!/cp[j]!:0;flux=rate*(ci-cj)*md[i]!;d[i]!-=flux;d[j]!+=flux}let adj=0;for(let i=0;i<this.size;i++){let before=st[i]!,raw=before+d[i]!,next=Q(raw,0,cp[i]!);st[i]=next;adj+=next-before}this.totalStock[k]!+=adj;this.diffusionAdjustment[k]!+=adj}
  step(t:number,drought:DroughtState|null,interval:Interval):void{let added=[0,0,0],phase=t%this.updateStride,bucket=this.regenBuckets[phase]!,elapsed=new Int32Array(bucket.length);for(let j=0;j<bucket.length;j++){let i=bucket[j]!;elapsed[j]=Math.max(1,t-this.regenLast[i]!)}for(let k=0;k<2;k++){let factor=drought&&t<drought.end&&k===drought.kind?(1-drought.suppression):1,st=this.stock[k]!,cp=this.cap[k]!,boost=this.sourceBoost[k]!;for(let j=0;j<bucket.length;j++){let i=bucket[j]!,gap=cp[i]!-st[i]!;if(gap<=1e-9)continue;let inc=gap*(1-Math.exp(-this.regenRate*boost[i]!*factor*elapsed[j]!));if(inc>0){let before=st[i]!;st[i]!+=inc;this.totalStock[k]!+=st[i]!-before;added[k]!+=inc}}this.input[k]!+=added[k]!}
-  if(this.enabledByproduct){let st=this.stock[2]!,dec=0;for(let j=0;j<bucket.length;j++){let i=bucket[j]!,e=elapsed[j]!,before=st[i]!,next=before*Math.exp(-C_DECAY_RATE*e),loss=before-next;if(loss>0){st[i]=next;dec+=loss}}this.totalStock[2]!-=dec;this.decayed[2]!+=dec;if(interval)interval.decayed_c+=dec}
+  if(this.enabledByproduct){let st=this.stock[2]!,dec=0,decayRate=(this.cSink&&t<this.cSink.end)?C_DECAY_RATE*this.cSink.factor:C_DECAY_RATE;for(let j=0;j<bucket.length;j++){let i=bucket[j]!,e=elapsed[j]!,before=st[i]!,next=before*Math.exp(-decayRate*e),loss=before-next;if(loss>0){st[i]=next;dec+=loss}}this.totalStock[2]!-=dec;this.decayed[2]!+=dec;if(interval)interval.decayed_c+=dec}
   if(t%100===0){this.diffuse(0);this.diffuse(1);if(this.enabledByproduct)this.diffuse(2)}for(let j=0;j<bucket.length;j++)this.regenLast[bucket[j]!]=t;this.lastInput=added;if(interval){interval.resources_spawned+=added[0]!+added[1]!;interval.spawned_a+=added[0]!;interval.spawned_b+=added[1]!;if(drought&&t<drought.end&&t%this.updateStride===0)interval.resources_suppressed+=1}this.recalcBounds();
  }
  scale(kind:null,factor:number,meta?:{tick:number|null;type:string|null;source:string|null;reason?:string}|null):number[];
@@ -170,10 +200,11 @@ class S{
  declare totalUse:number[];declare totalEnergy:number[];declare totalReproSupport:number[];
  declare resources:RS;declare drought:DroughtState|null;declare response:DisturbanceResponse|null;
  declare extinctTick:number|null;declare extinctionContext:any|null;declare nh:NicheHistoryPoint[];
+ declare lineageInterval:Map<number,LineageDelta>;declare lastLineageFlows:IntervalFlowFacts|null;
  constructor(c:EngineConfig){
   this.c={enable_byproduct:c.enable_byproduct!==false,enable_dormancy:c.enable_dormancy!==false,...(c as Omit<EngineConfig,'enable_byproduct'|'enable_dormancy'>)};this.study=!!c.study;
   this.rInit=R((c.seed^0xA341316C)>>>0);this.rFood=R((c.seed^0xC8013EA4)>>>0);this.rMove=R((c.seed^0xAD90777D)>>>0);this.rMut=R((c.seed^0x7E95761E)>>>0);this.rCat=R((c.seed^0x9E3779B9)>>>0);
-  this.t=0;this.o=[];this.ev=[];this.sn=[];this.long=[];this.longStride=2503;this.eventSn=[];this.L=new Map;this.FAM=new Map;this.nL=1;this.nO=1;this.peakPopulation=0;this.peakPopulationTick=0;this.tb=B();this.last=I();this.cur=I();this.totalUse=[0,0,0];this.totalEnergy=[0,0,0];this.totalReproSupport=[0,0,0,0];this.resources=new RS(this.c);this.drought=null;this.response=null;this.extinctTick=null;this.extinctionContext=null;this.nh=[];
+  this.t=0;this.o=[];this.ev=[];this.sn=[];this.long=[];this.longStride=2503;this.eventSn=[];this.L=new Map;this.FAM=new Map;this.nL=1;this.nO=1;this.peakPopulation=0;this.peakPopulationTick=0;this.tb=B();this.last=I();this.cur=I();this.totalUse=[0,0,0];this.totalEnergy=[0,0,0];this.totalReproSupport=[0,0,0,0];this.resources=new RS(this.c);this.drought=null;this.response=null;this.extinctTick=null;this.extinctionContext=null;this.nh=[];this.lineageInterval=new Map();this.lastLineageFlows=null;
   let ri=this.rInit;
   for(let k=0;k<c.pop;k++){let z=c.div,l=this.newL(0,[]),di=Q((ri()*2-1)*z,-1,1),ha=Q(di*.45+(ri()*2-1)*z*.75,-1,1);let matureAt=FOUNDER_MATURITY_MIN+Math.floor(ri()*FOUNDER_MATURITY_SPAN),id=this.nO++,bu=this.c.enable_byproduct?Q(.04+.28*H01(c.seed,id,17),0,1.5):0,dr=this.c.enable_dormancy?Q(.18+.62*H01(c.seed,id,29),0,1.5):0;this.o.push({id,parent:null,generation:0,born:0,matureAt,readyAt:matureAt,x:ri()*600,y:ri()*600,en:60,h:ri()*6.28,sp:Q(1.15*(1+(ri()*2-1)*z),.25,4),se:Q(55*(1+(ri()*2-1)*z),10,180),me:Q(.16*(1+(ri()*2-1)*z),.04,.5),rp:Q(92*(1+(ri()*2-1)*z),55,220),di,ha,bu,dr,activity:'active',dormantSince:null,wakeCount:0,lastWakeTick:null,ma:0,mb:0,mc:0,pc:0,ga:0,gb:0,gc:0,ra:0,rb:0,rc:0,l})}
   this.peakPopulation=this.o.length;this.updateLineageHistory();this.updateFamilyHistory();this.log('Universe created');if(!this.study)this.long.push(this.pack());
@@ -186,6 +217,7 @@ class S{
  catalyst(type:string,src:string):void{
   this.eventSn.push({...this.pack(),phase:'before_catalyst',source:src,catalyst:type});let pre=this.o.length,removed:number[];
   if(type==='global'){removed=this.resources.scale(null,.5,{tick:this.t,type,source:src,reason:'global nutrient crash'});this.log(`Global nutrient crash −50% field stock (${src})`)}
+  else if(type==='cWashout'){let r=this.resources.scale(2,0);removed=[0,0];this.resources.cSink={end:this.t+15000,factor:50};this.resources.removalEvents.push({tick:this.t,type,source:src,reason:'Metabolite C washout: stock cleared plus 50x decay sink for 15k ticks',amounts:[0,0,r],total:r});this.log(`Metabolite C washout · environmental C stock removed plus decay sink (${src})`)}
   else{let kind=type==='droughtB'?1:0,r=this.resources.scale(kind,.2);removed=kind?[0,r]:[r,0];this.resources.removalEvents.push({tick:this.t,type,source:src,reason:`Nutrient ${kind?'B':'A'} drought onset`,amounts:[...removed],total:r});this.drought={kind,end:this.t+25000,suppression:.85};this.log(`Nutrient ${kind?'B':'A'} drought · local field stock reduced · regeneration suppressed for 25k ticks (${src})`)}
   this.response={type,tick:this.t,pre_population:pre,deepest_population:pre,deepest_tick:this.t,nutrient_removed_by_type:[...removed],nutrient_removed_total:removed[0]!+removed[1]!,bottleneck_threshold:.6,recovery_threshold:.9,recovery_hold_ticks:RECOVERY_HOLD,episodes:[],active_episode_index:null,stable_since:null,first_durable_recovery_tick:null,durable_recovery_tick:null,relapses:0};
   this.eventSn.push({...this.pack(),phase:'after_catalyst',source:src,catalyst:type});
@@ -193,6 +225,22 @@ class S{
  localOpportunity(o:Organism):number{return this.resources.opportunity(o)}
  dormancyEntry(o:Organism):boolean{if(!this.c.enable_dormancy||o.activity==='dormant')return false;let r=Q((o.dr||0)/1.5,0,1),energy=o.en/Math.max(55,o.rp),opp=this.localOpportunity(o),eThresh=.34+.20*r,oThresh=.10+.16*r;return energy<eThresh&&opp<oThresh}
  dormancyWake(o:Organism):boolean{let r=Q((o.dr||0)/1.5,0,1),opp=this.localOpportunity(o),wake=.22+.18*r;return opp>wake}
+ lineageCredit(l:number,d:{consumedA?:number;consumedB?:number;consumedC?:number;energyA?:number;energyB?:number;energyC?:number;producedC?:number;births?:number;deaths?:number}){
+  let m=this.lineageInterval;if(!m)m=this.lineageInterval=new Map();
+  let f=m.get(l);
+  if(!f){f={consumedA:0,consumedB:0,consumedC:0,energyA:0,energyB:0,energyC:0,producedC:0,births:0,deaths:0};m.set(l,f)}
+  f.consumedA+=d.consumedA||0;f.consumedB+=d.consumedB||0;f.consumedC+=d.consumedC||0;f.energyA+=d.energyA||0;f.energyB+=d.energyB||0;f.energyC+=d.energyC||0;f.producedC+=d.producedC||0;f.births+=d.births||0;f.deaths+=d.deaths||0;
+ }
+ readIntervalFlows():IntervalFlowFacts{
+  let lineages:{lineageId:number;netMembers:number;consumedA:number;consumedB:number;consumedC:number;energyA:number;energyB:number;energyC:number;producedC:number;births:number;deaths:number}[]=[];
+  let t={netMembers:0,consumedA:0,consumedB:0,consumedC:0,energyA:0,energyB:0,energyC:0,producedC:0,births:0,deaths:0};
+  for(const [id,f] of (this.lineageInterval||new Map()).entries()){
+   let net=f.births-f.deaths;
+   lineages.push({lineageId:id,netMembers:net,consumedA:f.consumedA,consumedB:f.consumedB,consumedC:f.consumedC,energyA:f.energyA,energyB:f.energyB,energyC:f.energyC,producedC:f.producedC,births:f.births,deaths:f.deaths});
+   t.netMembers+=net;t.consumedA+=f.consumedA;t.consumedB+=f.consumedB;t.consumedC+=f.consumedC;t.energyA+=f.energyA;t.energyB+=f.energyB;t.energyC+=f.energyC;t.producedC+=f.producedC;t.births+=f.births;t.deaths+=f.deaths;
+  }
+  return{tick:this.t,strideTicks:EVENT_STRIDE,lineages,totals:t};
+ }
  flowFacts():FlowFacts{
   let acc=new Map<number,{lineageId:number;members:number;consumedA:number;consumedB:number;consumedC:number;energyA:number;energyB:number;energyC:number;producedC:number}>();
   for(const o of this.o){
@@ -204,25 +252,29 @@ class S{
   for(const f of lineages){t.members+=f.members;t.consumedA+=f.consumedA;t.consumedB+=f.consumedB;t.consumedC+=f.consumedC;t.energyA+=f.energyA;t.energyB+=f.energyB;t.energyC+=f.energyC;t.producedC+=f.producedC}
   return{tick:this.t,lineages,totals:t};
  }
- observerSnapshot(m:any,interval:Interval):any{let roles:Record<string,number>={},cross=0,dormClades:Record<string,number>={},cladeTotals:Record<string,number>={};for(const o of this.o){let role=metabolicRole(o);roles[role]=(roles[role]||0)+1;if(role==='byproduct_scavenger')cross++;let c=this.cladeRoot(o.l);cladeTotals[c]=(cladeTotals[c]||0)+1;if(o.activity==='dormant')dormClades[c]=(dormClades[c]||0)+1}let totalE=(m.resource_energy.a||0)+(m.resource_energy.b||0)+(m.resource_energy.c||0),fra:Record<string,number>={};for(const [c,n] of Object.entries(cladeTotals))fra[c]=(dormClades[c]||0)/n;let dominant=Object.entries(roles).sort((a,b)=>b[1]-a[1])[0]?.[0]||'unresolved';return{tick:this.t,population:m.population,starting_population:this.c.pop,active_population:m.active_population,dormant_population:m.dormant_population,dormant_fraction:m.dormant_fraction,c_energy_share:totalE?m.resource_energy.c/totalE:0,crossfeeder_fraction:m.population?cross/m.population:0,partitioned:m.niche_structure.persistent_partitioning,dominant_role:dominant,roles,wake_events:interval.wakes||0,wake_clades:{...(interval.wake_clades||{})},dormant_clade_fraction:fra,clade_totals:cladeTotals,interval:{producedC:interval.produced_c||0,consumedA:interval.consumed_a||0,consumedB:interval.consumed_b||0,consumedC:interval.consumed_c||0,energyA:interval.energy_a||0,energyB:interval.energy_b||0,energyC:interval.energy_c||0,births:interval.births||0,deaths:interval.deaths||0},flows:this.flowFacts()}}
+ observerSnapshot(m:any,interval:Interval):any{let roles:Record<string,number>={},cross=0,dormClades:Record<string,number>={},cladeTotals:Record<string,number>={};for(const o of this.o){let role=metabolicRole(o);roles[role]=(roles[role]||0)+1;if(role==='byproduct_scavenger')cross++;let c=this.cladeRoot(o.l);cladeTotals[c]=(cladeTotals[c]||0)+1;if(o.activity==='dormant')dormClades[c]=(dormClades[c]||0)+1}let totalE=(m.resource_energy.a||0)+(m.resource_energy.b||0)+(m.resource_energy.c||0),fra:Record<string,number>={};for(const [c,n] of Object.entries(cladeTotals))fra[c]=(dormClades[c]||0)/n;let dominant=Object.entries(roles).sort((a,b)=>b[1]-a[1])[0]?.[0]||'unresolved';return{tick:this.t,population:m.population,starting_population:this.c.pop,active_population:m.active_population,dormant_population:m.dormant_population,dormant_fraction:m.dormant_fraction,c_energy_share:totalE?m.resource_energy.c/totalE:0,crossfeeder_fraction:m.population?cross/m.population:0,partitioned:m.niche_structure.persistent_partitioning,dominant_role:dominant,roles,wake_events:interval.wakes||0,wake_clades:{...(interval.wake_clades||{})},dormant_clade_fraction:fra,clade_totals:cladeTotals,interval:{producedC:interval.produced_c||0,consumedA:interval.consumed_a||0,consumedB:interval.consumed_b||0,consumedC:interval.consumed_c||0,energyA:interval.energy_a||0,energyB:interval.energy_b||0,energyC:interval.energy_c||0,births:interval.births||0,deaths:interval.deaths||0},flows:this.flowFacts(),intervalFlows:this.lastLineageFlows||EMPTY_INTERVAL_FLOWS}}
  step(){
-  this.t++;if(this.c.st===this.t)this.catalyst(this.c.cat,'scheduled');if(this.drought&&this.t>=this.drought.end){this.log(`Nutrient ${this.drought.kind?'B':'A'} drought ended`);this.drought=null}
+  this.t++;if(this.c.st===this.t)this.catalyst(this.c.cat,'scheduled');if(this.drought&&this.t>=this.drought.end){this.log(`Nutrient ${this.drought.kind?'B':'A'} drought ended`);this.drought=null}if(this.resources.cSink&&this.t>=this.resources.cSink.end){this.log('Metabolite C sink dissipated');this.resources.cSink=null}
   this.resources.step(this.t,this.drought,this.cur);let born=[],live=[];
   for(const o of this.o){
    if(o.activity==='dormant'){
     if(((this.t+o.id)%DORMANCY_CHECK)===0&&this.dormancyWake(o)){o.activity='active';o.lastWakeTick=this.t;o.wakeCount=(o.wakeCount||0)+1;o.dormantSince=null;this.cur.wakes++;let cid=this.cladeRoot(o.l);this.cur.wake_clades[cid]=(this.cur.wake_clades[cid]||0)+1}
-    if(o.activity==='dormant'){o.en-=(PC(o.me)*DORMANT_MAINTENANCE+SC(o.en)*.08)*this.c.press;if(o.en>0)live.push(o);else this.cur.deaths++;continue}
+    if(o.activity==='dormant'){o.en-=(PC(o.me)*DORMANT_MAINTENANCE+SC(o.en)*.08)*this.c.press;if(o.en>0)live.push(o);else{this.cur.deaths++;this.lineageCredit(o.l,{deaths:1})}continue}
    }
-   if(((this.t+o.id)%DORMANCY_CHECK)===0&&this.dormancyEntry(o)){o.activity='dormant';o.dormantSince=this.t;this.cur.dormancy_entries++;o.en-=(PC(o.me)*DORMANT_MAINTENANCE)*this.c.press;if(o.en>0)live.push(o);else this.cur.deaths++;continue}
+   if(((this.t+o.id)%DORMANCY_CHECK)===0&&this.dormancyEntry(o)){o.activity='dormant';o.dormantSince=this.t;this.cur.dormancy_entries++;o.en-=(PC(o.me)*DORMANT_MAINTENANCE)*this.c.press;if(o.en>0)live.push(o);else{this.cur.deaths++;this.lineageCredit(o.l,{deaths:1})}continue}
    if(((this.t+o.id)&3)===0){let sensed=this.resources.sense(o);if(sensed.score>.003)o.h=sensed.angle;else{let pull=.04+.12*Math.abs(o.ha);if(Math.abs(o.ha)>.08&&this.rMove()<pull){let kind=o.ha>0?1:0,cx=kind?445:155,cy=kind?390:210;o.h=Math.atan2(WD(o.y,cy),WD(o.x,cx))+(this.rMove()-.5)*.75}else if(this.rMove()<.10)o.h+=this.rMove()*1.6-.8}}
    let mv=MV(o.sp);o.x=(o.x+Math.cos(o.h)*mv+600)%600;o.y=(o.y+Math.sin(o.h)*mv+600)%600;o.en-=(PC(o.me)+MC(o.sp)+DC(o.di)+SC(o.en)+(this.c.enable_byproduct?BUC(o.bu||0):0))*this.c.press;
-   let eat=this.resources.consume(o,this.cur);if(eat){o.en+=eat.gain;if(eat.kind===0){o.ma++;o.ga+=eat.gain;o.ra+=eat.gain;this.cur.energy_a+=eat.gain}else if(eat.kind===1){o.mb++;o.gb+=eat.gain;o.rb+=eat.gain;this.cur.energy_b+=eat.gain}else{o.mc=(o.mc||0)+1;o.gc=(o.gc||0)+eat.gain;o.rc=(o.rc||0)+eat.gain;this.cur.energy_c+=eat.gain}this.totalUse[eat.kind]!+=eat.amount;this.totalEnergy[eat.kind]!+=eat.gain}
-   if(this.t>=(o.matureAt||0)&&this.t>=(o.readyAt||0)&&o.en>=o.rp){let support=this.reproSupport(o);this.totalReproSupport[support]!++;if(support===0)this.cur.repro_supported_a++;else if(support===1)this.cur.repro_supported_b++;else if(support===3)this.cur.repro_supported_c++;else this.cur.repro_supported_mixed++;o.ra=0;o.rb=0;o.rc=0;o.en*=.52;o.readyAt=this.t+REPRO_COOLDOWN;born.push(this.child(o));this.cur.births++}if(o.en>0)live.push(o);else this.cur.deaths++
+   let eat=this.resources.consume(o,this.cur);if(eat){o.en+=eat.gain;/* Frozen counters (parity-protected): ma/mb/mc count consumption EVENTS,
+   not mass. Only read by lineage flow attribution, which labels them as
+   counts. Interval deltas carry true mass. Do not 'fix' without an
+   engine-version change. */
+   if(eat.kind===0){o.ma++;o.ga+=eat.gain;o.ra+=eat.gain;this.cur.energy_a+=eat.gain;this.lineageCredit(o.l,{consumedA:eat.amount,energyA:eat.gain,producedC:eat.produced})}else if(eat.kind===1){o.mb++;o.gb+=eat.gain;o.rb+=eat.gain;this.cur.energy_b+=eat.gain;this.lineageCredit(o.l,{consumedB:eat.amount,energyB:eat.gain,producedC:eat.produced})}else{o.mc=(o.mc||0)+1;o.gc=(o.gc||0)+eat.gain;o.rc=(o.rc||0)+eat.gain;this.cur.energy_c+=eat.gain;this.lineageCredit(o.l,{consumedC:eat.amount,energyC:eat.gain})}this.totalUse[eat.kind]!+=eat.amount;this.totalEnergy[eat.kind]!+=eat.gain}
+   if(this.t>=(o.matureAt||0)&&this.t>=(o.readyAt||0)&&o.en>=o.rp){let support=this.reproSupport(o);this.totalReproSupport[support]!++;if(support===0)this.cur.repro_supported_a++;else if(support===1)this.cur.repro_supported_b++;else if(support===3)this.cur.repro_supported_c++;else this.cur.repro_supported_mixed++;o.ra=0;o.rb=0;o.rc=0;o.en*=.52;o.readyAt=this.t+REPRO_COOLDOWN;let baby=this.child(o);born.push(baby);this.cur.births++;this.lineageCredit(baby.l,{births:1})}if(o.en>0)live.push(o);else{this.cur.deaths++;this.lineageCredit(o.l,{deaths:1})}
   }
   this.o=live.concat(born);if(this.o.length>this.peakPopulation){this.peakPopulation=this.o.length;this.peakPopulationTick=this.t}
   if(!this.o.length&&this.extinctTick===null){this.extinctTick=this.t;let prev=this.sn.length?this.sn[this.sn.length-1]:this.long[this.long.length-1];this.extinctionContext={tick:this.t,previous_snapshot:prev||null,nutrient_field:this.resources.totals(),interval:{...this.cur}};this.log('Population extinct')}
   if(this.response)this.trackResponse();
-  if(this.t%EVENT_STRIDE===0){this.updateLineageHistory();this.updateFamilyHistory();let obsM=this.metrics();this.last={...this.cur,wake_clades:{...this.cur.wake_clades}};this.cur=I();let ns=obsM.niche_structure;this.nh.push({tick:this.t,partitioned:ns.partitioned_now,effective_niches:ns.effective_niches,coverage:ns.realized_coverage,alignment:ns.spatial.alignment});while(this.nh.length&&this.nh[0]!.tick<this.t-PART_WINDOW)this.nh.shift();if(!this.study){this.sn.push(this.pack());if(this.sn.length>120)this.sn.shift()}}
+  if(this.t%EVENT_STRIDE===0){this.updateLineageHistory();this.updateFamilyHistory();let obsM=this.metrics();this.last={...this.cur,wake_clades:{...this.cur.wake_clades}};this.lastLineageFlows=this.readIntervalFlows();this.lineageInterval=new Map();this.cur=I();let ns=obsM.niche_structure;this.nh.push({tick:this.t,partitioned:ns.partitioned_now,effective_niches:ns.effective_niches,coverage:ns.realized_coverage,alignment:ns.spatial.alignment});while(this.nh.length&&this.nh[0]!.tick<this.t-PART_WINDOW)this.nh.shift();if(!this.study){this.sn.push(this.pack());if(this.sn.length>120)this.sn.shift()}}
   if(!this.study&&this.t%this.longStride===0){this.long.push(this.pack());if(this.long.length>500){this.long=this.long.filter((_,i)=>i%2===0);this.longStride*=2}}
  }
  trackResponse(){let r=this.response!,p=this.o.length;if(p<r.deepest_population){r.deepest_population=p;r.deepest_tick=this.t}let b=p<=r.pre_population*r.bottleneck_threshold,rec=p>=r.pre_population*r.recovery_threshold;if(b&&r.active_episode_index===null){if(r.episodes.length)r.relapses++;r.episodes.push({start_tick:this.t,min_population:p,min_tick:this.t,durable_recovery_tick:null});r.active_episode_index=r.episodes.length-1;r.stable_since=null}if(r.active_episode_index!==null){let ep=r.episodes[r.active_episode_index]!;if(p<ep.min_population){ep.min_population=p;ep.min_tick=this.t}if(rec){if(r.stable_since===null)r.stable_since=this.t;if(this.t-r.stable_since!>=r.recovery_hold_ticks){ep.durable_recovery_tick=this.t;r.durable_recovery_tick=this.t;if(r.first_durable_recovery_tick===null)r.first_durable_recovery_tick=this.t;r.active_episode_index=null;r.stable_since=null}}else r.stable_since=null}}
