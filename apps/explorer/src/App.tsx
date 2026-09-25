@@ -611,7 +611,7 @@ export function App(){
       {surface==="experiments"&&<section className="panel">
         <span className="eyebrow">What if this world changed?</span><h2>Experiments</h2>
         {snapshot.control?<div className="compare"><div><strong>Experiment</strong><span>{snapshot.population} living</span><span>{m.ecological_outcome}</span><span>{formatYear(snapshot.tick)}</span></div><div><strong>Untouched twin</strong><span>{snapshot.control.population} living</span><span>{snapshot.control.metrics.ecological_outcome}</span><span>{formatYear(snapshot.control.tick)}</span></div></div>:<p>No matched control exists yet. Applying an intervention creates an exact twin first.</p>}
-        <div className="actions"><button onClick={()=>runtime.intervene("global")}>Global nutrient crash</button><button onClick={()=>runtime.intervene("droughtA")}>Nutrient A drought</button><button onClick={()=>runtime.intervene("droughtB")}>Nutrient B drought</button></div>
+        <div className="actions"><button onClick={()=>{if(blockWhilePending())return;runtime.intervene("global")}}>Global nutrient crash</button><button onClick={()=>{if(blockWhilePending())return;runtime.intervene("droughtA")}}>Nutrient A drought</button><button onClick={()=>{if(blockWhilePending())return;runtime.intervene("droughtB")}}>Nutrient B drought</button></div>
         {records.length>0&&<><h3>Histories so far</h3><p>What the experiment branch has lived through — the untouched twin keeps its own time.</p>{records.slice(-4).reverse().map((r:any)=><article key={r.id}><span>{formatTickAge(r.tick)} · {r.phase}</span><h3>{r.title}</h3></article>)}</>}
       </section>}
       </aside>

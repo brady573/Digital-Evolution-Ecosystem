@@ -327,6 +327,11 @@ export class UniverseSession {
    */
   intervene(intervention:"global"|"droughtA"|"droughtB"){
     if(!this.#experiment)throw new Error("Universe has not been created");
+    // The pause gate covers experiments too: applying a disturbance under a
+    // pending choice would stale its offered context and stack an unevaluated
+    // second hit. Internal resolution uses applyIntervention directly and is
+    // unaffected (it clears the gate itself).
+    if(this.#pendingDecision)throw new Error("A decision is pending: resolve it before experimenting");
     if(!this.#control)this.createControlFork();
     const spec:InterventionSpec=intervention==="global"
       ?{schemaVersion:1,kind:"nutrient_disturbance",mode:"global_crash"}

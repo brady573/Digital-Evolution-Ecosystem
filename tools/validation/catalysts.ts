@@ -428,11 +428,33 @@ function testCatalystEvidenceAndReplay() {
   console.log("catalyst evidence + replay: PASS");
 }
 
+function testInterveneBlockedWhilePending() {
+  // Review finding on main (#27/#28): the Experiments path once mutated
+  // straight through the pause gate, staling the offered context and stacking
+  // an unevaluated second hit. Both sources must refuse.
+  const { session, window } = atFirstWindow();
+  const stateAtWindow = JSON.stringify(session.checkpoint().experiment);
+  assert.throws(() => session.intervene("droughtA"), /pending/, "experiments refuse during a catalyst window");
+  assert.equal(JSON.stringify(session.checkpoint().experiment), stateAtWindow, "refused intervention changes nothing");
+  assert.equal(session.snapshot().pendingDecision, window as any, "window still pending");
+  session.resolveEventDecision(window.opportunityId, "keep-watching");
+
+  const events = new UniverseSession();
+  events.create(config(FIXTURE_SEED));
+  const first = events.advance(120_000).pendingDecision as any;
+  assert.equal(first?.source, "observed_event", "dormancy event pending");
+  const stateAtEvent = JSON.stringify(events.checkpoint().experiment);
+  assert.throws(() => events.intervene("global"), /pending/, "experiments refuse during an event decision");
+  assert.equal(JSON.stringify(events.checkpoint().experiment), stateAtEvent, "refused intervention changes nothing");
+  console.log("experiments blocked while pending: PASS");
+}
+
 testEligibilityBoundaries();
 testQuietAndCooldown();
 testFirstWindow();
 testSameTickPriority();
 testCatalystGateAndChoices();
+testInterveneBlockedWhilePending();
 testCrashAndCooldown();
 testCatalystCheckpoint();
 testCatalystEvidenceAndReplay();
