@@ -1,3 +1,5 @@
+import type { ObservedEvent } from "@digital-evolution/contracts";
+
 export interface ObservationFrame {
   readonly tick: number;
   readonly population: number;
@@ -130,5 +132,32 @@ export class EcologyObserver {
         era_persistence_ticks:ERA_PERSIST,
       },
     };
+  }
+
+  /**
+   * Typed view of this observer's own records for the event-decision path.
+   * Analysis remains the authority on whether the evidence supports an event;
+   * this only adapts the record shape into the shared ObservedEvent contract so
+   * no decision-layer code depends on an untyped analysis payload.
+   * Read-only: it does not change detection or any biological state.
+   */
+  observedEvents(): ObservedEvent[]{
+    return this.records.map((record:any)=>({
+      schemaVersion:1 as const,
+      eventId:String(record.id),
+      arcId:String(record.arc_id),
+      kind:String(record.kind),
+      phase:String(record.phase),
+      tick:Number(record.tick),
+      level:String(record.level),
+      title:String(record.title),
+      summary:String(record.summary),
+      evidence:Object.fromEntries(
+        Object.entries(record.evidence??{}).filter(
+          ([,v])=>typeof v==="number"||typeof v==="string"||typeof v==="boolean",
+        ) as [string,number|string|boolean][],
+      ),
+      entityRefs:Array.isArray(record.entity_refs)?record.entity_refs.map(Number):[],
+    }));
   }
 }

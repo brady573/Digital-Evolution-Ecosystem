@@ -1,6 +1,6 @@
 // @ts-nocheck
 /**
- * Compatibility extraction of the v0.29.0 / engine 0.19.0 prototype core, extended to 0.20.0 (rich clamp only).
+ * Compatibility extraction of the v0.29.0 / engine 0.19.0 prototype core, extended to engine 0.20.0 (rich clamp only). APP_VERSION tracks the product app version (0.31.0); it is metadata and affects no biological behavior.
  *
  * MIGRATION RULE: preserve this algorithm byte-for-byte in behavior while the
  * repository parity harness is active. Structural/type cleanup follows parity,
@@ -9,7 +9,7 @@
 const Q=(v,a,b)=>Math.max(a,Math.min(b,v));
 const A=a=>a.length?a.reduce((s,v)=>s+v,0)/a.length:0;
 const R=s=>{let a=s>>>0;let f=()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296};f.getState=()=>a>>>0;f.setState=v=>{a=v>>>0};return f};
-const APP_VERSION='0.30.0',ENGINE_VERSION='0.20.0',EXPORT_VERSION='0.30';
+const APP_VERSION='0.31.0',ENGINE_VERSION='0.20.0',EXPORT_VERSION='0.30';
 const C_BYPRODUCT_YIELD=.32,C_ENERGY_YIELD=9,C_DECAY_RATE=.00022,C_DIFFUSION_RATE=.06,BU_MAINT_COST=.010,DORMANT_MAINTENANCE=.12,DORMANCY_CHECK=40,CROSSFEED_FORM=.035,CROSSFEED_EST=.055,CROSSFEED_PERSIST=5000,DORMANCY_PERSIST=5000,ERA_PERSIST=7500;
 const H01=(seed,id,salt=0)=>{let x=(seed^(Math.imul(id+salt,0x9E3779B1)))>>>0;x^=x>>>16;x=Math.imul(x,0x7FEB352D);x^=x>>>15;x=Math.imul(x,0x846CA68B);x^=x>>>16;return(x>>>0)/4294967296};
 const C_ACCESS=bu=>{let v=Q(bu,0,1.5);return v<=0?0:(v*v)/(v*v+.1024)};

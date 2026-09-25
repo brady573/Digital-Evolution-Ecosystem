@@ -3,15 +3,18 @@ import type {
   RenderSnapshot,
   RuntimeCommand,
   RuntimeResponse,
+  SupportedUniverseCheckpoint,
   UniverseCheckpoint,
 } from "@digital-evolution/contracts";
 
 export interface RuntimeClient {
   command(command: RuntimeCommand): void;
   subscribe(listener: (snapshot: RenderSnapshot) => void): () => void;
-  loadCheckpoint(checkpoint: UniverseCheckpoint): Promise<RenderSnapshot>;
+  loadCheckpoint(checkpoint: SupportedUniverseCheckpoint): Promise<RenderSnapshot>;
   requestCheckpoint(): Promise<UniverseCheckpoint>;
   requestExport(): Promise<unknown>;
+  /** Resolves the pending opportunity; rejects on validation failure. */
+  resolveEventDecision(opportunityId: string, choiceId: string): Promise<RenderSnapshot>;
   destroy(): void;
 }
 
@@ -35,7 +38,10 @@ export class WorkerRuntimeClient implements RuntimeClient {
   intervene(intervention:"global"|"droughtA"|"droughtB"){this.command({type:"APPLY_INTERVENTION",intervention})}
   runToNextEvent(maxTicks=100_000){this.command({type:"RUN_TO_NEXT_EVENT",maxTicks})}
   createControlFork(){this.command({type:"CREATE_CONTROL_FORK"})}
-  loadCheckpoint(checkpoint:UniverseCheckpoint){
+  resolveEventDecision(opportunityId:string,choiceId:string){
+    return this.#request<RenderSnapshot>("RESOLVE_EVENT_DECISION",{opportunityId,choiceId});
+  }
+  loadCheckpoint(checkpoint:SupportedUniverseCheckpoint){
     // Acknowledged restore: resolves only after the worker has restored the
     // checkpoint and emitted the corresponding snapshot. Rejects on worker
     // error or timeout instead of silently falling back.
@@ -90,11 +96,11 @@ export class WorkerRuntimeClient implements RuntimeClient {
     if(pending){clearTimeout(pending.timer);pending.reject(reason)}
   }
 
-  #request<T>(type:"REQUEST_CHECKPOINT"|"REQUEST_EXPORT"):Promise<T>{
+  #request<T>(type:"REQUEST_CHECKPOINT"|"REQUEST_EXPORT"|"RESOLVE_EVENT_DECISION",extra:Record<string,unknown>={}):Promise<T>{
     const requestId=`r-${++this.#seq}`;
     return new Promise<T>((resolve,reject)=>{
       this.#pending.set(requestId,{resolve,reject});
-      this.command({type,requestId} as RuntimeCommand);
+      this.command({type,requestId,...extra} as RuntimeCommand);
     });
   }
 
@@ -103,6 +109,13 @@ export class WorkerRuntimeClient implements RuntimeClient {
       const pendingLoad=this.#pendingLoad;
       if(pendingLoad&&response.snapshot.tick===pendingLoad.expectedTick)pendingLoad.resolve(response.snapshot);
       for(const listener of this.#listeners)listener(response.snapshot);
+      return;
+    }
+    if(response.type==="DECISION_RESOLVED"){
+      const pending=this.#pending.get(response.requestId);
+      if(!pending)return;
+      this.#pending.delete(response.requestId);
+      pending.resolve(response.snapshot);
       return;
     }
     if(response.type==="CHECKPOINT"||response.type==="EXPORT"){
