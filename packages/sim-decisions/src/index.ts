@@ -132,11 +132,14 @@ export function buildDecisionOpportunity(
   };
 }
 
-/** Engine modes this runtime can actually apply today. */
+/** Engine modes this runtime can actually apply today. c_washout is
+ * validation-internal (never offered, no button); support here only lets
+ * assays apply it through the same recorded path. */
 export const SUPPORTED_INTERVENTION_MODES: ReadonlySet<string> = new Set([
   "global_crash",
   "drought_a",
   "drought_b",
+  "c_washout",
 ]);
 
 /** Validate a persisted spec against what the current engine/runtime supports. */
@@ -150,7 +153,7 @@ export function isSupportedIntervention(spec: InterventionSpec | null): boolean 
 /** Map the versioned spec onto the existing engine catalyst mode (no behavior change). */
 export function engineCatalystModeFor(
   spec: InterventionSpec,
-): "global" | "droughtA" | "droughtB" {
+): "global" | "droughtA" | "droughtB" | "cWashout" {
   switch (spec.mode) {
     case "global_crash":
       return "global";
@@ -158,6 +161,8 @@ export function engineCatalystModeFor(
       return "droughtA";
     case "drought_b":
       return "droughtB";
+    case "c_washout":
+      return "cWashout";
   }
 }
 

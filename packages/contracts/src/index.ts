@@ -81,7 +81,10 @@ export type InterventionSpec =
   | {
       readonly schemaVersion: 1;
       readonly kind: "nutrient_disturbance";
-      readonly mode: "global_crash" | "drought_a" | "drought_b";
+      // c_washout is validation-internal (matched reliance assays): it is a
+      // supported engine effect but never offered in catalyst windows and has
+      // no Experiments button. Old saves never reference it.
+      readonly mode: "global_crash" | "drought_a" | "drought_b" | "c_washout";
     };
 
 export interface DecisionChoice {

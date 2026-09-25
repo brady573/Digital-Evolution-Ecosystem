@@ -2,6 +2,11 @@ import assert from "node:assert/strict";
 import { EcologyObserver, type ObservationFrame } from "../../packages/sim-analysis/src/index.ts";
 import { UniverseSession } from "../../packages/sim-runtime/src/session.ts";
 import type { EngineConfig } from "../../packages/contracts/src/index.ts";
+import {
+  catalystIds,
+  engineCatalystModeFor,
+  isSupportedIntervention,
+} from "../../packages/sim-decisions/src/index.ts";
 import { ENGINE_VERSION } from "../../packages/sim-core/src/index.ts";
 import { CHECKPOINT_SCHEMA_VERSION } from "../../packages/sim-runtime/src/session.ts";
 
@@ -370,7 +375,66 @@ function testMultiSeedPossibility() {
   console.log(`dependency multi-seed possibility [${established.join(", ")}]: PASS`);
 }
 
+function testWashoutReliance() {
+  // Washout is validation-internal: applicable through the recorded path but
+  // never offered in windows and without an Experiments button.
+  assert.equal(
+    engineCatalystModeFor({ schemaVersion: 1, kind: "nutrient_disturbance", mode: "c_washout" }),
+    "cWashout",
+    "washout maps to the engine sink mode",
+  );
+  assert.ok(
+    isSupportedIntervention({ schemaVersion: 1, kind: "nutrient_disturbance", mode: "c_washout" }),
+    "washout applies through the recorded path",
+  );
+  assert.ok(!catalystIds().some((id) => String(id).includes("washout")), "washout never offered");
+  assert.equal(catalystIds().length, 3, "window catalog unchanged");
+  // Stage 2 Level-3: matched C-availability perturbation. An established
+  // guild (20% scavengers) faces a recorded environmental C sink on the live
+  // branch while the exact control twin runs untouched. The guild collapses
+  // to 4-6% against 20-27% control while population holds: material reliance
+  // on continued C availability, demonstrated by controlled comparison
+  // rather than temporal order. Deterministic on the fixture seed.
+  const session = new UniverseSession();
+  session.create(fixtureConfig(FIXTURE_SEED));
+  settle(session, 60000);
+  session.createControlFork();
+  session.applyIntervention(
+    { schemaVersion: 1, kind: "nutrient_disturbance", mode: "c_washout" },
+    "reliance assay",
+  );
+  settle(session, 75000);
+  const snap = session.snapshot();
+  const live = snap.metrics as any;
+  const control = snap.control!.metrics as any;
+  const liveShare = (live.metabolic_roles?.counts?.byproduct_scavenger || 0) / live.population;
+  const controlShare = (control.metabolic_roles?.counts?.byproduct_scavenger || 0) / control.population;
+  assert.ok(liveShare < 0.1, `washed guild collapses (live ${liveShare.toFixed(3)})`);
+  assert.ok(controlShare > 0.15, `control guild holds (control ${controlShare.toFixed(3)})`);
+  assert.ok(liveShare < controlShare / 2, "guild effect is large, not marginal");
+  assert.ok(
+    live.population > control.population * 0.8,
+    `no wipeout: live ${live.population} vs control ${control.population}`,
+  );
+  assert.ok(
+    live.metabolite_c.stock < control.metabolite_c.stock / 2,
+    "sink suppresses C re-accumulation",
+  );
+  const liveRemovals = live.nutrient_field.accounting.removal_events as any[];
+  const controlRemovals = control.nutrient_field.accounting.removal_events as any[];
+  assert.ok(liveRemovals.some((e: any) => e.type === "cWashout"), "washout recorded on live");
+  assert.ok(
+    liveRemovals.every((e: any) => e.type === "cWashout"),
+    "washout touches C only: no A/B removal on live",
+  );
+  assert.equal(controlRemovals.length, 0, "control records no removals");
+  console.log(
+    `washout reliance (live ${(liveShare * 100).toFixed(1)}% vs control ${(controlShare * 100).toFixed(1)}%): PASS`,
+  );
+}
+
 testFixtureArc();
 testMultiSeedPossibility();
 testTradeoffHolds();
+testWashoutReliance();
 console.log(`dependency validation: PASS (engine ${ENGINE_VERSION})`);
