@@ -1,0 +1,2772 @@
+{
+  "baseline": "m4b-phenotype-prototype-v1",
+  "sections": {
+    "matrix": {
+      "blob": {
+        "driver": "speed",
+        "cells": [
+          {
+            "level": "low",
+            "driverValue": 0.5,
+            "quantized": {
+              "elongation": 0,
+              "projection": 0.25,
+              "density": 0.5,
+              "asymmetry": 0.25,
+              "secondary": 0,
+              "bulk": 0.25
+            },
+            "filled": 81,
+            "hash": "788d165c"
+          },
+          {
+            "level": "medium",
+            "driverValue": 1.5,
+            "quantized": {
+              "elongation": 0.25,
+              "projection": 0.25,
+              "density": 0.5,
+              "asymmetry": 0.25,
+              "secondary": 0,
+              "bulk": 0.25
+            },
+            "filled": 91,
+            "hash": "16ccbf14"
+          },
+          {
+            "level": "high",
+            "driverValue": 2.5,
+            "quantized": {
+              "elongation": 0.5,
+              "projection": 0.25,
+              "density": 0.5,
+              "asymmetry": 0.25,
+              "secondary": 0,
+              "bulk": 0.25
+            },
+            "filled": 91,
+            "hash": "16ccbf14"
+          }
+        ]
+      },
+      "segmented": {
+        "driver": "speed",
+        "cells": [
+          {
+            "level": "low",
+            "driverValue": 2,
+            "quantized": {
+              "elongation": 0.5,
+              "projection": 0.5,
+              "density": 0.5,
+              "asymmetry": 0.25,
+              "secondary": 0,
+              "bulk": 0.25
+            },
+            "filled": 14,
+            "hash": "30919a7d"
+          },
+          {
+            "level": "medium",
+            "driverValue": 2.9,
+            "quantized": {
+              "elongation": 0.75,
+              "projection": 0.5,
+              "density": 0.5,
+              "asymmetry": 0.25,
+              "secondary": 0,
+              "bulk": 0.25
+            },
+            "filled": 17,
+            "hash": "6ba3037c"
+          },
+          {
+            "level": "high",
+            "driverValue": 3.8,
+            "quantized": {
+              "elongation": 1,
+              "projection": 0.5,
+              "density": 0.5,
+              "asymmetry": 0.25,
+              "secondary": 0,
+              "bulk": 0.25
+            },
+            "filled": 17,
+            "hash": "6ba3037c"
+          }
+        ]
+      },
+      "radial": {
+        "driver": "sensing",
+        "cells": [
+          {
+            "level": "low",
+            "driverValue": 110,
+            "quantized": {
+              "elongation": 0.25,
+              "projection": 0.5,
+              "density": 0.5,
+              "asymmetry": 0.5,
+              "secondary": 0,
+              "bulk": 0.25
+            },
+            "filled": 23,
+            "hash": "a62f7386"
+          },
+          {
+            "level": "medium",
+            "driverValue": 140,
+            "quantized": {
+              "elongation": 0.25,
+              "projection": 0.75,
+              "density": 0.5,
+              "asymmetry": 0.5,
+              "secondary": 0,
+              "bulk": 0.25
+            },
+            "filled": 29,
+            "hash": "b344e334"
+          },
+          {
+            "level": "high",
+            "driverValue": 170,
+            "quantized": {
+              "elongation": 0.25,
+              "projection": 1,
+              "density": 0.5,
+              "asymmetry": 0.5,
+              "secondary": 0,
+              "bulk": 0.25
+            },
+            "filled": 43,
+            "hash": "9ee604ce"
+          }
+        ]
+      },
+      "plated": {
+        "driver": "metabolism",
+        "cells": [
+          {
+            "level": "low",
+            "driverValue": 0.25,
+            "quantized": {
+              "elongation": 0.25,
+              "projection": 0.25,
+              "density": 0.5,
+              "asymmetry": 0.5,
+              "secondary": 0,
+              "bulk": 0.25
+            },
+            "filled": 113,
+            "hash": "e4e848dc"
+          },
+          {
+            "level": "medium",
+            "driverValue": 0.36,
+            "quantized": {
+              "elongation": 0.25,
+              "projection": 0.25,
+              "density": 0.75,
+              "asymmetry": 0.5,
+              "secondary": 0,
+              "bulk": 0.25
+            },
+            "filled": 113,
+            "hash": "e4e848dc"
+          },
+          {
+            "level": "high",
+            "driverValue": 0.48,
+            "quantized": {
+              "elongation": 0.25,
+              "projection": 0.25,
+              "density": 1,
+              "asymmetry": 0.5,
+              "secondary": 0,
+              "bulk": 0.25
+            },
+            "filled": 113,
+            "hash": "e4e848dc"
+          }
+        ]
+      },
+      "branching": {
+        "driver": "sensing",
+        "cells": [
+          {
+            "level": "low",
+            "driverValue": 70,
+            "quantized": {
+              "elongation": 0.25,
+              "projection": 0.25,
+              "density": 0.5,
+              "asymmetry": 0.75,
+              "secondary": 0.25,
+              "bulk": 0.25
+            },
+            "filled": 12,
+            "hash": "458d578f"
+          },
+          {
+            "level": "medium",
+            "driverValue": 120,
+            "quantized": {
+              "elongation": 0.25,
+              "projection": 0.75,
+              "density": 0.5,
+              "asymmetry": 0.75,
+              "secondary": 0.25,
+              "bulk": 0.25
+            },
+            "filled": 32,
+            "hash": "8e787f9d"
+          },
+          {
+            "level": "high",
+            "driverValue": 170,
+            "quantized": {
+              "elongation": 0.25,
+              "projection": 1,
+              "density": 0.5,
+              "asymmetry": 0.75,
+              "secondary": 0.25,
+              "bulk": 0.25
+            },
+            "filled": 39,
+            "hash": "b137ee24"
+          }
+        ]
+      },
+      "paddled": {
+        "driver": "speed",
+        "cells": [
+          {
+            "level": "low",
+            "driverValue": 2,
+            "quantized": {
+              "elongation": 0.5,
+              "projection": 0.5,
+              "density": 0.75,
+              "asymmetry": 0.5,
+              "secondary": 0,
+              "bulk": 0.25
+            },
+            "filled": 50,
+            "hash": "7b77f329"
+          },
+          {
+            "level": "medium",
+            "driverValue": 2.9,
+            "quantized": {
+              "elongation": 0.75,
+              "projection": 0.5,
+              "density": 0.75,
+              "asymmetry": 0.5,
+              "secondary": 0,
+              "bulk": 0.25
+            },
+            "filled": 56,
+            "hash": "20afe4fd"
+          },
+          {
+            "level": "high",
+            "driverValue": 3.8,
+            "quantized": {
+              "elongation": 1,
+              "projection": 0.5,
+              "density": 0.75,
+              "asymmetry": 0.5,
+              "secondary": 0,
+              "bulk": 0.25
+            },
+            "filled": 56,
+            "hash": "20afe4fd"
+          }
+        ]
+      }
+    },
+    "strips": [
+      {
+        "trait": "speed",
+        "rows": [
+          {
+            "base": "segmented",
+            "fams": [
+              "0.25:blob",
+              "1.2:blob",
+              "2.1:segm",
+              "3:segm",
+              "4:padd"
+            ]
+          },
+          {
+            "base": "paddled",
+            "fams": [
+              "0.25:plat",
+              "1.2:plat",
+              "2.1:plat",
+              "3:padd",
+              "4:padd"
+            ]
+          }
+        ]
+      },
+      {
+        "trait": "sensing",
+        "rows": [
+          {
+            "base": "radial",
+            "fams": [
+              "10:blob",
+              "52:blob",
+              "95:blob",
+              "137:radi",
+              "180:radi"
+            ]
+          },
+          {
+            "base": "branching",
+            "fams": [
+              "10:plat",
+              "52:plat",
+              "95:bran",
+              "137:bran",
+              "180:bran"
+            ]
+          }
+        ]
+      },
+      {
+        "trait": "metabolism",
+        "rows": [
+          {
+            "base": "plated",
+            "fams": [
+              "0.04:blob",
+              "0.155:blob",
+              "0.27:plat",
+              "0.385:plat",
+              "0.5:plat"
+            ]
+          },
+          {
+            "base": "blob",
+            "fams": [
+              "0.04:blob",
+              "0.155:blob",
+              "0.27:blob",
+              "0.385:plat",
+              "0.5:plat"
+            ]
+          }
+        ]
+      },
+      {
+        "trait": "reproduction",
+        "rows": [
+          {
+            "base": "paddled",
+            "fams": [
+              "55:padd",
+              "96:padd",
+              "137:padd",
+              "178:padd",
+              "220:padd"
+            ]
+          },
+          {
+            "base": "blob",
+            "fams": [
+              "55:blob",
+              "96:blob",
+              "137:blob",
+              "178:blob",
+              "220:blob"
+            ]
+          }
+        ]
+      },
+      {
+        "trait": "diet",
+        "rows": [
+          {
+            "base": "paddled",
+            "fams": [
+              "-1.5:padd",
+              "-0.75:padd",
+              "0:padd",
+              "0.75:padd",
+              "1.5:padd"
+            ]
+          },
+          {
+            "base": "segmented",
+            "fams": [
+              "-1.5:segm",
+              "-0.75:segm",
+              "0:segm",
+              "0.75:segm",
+              "1.5:segm"
+            ]
+          }
+        ]
+      },
+      {
+        "trait": "habitat",
+        "rows": [
+          {
+            "base": "branching",
+            "fams": [
+              "-1.5:bran",
+              "-0.75:bran",
+              "0:radi",
+              "0.75:bran",
+              "1.5:bran"
+            ]
+          },
+          {
+            "base": "blob",
+            "fams": [
+              "-1.5:blob",
+              "-0.75:blob",
+              "0:blob",
+              "0.75:blob",
+              "1.5:blob"
+            ]
+          }
+        ]
+      },
+      {
+        "trait": "byproductUse",
+        "rows": [
+          {
+            "base": "branching",
+            "fams": [
+              "0:bran",
+              "0.375:bran",
+              "0.75:bran",
+              "1.125:bran",
+              "1.5:bran"
+            ]
+          },
+          {
+            "base": "plated",
+            "fams": [
+              "0:plat",
+              "0.375:plat",
+              "0.75:plat",
+              "1.125:plat",
+              "1.5:plat"
+            ]
+          }
+        ]
+      },
+      {
+        "trait": "dormancyResponse",
+        "rows": [
+          {
+            "base": "blob",
+            "fams": [
+              "0:blob",
+              "0.375:blob",
+              "0.75:blob",
+              "1.125:blob",
+              "1.5:blob"
+            ]
+          },
+          {
+            "base": "radial",
+            "fams": [
+              "0:radi",
+              "0.375:radi",
+              "0.75:radi",
+              "1.125:radi",
+              "1.5:radi"
+            ]
+          }
+        ]
+      }
+    ],
+    "lineages": {
+      "stable": {
+        "families": [
+          "blob",
+          "blob",
+          "blob",
+          "blob",
+          "blob",
+          "blob",
+          "blob",
+          "blob",
+          "blob",
+          "blob"
+        ],
+        "transitions": 0
+      },
+      "directional": {
+        "families": [
+          "blob",
+          "blob",
+          "blob",
+          "blob",
+          "blob",
+          "blob",
+          "blob",
+          "blob",
+          "segmented",
+          "segmented"
+        ],
+        "transitions": 1
+      },
+      "near-boundary": {
+        "families": [
+          "blob",
+          "blob",
+          "blob",
+          "blob",
+          "blob",
+          "blob",
+          "blob",
+          "blob",
+          "blob",
+          "blob"
+        ],
+        "transitions": 0
+      },
+      "transition": {
+        "families": [
+          "blob",
+          "blob",
+          "blob",
+          "blob",
+          "blob",
+          "blob",
+          "blob",
+          "segmented",
+          "segmented",
+          "segmented"
+        ],
+        "transitions": 1
+      }
+    },
+    "boundary": [
+      {
+        "t": 0.6,
+        "founder": "segmented",
+        "childOfBlob": "blob",
+        "childOfSegmented": "segmented"
+      },
+      {
+        "t": 0.7,
+        "founder": "segmented",
+        "childOfBlob": "blob",
+        "childOfSegmented": "segmented"
+      },
+      {
+        "t": 0.8,
+        "founder": "segmented",
+        "childOfBlob": "segmented",
+        "childOfSegmented": "segmented"
+      },
+      {
+        "t": 0.9,
+        "founder": "segmented",
+        "childOfBlob": "segmented",
+        "childOfSegmented": "segmented"
+      }
+    ],
+    "continuity": [
+      {
+        "case": "comfortably inside a family",
+        "family": "blob",
+        "hash": "16ccbf14",
+        "identical": true
+      },
+      {
+        "case": "near a family boundary",
+        "family": "blob",
+        "hash": "16ccbf14",
+        "identical": true
+      },
+      {
+        "case": "recently transitioned",
+        "family": "segmented",
+        "hash": "d64c59a0",
+        "identical": true
+      }
+    ],
+    "equivalence": {
+      "identical": true,
+      "maxCosmeticDrift": 2
+    },
+    "dormancy": {
+      "blob": {
+        "active": 91,
+        "weak": 28,
+        "strong": 50
+      },
+      "segmented": {
+        "active": 17,
+        "weak": 16,
+        "strong": 11
+      },
+      "radial": {
+        "active": 29,
+        "weak": 25,
+        "strong": 6
+      },
+      "plated": {
+        "active": 113,
+        "weak": 57,
+        "strong": 121
+      },
+      "branching": {
+        "active": 32,
+        "weak": 29,
+        "strong": 5
+      },
+      "paddled": {
+        "active": 56,
+        "weak": 41,
+        "strong": 12
+      }
+    },
+    "scenes": [
+      {
+        "name": "scene-50",
+        "tick": 1000,
+        "population": 64,
+        "dormant": 1,
+        "simMs": 189,
+        "families": {
+          "blob": 64
+        },
+        "tierMs": {
+          "ecosystem": 0,
+          "population": 0,
+          "inspection": 2
+        }
+      },
+      {
+        "name": "scene-250",
+        "tick": 2500,
+        "population": 287,
+        "dormant": 17,
+        "simMs": 658,
+        "families": {
+          "blob": 287
+        },
+        "tierMs": {
+          "ecosystem": 1,
+          "population": 5,
+          "inspection": 3
+        }
+      },
+      {
+        "name": "scene-1000",
+        "tick": 4000,
+        "population": 1211,
+        "dormant": 215,
+        "simMs": 2330,
+        "families": {
+          "blob": 1211
+        },
+        "tierMs": {
+          "ecosystem": 5,
+          "population": 3,
+          "inspection": 9
+        }
+      },
+      {
+        "name": "scene-3000",
+        "tick": 5000,
+        "population": 3366,
+        "dormant": 533,
+        "simMs": 6062,
+        "families": {
+          "blob": 3366
+        },
+        "tierMs": {
+          "ecosystem": 16,
+          "population": 16,
+          "inspection": 20
+        }
+      }
+    ],
+    "perf": {
+      "organisms": 1211,
+      "resolveBestMs": 3.025156000001516,
+      "ecoBestMs": 1.8542190000007395,
+      "ecoRects": 6895,
+      "popBestMs": 2.3476559999999154,
+      "popRects": 40191,
+      "inspBestMs": 4.357187999999951,
+      "inspRects": 101180,
+      "baselineBestMs": 0.25171899999986636,
+      "baselineRects": 5903
+    },
+    "tuning": {
+      "hysteresisUp": 0.78,
+      "hysteresisDown": 0.21999999999999997,
+      "closestPair": "segmented vs radial",
+      "closestDiff": 26,
+      "manifoldRanges": [
+        "speed [0.68, 1.69]",
+        "sensing [31.96, 79.55]",
+        "metabolism [0.10, 0.22]",
+        "reproduction [55.00, 136.50]",
+        "diet [-0.45, 0.37]",
+        "habitat [-0.44, 0.56]",
+        "byproductUse [0.00, 0.46]",
+        "dormancyResponse [0.00, 0.87]"
+      ],
+      "closestNonBlob": {
+        "d": 0.20659084659891921,
+        "fam": "plated"
+      },
+      "manifoldNote": "owner decision required"
+    },
+    "visuals": [
+      {
+        "section": "matrix",
+        "key": "blob/low",
+        "label": "blob low eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000000100011100010000000",
+        "family": "blob"
+      },
+      {
+        "section": "matrix",
+        "key": "blob/low",
+        "label": "blob low pop",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000010000001111100001111100011111110001111100001111100000010000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "matrix",
+        "key": "blob/low",
+        "label": "blob low insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100001111111110000111111111000111111111110001111111110000111111111000011111111100000111111100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "matrix",
+        "key": "blob/medium",
+        "label": "blob medium eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000000100011100010000000",
+        "family": "blob"
+      },
+      {
+        "section": "matrix",
+        "key": "blob/medium",
+        "label": "blob medium pop",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "matrix",
+        "key": "blob/medium",
+        "label": "blob medium insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100000111111100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "matrix",
+        "key": "blob/high",
+        "label": "blob high eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000000100111110010000000",
+        "family": "blob"
+      },
+      {
+        "section": "matrix",
+        "key": "blob/high",
+        "label": "blob high pop",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "matrix",
+        "key": "blob/high",
+        "label": "blob high insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100000111111100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "matrix",
+        "key": "segmented/low",
+        "label": "segmented low eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0101100000010100000001010",
+        "family": "segmented"
+      },
+      {
+        "section": "matrix",
+        "key": "segmented/low",
+        "label": "segmented low pop",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000000000010101011000000000010101010000000000010101010000000000000000000",
+        "family": "segmented"
+      },
+      {
+        "section": "matrix",
+        "key": "segmented/low",
+        "label": "segmented low insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000000000000000000000000000000000000000101010110000000000000000001010101000000000000000000010101010000000000000000000000000100000000000000000000000000000",
+        "family": "segmented"
+      },
+      {
+        "section": "matrix",
+        "key": "segmented/medium",
+        "label": "segmented medium eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0101100000010100000001010",
+        "family": "segmented"
+      },
+      {
+        "section": "matrix",
+        "key": "segmented/medium",
+        "label": "segmented medium pop",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000000000010101011000000000010101010000000000010101010000000000000000000",
+        "family": "segmented"
+      },
+      {
+        "section": "matrix",
+        "key": "segmented/medium",
+        "label": "segmented medium insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000000000000000000000000000000000000001010101011000000000000000010101010100000000000000000101010101000000000000000000000000100000000000000000000000000000",
+        "family": "segmented"
+      },
+      {
+        "section": "matrix",
+        "key": "segmented/high",
+        "label": "segmented high eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0101100000010100000001010",
+        "family": "segmented"
+      },
+      {
+        "section": "matrix",
+        "key": "segmented/high",
+        "label": "segmented high pop",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000000000010101011000000000010101010000000000010101010000000000000000000",
+        "family": "segmented"
+      },
+      {
+        "section": "matrix",
+        "key": "segmented/high",
+        "label": "segmented high insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000000000000000000000000000000000000001010101011000000000000000010101010100000000000000000101010101000000000000000000000000100000000000000000000000000000",
+        "family": "segmented"
+      },
+      {
+        "section": "matrix",
+        "key": "radial/low",
+        "label": "radial low eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000001010011110101000000",
+        "family": "radial"
+      },
+      {
+        "section": "matrix",
+        "key": "radial/low",
+        "label": "radial low pop",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000000000001000100000111000001111110000111000001000100000000000000000000",
+        "family": "radial"
+      },
+      {
+        "section": "matrix",
+        "key": "radial/low",
+        "label": "radial low insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000000000000000000000000001000001000000010001000000000111000000001111111100000001110000000001000100000001000001000000000000100000000000000000000000000000",
+        "family": "radial"
+      },
+      {
+        "section": "matrix",
+        "key": "radial/medium",
+        "label": "radial medium eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000001010011110101000000",
+        "family": "radial"
+      },
+      {
+        "section": "matrix",
+        "key": "radial/medium",
+        "label": "radial medium pop",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000010000010001000100000111000011111111000111000001000100010000010000000000",
+        "family": "radial"
+      },
+      {
+        "section": "matrix",
+        "key": "radial/medium",
+        "label": "radial medium insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000000000000100000001000001000001000000010001000000000111000000011111111110000001110000000001000100000001000001000001000000110000000000000000000000000000",
+        "family": "radial"
+      },
+      {
+        "section": "matrix",
+        "key": "radial/high",
+        "label": "radial high eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000001110011110111000000",
+        "family": "radial"
+      },
+      {
+        "section": "matrix",
+        "key": "radial/high",
+        "label": "radial high pop",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000010010010001010100000111000011111111000111000001010100010010010000000000",
+        "family": "radial"
+      },
+      {
+        "section": "matrix",
+        "key": "radial/high",
+        "label": "radial high insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000010000100001000100010001000001001001000000010101000000000111000000111111111111000001110000000001010100000001001001000001000100110001000010000100000000000000",
+        "family": "radial"
+      },
+      {
+        "section": "matrix",
+        "key": "plated/low",
+        "label": "plated low eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000001111000010111100000",
+        "family": "plated"
+      },
+      {
+        "section": "matrix",
+        "key": "plated/low",
+        "label": "plated low pop",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000011111110011111110011111111000000001011111111011111110011111110000000000",
+        "family": "plated"
+      },
+      {
+        "section": "matrix",
+        "key": "plated/low",
+        "label": "plated low insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000011111111111001111111111100111111111110011111111111001111111111110000000000001011111111111101111111111100111111111110011111111111001111111111100000000000000",
+        "family": "plated"
+      },
+      {
+        "section": "matrix",
+        "key": "plated/medium",
+        "label": "plated medium eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000001111000010111100000",
+        "family": "plated"
+      },
+      {
+        "section": "matrix",
+        "key": "plated/medium",
+        "label": "plated medium pop",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000011111110011111110011111111000000001011111111011111110011111110000000000",
+        "family": "plated"
+      },
+      {
+        "section": "matrix",
+        "key": "plated/medium",
+        "label": "plated medium insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000011111111111001111111111100111111111110011111111111001111111111110000000000001011111111111101111111111100111111111110011111111111001111111111100000000000000",
+        "family": "plated"
+      },
+      {
+        "section": "matrix",
+        "key": "plated/high",
+        "label": "plated high eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000001111000010111100000",
+        "family": "plated"
+      },
+      {
+        "section": "matrix",
+        "key": "plated/high",
+        "label": "plated high pop",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000011111110011111110011111111000000001011111111011111110011111110000000000",
+        "family": "plated"
+      },
+      {
+        "section": "matrix",
+        "key": "plated/high",
+        "label": "plated high insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000011111111111001111111111100111111111110011111111111001111111111110000000000001011111111111101111111111100111111111110011111111111001111111111100000000000000",
+        "family": "plated"
+      },
+      {
+        "section": "matrix",
+        "key": "branching/low",
+        "label": "branching low eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000000000001000111100100",
+        "family": "branching"
+      },
+      {
+        "section": "matrix",
+        "key": "branching/low",
+        "label": "branching low pop",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000000000000000000000000000000000000000010000000111110000111110000010000",
+        "family": "branching"
+      },
+      {
+        "section": "matrix",
+        "key": "branching/low",
+        "label": "branching low insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000000001111100000000111110000000001000000",
+        "family": "branching"
+      },
+      {
+        "section": "matrix",
+        "key": "branching/medium",
+        "label": "branching medium eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000000100011110111100100",
+        "family": "branching"
+      },
+      {
+        "section": "matrix",
+        "key": "branching/medium",
+        "label": "branching medium pop",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000000000000000000000000000000010000001111111001111111001111111000010000",
+        "family": "branching"
+      },
+      {
+        "section": "matrix",
+        "key": "branching/medium",
+        "label": "branching medium insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000000111111111000000010000000001111111110000000100100000011111111100000001000000",
+        "family": "branching"
+      },
+      {
+        "section": "matrix",
+        "key": "branching/high",
+        "label": "branching high eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000000100011110111100100",
+        "family": "branching"
+      },
+      {
+        "section": "matrix",
+        "key": "branching/high",
+        "label": "branching high pop",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000000000000000000000010000000010000001111111001111111001111111000010000",
+        "family": "branching"
+      },
+      {
+        "section": "matrix",
+        "key": "branching/high",
+        "label": "branching high insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000000000000000000000000000000000000000000000000000000010000000000001000000001111111111100000010000000011111111111000000100100000111111111110000001000000",
+        "family": "branching"
+      },
+      {
+        "section": "matrix",
+        "key": "paddled/low",
+        "label": "paddled low eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "1110000100111110010011100",
+        "family": "paddled"
+      },
+      {
+        "section": "matrix",
+        "key": "paddled/low",
+        "label": "paddled low pop",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000001110000001110000000010000111111111000010000001110000001110000000000000",
+        "family": "paddled"
+      },
+      {
+        "section": "matrix",
+        "key": "paddled/low",
+        "label": "paddled low insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000000000000001110000000000111000000000000100000001111111111101111111111111011111111111000000010000000000111000000000011100100000000000000000000000000000",
+        "family": "paddled"
+      },
+      {
+        "section": "matrix",
+        "key": "paddled/medium",
+        "label": "paddled medium eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "1110000100111110010011100",
+        "family": "paddled"
+      },
+      {
+        "section": "matrix",
+        "key": "paddled/medium",
+        "label": "paddled medium pop",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "001110000001110000001110000000010000111111111000010000001110000001110000001110000",
+        "family": "paddled"
+      },
+      {
+        "section": "matrix",
+        "key": "paddled/medium",
+        "label": "paddled medium insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000011100000000001110000000000111000000000000100000001111111111101111111111111011111111111000000010000000000111000000000011100100000001110000000000000000000",
+        "family": "paddled"
+      },
+      {
+        "section": "matrix",
+        "key": "paddled/high",
+        "label": "paddled high eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "1110000100111110010011100",
+        "family": "paddled"
+      },
+      {
+        "section": "matrix",
+        "key": "paddled/high",
+        "label": "paddled high pop",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "001110000001110000001110000000010000111111111000010000001110000001110000001110000",
+        "family": "paddled"
+      },
+      {
+        "section": "matrix",
+        "key": "paddled/high",
+        "label": "paddled high insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000011100000000001110000000000111000000000000100000001111111111101111111111111011111111111000000010000000000111000000000011100100000001110000000000000000000",
+        "family": "paddled"
+      },
+      {
+        "section": "strips",
+        "key": "speed/segmented",
+        "label": "segmented speed=0.25",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100001111111110000111111111001111111111111001111111110000111111111000011111111100001111111100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "strips",
+        "key": "speed/segmented",
+        "label": "segmented speed=1.2",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100001111111100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "strips",
+        "key": "speed/segmented",
+        "label": "segmented speed=2.1",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000000000000000000000000000000000000000101010110000000000000000001010101000000000000000000010101010000000000000000001000000000000000000000000000000000000",
+        "family": "segmented"
+      },
+      {
+        "section": "strips",
+        "key": "speed/segmented",
+        "label": "segmented speed=3",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000000000000000000000000000000000000001010101011000000000000000010101010100000000000000000101010101000000000000000001000000000000000000000000000000000000",
+        "family": "segmented"
+      },
+      {
+        "section": "strips",
+        "key": "speed/segmented",
+        "label": "segmented speed=4",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000011100000000001110000000000111000000000000100000001111111111101111111111111011111111111000000010000000000111000000001011100000000001110000000000000000000",
+        "family": "paddled"
+      },
+      {
+        "section": "strips",
+        "key": "speed/paddled",
+        "label": "paddled speed=0.25",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000011111111111001111111111100111111111110011111111111001111111111110000000000001011111111111101111111111100111111111110011111111111001111111111100000000000000",
+        "family": "plated"
+      },
+      {
+        "section": "strips",
+        "key": "speed/paddled",
+        "label": "paddled speed=1.2",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000011111111111001111111111100111111111110011111111111001111111111110000000000001011111111111101111111111100111111111110011111111111001111111111100000000000000",
+        "family": "plated"
+      },
+      {
+        "section": "strips",
+        "key": "speed/paddled",
+        "label": "paddled speed=2.1",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000011111111111001111111111100111111111110011111111111001111111111110000000000001011111111111101111111111100111111111110011111111111001111111111100000000000000",
+        "family": "plated"
+      },
+      {
+        "section": "strips",
+        "key": "speed/paddled",
+        "label": "paddled speed=3",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000011100000000001110000000000111000000000000100000001111111111101111111111111011111111111000000010000000000111000000001011100000000001110000000000000000000",
+        "family": "paddled"
+      },
+      {
+        "section": "strips",
+        "key": "speed/paddled",
+        "label": "paddled speed=4",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000011100000000001110000000000111000000000000100000001111111111101111111111111011111111111000000010000000000111000000001011100000000001110000000000000000000",
+        "family": "paddled"
+      },
+      {
+        "section": "strips",
+        "key": "sensing/radial",
+        "label": "radial sensing=10",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100001111111100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "strips",
+        "key": "sensing/radial",
+        "label": "radial sensing=52",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100001111111100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "strips",
+        "key": "sensing/radial",
+        "label": "radial sensing=95",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100001111111100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "strips",
+        "key": "sensing/radial",
+        "label": "radial sensing=137",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000000000000100000001000001000001000000010001000000000111000000011111111110000001110000000001000100000001000001000001000000010000000000000000000000000000",
+        "family": "radial"
+      },
+      {
+        "section": "strips",
+        "key": "sensing/radial",
+        "label": "radial sensing=180",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000010000100001000100010001000001001001000000010101000000000111000000111111111111000001110000000001010100000001001001000001000100010001000010000100000000000000",
+        "family": "radial"
+      },
+      {
+        "section": "strips",
+        "key": "sensing/branching",
+        "label": "branching sensing=10",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000011111111111001111111111100111111111110011111111111001111111111110000000000001011111111111101111111111100111111111110011111111111001111111111100000000000000",
+        "family": "plated"
+      },
+      {
+        "section": "strips",
+        "key": "sensing/branching",
+        "label": "branching sensing=52",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000011111111111001111111111100111111111110011111111111001111111111110000000000001011111111111101111111111100111111111110011111111111001111111111100000000000000",
+        "family": "plated"
+      },
+      {
+        "section": "strips",
+        "key": "sensing/branching",
+        "label": "branching sensing=95",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000010000000000111111100001011111110000001111111000000001000000",
+        "family": "branching"
+      },
+      {
+        "section": "strips",
+        "key": "sensing/branching",
+        "label": "branching sensing=137",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000000111111111000000010000000001111111110001000100000000011111111100000001000000",
+        "family": "branching"
+      },
+      {
+        "section": "strips",
+        "key": "sensing/branching",
+        "label": "branching sensing=180",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000000000000000000000000000000000000000000000000000000010000000000001000000001111111111100000010000000011111111111001000100000000111111111110000001000000",
+        "family": "branching"
+      },
+      {
+        "section": "strips",
+        "key": "metabolism/plated",
+        "label": "plated metabolism=0.04",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100001111111100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "strips",
+        "key": "metabolism/plated",
+        "label": "plated metabolism=0.155",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100001111111100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "strips",
+        "key": "metabolism/plated",
+        "label": "plated metabolism=0.27",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000011111111111001111111111100111111111110011111111111001111111111110000000000001011111111111101111111111100111111111110011111111111001111111111100000000000000",
+        "family": "plated"
+      },
+      {
+        "section": "strips",
+        "key": "metabolism/plated",
+        "label": "plated metabolism=0.385",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000011111111111001111111111100111111111110011111111111001111111111110000000000001011111111111101111111111100111111111110011111111111001111111111100000000000000",
+        "family": "plated"
+      },
+      {
+        "section": "strips",
+        "key": "metabolism/plated",
+        "label": "plated metabolism=0.5",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000011111111111001111111111100111111111110011111111111001111111111110000000000001011111111111101111111111100111111111110011111111111001111111111100000000000000",
+        "family": "plated"
+      },
+      {
+        "section": "strips",
+        "key": "metabolism/blob",
+        "label": "blob metabolism=0.04",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100001111111100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "strips",
+        "key": "metabolism/blob",
+        "label": "blob metabolism=0.155",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100001111111100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "strips",
+        "key": "metabolism/blob",
+        "label": "blob metabolism=0.27",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100001111111100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "strips",
+        "key": "metabolism/blob",
+        "label": "blob metabolism=0.385",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000011111111111001111111111100111111111110011111111111001111111111110000000000001011111111111101111111111100111111111110011111111111001111111111100000000000000",
+        "family": "plated"
+      },
+      {
+        "section": "strips",
+        "key": "metabolism/blob",
+        "label": "blob metabolism=0.5",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000011111111111001111111111100111111111110011111111111001111111111110000000000001011111111111101111111111100111111111110011111111111001111111111100000000000000",
+        "family": "plated"
+      },
+      {
+        "section": "strips",
+        "key": "reproduction/paddled",
+        "label": "paddled reproduction=55",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000011100000000001110000000000111000000000000100000001111111111101111111111111011111111111000000010000000000111000000001011100000000001110000000000000000000",
+        "family": "paddled"
+      },
+      {
+        "section": "strips",
+        "key": "reproduction/paddled",
+        "label": "paddled reproduction=96",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000011100000000001110000000000111000000000000100000001111111111101111111111111011111111111000000010000000000111000000001011100000000001110000000000000000000",
+        "family": "paddled"
+      },
+      {
+        "section": "strips",
+        "key": "reproduction/paddled",
+        "label": "paddled reproduction=137",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000011100000000001110000000000111000000000000100000001111111111101111111111111011111111111000000010000000000111000000001011100000000001110000000000000000000",
+        "family": "paddled"
+      },
+      {
+        "section": "strips",
+        "key": "reproduction/paddled",
+        "label": "paddled reproduction=178",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000011100000000001110000000000111000000000000100000001111111111101111111111111011111111111000000010000000000111000000001011100000000001110000000000000000000",
+        "family": "paddled"
+      },
+      {
+        "section": "strips",
+        "key": "reproduction/paddled",
+        "label": "paddled reproduction=220",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000011100000000001110000000000111000000000000100000001111111111101111111111111011111111111000000010000000000111000000001011100000000001110000000000000000000",
+        "family": "paddled"
+      },
+      {
+        "section": "strips",
+        "key": "reproduction/blob",
+        "label": "blob reproduction=55",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100001111111100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "strips",
+        "key": "reproduction/blob",
+        "label": "blob reproduction=96",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100001111111100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "strips",
+        "key": "reproduction/blob",
+        "label": "blob reproduction=137",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000001000000000111111100000111111111000111111111110011111111111001111111111101111111111111011111111111001111111111100111111111110001111111110000011111110000000001000000",
+        "family": "blob"
+      },
+      {
+        "section": "strips",
+        "key": "reproduction/blob",
+        "label": "blob reproduction=178",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000001000000000111111100000111111111000111111111110011111111111001111111111101111111111111011111111111001111111111100111111111110001111111110000011111110000000001000000",
+        "family": "blob"
+      },
+      {
+        "section": "strips",
+        "key": "reproduction/blob",
+        "label": "blob reproduction=220",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000001000000000111111100000111111111000111111111110011111111111001111111111101111111111111011111111111001111111111100111111111110001111111110000011111110000000001000000",
+        "family": "blob"
+      },
+      {
+        "section": "strips",
+        "key": "diet/paddled",
+        "label": "paddled diet=-1.5",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000011100000000001110000000000111000000000000100000001111111111101111111111111011111111111000000010000000000111000000001011100000000001110000000000000000000",
+        "family": "paddled"
+      },
+      {
+        "section": "strips",
+        "key": "diet/paddled",
+        "label": "paddled diet=-0.75",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000011100000000001110000000000111000000000000100000001111111111101111111111111011111111111000000010000000000111000000001011100000000001110000000000000000000",
+        "family": "paddled"
+      },
+      {
+        "section": "strips",
+        "key": "diet/paddled",
+        "label": "paddled diet=0",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000011100000000001110000000000111000000000000100000001111111111101111111111111011111111111000000010000000000111000000001011100000000001110000000000000000000",
+        "family": "paddled"
+      },
+      {
+        "section": "strips",
+        "key": "diet/paddled",
+        "label": "paddled diet=0.75",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000011100000000001110000000000111000000000000100000001111111111101111111111111011111111111000000010000000000111000000001011100000000001110000000000000000000",
+        "family": "paddled"
+      },
+      {
+        "section": "strips",
+        "key": "diet/paddled",
+        "label": "paddled diet=1.5",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000011100000000001110000000000111000000000000100000001111111111101111111111111011111111111000000010000000000111000000001011100000000001110000000000000000000",
+        "family": "paddled"
+      },
+      {
+        "section": "strips",
+        "key": "diet/segmented",
+        "label": "segmented diet=-1.5",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000000000000000000000000000000000000011010101010000000000000000010101010100000000000000000101010101000000000000000001000000000000000000000000000000000000",
+        "family": "segmented"
+      },
+      {
+        "section": "strips",
+        "key": "diet/segmented",
+        "label": "segmented diet=-0.75",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000000000000000000000000000000000000011010101010000000000000000010101010100000000000000000101010101000000000000000001000000000000000000000000000000000000",
+        "family": "segmented"
+      },
+      {
+        "section": "strips",
+        "key": "diet/segmented",
+        "label": "segmented diet=0",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000000000000000000000000000000000000001010101011000000000000000010101010100000000000000000101010101000000000000000001000000000000000000000000000000000000",
+        "family": "segmented"
+      },
+      {
+        "section": "strips",
+        "key": "diet/segmented",
+        "label": "segmented diet=0.75",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000000000000000000000000000000000000001010101011000000000000000010101010100000000000000000101010101000000000000000001000000000000000000000000000000000000",
+        "family": "segmented"
+      },
+      {
+        "section": "strips",
+        "key": "diet/segmented",
+        "label": "segmented diet=1.5",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000000000000000000000000000000000000001010101011000000000000000010101010100000000000000000101010101000000000000000001000000000000000000000000000000000000",
+        "family": "segmented"
+      },
+      {
+        "section": "strips",
+        "key": "habitat/branching",
+        "label": "branching habitat=-1.5",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000000111111111000000010000000001111111110001000100000000011111111100000001000000",
+        "family": "branching"
+      },
+      {
+        "section": "strips",
+        "key": "habitat/branching",
+        "label": "branching habitat=-0.75",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000000111111111000000010000000001111111110001000100000000011111111100000001000000",
+        "family": "branching"
+      },
+      {
+        "section": "strips",
+        "key": "habitat/branching",
+        "label": "branching habitat=0",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000000000000100000001000001000001000000010001000000000111000000011111111110000001110000000001000100000001000001000001000000010000000000000000000000000000",
+        "family": "radial"
+      },
+      {
+        "section": "strips",
+        "key": "habitat/branching",
+        "label": "branching habitat=0.75",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000000111111111000000010000000001111111110001000100000000011111111100000001000000",
+        "family": "branching"
+      },
+      {
+        "section": "strips",
+        "key": "habitat/branching",
+        "label": "branching habitat=1.5",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000000111111111000000010000000001111111110001000100000000011111111100000001000000",
+        "family": "branching"
+      },
+      {
+        "section": "strips",
+        "key": "habitat/blob",
+        "label": "blob habitat=-1.5",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100001111111100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "strips",
+        "key": "habitat/blob",
+        "label": "blob habitat=-0.75",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100001111111100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "strips",
+        "key": "habitat/blob",
+        "label": "blob habitat=0",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100001111111100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "strips",
+        "key": "habitat/blob",
+        "label": "blob habitat=0.75",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100001111111100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "strips",
+        "key": "habitat/blob",
+        "label": "blob habitat=1.5",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100001111111100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "strips",
+        "key": "byproductUse/branching",
+        "label": "branching byproductUse=0",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000000111111111000000010000000001111111110001000100000000011111111100000001000000",
+        "family": "branching"
+      },
+      {
+        "section": "strips",
+        "key": "byproductUse/branching",
+        "label": "branching byproductUse=0.375",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000000111111111000000010000000001111111110001000100000000011111111100000001000000",
+        "family": "branching"
+      },
+      {
+        "section": "strips",
+        "key": "byproductUse/branching",
+        "label": "branching byproductUse=0.75",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000000000000000000000000000000000000000000000000000000010000000010001000001001111111111100100010000010011111111111001000100000100111111111110000001000000",
+        "family": "branching"
+      },
+      {
+        "section": "strips",
+        "key": "byproductUse/branching",
+        "label": "branching byproductUse=1.125",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000000000000000000000000000000000000000000000000000000010000000010001000001001111111111100100010000010011111111111001000100000100111111111110000001000000",
+        "family": "branching"
+      },
+      {
+        "section": "strips",
+        "key": "byproductUse/branching",
+        "label": "branching byproductUse=1.5",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000000000000000000000000000000000000000000000000000000010000000010001000001001111111111100100010000010011111111111001000100000100111111111110000001000000",
+        "family": "branching"
+      },
+      {
+        "section": "strips",
+        "key": "byproductUse/plated",
+        "label": "plated byproductUse=0",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000011111111111001111111111100111111111110011111111111001111111111110000000000001011111111111101111111111100111111111110011111111111001111111111100000000000000",
+        "family": "plated"
+      },
+      {
+        "section": "strips",
+        "key": "byproductUse/plated",
+        "label": "plated byproductUse=0.375",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000011111111111001111111111100111111111110011111111111001111111111110000000000001011111111111101111111111100111111111110011111111111001111111111100000000000000",
+        "family": "plated"
+      },
+      {
+        "section": "strips",
+        "key": "byproductUse/plated",
+        "label": "plated byproductUse=0.75",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000011111111111001111111111100111111111110011111111111001111111111110000000000001011111111111101111111111100111111111110011111111111001111111111100000000000000",
+        "family": "plated"
+      },
+      {
+        "section": "strips",
+        "key": "byproductUse/plated",
+        "label": "plated byproductUse=1.125",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000011111111111001111111111100111111111110011111111111001111111111110000000000001011111111111101111111111100111111111110011111111111001111111111100000000000000",
+        "family": "plated"
+      },
+      {
+        "section": "strips",
+        "key": "byproductUse/plated",
+        "label": "plated byproductUse=1.5",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000011111111111001111111111100111111111110011111111111001111111111110000000000001011111111111101111111111100111111111110011111111111001111111111100000000000000",
+        "family": "plated"
+      },
+      {
+        "section": "strips",
+        "key": "dormancyResponse/blob",
+        "label": "blob dormancyResponse=0",
+        "tier": "inspection",
+        "activity": "dormant",
+        "size": 13,
+        "bits": "0000000000000000000100000000011101110000010000000100010000000001001000000000101000000000001010000000001001000000000100010000000100001111011100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "strips",
+        "key": "dormancyResponse/blob",
+        "label": "blob dormancyResponse=0.375",
+        "tier": "inspection",
+        "activity": "dormant",
+        "size": 13,
+        "bits": "0000000000000000000100000000011101110000010000000100010000000001001000000000101000000000001010000000001001000000000100010000000100001111011100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "strips",
+        "key": "dormancyResponse/blob",
+        "label": "blob dormancyResponse=0.75",
+        "tier": "inspection",
+        "activity": "dormant",
+        "size": 13,
+        "bits": "0000000000000000000000000000000010000000000111110000000111111100000011111110000011111111100000111111100000011111110000000111110000001000100000000000000000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "strips",
+        "key": "dormancyResponse/blob",
+        "label": "blob dormancyResponse=1.125",
+        "tier": "inspection",
+        "activity": "dormant",
+        "size": 13,
+        "bits": "0000000000000000000000000000000010000000000111110000000111111100000011111110000011111111100000111111100000011111110000000111110000001000100000000000000000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "strips",
+        "key": "dormancyResponse/blob",
+        "label": "blob dormancyResponse=1.5",
+        "tier": "inspection",
+        "activity": "dormant",
+        "size": 13,
+        "bits": "0000000000000000000000000000000010000000000111110000000111111100000011111110000011111111100000111111100000011111110000000111110000001000100000000000000000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "strips",
+        "key": "dormancyResponse/radial",
+        "label": "radial dormancyResponse=0",
+        "tier": "inspection",
+        "activity": "dormant",
+        "size": 13,
+        "bits": "0000000000000000000000000000100000001000001000001000000010001000000000111000000011100011100000001110000000001000100000001000001000001000000010000000000000000000000000000",
+        "family": "radial"
+      },
+      {
+        "section": "strips",
+        "key": "dormancyResponse/radial",
+        "label": "radial dormancyResponse=0.375",
+        "tier": "inspection",
+        "activity": "dormant",
+        "size": 13,
+        "bits": "0000000000000000000000000000100000001000001000001000000010001000000000111000000011100011100000001110000000001000100000001000001000001000000010000000000000000000000000000",
+        "family": "radial"
+      },
+      {
+        "section": "strips",
+        "key": "dormancyResponse/radial",
+        "label": "radial dormancyResponse=0.75",
+        "tier": "inspection",
+        "activity": "dormant",
+        "size": 13,
+        "bits": "0000000000000000000000000000000000000000000000000000000000000000000000010000000000011100000000000100000000000000000000000000000000001000000000000000000000000000000000000",
+        "family": "radial"
+      },
+      {
+        "section": "strips",
+        "key": "dormancyResponse/radial",
+        "label": "radial dormancyResponse=1.125",
+        "tier": "inspection",
+        "activity": "dormant",
+        "size": 13,
+        "bits": "0000000000000000000000000000000000000000000000000000000000000000000000010000000000011100000000000100000000000000000000000000000000001000000000000000000000000000000000000",
+        "family": "radial"
+      },
+      {
+        "section": "strips",
+        "key": "dormancyResponse/radial",
+        "label": "radial dormancyResponse=1.5",
+        "tier": "inspection",
+        "activity": "dormant",
+        "size": 13,
+        "bits": "0000000000000000000000000000000000000000000000000000000000000000000000010000000000011100000000000100000000000000000000000000000000001000000000000000000000000000000000000",
+        "family": "radial"
+      },
+      {
+        "section": "lineages",
+        "key": "stable",
+        "label": "stable #0 blob",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "stable",
+        "label": "stable #1 blob",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "stable",
+        "label": "stable #2 blob",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "stable",
+        "label": "stable #3 blob",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "stable",
+        "label": "stable #4 blob",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "stable",
+        "label": "stable #5 blob",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "stable",
+        "label": "stable #6 blob",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "stable",
+        "label": "stable #7 blob",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "stable",
+        "label": "stable #8 blob",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "stable",
+        "label": "stable #9 blob",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "directional",
+        "label": "directional #0 blob",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "directional",
+        "label": "directional #1 blob",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "directional",
+        "label": "directional #2 blob",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "directional",
+        "label": "directional #3 blob",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "directional",
+        "label": "directional #4 blob",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "directional",
+        "label": "directional #5 blob",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "directional",
+        "label": "directional #6 blob",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "directional",
+        "label": "directional #7 blob",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "directional",
+        "label": "directional #8 segmented",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000000000010101010000000000010101010000000000010101010000000000000000000",
+        "family": "segmented"
+      },
+      {
+        "section": "lineages",
+        "key": "directional",
+        "label": "directional #9 segmented",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000000000010101010000000000010101010000000000010101010000000000000000000",
+        "family": "segmented"
+      },
+      {
+        "section": "lineages",
+        "key": "near-boundary",
+        "label": "near-boundary #0 blob",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "near-boundary",
+        "label": "near-boundary #1 blob",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "near-boundary",
+        "label": "near-boundary #2 blob",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "near-boundary",
+        "label": "near-boundary #3 blob",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "near-boundary",
+        "label": "near-boundary #4 blob",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "near-boundary",
+        "label": "near-boundary #5 blob",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "near-boundary",
+        "label": "near-boundary #6 blob",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "near-boundary",
+        "label": "near-boundary #7 blob",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "near-boundary",
+        "label": "near-boundary #8 blob",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "near-boundary",
+        "label": "near-boundary #9 blob",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "transition",
+        "label": "transition #0 blob",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "transition",
+        "label": "transition #1 blob",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "transition",
+        "label": "transition #2 blob",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "transition",
+        "label": "transition #3 blob",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "transition",
+        "label": "transition #4 blob",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "transition",
+        "label": "transition #5 blob",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "transition",
+        "label": "transition #6 blob",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "transition",
+        "label": "transition #7 segmented",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000000000010101011000000000010101010000000000010101010000000000000000000",
+        "family": "segmented"
+      },
+      {
+        "section": "lineages",
+        "key": "transition",
+        "label": "transition #8 segmented",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000000000010101011000000000010101010000000000010101010000000000000000000",
+        "family": "segmented"
+      },
+      {
+        "section": "lineages",
+        "key": "transition",
+        "label": "transition #9 segmented",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000000000010101011000000000010101010000000000010101010000000000000000000",
+        "family": "segmented"
+      },
+      {
+        "section": "boundary",
+        "key": "t0.6",
+        "label": "founder",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000000000010101011000000000010101010000000000010101010000000000000000000",
+        "family": "segmented"
+      },
+      {
+        "section": "boundary",
+        "key": "t0.6",
+        "label": "child-of-blob",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "boundary",
+        "key": "t0.6",
+        "label": "child-of-seg",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000000000010101011000000000010101010000000000010101010000000000000000000",
+        "family": "segmented"
+      },
+      {
+        "section": "boundary",
+        "key": "t0.7",
+        "label": "founder",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000000000010101011000000000010101010000000000010101010000000000000000000",
+        "family": "segmented"
+      },
+      {
+        "section": "boundary",
+        "key": "t0.7",
+        "label": "child-of-blob",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "boundary",
+        "key": "t0.7",
+        "label": "child-of-seg",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000000000010101011000000000010101010000000000010101010000000000000000000",
+        "family": "segmented"
+      },
+      {
+        "section": "boundary",
+        "key": "t0.8",
+        "label": "founder",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000000000010101011000000000010101010000000000010101010000000000000000000",
+        "family": "segmented"
+      },
+      {
+        "section": "boundary",
+        "key": "t0.8",
+        "label": "child-of-blob",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000000000010101011000000000010101010000000000010101010000000000000000000",
+        "family": "segmented"
+      },
+      {
+        "section": "boundary",
+        "key": "t0.8",
+        "label": "child-of-seg",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000000000010101011000000000010101010000000000010101010000000000000000000",
+        "family": "segmented"
+      },
+      {
+        "section": "boundary",
+        "key": "t0.9",
+        "label": "founder",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000000000010101011000000000010101010000000000010101010000000000000000000",
+        "family": "segmented"
+      },
+      {
+        "section": "boundary",
+        "key": "t0.9",
+        "label": "child-of-blob",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000000000010101011000000000010101010000000000010101010000000000000000000",
+        "family": "segmented"
+      },
+      {
+        "section": "boundary",
+        "key": "t0.9",
+        "label": "child-of-seg",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000000000010101011000000000010101010000000000010101010000000000000000000",
+        "family": "segmented"
+      },
+      {
+        "section": "dormancy",
+        "key": "blob",
+        "label": "blob active",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100000111111100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "dormancy",
+        "key": "blob",
+        "label": "blob dorm-weak",
+        "tier": "inspection",
+        "activity": "dormant",
+        "size": 13,
+        "bits": "0000000000000000000100000000011101110000010000000100010000000001001000000000101000000000001010000000001001000000000100010000000100000111011100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "dormancy",
+        "key": "blob",
+        "label": "blob dorm-strong",
+        "tier": "inspection",
+        "activity": "dormant",
+        "size": 13,
+        "bits": "0000000000000000000000000000000010000000000111110000000111111100000011111110000011111111100000111111100000011111110000000111110000000000100100000000000000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "dormancy",
+        "key": "segmented",
+        "label": "segmented active",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000000000000000000000000000000000000001010101011000000000000000010101010100000000000000000101010101000000000000000000000000100000000000000000000000000000",
+        "family": "segmented"
+      },
+      {
+        "section": "dormancy",
+        "key": "segmented",
+        "label": "segmented dorm-weak",
+        "tier": "inspection",
+        "activity": "dormant",
+        "size": 13,
+        "bits": "0000000000000000000000000000000000000000000000000000001010101010000000000000000010101010100000000000000000101010101000000000000000000000000100000000000000000000000000000",
+        "family": "segmented"
+      },
+      {
+        "section": "dormancy",
+        "key": "segmented",
+        "label": "segmented dorm-strong",
+        "tier": "inspection",
+        "activity": "dormant",
+        "size": 13,
+        "bits": "0000000000000000000000000000000000000000000000000000000000000000000101010101000010101010100000000000000000000000000000000000000000000000000100000000000000000000000000000",
+        "family": "segmented"
+      },
+      {
+        "section": "dormancy",
+        "key": "radial",
+        "label": "radial active",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000000000000100000001000001000001000000010001000000000111000000011111111110000001110000000001000100000001000001000001000000110000000000000000000000000000",
+        "family": "radial"
+      },
+      {
+        "section": "dormancy",
+        "key": "radial",
+        "label": "radial dorm-weak",
+        "tier": "inspection",
+        "activity": "dormant",
+        "size": 13,
+        "bits": "0000000000000000000000000000100000001000001000001000000010001000000000111000000011100011100000001110000000001000100000001000001000001000000110000000000000000000000000000",
+        "family": "radial"
+      },
+      {
+        "section": "dormancy",
+        "key": "radial",
+        "label": "radial dorm-strong",
+        "tier": "inspection",
+        "activity": "dormant",
+        "size": 13,
+        "bits": "0000000000000000000000000000000000000000000000000000000000000000000000010000000000011100000000000100000000000000000000000000000000000000000100000000000000000000000000000",
+        "family": "radial"
+      },
+      {
+        "section": "dormancy",
+        "key": "plated",
+        "label": "plated active",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000011111111111001111111111100111111111110011111111111001111111111110000000000001011111111111101111111111100111111111110011111111111001111111111100000000000000",
+        "family": "plated"
+      },
+      {
+        "section": "dormancy",
+        "key": "plated",
+        "label": "plated dorm-weak",
+        "tier": "inspection",
+        "activity": "dormant",
+        "size": 13,
+        "bits": "0000000000000011111111111001000000000100100000000010010000000001001111111111100000000000000011111111111001000000000100100000000010010000000101001111111111100000000000000",
+        "family": "plated"
+      },
+      {
+        "section": "dormancy",
+        "key": "plated",
+        "label": "plated dorm-strong",
+        "tier": "inspection",
+        "activity": "dormant",
+        "size": 13,
+        "bits": "0000000000000011111111111001111111111100111111111110011111111111001111111111100111111111110011111111111001111111111100111111111110011111111111001111111111100000000000000",
+        "family": "plated"
+      },
+      {
+        "section": "dormancy",
+        "key": "branching",
+        "label": "branching active",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000000111111111000000010000000001111111110000000100100000011111111100000001000000",
+        "family": "branching"
+      },
+      {
+        "section": "dormancy",
+        "key": "branching",
+        "label": "branching dorm-weak",
+        "tier": "inspection",
+        "activity": "dormant",
+        "size": 13,
+        "bits": "0000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000000111011111000000010000000001110111110000000100100000011101111100000001000000",
+        "family": "branching"
+      },
+      {
+        "section": "dormancy",
+        "key": "branching",
+        "label": "branching dorm-strong",
+        "tier": "inspection",
+        "activity": "dormant",
+        "size": 13,
+        "bits": "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000111000000000001000000",
+        "family": "branching"
+      },
+      {
+        "section": "dormancy",
+        "key": "paddled",
+        "label": "paddled active",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000011100000000001110000000000111000000000000100000001111111111101111111111111011111111111000000010000000000111000000000011100100000001110000000000000000000",
+        "family": "paddled"
+      },
+      {
+        "section": "dormancy",
+        "key": "paddled",
+        "label": "paddled dorm-weak",
+        "tier": "inspection",
+        "activity": "dormant",
+        "size": 13,
+        "bits": "0000000000000000011100000000001010000000000111000000000000100000001111101111101000000000001011111011111000000010000000000111000000000010100100000001110000000000000000000",
+        "family": "paddled"
+      },
+      {
+        "section": "dormancy",
+        "key": "paddled",
+        "label": "paddled dorm-strong",
+        "tier": "inspection",
+        "activity": "dormant",
+        "size": 13,
+        "bits": "0000000000000000000000000000000000000000000000000000000000000000000000010000000011111111100000000100000000000000000000000000000000000000000100000000000000000000000000000",
+        "family": "paddled"
+      }
+    ]
+  }
+}
