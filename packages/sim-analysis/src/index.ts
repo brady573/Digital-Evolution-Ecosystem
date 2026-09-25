@@ -46,11 +46,11 @@ const DEP_PERSIST=5000;
 // dynamics. Causal reading belongs to matched-branch comparison, not the
 // single-run record (see validation).
 const DEP_GUILD_COLLAPSE=.33;
-// Takeover attribution ranks by absolute C-energy contribution, never by
+// Major-consumer attribution ranks by absolute C-energy contribution, never by
 // within-lineage fraction (a singleton at 100% C must not outrank the guild's
 // main supplier). Naming a lineage additionally requires a meaningful guild
 // share; otherwise the record stays generic. Owner-visible constant.
-const DEP_GUILD_SHARE=.10;
+const DEP_MAJOR_SHARE=.10;
 
 export class EcologyObserver {
   cross={id:"eco-crossfeeding-1",state:"absent",candidateSince:null as number|null,lowSince:null as number|null};
@@ -129,7 +129,7 @@ export class EcologyObserver {
       guildC+=l.energyC;
       if(l.energyC>topEnergyC){topEnergyC=l.energyC;topConsumer=l.lineageId;topConsumerShare=e>0?l.energyC/e:0}
     }
-    const topMeaningful=topConsumer!==null&&guildC>0&&topEnergyC/guildC>=DEP_GUILD_SHARE;
+    const topMeaningful=topConsumer!==null&&guildC>0&&topEnergyC/guildC>=DEP_MAJOR_SHARE;
     const topRefs=topMeaningful&&topConsumer!==null?[topConsumer]:[];
     if(dd.state==="absent"&&depForm){dd.state="forming";dd.candidateSince=s.tick}
     else if(dd.state==="forming"){
@@ -157,14 +157,14 @@ export class EcologyObserver {
           const same=topConsumer!==null&&topConsumer===dd.topConsumer;
           dd.state="recovered";
           if(!topMeaningful||topConsumer===null){
-            this.add("dependency",dd.id,s.tick,"recovered","The C-dependent guild recovered",`Scavenger share returned to ${Math.round(scav*100)}% of the living population; C use is spread across many lineages with no single dominant consumer.`,"major",s,[]);
+            this.add("dependency",dd.id,s.tick,"recovered","The C-dependent guild recovered",`Scavenger share returned to ${Math.round(scav*100)}% of the living population; C use is distributed across lineages; no lineage met the attribution threshold.`,"major",s,[]);
           }else if(same){
             this.add("dependency",dd.id,s.tick,"recovered","The C-dependent lineage recovered",`Lineage L-${String(topConsumer).padStart(4,"0")} again realizes ${Math.round(topConsumerShare*100)}% of its energy from biologically produced Metabolite C after disruption.`,"major",s,[topConsumer]);
           }else{
             // 10% marks a major consumer, never dominance: in a near-even
             // guild the top lineage leads by deterministic ordering, so the
             // record claims plurality factually (largest share) without a
-            // takeover/dominance conclusion.
+            // dominance conclusion.
             this.add("dependency",dd.id,s.tick,"recovered","A new lineage became a major C consumer",`Lineage L-${String(topConsumer).padStart(4,"0")} now realizes ${Math.round(topConsumerShare*100)}% of its energy from C, the largest share among living lineages${dd.topConsumer===null?"":`, succeeding L-${String(dd.topConsumer).padStart(4,"0")} after disruption`}.`,"major",s,[topConsumer]);
           }
           dd.state="established";dd.establishedTick=s.tick;dd.estScav=scav;dd.baselineProduced=s.interval.producedC;
@@ -225,7 +225,7 @@ export class EcologyObserver {
         dependency_established_c_share:DEP_EST_C,
         dependency_persistence_ticks:DEP_PERSIST,
         dependency_collapse_guild_fraction:DEP_GUILD_COLLAPSE,
-        dependency_takeover_guild_share:DEP_GUILD_SHARE,
+        dependency_major_consumer_guild_share:DEP_MAJOR_SHARE,
       },
     };
   }

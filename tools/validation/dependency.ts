@@ -176,7 +176,7 @@ function testRecoveryReplacement() {
   observer.observe(frame(62500, { scav: 28, intervalProd: 60, top: { id: 41, share: 0.35 } }));
   const records = depRecords(observer);
   assert.equal(records.length, 3, "establishment + disruption + replacement records");
-  assert.equal(records[2].title, "A new lineage became a major C consumer", "new lineage worded as major consumer, not takeover");
+  assert.equal(records[2].title, "A new lineage became a major C consumer", "new lineage worded as major consumer");
   assert.ok(records[2].summary.includes("succeeding L-0009"), "replaced lineage named factually");
   assert.deepEqual(records[2].entity_refs, [41], "replacing lineage referenced");
   console.log("dependency replacement: PASS");
@@ -224,8 +224,8 @@ function testTopConsumerRanksAbsolute() {
 }
 
 function testDiffuseGuildNamesNobody() {
-  // C use spread across many lineages with no dominant consumer: the guild
-  // still establishes, but no lineage is named as taking over.
+  // C use spread across many lineages with no meaningful consumer: the guild
+  // still establishes, but no lineage is named.
   const diffuse = Array.from({ length: 12 }, (_, i) => ({ id: 100 + i, members: 5, eA: 920, eB: 0, eC: 80 }));
   const observer = new EcologyObserver();
   observer.observe(frame(40000, { scav: 28, extraLineages: diffuse }));
@@ -268,11 +268,10 @@ testZeroPopulationSafe();
 // --- Integration: full arc on one deterministic run --------------------------
 // Balanced seed 24681357: guild establishes @45431, drought_b @~60k collapses
 // it (16% -> 3%), and the guild recovers @91113. The return is diffuse (no
-// single lineage holds >=10% of C energy), so the record stays generic
-// instead of naming a takeover: lineage replacement wording is covered by
-// unit tests, the integration proves real recovery. Recovery-with-
-// reorganization at the composition level was observed separately
-// (post-drought mixed_primary takeover with scavengers at zero).
+// single lineage holds >=10% of C energy), so the record stays generic;
+// major-consumer wording is covered by unit tests, the integration proves
+// real recovery. Composition-level reorganization was observed separately
+// (post-drought mixed_primary dominance with scavengers at zero).
 
 const FIXTURE_SEED = 24681357;
 function fixtureConfig(seed: number): EngineConfig {
@@ -315,7 +314,8 @@ function testFixtureArc() {
   assert.equal(records[2].phase, "recovered", "third record recovers");
   assert.equal(records[2].tick, 91113, "recovery is deterministic");
   assert.equal(records[2].title, "The C-dependent guild recovered", "diffuse return stays generic");
-  assert.deepEqual(records[2].entity_refs, [], "no lineage named without a dominant consumer");
+  assert.deepEqual(records[2].entity_refs, [], "no lineage named without a meaningful consumer");
+  assert.ok(records[2].summary.includes("attribution threshold"), "generic wording stays evidence-bounded");
   console.log("dependency fixture arc: PASS");
 }
 
