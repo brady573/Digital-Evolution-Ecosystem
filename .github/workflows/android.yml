@@ -41,9 +41,11 @@ jobs:
       - run: pnpm verify
       - run: pnpm --filter @digital-evolution/explorer build
       - run: pnpm --filter @digital-evolution/explorer exec cap sync android
+      - name: Locate Android SDK
+        run: echo "SDK_PATH=${ANDROID_HOME:-/usr/local/lib/android/sdk}" >> "$GITHUB_ENV"
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
-          path: ${{ env.ANDROID_HOME }}
+          path: ${{ env.SDK_PATH }}
           key: android-sdk-36-${{ runner.os }}-v1
       - name: Install Android SDK packages
         run: |
