@@ -71,7 +71,7 @@ function frame(
 }
 
 function depRecords(observer: EcologyObserver) {
-  return observer.records.filter((r: any) => r.kind === "dependency");
+  return observer.records.filter((r: any) => r.kind === "cuse");
 }
 
 function testFormAndEstablish() {
@@ -129,7 +129,7 @@ function testDisruption() {
   const records = depRecords(observer);
   assert.equal(records.length, 2, "establishment + disruption records");
   assert.equal(records[1].phase, "disrupted", "disrupted phase");
-  assert.equal(records[1].title, "The C-dependent guild collapsed", "collapse titled plainly");
+  assert.equal(records[1].title, "The C-using guild collapsed", "collapse titled plainly");
   assert.ok(records[1].summary.includes("Scavenger share fell from 7%"), "guild loss quantified");
   assert.ok(records[1].summary.includes("per-stride C production stood at"), "production reported as measured context");
   assert.deepEqual(records[1].entity_refs, [9], "prior top consumer referenced");
@@ -311,7 +311,7 @@ function testFixtureArc() {
     "dependency validation",
   );
   settle(session, 120000);
-  const records = (session.analysis as any).records.filter((r: any) => r.kind === "dependency");
+  const records = (session.analysis as any).records.filter((r: any) => r.kind === "cuse");
   assert.equal(records.length, 3, "establishment, disruption, and replacement all fire");
   assert.equal(records[0].phase, "established", "first record establishes");
   assert.equal(records[0].tick, 45431, "establishment is deterministic");
@@ -321,7 +321,7 @@ function testFixtureArc() {
   assert.deepEqual(records[1].entity_refs, [906], "disruption names the fallen consumer");
   assert.equal(records[2].phase, "recovered", "third record recovers");
   assert.equal(records[2].tick, 91113, "recovery is deterministic");
-  assert.equal(records[2].title, "The C-dependent guild recovered", "diffuse return stays generic");
+  assert.equal(records[2].title, "The C-using guild recovered", "diffuse return stays generic");
   assert.deepEqual(records[2].entity_refs, [], "no lineage named without a meaningful consumer");
   assert.ok(records[2].summary.includes("attribution threshold"), "generic wording stays evidence-bounded");
   console.log("dependency fixture arc: PASS");
@@ -358,7 +358,7 @@ function testMultiSeedPossibility() {
     session.create(fixtureConfig(seed));
     settle(session, 60000);
     const records = (session.analysis as any).records.filter(
-      (r: any) => r.kind === "dependency" && r.phase === "established",
+      (r: any) => r.kind === "cuse" && r.phase === "established",
     );
     if (records.length > 0) established.push(`${seed}@${records[0].tick}`);
   }

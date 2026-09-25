@@ -29,7 +29,7 @@ const CROSSFEED_EST=.055;
 const CROSSFEED_PERSIST=5000;
 const DORMANCY_PERSIST=5000;
 const ERA_PERSIST=7500;
-// C-dependency guild thresholds mirror the crossfeeding family: forming at
+// C-use guild thresholds mirror the crossfeeding family: forming at
 // the durable-use floor, established strictly above it, collapse below half
 // the forming level. Calibrated against balanced-seed-24681357 lineage flows
 // (guild forms ~40-45k at 6-16% scavenger share; no lineage exceeds ~15% C
@@ -58,7 +58,7 @@ export class EcologyObserver {
   cross={id:"eco-crossfeeding-1",state:"absent",candidateSince:null as number|null,lowSince:null as number|null};
   seedbank={id:"eco-seedbank-1",state:"absent",candidateSince:null as number|null,lowSince:null as number|null,establishedTick:null as number|null,lastReturnTick:null as number|null,priorDormantClades:{} as Record<string,number>,returnedClades:{} as Record<string,number>};
   era={current:null as string|null,candidate:null as string|null,candidateSince:null as number|null,index:0};
-  dep={id:"eco-dependency-1",state:"absent",candidateSince:null as number|null,lowSince:null as number|null,establishedTick:null as number|null,estScav:0,baselineProduced:0,topConsumer:null as number|null,topConsumerShare:0};
+  dep={id:"eco-cuse-1",state:"absent",candidateSince:null as number|null,lowSince:null as number|null,establishedTick:null as number|null,estScav:0,baselineProduced:0,topConsumer:null as number|null,topConsumerShare:0};
   records:any[]=[];
   eras:any[]=[];
 
@@ -118,7 +118,7 @@ export class EcologyObserver {
     }
     d.priorDormantClades={...s.dormant_clade_fraction};
 
-    // C-dependency guild: a role-defined guild (byproduct scavengers) with
+    // C-use guild: a role-defined guild (byproduct scavengers) with
     // lineage-identified top consumers. Wording stays evidence-bounded:
     // decline *followed* measured production loss; causation is never asserted.
     const dd=this.dep,pop=s.population;
@@ -139,7 +139,7 @@ export class EcologyObserver {
       else if(depEst&&dd.candidateSince!==null&&s.tick-dd.candidateSince>=DEP_PERSIST){
         dd.state="established";dd.establishedTick=s.tick;dd.estScav=scav;dd.baselineProduced=s.interval.producedC;
         dd.topConsumer=topMeaningful?topConsumer:null;dd.topConsumerShare=topConsumerShare;dd.lowSince=null;dd.candidateSince=null;
-        this.add("dependency",dd.id,s.tick,"established","A C-dependent guild became established",`${Math.round(scav*100)}% of living organisms meet the byproduct-scavenger evidence rule while ${Math.round(s.c_energy_share*100)}% of living energy history comes from biologically produced Metabolite C.`,"major",s,topRefs);
+        this.add("cuse",dd.id,s.tick,"established","A C-using guild became established",`${Math.round(scav*100)}% of living organisms meet the byproduct-scavenger evidence rule while ${Math.round(s.c_energy_share*100)}% of living energy history comes from biologically produced Metabolite C.`,"major",s,topRefs);
       }
     } else if(dd.state==="established"){
       // Guild collapse is the tripwire; production is measured context.
@@ -149,7 +149,7 @@ export class EcologyObserver {
         if(dd.lowSince===null)dd.lowSince=s.tick;
         if(s.tick-dd.lowSince>=DEP_PERSIST){
           dd.state="disrupted";dd.candidateSince=null;dd.lowSince=null;
-          this.add("dependency",dd.id,s.tick,"disrupted","The C-dependent guild collapsed",`Scavenger share fell from ${Math.round(dd.estScav*100)}% to ${Math.round(scav*100)}% of the living population; per-stride C production stood at ${Math.round(dd.baselineProduced>0?100*s.interval.producedC/dd.baselineProduced:0)}% of its established level.`,"major",s,dd.topConsumer===null?[]:[dd.topConsumer]);
+          this.add("cuse",dd.id,s.tick,"disrupted","The C-using guild collapsed",`Scavenger share fell from ${Math.round(dd.estScav*100)}% to ${Math.round(scav*100)}% of the living population; per-stride C production stood at ${Math.round(dd.baselineProduced>0?100*s.interval.producedC/dd.baselineProduced:0)}% of its established level.`,"major",s,dd.topConsumer===null?[]:[dd.topConsumer]);
         }
       } else dd.lowSince=null;
     } else if(dd.state==="disrupted"){
@@ -159,15 +159,15 @@ export class EcologyObserver {
           const same=topConsumer!==null&&topConsumer===dd.topConsumer;
           dd.state="recovered";
           if(!topMeaningful||topConsumer===null){
-            this.add("dependency",dd.id,s.tick,"recovered","The C-dependent guild recovered",`Scavenger share returned to ${Math.round(scav*100)}% of the living population; C use is distributed across lineages; no lineage met the attribution threshold.`,"major",s,[]);
+            this.add("cuse",dd.id,s.tick,"recovered","The C-using guild recovered",`Scavenger share returned to ${Math.round(scav*100)}% of the living population; C use is distributed across lineages; no lineage met the attribution threshold.`,"major",s,[]);
           }else if(same){
-            this.add("dependency",dd.id,s.tick,"recovered","The C-dependent lineage recovered",`Lineage L-${String(topConsumer).padStart(4,"0")} again realizes ${Math.round(topConsumerShare*100)}% of its energy from biologically produced Metabolite C after disruption.`,"major",s,[topConsumer]);
+            this.add("cuse",dd.id,s.tick,"recovered","The C-using lineage recovered",`Lineage L-${String(topConsumer).padStart(4,"0")} again realizes ${Math.round(topConsumerShare*100)}% of its energy from biologically produced Metabolite C after disruption.`,"major",s,[topConsumer]);
           }else{
             // 10% marks a major consumer, never dominance: in a near-even
             // guild the top lineage leads by deterministic ordering, so the
             // record claims plurality factually (largest share) without a
             // dominance conclusion.
-            this.add("dependency",dd.id,s.tick,"recovered","A new lineage became a major C consumer",`Lineage L-${String(topConsumer).padStart(4,"0")} now realizes ${Math.round(topConsumerShare*100)}% of its energy from C, the largest share among living lineages${dd.topConsumer===null?"":`, succeeding L-${String(dd.topConsumer).padStart(4,"0")} after disruption`}.`,"major",s,[topConsumer]);
+            this.add("cuse",dd.id,s.tick,"recovered","A new lineage became a major C consumer",`Lineage L-${String(topConsumer).padStart(4,"0")} now realizes ${Math.round(topConsumerShare*100)}% of its energy from C, the largest share among living lineages${dd.topConsumer===null?"":`, succeeding L-${String(dd.topConsumer).padStart(4,"0")} after disruption`}.`,"major",s,[topConsumer]);
           }
           dd.state="established";dd.establishedTick=s.tick;dd.estScav=scav;dd.baselineProduced=s.interval.producedC;
           dd.topConsumer=topMeaningful?topConsumer:null;dd.topConsumerShare=topConsumerShare;dd.candidateSince=null;dd.lowSince=null;
@@ -212,7 +212,7 @@ export class EcologyObserver {
     return{
       crossfeeding:{...this.cross},
       seed_bank:{...this.seedbank},
-      c_dependency:{...this.dep},
+      cuse_guild:{...this.dep},
       eras:JSON.parse(JSON.stringify(this.eras)),
       records:JSON.parse(JSON.stringify(this.records)),
       rules:{
@@ -221,13 +221,13 @@ export class EcologyObserver {
         crossfeed_persistence_ticks:CROSSFEED_PERSIST,
         dormancy_persistence_ticks:DORMANCY_PERSIST,
         era_persistence_ticks:ERA_PERSIST,
-        dependency_form_scavenger:DEP_FORM_SCAV,
-        dependency_form_c_share:DEP_FORM_C,
-        dependency_established_scavenger:DEP_EST_SCAV,
-        dependency_established_c_share:DEP_EST_C,
-        dependency_persistence_ticks:DEP_PERSIST,
-        dependency_collapse_guild_fraction:DEP_GUILD_COLLAPSE,
-        dependency_major_consumer_guild_share:DEP_MAJOR_SHARE,
+        cuse_form_scavenger:DEP_FORM_SCAV,
+        cuse_form_c_share:DEP_FORM_C,
+        cuse_established_scavenger:DEP_EST_SCAV,
+        cuse_established_c_share:DEP_EST_C,
+        cuse_persistence_ticks:DEP_PERSIST,
+        cuse_collapse_guild_fraction:DEP_GUILD_COLLAPSE,
+        cuse_major_consumer_guild_share:DEP_MAJOR_SHARE,
       },
     };
   }
