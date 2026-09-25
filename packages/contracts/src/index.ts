@@ -219,6 +219,44 @@ export interface IntervalRates {
 }
 
 /**
+ * Per-lineage activity during one observation stride, including lineages
+ * with no living members left (the dead are attributed, not dropped).
+ * netMembers (births minus deaths) sums to the population change.
+ */
+export interface IntervalLineageFlow {
+  readonly lineageId: number;
+  readonly netMembers: number;
+  readonly consumedA: number;
+  readonly consumedB: number;
+  readonly consumedC: number;
+  readonly energyA: number;
+  readonly energyB: number;
+  readonly energyC: number;
+  readonly producedC: number;
+  readonly births: number;
+  readonly deaths: number;
+}
+
+/** Deterministic per-lineage interval activity with window totals. */
+export interface IntervalFlowFacts {
+  readonly tick: number;
+  readonly strideTicks: number;
+  readonly lineages: readonly IntervalLineageFlow[];
+  readonly totals: {
+    readonly netMembers: number;
+    readonly consumedA: number;
+    readonly consumedB: number;
+    readonly consumedC: number;
+    readonly energyA: number;
+    readonly energyB: number;
+    readonly energyC: number;
+    readonly producedC: number;
+    readonly births: number;
+    readonly deaths: number;
+  };
+}
+
+/**
  * Deterministic biological flow facts for one lineage at one observation
  * tick, aggregated over living organisms only. Causal facts (who ate,
  * gained, and produced what), never semantic labels: analysis may classify
@@ -227,7 +265,11 @@ export interface IntervalRates {
 export interface LineageFlow {
   readonly lineageId: number;
   readonly members: number;
-  /** Lifetime consumed mass summed over living members, by substance. */
+  /**
+   * Lifetime consumption-EVENT counts summed over living members, by
+   * substance (frozen parity-protected counters, not mass: ma/mb/mc
+   * increment per eating event). Interval deltas carry true mass.
+   */
   readonly consumedA: number;
   readonly consumedB: number;
   readonly consumedC: number;

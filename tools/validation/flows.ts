@@ -138,12 +138,17 @@ function testFlowCheckpoint() {
   assert.ok(Array.isArray(organisms) && organisms.length > 0, "checkpoint carries organisms");
   assert.ok(organisms.every((o: any) => typeof o.pc === "number"), "new saves credit production");
   for (const o of organisms) delete o.pc;
+  delete legacy.experiment.state.props.lastLineageFlows;
+  delete legacy.experiment.state.props.lineageInterval;
   const aged = new UniverseSession();
   aged.restore(legacy);
-  settle(aged, 20500);
+  settle(aged, aged.snapshot().tick + 1000);
   const facts = flows(aged);
   assert.equal(facts.totals.members, aged.snapshot().population, "aged organisms still aggregate");
   assert.ok(Number.isFinite(facts.totals.producedC), "aged production total is finite");
+  const agedInterval = (aged.simulation as any).lastLineageFlows;
+  assert.ok(agedInterval && agedInterval.tick > 0, "interval attribution restarts after restore");
+  assert.ok(Number.isFinite(agedInterval.totals.producedC), "restored interval totals finite");
   console.log("flow checkpoint round-trip + legacy tolerance: PASS");
 }
 
@@ -186,8 +191,75 @@ function testProcessActivations() {
   console.log("process activations: PASS");
 }
 
+function intervalFlows(session: UniverseSession) {
+  return (session.simulation as any).lastLineageFlows;
+}
+
+/** Advance to a stride multiple (one full stride ahead), draining pendings. */
+function settleStride(session: UniverseSession): number {
+  const tick = session.snapshot().tick;
+  const next = tick % 251 === 0 ? tick + 251 : tick + (251 - (tick % 251));
+  for (let i = 0; i < 500 && session.snapshot().tick < next; i++) {
+    const snapshot = session.advance(Math.min(251, next - session.snapshot().tick));
+    const pending = snapshot.pendingDecision;
+    if (pending) session.resolveEventDecision(pending.opportunityId, "keep-watching");
+  }
+  assert.equal(session.snapshot().tick, next, "lands exactly on a stride multiple");
+  return next;
+}
+
+function testIntervalDeterminism() {
+  const run = () => {
+    const session = new UniverseSession();
+    session.create(config(FIXTURE_SEED));
+    settle(session, 10000);
+    return JSON.stringify(intervalFlows(session));
+  };
+  assert.equal(run(), run(), "interval lineage facts reproduce exactly");
+  console.log("interval determinism: PASS");
+}
+
+function testIntervalNetMembers() {
+  // Births minus deaths over a stride must equal the population change:
+  // exact membership accounting, dead included.
+  const session = new UniverseSession();
+  session.create(config(FIXTURE_SEED));
+  settle(session, 10000);
+  settleStride(session);
+  const p1 = session.snapshot().population;
+  settleStride(session);
+  const facts = intervalFlows(session);
+  const p2 = session.snapshot().population;
+  assert.equal(facts.totals.netMembers, p2 - p1, `net members (${facts.totals.netMembers}) equals pop change (${p2 - p1})`);
+  assert.equal(facts.totals.births - facts.totals.deaths, p2 - p1, "births minus deaths equals pop change");
+  console.log("interval net members: PASS");
+}
+
+function testIntervalCoversDead() {
+  // Interval consumption must cover organisms that died mid-stride: it can
+  // only exceed the living-lifetime delta, never fall short of it.
+  const session = new UniverseSession();
+  session.create(config(FIXTURE_SEED));
+  settle(session, 10000);
+  settleStride(session);
+  const before = livingSums(session);
+  settleStride(session);
+  const facts = intervalFlows(session);
+  const after = livingSums(session);
+  const delta = after.mc - before.mc;
+  const eps = 1e-9 * Math.max(1, Math.abs(facts.totals.consumedC), Math.abs(delta));
+  assert.ok(
+    facts.totals.consumedC + eps >= delta,
+    `interval C (${facts.totals.consumedC}) covers living delta (${delta})`,
+  );
+  console.log("interval covers the dead: PASS");
+}
+
 testFlowDeterminism();
 testProcessActivations();
+testIntervalDeterminism();
+testIntervalNetMembers();
+testIntervalCoversDead();
 testFlowSelfConsistency();
 testFlowRngNeutrality();
 testFlowCheckpoint();

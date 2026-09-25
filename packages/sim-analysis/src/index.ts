@@ -1,4 +1,4 @@
-import type { FlowFacts, IntervalRates, ObservedEvent } from "@digital-evolution/contracts";
+import type { FlowFacts, IntervalFlowFacts, IntervalRates, ObservedEvent } from "@digital-evolution/contracts";
 
 export interface ObservationFrame {
   readonly tick: number;
@@ -20,6 +20,8 @@ export interface ObservationFrame {
   readonly flows: FlowFacts;
   /** Per-stride biological interval rates ending at this tick. */
   readonly interval: IntervalRates;
+  /** Per-lineage interval activity, dead included. Read-only. */
+  readonly intervalFlows: IntervalFlowFacts;
 }
 
 const CROSSFEED_FORM=.035;

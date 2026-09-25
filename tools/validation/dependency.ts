@@ -59,6 +59,14 @@ function frame(
       consumedA: 0, consumedB: 0, consumedC: 0,
       energyA: 0, energyB: 0, energyC: 0, births: 0, deaths: 0,
     },
+    intervalFlows: {
+      tick, strideTicks: 251, lineages: [],
+      totals: {
+        netMembers: 0, consumedA: 0, consumedB: 0, consumedC: 0,
+        energyA: 0, energyB: 0, energyC: 0, producedC: o.intervalProd ?? 60,
+        births: 0, deaths: 0,
+      },
+    },
   };
 }
 
