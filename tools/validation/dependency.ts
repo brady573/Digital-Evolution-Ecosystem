@@ -237,5 +237,27 @@ function testFixtureArc() {
   console.log("dependency fixture arc: PASS");
 }
 
+function testTradeoffHolds() {
+  // Slice requirement: strong C-processing must cost enough that universal
+  // maximal C use is not trivially optimal. Mechanism: BUC maintenance
+  // (.010*bu^2 per active tick) against C yield 9 below primary yields.
+  // Guards the cost term against accidental removal; threshold has ~35%
+  // headroom over the highest surveyed maximum (0.73, abundant).
+  const cases: Array<[string, EngineConfig]> = [
+    ["balanced", fixtureConfig(FIXTURE_SEED)],
+    ["abundant", { ...fixtureConfig(821947219), start: 2.01, prod: 3.76 }],
+  ];
+  for (const [label, cfg] of cases) {
+    const session = new UniverseSession();
+    session.create(cfg);
+    settle(session, 60000);
+    const bu = (session.snapshot().metrics as any).traits?.byproduct_use ?? {};
+    assert.ok(bu.max < 1.0, `${label}: bu must not fixate at max (max=${bu.max})`);
+    assert.ok(bu.max > bu.min, `${label}: bu diversity persists`);
+  }
+  console.log("tradeoff holds: PASS");
+}
+
 testFixtureArc();
+testTradeoffHolds();
 console.log(`dependency validation: PASS (engine ${ENGINE_VERSION})`);
