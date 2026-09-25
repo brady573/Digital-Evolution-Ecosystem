@@ -249,6 +249,36 @@ async function main(){
     // History renders the recorded choice copy, never a UI-side label.
     await decisionPage.getByText("Keep watching",{exact:true}).waitFor();
     await decisionPage.getByText(/not a proven cause/).waitFor();
+
+    // C17: catalyst window on the same World surface. Quiet restarts at the
+    // event creation tick, so the first window follows at the next quiet stride.
+    await decisionPage.getByRole("button",{name:"World",exact:true}).click();
+    const catalystSheet=decisionPage.getByTestId("decision-sheet");
+    for(let i=0;i<10&&!(await catalystSheet.isVisible().catch(()=>false));i++){
+      await decisionPage.getByRole("button",{name:"Next meaningful change"}).click();
+      await decisionPage.waitForTimeout(1000);
+    }
+    await catalystSheet.waitFor({timeout:180_000});
+    assert.equal(await catalystSheet.getAttribute("data-source"),"world_catalyst","window carries catalyst provenance, never a fake event");
+    await catalystSheet.getByText("World catalyst — your move").waitFor();
+    await catalystSheet.getByText("Change the environment?").waitFor();
+    const catalystTick=await tick(decisionPage);
+    assert.ok(catalystTick>decisionTick,"catalyst window arrives after the event decision");
+    const catalystChoices=await catalystSheet.locator(".decision-choices button").count();
+    assert.ok(catalystChoices>=2,"window offers keep watching plus eligible catalysts");
+    // Bypass prevention, zero-tick resolution, explicit resume — same gate.
+    await decisionPage.getByRole("button",{name:"Play"}).click();
+    await decisionPage.waitForTimeout(600);
+    assert.equal(await tick(decisionPage),catalystTick,"Play cannot bypass a catalyst window");
+    await catalystSheet.getByText("Keep watching").click();
+    await catalystSheet.waitFor({state:"detached",timeout:15_000});
+    assert.equal(await tick(decisionPage),catalystTick,"catalyst resolution advances zero ticks");
+    await decisionPage.getByRole("button",{name:"Play"}).click();
+    await decisionPage.waitForTimeout(900);
+    assert.ok(await tick(decisionPage)>catalystTick,"explicit Play resumes after a catalyst choice");
+    await decisionPage.getByRole("button",{name:"Pause"}).click();
+    await decisionPage.getByRole("button",{name:"History"}).click();
+    await decisionPage.getByText(/World catalyst offered at tick/).waitFor();
     await decisionPage.close();
 
     const mobile=await context.newPage();

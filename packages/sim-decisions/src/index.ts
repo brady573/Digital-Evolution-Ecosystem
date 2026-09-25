@@ -11,6 +11,10 @@
  * the same policy always produces byte-identical output (deterministic replay).
  */
 import type {
+  CatalystContext,
+  CatalystDiagnosis,
+  CatalystId,
+  CatalystOpportunity,
   DecisionChoice,
   DecisionContext,
   DecisionOpportunity,
@@ -115,6 +119,7 @@ export function buildDecisionOpportunity(
   return {
     schemaVersion: 1,
     opportunityId: `dop:${event.eventId}`,
+    source: "observed_event",
     policyVersion,
     sourceEventId: event.eventId,
     sourceArcId: event.arcId,
@@ -163,9 +168,9 @@ export const decisionCommandIdFor = (
   policyVersion: string,
 ): string => `dcmd:${opportunityId}:${choiceId}:${policyVersion}`;
 
-/** Find a choice on an offered opportunity, or null when absent. */
+/** Find a choice on an offered opportunity of either source, or null. */
 export function findChoice(
-  opportunity: DecisionOpportunity,
+  opportunity: { readonly choices: readonly DecisionChoice[] },
   choiceId: string,
 ): DecisionChoice | null {
   return opportunity.choices.find((choice) => choice.choiceId === choiceId) ?? null;
@@ -173,3 +178,198 @@ export function findChoice(
 
 /** Test/inspection helper: the mapped policy keys in this version. */
 export const mappedPolicyKeys = (): readonly string[] => Object.keys(REGISTRY).sort();
+
+/* ------------------------------------------------------------------ *
+ * M3 world catalysts: quiet-period environmental intervention windows.
+ *
+ * Same purity contract as the event policy: read-only evaluation of present
+ * and historical world state. No RNG, no simulated futures, no lineage
+ * inspection, no outcome prediction. A catalyst window is never an observed
+ * biological event; it carries world_catalyst provenance end to end.
+ * ------------------------------------------------------------------ */
+
+/** Catalyst catalog version. Evolves independently of the event policy. */
+export const CATALYST_POLICY_VERSION = "m3-catalysts-1.0.0";
+
+/**
+ * Game-policy constants (not biological rules). Centralized and versioned
+ * here; report evidence before changing them, never silently retune.
+ *
+ * Stock floors face lived reality: surveyed universes graze field stocks to a
+ * 1-15% equilibrium within a few thousand ticks in every config (balanced,
+ * patchwork, harsh, abundant), so higher floors make catalysts effectively
+ * unavailable. A drought's bite is regen suppression, which matters most
+ * exactly when stocks are tight. Set with Owner approval from that evidence.
+ */
+export const CATALYST_QUIET_TICKS = 10_000;
+export const MAJOR_CATALYST_COOLDOWN_TICKS = 25_000;
+/** Order of the existing drought duration; cooldowns match it, not vice versa. */
+export const CATALYST_MIN_ENERGY_SHARE = 0.15;
+export const CATALYST_MIN_STOCK_FRACTION = 0.08;
+export const CATALYST_MIN_ABIOTIC_FRACTION = 0.1;
+export const CATALYST_MIN_POPULATION = 20;
+
+interface CatalystSpec {
+  readonly id: CatalystId;
+  readonly title: string;
+  readonly effect: string;
+  readonly choiceId: string;
+  readonly intervention: InterventionSpec;
+}
+
+/**
+ * M3 v1 catalog, in deterministic offer order. Compound requirements are
+ * explicit predicate conjunctions so later triggers can extend them without
+ * changing the window architecture (no rules engine).
+ */
+const CATALYST_SPECS: readonly CatalystSpec[] = [
+  {
+    id: "drought-a",
+    title: "Nutrient A drought",
+    effect: "Reduce Nutrient A availability using the existing drought intervention.",
+    choiceId: "drought-a",
+    intervention: { schemaVersion: 1, kind: "nutrient_disturbance", mode: "drought_a" },
+  },
+  {
+    id: "drought-b",
+    title: "Nutrient B drought",
+    effect: "Reduce Nutrient B availability using the existing drought intervention.",
+    intervention: { schemaVersion: 1, kind: "nutrient_disturbance", mode: "drought_b" },
+    choiceId: "drought-b",
+  },
+  {
+    id: "global-crash",
+    title: "Global nutrient crash",
+    effect: "Reduce all nutrient availability using the existing global intervention.",
+    intervention: { schemaVersion: 1, kind: "nutrient_disturbance", mode: "global_crash" },
+    choiceId: "global-crash",
+  },
+];
+
+/** Test/inspection helper: the v1 catalyst ids in offer order. */
+export const catalystIds = (): readonly CatalystId[] => CATALYST_SPECS.map((s) => s.id);
+
+type CatalystRequirement = (context: CatalystContext) => string | null;
+
+const noDroughtActive: CatalystRequirement = (c) =>
+  c.droughtActive ? "a drought is currently active" : null;
+
+function minEnergyShare(which: "A" | "B"): CatalystRequirement {
+  return (c) => {
+    const share = which === "A" ? c.energyShareA : c.energyShareB;
+    return share >= CATALYST_MIN_ENERGY_SHARE
+      ? null
+      : `Nutrient ${which} contributes ${(share * 100).toFixed(1)}% of realized energy (needs ${(CATALYST_MIN_ENERGY_SHARE * 100).toFixed(0)}%)`;
+  };
+}
+
+function minStockFraction(which: "A" | "B"): CatalystRequirement {
+  return (c) => {
+    const fraction = which === "A" ? c.stockFractionA : c.stockFractionB;
+    return fraction >= CATALYST_MIN_STOCK_FRACTION
+      ? null
+      : `Nutrient ${which} field stock is ${(fraction * 100).toFixed(1)}% of capacity (needs ${(CATALYST_MIN_STOCK_FRACTION * 100).toFixed(0)}%)`;
+  };
+}
+
+const CATALYST_REQUIREMENTS: Readonly<Record<CatalystId, readonly CatalystRequirement[]>> = {
+  "drought-a": [noDroughtActive, minEnergyShare("A"), minStockFraction("A")],
+  "drought-b": [noDroughtActive, minEnergyShare("B"), minStockFraction("B")],
+  "global-crash": [
+    noDroughtActive,
+    (c) =>
+      c.abioticStockFraction >= CATALYST_MIN_ABIOTIC_FRACTION
+        ? null
+        : `abiotic stock is ${(c.abioticStockFraction * 100).toFixed(1)}% of capacity (needs ${(CATALYST_MIN_ABIOTIC_FRACTION * 100).toFixed(0)}%)`,
+    (c) =>
+      c.population >= CATALYST_MIN_POPULATION
+        ? null
+        : `living population is ${c.population} (needs ${CATALYST_MIN_POPULATION})`,
+  ],
+};
+
+/**
+ * Evaluate every catalyst against read-only world state. Pure and
+ * deterministic: same context + same cooldown state => same diagnoses.
+ * Consumes no RNG and touches no simulation state.
+ */
+export function diagnoseCatalysts(
+  context: CatalystContext,
+  majorCooldownClear: boolean,
+): readonly CatalystDiagnosis[] {
+  return CATALYST_SPECS.map((spec) => {
+    const reasons: string[] = [];
+    for (const requirement of CATALYST_REQUIREMENTS[spec.id]) {
+      const failure = requirement(context);
+      if (failure) reasons.push(failure);
+    }
+    if (!majorCooldownClear) reasons.push("major-catalyst cooldown has not elapsed");
+    return { catalystId: spec.id, eligible: reasons.length === 0, reasons };
+  });
+}
+
+export interface CatalystWindowInput {
+  readonly tick: number;
+  readonly lastDecisionTick: number;
+  readonly lastMajorCatalystTick: number | null;
+  readonly context: CatalystContext;
+  readonly policyVersion?: string;
+}
+
+/**
+ * Decide whether a catalyst window opens now. Returns null when quiet time
+ * has not elapsed, the major cooldown blocks every otherwise-eligible
+ * catalyst, or nothing is eligible (in which case the world simply continues;
+ * requirements are never relaxed for waiting longer). No RNG.
+ */
+export function selectCatalystWindow(input: CatalystWindowInput): CatalystOpportunity | null {
+  const policyVersion = input.policyVersion ?? CATALYST_POLICY_VERSION;
+  if (input.tick - input.lastDecisionTick < CATALYST_QUIET_TICKS) return null;
+  const cooldownClear = isMajorCooldownClear(input.tick, input.lastMajorCatalystTick);
+  const diagnoses = diagnoseCatalysts(input.context, cooldownClear);
+  const eligible = diagnoses.filter((d) => d.eligible).map((d) => d.catalystId);
+  if (eligible.length === 0) return null;
+  const choices: DecisionChoice[] = [
+    {
+      choiceId: "keep-watching",
+      title: "Keep watching",
+      directEffectDescription: "Change nothing. The world stays exactly as it is.",
+      intervention: null,
+      catalystId: null,
+    },
+  ];
+  for (const id of eligible) {
+    const spec = CATALYST_SPECS.find((s) => s.id === id)!;
+    choices.push({
+      choiceId: spec.choiceId,
+      title: spec.title,
+      directEffectDescription: spec.effect,
+      intervention: spec.intervention,
+      catalystId: spec.id,
+    });
+  }
+  return {
+    schemaVersion: 1,
+    opportunityId: `wcat:${input.tick}`,
+    policyVersion,
+    source: "world_catalyst",
+    catalystIds: eligible,
+    createdTick: input.tick,
+    status: "pending",
+    prompt: "Change the environment?",
+    context:
+      "The world has been stable long enough for an intervention. " +
+      "Current conditions make these options meaningful. Nothing natural is beginning; this is your move, not nature's.",
+    contextSnapshot: { ...input.context },
+    diagnoses,
+    choices,
+  };
+}
+
+/**
+ * Whether a major catalyst may be offered at this tick. Exported so runtime
+ * and validation share the rule instead of duplicating the constant logic.
+ */
+export function isMajorCooldownClear(tick: number, lastMajorCatalystTick: number | null): boolean {
+  return lastMajorCatalystTick === null || tick - lastMajorCatalystTick >= MAJOR_CATALYST_COOLDOWN_TICKS;
+}

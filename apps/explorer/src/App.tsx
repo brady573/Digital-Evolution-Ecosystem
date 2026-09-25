@@ -543,8 +543,8 @@ export function App(){
               <button aria-label="Reset view" onClick={()=>{setZoom(1);setCam({x:300,y:300})}}>⌂</button>
             </div>
           </div>
-          {pending&&<section className="decision-sheet" role="dialog" aria-modal="false" aria-label="Event decision" data-testid="decision-sheet">
-            <span className="eyebrow">A decision is waiting</span>
+          {pending&&<section className="decision-sheet" role="dialog" aria-modal="false" aria-label={pending.source==="world_catalyst"?"World catalyst":"Event decision"} data-testid="decision-sheet" data-source={pending.source}>
+            <span className="eyebrow">{pending.source==="world_catalyst"?"World catalyst — your move":"A decision is waiting"}</span>
             <h2>{pending.prompt}</h2>
             <p className="decision-context">{pending.context}</p>
             <p className="decision-tick">World paused at tick {pending.createdTick.toLocaleString()}</p>
@@ -588,11 +588,14 @@ export function App(){
           <h3>Your decisions</h3>
           <p>Actions you took, in order. A decision is an action followed by later outcomes, not a proven cause.</p>
           {snapshot.resolvedDecisions.slice().reverse().map(d=>{
-            const source=records.find((r:any)=>r.id===d.sourceEventId);
+            const source=d.sourceEventId?records.find((r:any)=>r.id===d.sourceEventId):null;
+            const offered=d.source==="world_catalyst"
+              ?`World catalyst offered at tick ${d.offerTick.toLocaleString()}.`
+              :source?`After: ${source.title}.`:"No linked event.";
             return <article key={d.commandId} className="decision-record">
               <span>Tick {d.tick.toLocaleString()}</span>
               <h3>{d.choiceTitle}</h3>
-              <p>{source?`After: ${source.title}.`:"No linked event."} {d.directEffectDescription}</p>
+              <p>{offered} {d.directEffectDescription}</p>
             </article>;
           })}
         </>}

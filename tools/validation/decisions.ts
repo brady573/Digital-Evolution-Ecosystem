@@ -14,6 +14,7 @@
  */
 import assert from "node:assert/strict";
 import type {
+  CatalystOpportunity,
   DecisionOpportunity,
   DecisionResolution,
   EngineConfig,
@@ -24,6 +25,7 @@ import type {
 import { ENGINE_VERSION, EVENT_STRIDE } from "../../packages/sim-core/src/index.ts";
 import { UniverseSession, CHECKPOINT_SCHEMA_VERSION } from "../../packages/sim-runtime/src/session.ts";
 import {
+  CATALYST_POLICY_VERSION,
   DECISION_POLICY_VERSION,
   buildDecisionOpportunity,
   engineCatalystModeFor,
@@ -282,6 +284,21 @@ function testForwardCompatPolicyVersion() {
     "resolution inherits the opportunity's version, not the generator's",
   );
 
+  // A catalyst window now intercedes (quiet satisfied, stocks eligible): it is
+  // stamped with the current catalyst catalog, proving new generation is never
+  // mislabeled by the aged restore.
+  const window = session.advance(120_000).pendingDecision as CatalystOpportunity;
+  assert.ok(window, "a catalyst window follows");
+  assert.equal(window.source, "world_catalyst", "interceding decision is a catalyst window");
+  assert.equal(window.createdTick, 17_570, "first window opens at the first quiet stride");
+  assert.equal(window.policyVersion, CATALYST_POLICY_VERSION, "new window stamped current");
+  session.resolveEventDecision(window.opportunityId, "keep-watching");
+  assert.equal(
+    session.decisionResolutions[1]!.policyVersion,
+    CATALYST_POLICY_VERSION,
+    "window resolution stamped current",
+  );
+
   // The next natural event is stamped with the current policy version, and so
   // is its resolution: no stale labels leak into new decisions or evidence.
   const second = session.advance(120_000).pendingDecision as DecisionOpportunity;
@@ -296,7 +313,7 @@ function testForwardCompatPolicyVersion() {
   );
   session.resolveEventDecision(second.opportunityId, "drought-a");
   assert.equal(
-    session.decisionResolutions[1]!.policyVersion,
+    session.decisionResolutions[2]!.policyVersion,
     DECISION_POLICY_VERSION,
     "new resolution stamped current",
   );

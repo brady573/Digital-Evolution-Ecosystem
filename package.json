@@ -10,11 +10,12 @@
     "test:migration": "tsx tools/validation/parity.ts",
     "build": "pnpm --filter @digital-evolution/explorer build",
     "dev": "pnpm --filter @digital-evolution/explorer dev",
-    "verify": "pnpm typecheck && pnpm test:migration && pnpm test:decisions && pnpm test:ecology && pnpm build",
+    "verify": "pnpm typecheck && pnpm test:migration && pnpm test:decisions && pnpm test:catalysts && pnpm test:ecology && pnpm build",
     "test:ecology": "tsx tools/validation/ecology.ts",
     "test:survey": "tsx tools/validation/ecology-survey.ts",
     "test:browser": "tsx tools/validation/browser-smoke.ts",
-    "test:decisions": "tsx tools/validation/decisions.ts"
+    "test:decisions": "tsx tools/validation/decisions.ts",
+    "test:catalysts": "tsx tools/validation/catalysts.ts"
   },
   "devDependencies": {
     "@types/node": "26.6.2",

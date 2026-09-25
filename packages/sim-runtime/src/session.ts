@@ -1,15 +1,18 @@
 import type {
+  CatalystContext,
+  CatalystDiagnosis,
   DecisionCheckpoint,
   DecisionContext,
-  DecisionOpportunity,
   DecisionResolution,
   EngineConfig,
   InterventionSpec,
+  PendingDecision,
   RenderSnapshot,
   RuntimeCommand,
   RuntimeResponse,
   SupportedUniverseCheckpoint,
   UniverseCheckpoint,
+  UniverseCheckpointV02,
 } from "@digital-evolution/contracts";
 import {
   ENGINE_VERSION,
@@ -20,16 +23,22 @@ import {
 } from "@digital-evolution/sim-core";
 import { EcologyObserver } from "@digital-evolution/sim-analysis";
 import {
+  CATALYST_POLICY_VERSION,
+  CATALYST_QUIET_TICKS,
+  MAJOR_CATALYST_COOLDOWN_TICKS,
   DECISION_POLICY_VERSION,
   buildDecisionOpportunity,
   decisionCommandIdFor,
+  diagnoseCatalysts,
   engineCatalystModeFor,
   findChoice,
   isDecisionEligible,
+  isMajorCooldownClear,
   isSupportedIntervention,
+  selectCatalystWindow,
 } from "@digital-evolution/sim-decisions";
 
-export const CHECKPOINT_SCHEMA_VERSION = "0.2" as const;
+export const CHECKPOINT_SCHEMA_VERSION = "0.3" as const;
 
 function analysisFrame(sim:any){
   return sim.observerSnapshot(sim.metrics(),sim.last);
@@ -39,7 +48,7 @@ function observeIfDue(sim:any,observer:EcologyObserver){
   if(sim.t>0&&sim.t%EVENT_STRIDE===0)observer.observe(analysisFrame(sim));
 }
 
-function renderSnapshot(sim:any,analysis:EcologyObserver,control:any|null,pendingDecision:DecisionOpportunity|null,resolvedDecisions:readonly DecisionResolution[]):RenderSnapshot{
+function renderSnapshot(sim:any,analysis:EcologyObserver,control:any|null,pendingDecision:PendingDecision|null,resolvedDecisions:readonly DecisionResolution[]):RenderSnapshot{
   const metrics=sim.metrics();
   return{
     tick:sim.t,
@@ -69,15 +78,59 @@ function renderSnapshot(sim:any,analysis:EcologyObserver,control:any|null,pendin
   };
 }
 
+/**
+ * A persisted pending decision replays exactly as stored: never re-evaluated
+ * against a newer catalog, which could silently substitute choices. Pre-source
+ * 0.2 saves carry no `source` field; a `sourceEventId` can only mean an
+ * observed-event decision, so normalize it explicitly rather than guessing.
+ * Anything else unrecognized restores as no pending decision.
+ */
+function normalizePendingDecision(raw:unknown):PendingDecision|null{
+  if(!raw||typeof raw!=="object")return null;
+  const copy=JSON.parse(JSON.stringify(raw));
+  if(copy.source==="world_catalyst"||copy.source==="observed_event")return copy as PendingDecision;
+  if(typeof copy.sourceEventId==="string"){copy.source="observed_event";return copy as PendingDecision}
+  return null;
+}
+
+function normalizeResolution(raw:any):DecisionResolution{
+  const copy=JSON.parse(JSON.stringify(raw));
+  // Backfill for 0.2 records, which predate these fields: the resolution tick
+  // is the best available offer estimate, and no 0.2 record came from a
+  // catalyst window (they did not exist).
+  if(copy.offerTick===undefined)copy.offerTick=copy.tick;
+  if(copy.catalystId===undefined)copy.catalystId=null;
+  if(copy.source===undefined)copy.source="event_decision";
+  return copy as DecisionResolution;
+}
+
+/** Newest decision tick known to a migrated checkpoint, or 0 when none. */
+function newestKnownDecisionTick(pending:PendingDecision|null,resolutions:readonly DecisionResolution[]):number{
+  let newest=0;
+  if(pending&&typeof pending.createdTick==="number")newest=Math.max(newest,pending.createdTick);
+  for(const r of resolutions){
+    if(r&&typeof r.tick==="number")newest=Math.max(newest,r.tick);
+    if(r&&typeof (r as any).offerTick==="number")newest=Math.max(newest,(r as any).offerTick);
+  }
+  return newest;
+}
+
 export class UniverseSession {
   #experiment:any|null=null;
   #analysis=new EcologyObserver();
   #control:any|null=null;
   #controlAnalysis:EcologyObserver|null=null;
   // M3 decision lifecycle state (runtime-owned, resumable).
-  #pendingDecision:DecisionOpportunity|null=null;
+  // pendingDecision covers both sources: observed events and catalyst windows.
+  #pendingDecision:PendingDecision|null=null;
   #decisionResolutions:DecisionResolution[]=[];
   #policyVersion=DECISION_POLICY_VERSION;
+  #catalystPolicyVersion=CATALYST_POLICY_VERSION;
+  /** Tick of the most recent opportunity creation, either source. Starts at 0:
+   *  at universe start the quiet interval is measured from tick 0. */
+  #lastDecisionTick=0;
+  /** Tick of the most recent applied non-null catalyst, or null if none. */
+  #lastMajorCatalystTick:number|null=null;
   /** Number of analysis records already evaluated for decisions. */
   #observedThrough=0;
 
@@ -95,6 +148,9 @@ export class UniverseSession {
     this.#pendingDecision=null;
     this.#decisionResolutions=[];
     this.#policyVersion=DECISION_POLICY_VERSION;
+    this.#catalystPolicyVersion=CATALYST_POLICY_VERSION;
+    this.#lastDecisionTick=0;
+    this.#lastMajorCatalystTick=null;
     this.#observedThrough=0;
     return this.snapshot();
   }
@@ -133,9 +189,71 @@ export class UniverseSession {
       const opportunity=buildDecisionOpportunity(event,this.#decisionContext(),this.#policyVersion);
       if(!opportunity)continue;
       this.#pendingDecision=opportunity;
+      // Either source restarts the catalyst quiet interval at creation.
+      this.#lastDecisionTick=opportunity.createdTick;
       return true;
     }
     return false;
+  }
+
+  /**
+   * Read-only catalyst world state. Every read is a present-state property or
+   * an already-computed metrics object: no RNG, no mutation, no new analysis.
+   * sim.drought is the engine's own active-disturbance record (or null).
+   */
+  #catalystContext():CatalystContext{
+    const sim=this.#experiment;
+    const metrics=sim.metrics();
+    const energy=metrics.resource_energy??{a:0,b:0,c:0};
+    const ea=Number(energy.a||0),eb=Number(energy.b||0),ec=Number(energy.c||0);
+    const totalEnergy=ea+eb+ec;
+    const field=metrics.nutrient_field??{};
+    const stockA=Number(field.a||0),capA=Number(field.a_capacity||0);
+    const stockB=Number(field.b||0),capB=Number(field.b_capacity||0);
+    return{
+      tick:sim.t,
+      population:Number(metrics.population||0),
+      droughtActive:sim.drought!=null,
+      energyShareA:totalEnergy>0?ea/totalEnergy:0,
+      energyShareB:totalEnergy>0?eb/totalEnergy:0,
+      stockFractionA:capA>0?stockA/capA:0,
+      stockFractionB:capB>0?stockB/capB:0,
+      abioticStockFraction:(capA+capB)>0?(stockA+stockB)/(capA+capB):0,
+    };
+  }
+
+  /**
+   * Evaluate a catalyst window. Called only at stride boundaries (the same
+   * deterministic cadence as the event gate), never every tick: metrics() is
+   * too costly to rebuild per step at phone populations.
+   */
+  #evaluateCatalystWindow():boolean{
+    if(this.#pendingDecision)return false;
+    const context=this.#catalystContext();
+    const opportunity=selectCatalystWindow({
+      tick:context.tick,
+      lastDecisionTick:this.#lastDecisionTick,
+      lastMajorCatalystTick:this.#lastMajorCatalystTick,
+      context,
+      policyVersion:this.#catalystPolicyVersion,
+    });
+    if(!opportunity)return false;
+    this.#pendingDecision=opportunity;
+    this.#lastDecisionTick=opportunity.createdTick;
+    return true;
+  }
+
+  /**
+   * Read-only catalyst diagnostics for validation and UI: the current context
+   * plus per-catalyst eligibility. Pure read; safe to call any time.
+   */
+  describeCatalystEligibility():{context:CatalystContext;diagnoses:readonly CatalystDiagnosis[]}{
+    if(!this.#experiment)throw new Error("Universe has not been created");
+    const context=this.#catalystContext();
+    return{
+      context,
+      diagnoses:diagnoseCatalysts(context,isMajorCooldownClear(context.tick,this.#lastMajorCatalystTick)),
+    };
   }
 
   #stepOnce(){
@@ -155,7 +273,10 @@ export class UniverseSession {
     const count=Math.max(0,Math.floor(ticks));
     for(let i=0;i<count;i++){
       this.#stepOnce();
+      // Observed events have priority: evaluate them first at every step, and
+      // only consider a catalyst window at stride boundaries when none fired.
       if(this.#evaluateNewEvents())break;
+      if(this.#experiment.t%EVENT_STRIDE===0&&this.#evaluateCatalystWindow())break;
     }
     return this.snapshot();
   }
@@ -171,6 +292,9 @@ export class UniverseSession {
       // A decision-eligible observation stops the scan immediately, even if the
       // same tick also produced a non-decision record or raw engine event.
       if(this.#evaluateNewEvents())return this.snapshot();
+      // A catalyst window is equally scan-worthy: quiet stretches are exactly
+      // when the player reaches for time compression.
+      if(this.#experiment.t%EVENT_STRIDE===0&&this.#evaluateCatalystWindow())return this.snapshot();
       if(this.#analysis.records.length>startRecords||this.#experiment.ev.length>startEvents||this.#experiment.extinctTick!==null)break;
     }
     return this.snapshot();
@@ -213,9 +337,9 @@ export class UniverseSession {
   }
 
   /**
-   * Resolve the pending opportunity. Records the command, applies at most one
-   * intervention, clears the gate, and never advances a tick: the world stays
-   * paused until the player explicitly resumes.
+   * Resolve the pending opportunity, either source. Records the command,
+   * applies at most one intervention, clears the gate, and never advances a
+   * tick: the world stays paused until the player explicitly resumes.
    */
   resolveEventDecision(opportunityId:string,choiceId:string){
     if(!this.#experiment)throw new Error("Universe has not been created");
@@ -226,24 +350,33 @@ export class UniverseSession {
     const choice=findChoice(pending,choiceId);
     if(!choice)throw new Error("Choice does not belong to this decision opportunity");
     if(!isSupportedIntervention(choice.intervention))throw new Error("Stored intervention is not supported by this engine version");
+    const fromCatalyst=pending.source==="world_catalyst";
     const resolution:DecisionResolution={
       schemaVersion:1,
       commandId:decisionCommandIdFor(pending.opportunityId,choice.choiceId,pending.policyVersion),
       tick:this.#experiment.t,
+      offerTick:pending.createdTick,
       opportunityId:pending.opportunityId,
-      sourceEventId:pending.sourceEventId,
+      // Never a fabricated event id: catalyst resolutions carry null.
+      sourceEventId:fromCatalyst?null:pending.sourceEventId,
       choiceId:choice.choiceId,
       choiceTitle:choice.title,
       directEffectDescription:choice.directEffectDescription,
       intervention:choice.intervention,
-      source:"event_decision",
+      source:fromCatalyst?"world_catalyst":"event_decision",
+      catalystId:choice.catalystId??null,
       // The opportunity's version, not the generator's: a restored pending
       // keeps the catalog it was offered under, so the record stays
       // interpretable even after the catalog evolves.
       policyVersion:pending.policyVersion,
     };
     this.#decisionResolutions.push(resolution);
-    if(choice.intervention)this.applyIntervention(choice.intervention,"event decision");
+    if(choice.intervention){
+      // The quiet interval already restarted at creation; only a non-null
+      // catalyst application additionally starts the major cooldown.
+      this.applyIntervention(choice.intervention,fromCatalyst?"world catalyst":"event decision");
+      if(fromCatalyst)this.#lastMajorCatalystTick=this.#experiment.t;
+    }
     this.#pendingDecision=null;
     return this.snapshot();
   }
@@ -253,6 +386,9 @@ export class UniverseSession {
       pending:this.#pendingDecision?JSON.parse(JSON.stringify(this.#pendingDecision)):null,
       resolutions:JSON.parse(JSON.stringify(this.#decisionResolutions)),
       policyVersion:this.#policyVersion,
+      catalystPolicyVersion:this.#catalystPolicyVersion,
+      lastDecisionTick:this.#lastDecisionTick,
+      lastMajorCatalystTick:this.#lastMajorCatalystTick,
     };
   }
 
@@ -271,31 +407,53 @@ export class UniverseSession {
   }
 
   /**
-   * Restore schema 0.2 exactly. Schema 0.1 is migrated forward: same simulation,
-   * analysis and control state, with no pending opportunity and an empty
-   * decision history.
+   * Restore schema 0.3 exactly. Older schemas migrate forward explicitly:
+   * - 0.2: same simulation/analysis/control state; pending normalizes (a
+   *   sourceless pending with a sourceEventId is an event decision);
+   *   resolutions backfill offerTick/catalystId; pacing state restarts from
+   *   the newest known decision tick (or 0) with a clear cooldown.
+   * - 0.1: as 0.2, with no pending opportunity and an empty command history.
+   * Generator versions are always the running code's; persisted pendings and
+   * resolutions keep their own embedded versions.
    */
   restore(checkpoint:SupportedUniverseCheckpoint){
     const schema=(checkpoint as any)?.checkpointSchemaVersion;
-    if(schema!=="0.1"&&schema!=="0.2")throw new Error(`Unsupported runtime checkpoint schema: ${String(schema)}`);
+    if(schema!=="0.1"&&schema!=="0.2"&&schema!=="0.3")throw new Error(`Unsupported runtime checkpoint schema: ${String(schema)}`);
     if(checkpoint.engineVersion!==ENGINE_VERSION)throw new Error(`Checkpoint engine ${checkpoint.engineVersion} does not match ${ENGINE_VERSION}`);
     this.#experiment=restoreSimulationCheckpoint(checkpoint.experiment as any);
     this.#analysis=EcologyObserver.restore(checkpoint.analysis);
     this.#control=checkpoint.control?restoreSimulationCheckpoint(checkpoint.control as any):null;
     this.#controlAnalysis=checkpoint.controlAnalysis?EcologyObserver.restore(checkpoint.controlAnalysis):null;
-    if(schema==="0.2"){
+    if(schema==="0.3"){
       const decisions=(checkpoint as UniverseCheckpoint).decisions;
-      this.#pendingDecision=decisions?.pending?JSON.parse(JSON.stringify(decisions.pending)):null;
-      this.#decisionResolutions=decisions?.resolutions?JSON.parse(JSON.stringify(decisions.resolutions)):[];
-      // Generator version is always the running code's. A resumed checkpoint must
-    // never stamp newly generated opportunities with an older catalog's
-    // version. Persisted pending opportunities and resolutions keep their own
-    // embedded versions and restore exactly as stored.
-    this.#policyVersion=DECISION_POLICY_VERSION;
+      this.#pendingDecision=normalizePendingDecision(decisions?.pending);
+      this.#decisionResolutions=Array.isArray(decisions?.resolutions)
+        ?decisions.resolutions.map(normalizeResolution)
+        :[];
+      this.#policyVersion=DECISION_POLICY_VERSION;
+      this.#catalystPolicyVersion=CATALYST_POLICY_VERSION;
+      this.#lastDecisionTick=typeof decisions?.lastDecisionTick==="number"?decisions.lastDecisionTick:0;
+      this.#lastMajorCatalystTick=typeof decisions?.lastMajorCatalystTick==="number"?decisions.lastMajorCatalystTick:null;
+    }else if(schema==="0.2"){
+      const decisions=(checkpoint as UniverseCheckpointV02).decisions;
+      const pending=normalizePendingDecision(decisions?.pending);
+      const resolutions=Array.isArray(decisions?.resolutions)
+        ?(decisions.resolutions as any[]).map(normalizeResolution)
+        :[];
+      this.#pendingDecision=pending;
+      this.#decisionResolutions=resolutions;
+      // Generator versions are always the running code's, for both catalogs.
+      this.#policyVersion=DECISION_POLICY_VERSION;
+      this.#catalystPolicyVersion=CATALYST_POLICY_VERSION;
+      this.#lastDecisionTick=newestKnownDecisionTick(pending,resolutions);
+      this.#lastMajorCatalystTick=null;
     }else{
       this.#pendingDecision=null;
       this.#decisionResolutions=[];
       this.#policyVersion=DECISION_POLICY_VERSION;
+      this.#catalystPolicyVersion=CATALYST_POLICY_VERSION;
+      this.#lastDecisionTick=0;
+      this.#lastMajorCatalystTick=null;
     }
     // A restored pending opportunity is replayed as-is: never re-evaluated
     // against the current catalog, which could silently substitute choices.
@@ -309,13 +467,22 @@ export class UniverseSession {
       ...this.#experiment.out(),
       repository_analysis:this.#analysis.export(),
       // Observed evidence and player action stay separate representations.
+      // Catalyst provenance stays explicit: pending/resolutions carry their
+      // source, and pacing state is exported so evidence stays interpretable.
       observed_events:this.#analysis.observedEvents(),
       player_decisions:{
         schema_version:1,
         policy_version:this.#policyVersion,
+        catalyst_policy_version:this.#catalystPolicyVersion,
         checkpoint_schema_version:CHECKPOINT_SCHEMA_VERSION,
         pending:this.#pendingDecision,
         resolutions:this.#decisionResolutions,
+        catalyst_state:{
+          last_decision_tick:this.#lastDecisionTick,
+          last_major_catalyst_tick:this.#lastMajorCatalystTick,
+          quiet_ticks:CATALYST_QUIET_TICKS,
+          major_cooldown_ticks:MAJOR_CATALYST_COOLDOWN_TICKS,
+        },
       },
       matched_control:this.#control?{
         forked:true,
