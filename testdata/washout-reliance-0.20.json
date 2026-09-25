@@ -1,0 +1,108 @@
+{
+  "engine": "0.20.0",
+  "config": "balanced",
+  "settleTicks": 60000,
+  "assayTicks": 15000,
+  "intervention": {
+    "schemaVersion": 1,
+    "kind": "nutrient_disturbance",
+    "mode": "c_washout"
+  },
+  "rows": [
+    {
+      "seed": 3543950664,
+      "applicable": true,
+      "forkTick": 60670,
+      "washTick": 60670,
+      "establishedTick": 42670,
+      "livePopulation": 439,
+      "controlPopulation": 460,
+      "liveScavengerShare": 0.04100227790432802,
+      "controlScavengerShare": 0.09565217391304348,
+      "liveCStock": 10.758091921770133,
+      "controlCStock": 24.98229912971843,
+      "materialResponse": true
+    },
+    {
+      "seed": 821947219,
+      "horizon": 120000,
+      "applicable": true,
+      "forkTick": 120101,
+      "washTick": 120101,
+      "establishedTick": 88101,
+      "livePopulation": 352,
+      "controlPopulation": 373,
+      "liveScavengerShare": 0.03125,
+      "controlScavengerShare": 0.22788203753351208,
+      "liveCStock": 10.75372532607529,
+      "controlCStock": 26.053279273418163,
+      "materialResponse": true
+    },
+    {
+      "seed": 111111111,
+      "horizon": 120000,
+      "applicable": true,
+      "forkTick": 120049,
+      "washTick": 120049,
+      "establishedTick": 68523,
+      "livePopulation": 373,
+      "controlPopulation": 358,
+      "liveScavengerShare": 0.064343163538874,
+      "controlScavengerShare": 0.1564245810055866,
+      "liveCStock": 10.965759440562092,
+      "controlCStock": 26.470937767941802,
+      "materialResponse": true
+    },
+    {
+      "seed": 333333333,
+      "horizon": 120000,
+      "applicable": true,
+      "forkTick": 120121,
+      "washTick": 120121,
+      "establishedTick": 93121,
+      "livePopulation": 392,
+      "controlPopulation": 360,
+      "liveScavengerShare": 0.015306122448979591,
+      "controlScavengerShare": 0.06666666666666667,
+      "liveCStock": 11.979194259102318,
+      "controlCStock": 27.18762449548974,
+      "materialResponse": true
+    },
+    {
+      "seed": 444444444,
+      "horizon": 120000,
+      "applicable": true,
+      "forkTick": 120189,
+      "washTick": 120189,
+      "establishedTick": 110189,
+      "livePopulation": 396,
+      "controlPopulation": 426,
+      "liveScavengerShare": 0.06060606060606061,
+      "controlScavengerShare": 0.08450704225352113,
+      "liveCStock": 28.81365594445521,
+      "controlCStock": 23.159762400351624,
+      "materialResponse": false
+    },
+    {
+      "seed": 2088626459,
+      "horizon": 120000,
+      "applicable": false,
+      "extended": true,
+      "reason": "no C-use guild established by 120k"
+    },
+    {
+      "seed": 2121676508,
+      "horizon": 120000,
+      "applicable": false,
+      "extended": true,
+      "reason": "no C-use guild established by 120k"
+    },
+    {
+      "seed": 222222222,
+      "horizon": 120000,
+      "applicable": false,
+      "extended": true,
+      "reason": "no C-use guild established by 120k"
+    }
+  ]
+}

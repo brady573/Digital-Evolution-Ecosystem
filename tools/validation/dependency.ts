@@ -433,7 +433,47 @@ function testWashoutReliance() {
   );
 }
 
+function testWashoutCheckpoint() {
+  // Review 3: a timed sink is future-biology state. Prove a checkpoint taken
+  // mid-sink restores the remaining duration/strength exactly and both
+  // branches continue identically through expiry.
+  const session = new UniverseSession();
+  session.create(fixtureConfig(FIXTURE_SEED));
+  settle(session, 60000);
+  session.applyIntervention(
+    { schemaVersion: 1, kind: "nutrient_disturbance", mode: "c_washout" },
+    "checkpoint assay",
+  );
+  const washTick = session.snapshot().tick;
+  settle(session, washTick + 5000);
+  const liveSink = (session.simulation as any).resources.cSink;
+  assert.deepEqual(liveSink, { end: washTick + 15000, factor: 50 }, "sink state exact mid-window");
+  const restored = new UniverseSession();
+  restored.restore(JSON.parse(JSON.stringify(session.checkpoint())));
+  assert.deepEqual(
+    (restored.simulation as any).resources.cSink,
+    { end: washTick + 15000, factor: 50 },
+    "restored sink keeps remaining duration and strength",
+  );
+  settle(session, washTick + 25000);
+  settle(restored, washTick + 25000);
+  const state = (s: UniverseSession) => {
+    const m = s.snapshot().metrics as any;
+    return {
+      tick: s.snapshot().tick,
+      pop: m.population,
+      scav: m.metabolic_roles?.counts?.byproduct_scavenger || 0,
+      cStock: Math.round(m.metabolite_c.stock * 1000),
+      sink: (s.simulation as any).resources.cSink,
+    };
+  };
+  assert.deepEqual(state(restored), state(session), "branches continue identically through expiry");
+  assert.equal(state(session).sink, null, "sink expired on both branches");
+  console.log("washout checkpoint continuation: PASS");
+}
+
 testFixtureArc();
+testWashoutCheckpoint();
 testMultiSeedPossibility();
 testTradeoffHolds();
 testWashoutReliance();

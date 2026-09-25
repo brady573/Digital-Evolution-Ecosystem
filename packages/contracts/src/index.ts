@@ -81,9 +81,12 @@ export type InterventionSpec =
   | {
       readonly schemaVersion: 1;
       readonly kind: "nutrient_disturbance";
-      // c_washout is validation-internal (matched reliance assays): it is a
-      // supported engine effect but never offered in catalyst windows and has
-      // no Experiments button. Old saves never reference it.
+      // c_washout is a SUPPORTED environmental intervention (recorded path,
+      // removal events, response tracking), validation-internal by policy:
+      // never offered in windows (asserted), no Experiments button. Additive
+      // union member: old saves/loads are unaffected, no schema bump. Engine
+      // version unchanged: sink paths are inert by default (parity-proven)
+      // and active only under this explicit command, like droughts.
       readonly mode: "global_crash" | "drought_a" | "drought_b" | "c_washout";
     };
 
