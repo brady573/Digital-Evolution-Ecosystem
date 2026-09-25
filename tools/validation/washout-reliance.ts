@@ -15,7 +15,7 @@ import { ENGINE_VERSION } from "../../packages/sim-core/src/index.ts";
  * Retains to testdata/washout-reliance-0.20.json (resume-safe).
  */
 
-const OUT = "testdata/washout-reliance-0.20.json";
+const OUT = "testdata/washout-reliance-0.21.json";
 const SEEDS = [821947219, 2088626459, 3543950664, 2121676508, 111111111, 222222222, 333333333, 444444444];
 const SETTLE_TICKS = 60000;
 const EXTENDED_TICKS = 120000;
