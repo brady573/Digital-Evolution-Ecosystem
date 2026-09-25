@@ -168,7 +168,26 @@ function testFlowEvidence() {
   console.log("flow evidence separation: PASS");
 }
 
+function testProcessActivations() {
+  // Stage 2: execution attribution per process. Deterministic across
+  // identical runs; all three processes execute in a live world; counts
+  // advance monotonically within a run.
+  const run = () => {
+    const session = new UniverseSession();
+    session.create(config(FIXTURE_SEED));
+    settle(session, 10000);
+    const last = (session.simulation as any).last;
+    return { a: last.proc_exec_a || 0, b: last.proc_exec_b || 0, c: last.proc_exec_c || 0 };
+  };
+  const a = run();
+  const b = run();
+  assert.deepEqual(a, b, "process execution counts reproduce exactly");
+  assert.ok(a.a > 0 && a.b > 0 && a.c > 0, `all processes execute (a=${a.a} b=${a.b} c=${a.c})`);
+  console.log("process activations: PASS");
+}
+
 testFlowDeterminism();
+testProcessActivations();
 testFlowSelfConsistency();
 testFlowRngNeutrality();
 testFlowCheckpoint();

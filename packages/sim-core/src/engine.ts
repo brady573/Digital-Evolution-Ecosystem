@@ -27,8 +27,8 @@ const STRAT_CUT=.25,REALIZED_CUT=.70,REALIZED_MIN_GAIN=45,PART_MIN=.12,PART_WIND
 const F=(n:number):string=>`L-${String(n).padStart(4,'0')}`;
 const B=():Record<string,[number,number]>=>Object.fromEntries(Object.keys(T).map(k=>[k,[0,0]])) as Record<string,[number,number]>;
 /** Per-stride biological interval counters (births, deaths, resource flows, dormancy transitions). */
-interface Interval{births:number;deaths:number;mutation_attempts:number;effective_mutations:number;resources_spawned:number;resources_suppressed:number;resources_consumed:number;spawned_a:number;spawned_b:number;consumed_a:number;consumed_b:number;consumed_c:number;produced_c:number;decayed_c:number;energy_a:number;energy_b:number;energy_c:number;repro_supported_a:number;repro_supported_b:number;repro_supported_mixed:number;repro_supported_c:number;dormancy_entries:number;wakes:number;wake_clades:Record<string,number>;[k:string]:number|Record<string,number>}
-const I=():Interval=>({births:0,deaths:0,mutation_attempts:0,effective_mutations:0,resources_spawned:0,resources_suppressed:0,resources_consumed:0,spawned_a:0,spawned_b:0,consumed_a:0,consumed_b:0,consumed_c:0,produced_c:0,decayed_c:0,energy_a:0,energy_b:0,energy_c:0,repro_supported_a:0,repro_supported_b:0,repro_supported_mixed:0,repro_supported_c:0,dormancy_entries:0,wakes:0,wake_clades:{}});
+interface Interval{births:number;deaths:number;mutation_attempts:number;effective_mutations:number;resources_spawned:number;resources_suppressed:number;resources_consumed:number;spawned_a:number;spawned_b:number;consumed_a:number;consumed_b:number;consumed_c:number;produced_c:number;decayed_c:number;energy_a:number;energy_b:number;energy_c:number;repro_supported_a:number;repro_supported_b:number;repro_supported_mixed:number;repro_supported_c:number;dormancy_entries:number;wakes:number;wake_clades:Record<string,number>;proc_exec_a:number;proc_exec_b:number;proc_exec_c:number;[k:string]:number|Record<string,number>}
+const I=():Interval=>({births:0,deaths:0,mutation_attempts:0,effective_mutations:0,resources_spawned:0,resources_suppressed:0,resources_consumed:0,spawned_a:0,spawned_b:0,consumed_a:0,consumed_b:0,consumed_c:0,produced_c:0,decayed_c:0,energy_a:0,energy_b:0,energy_c:0,repro_supported_a:0,repro_supported_b:0,repro_supported_mixed:0,repro_supported_c:0,dormancy_entries:0,wakes:0,wake_clades:{},proc_exec_a:0,proc_exec_b:0,proc_exec_c:0});
 const H_STD=[50000,100000,200000,300000],H_DEEP=[100000,300000,500000,1000000];
 const SCI={disclaimer:'Sources inform experimental design and interpretation; the exact simulation equations remain deliberate abstractions.',sources:[
 {key:'avida',authors:'Ofria & Wilke',year:2004,title:'Avida: A Software Platform for Research in Computational Evolutionary Biology',doi:'10.1162/106454604773563612',url:'https://doi.org/10.1162/106454604773563612',informs:['digital evolution','controlled experiments']},
@@ -67,6 +67,25 @@ const MUTATION_NAMES:Record<string,string>={speed:'movement',sensing:'nutrient-s
 const friendlyMutation=(a:string[]):string=>!a||!a.length?'founder':a.map(v=>MUTATION_NAMES[v]||v).join(' + ');
 
 const metabolicRole=(o:Organism):string=>{let total=(o.ga||0)+(o.gb||0)+(o.gc||0);if(total<REALIZED_MIN_GAIN)return'unresolved';let cs=(o.gc||0)/total;if(cs>=.15&&C_ACCESS(o.bu||0)>=.35)return'byproduct_scavenger';let p=(o.ga||0)+(o.gb||0);if(p<=0)return'unresolved';let a=(o.ga||0)/p;return a>=REALIZED_CUT?'primary_a':a<=1-REALIZED_CUT?'primary_b':'mixed_primary'};
+/**
+ * Stage 2 (issue #30) process foundation: the three supported metabolisms as
+ * explicit engine-owned processes. Identity, environmental input (field
+ * kind), capability/expression factor (access), byproduct output, and
+ * execution attribution route through these descriptors; consume() executes
+ * them without re-deriving the math. Capability rule: access derives ONLY
+ * from inherited organism state (AE/HP/C_ACCESS); analysis never activates,
+ * suppresses, or modifies it. Energy yields stay authoritative in the RS
+ * field definitions and are read through processYield, so no number here
+ * can drift from the fields.
+ */
+interface BioProcess{id:'primary_a'|'primary_b'|'c_scavenge';kind:0|1|2;access:(o:Organism)=>number;producesByproduct:boolean}
+const PROCESSES:Record<number,BioProcess>={
+ 0:{id:'primary_a',kind:0,access:(o)=>AE(o.di,0)*HP(o.ha,0),producesByproduct:true},
+ 1:{id:'primary_b',kind:1,access:(o)=>AE(o.di,1)*HP(o.ha,1),producesByproduct:true},
+ 2:{id:'c_scavenge',kind:2,access:(o)=>C_ACCESS(o.bu||0),producesByproduct:false},
+};
+function processFor(kind:number):BioProcess{return PROCESSES[kind]!}
+function processYield(defs:FieldDef[],kind:number):number{return defs[kind]!.energy_yield}
 /**
  * RETAINED ONLY to decode pre-removal checkpoints carrying the
  * "legacy-observer" tag. Never instantiated or advanced: ecological
@@ -138,13 +157,16 @@ class RS{
  idx(x:number,y:number):number{let ix=Math.floor((((x%600)+600)%600)/this.cell)%this.n,iy=Math.floor((((y%600)+600)%600)/this.cell)%this.n;return iy*this.n+ix}
  fractionAt(kind:number,x:number,y:number):number{let i=this.idx(x,y),c=this.cap[kind]![i]!;return c>1e-9?this.stock[kind]![i]!/c:0}
  amountAt(kind:number,x:number,y:number):number{return this.stock[kind]![this.idx(x,y)]!}
- access(o:Organism,k:number):number{return k===2?C_ACCESS(o.bu||0):AE(o.di,k)*HP(o.ha,k)}
+ access(o:Organism,k:number):number{return processFor(k).access(o)}
  scoreIndex(o:Organism,i:number):{score:number;kind:number}{let best=-1,bestKind=0,limit=this.enabledByproduct?3:2;for(let k=0;k<limit;k++){let amt=this.stock[k]![i]!,c=this.cap[k]![i]!;if(c<=1e-9||amt<=1e-9)continue;let score=amt*this.access(o,k);if(score>best){best=score;bestKind=k}}return{score:Math.max(0,best),kind:bestKind}}
  scoreAt(o:Organism,x:number,y:number):{score:number;kind:number}{return this.scoreIndex(o,this.idx(x,y))}
  opportunity(o:Organism):number{let i=this.idx(o.x,o.y),best=0,limit=this.enabledByproduct?3:2;for(let k=0;k<limit;k++){let c=this.cap[k]![i]!,f=c>1e-9?this.stock[k]![i]!/c:0;best=Math.max(best,f*this.access(o,k))}return best}
  sense(o:Organism){let best={score:0,kind:0,angle:o.h},ds=[Q(o.se*.45,15,75),Q(o.se,25,150)];for(const d of ds)for(let j=0;j<8;j++){let a=o.h+j*Math.PI/4,x=(o.x+Math.cos(a)*d+600)%600,y=(o.y+Math.sin(a)*d+600)%600,q=this.scoreIndex(o,this.idx(x,y));if(q.score>best.score){best={...q,angle:a}}}let local=this.scoreIndex(o,this.idx(o.x,o.y));if(local.score>best.score*1.12)best={...local,angle:o.h};return best}
  deposit(kind:number,x:number,y:number,amount:number,cause:string|null=null,interval:Interval|null=null):number{if(amount<=0||kind<0||kind>=this.stock.length)return 0;let i=this.idx(x,y),st=this.stock[kind]!,cp=this.cap[kind]!,room=Math.max(0,cp[i]!-st[i]!),add=Math.min(room,amount);if(add<=0)return 0;st[i]!+=add;this.totalStock[kind]!+=add;this.biologicalProduction[kind]!+=add;if(interval&&kind===2)interval.produced_c+=add;return add}
- consume(o:Organism,interval:Interval){let i=this.idx(o.x,o.y),best=-1,kind=0,limit=this.enabledByproduct?3:2;for(let k=0;k<limit;k++){let amt=this.stock[k]![i]!;if(amt<=1e-9)continue;let score=amt*this.access(o,k);if(score>best){best=score;kind=k}}if(best<=0)return null;let cap=this.cap[kind]![i]!,conc=cap>1e-9?this.stock[kind]![i]!/cap:0,take=Math.min(this.stock[kind]![i]!,this.uptake*(.55+.45*Q(conc,0,1)));if(take<=1e-6)return null;let before=this.stock[kind]![i]!;this.stock[kind]![i]!-=take;this.totalStock[kind]!+=this.stock[kind]![i]!-before;this.consumed[kind]!+=take;if(interval){interval.resources_consumed+=take;if(kind===0)interval.consumed_a+=take;else if(kind===1)interval.consumed_b+=take;else interval.consumed_c+=take}let gain=take*this.defs[kind]!.energy_yield*(kind===2?C_ACCESS(o.bu||0):AE(o.di,kind));if(this.enabledByproduct&&kind<2){let made=this.deposit(2,o.x,o.y,take*C_BYPRODUCT_YIELD,'primary metabolism',interval);o.pc=(o.pc||0)+made}return{kind,amount:take,gain}}
+ consume(o:Organism,interval:Interval){let i=this.idx(o.x,o.y),best=-1,kind=0,limit=this.enabledByproduct?3:2;for(let k=0;k<limit;k++){let amt=this.stock[k]![i]!;if(amt<=1e-9)continue;let score=amt*this.access(o,k);if(score>best){best=score;kind=k}}if(best<=0)return null;let cap=this.cap[kind]![i]!,conc=cap>1e-9?this.stock[kind]![i]!/cap:0,take=Math.min(this.stock[kind]![i]!,this.uptake*(.55+.45*Q(conc,0,1)));if(take<=1e-6)return null;let before=this.stock[kind]![i]!;this.stock[kind]![i]!-=take;this.totalStock[kind]!+=this.stock[kind]![i]!-before;this.consumed[kind]!+=take;if(interval){interval.resources_consumed+=take;if(kind===0){interval.consumed_a+=take;interval.proc_exec_a=(interval.proc_exec_a||0)+1}else if(kind===1){interval.consumed_b+=take;interval.proc_exec_b=(interval.proc_exec_b||0)+1}else{interval.consumed_c+=take;interval.proc_exec_c=(interval.proc_exec_c||0)+1}}/* Frozen asymmetry (parity-protected): habitat preference shapes food
+   discovery (selection access) but not digestion yield (AE-only gain).
+   Do not 'fix' without an engine-version change. */
+   let gain=take*processYield(this.defs,kind)*(kind===2?C_ACCESS(o.bu||0):AE(o.di,kind));if(this.enabledByproduct&&processFor(kind).producesByproduct){let made=this.deposit(2,o.x,o.y,take*C_BYPRODUCT_YIELD,'primary metabolism',interval);o.pc=(o.pc||0)+made}return{kind,amount:take,gain}}
  diffuse(k:number):void{let st=this.stock[k]!,cp=this.cap[k]!,d=this.delta[k]!,right=this.right,down=this.down,mr=this.minCapRight[k]!,md=this.minCapDown[k]!,rate=this.diffusionRate[k]!;d.fill(0);for(let i=0;i<this.size;i++){let ci=cp[i]!>1e-9?st[i]!/cp[i]!:0,j=right[i]!,cj=cp[j]!>1e-9?st[j]!/cp[j]!:0,flux=rate*(ci-cj)*mr[i]!;d[i]!-=flux;d[j]!+=flux;j=down[i]!;cj=cp[j]!>1e-9?st[j]!/cp[j]!:0;flux=rate*(ci-cj)*md[i]!;d[i]!-=flux;d[j]!+=flux}let adj=0;for(let i=0;i<this.size;i++){let before=st[i]!,raw=before+d[i]!,next=Q(raw,0,cp[i]!);st[i]=next;adj+=next-before}this.totalStock[k]!+=adj;this.diffusionAdjustment[k]!+=adj}
  step(t:number,drought:DroughtState|null,interval:Interval):void{let added=[0,0,0],phase=t%this.updateStride,bucket=this.regenBuckets[phase]!,elapsed=new Int32Array(bucket.length);for(let j=0;j<bucket.length;j++){let i=bucket[j]!;elapsed[j]=Math.max(1,t-this.regenLast[i]!)}for(let k=0;k<2;k++){let factor=drought&&t<drought.end&&k===drought.kind?(1-drought.suppression):1,st=this.stock[k]!,cp=this.cap[k]!,boost=this.sourceBoost[k]!;for(let j=0;j<bucket.length;j++){let i=bucket[j]!,gap=cp[i]!-st[i]!;if(gap<=1e-9)continue;let inc=gap*(1-Math.exp(-this.regenRate*boost[i]!*factor*elapsed[j]!));if(inc>0){let before=st[i]!;st[i]!+=inc;this.totalStock[k]!+=st[i]!-before;added[k]!+=inc}}this.input[k]!+=added[k]!}
   if(this.enabledByproduct){let st=this.stock[2]!,dec=0;for(let j=0;j<bucket.length;j++){let i=bucket[j]!,e=elapsed[j]!,before=st[i]!,next=before*Math.exp(-C_DECAY_RATE*e),loss=before-next;if(loss>0){st[i]=next;dec+=loss}}this.totalStock[2]!-=dec;this.decayed[2]!+=dec;if(interval)interval.decayed_c+=dec}
