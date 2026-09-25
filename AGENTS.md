@@ -72,6 +72,15 @@ all product packages -> contracts
 5. **Small, reviewable diffs.** Prefer focused PRs; use the PR template in `.github/pull_request_template.md`.
 6. **Offline-first.** Simulation, saves, history, experiments, and inspection must remain usable with no network.
 
+## Working from a handoff
+
+Design work arrives as files in `handoffs/`, not chat scrollback. The loop is claim → work → answer, and every step is a commit:
+
+1. **Claim.** Take the lowest-numbered `inbox/` handoff with `status: proposed`. Set it to `claimed` and commit — that commit reserves the work.
+2. **Work.** Implement what the handoff authorizes (nothing more). Run the handoff's `gate` command; `pnpm test:handoffs` keeps the queue itself well-formed and runs inside `pnpm verify`.
+3. **Answer.** Write the result in `outbox/` under the same id (`author: agent:<your-name>`, `status: done`), set the inbox handoff to `done` (or `blocked`, with the reason), update the `INDEX.md` ledger row, and commit. A human carries the outbox file back to the design side — that step closes the loop.
+4. **Format.** Every handoff obeys `handoffs/TEMPLATE.md`: id `HNN-0000`, direction/author agreement, per-directory id uniqueness, and `responds_to` linking each outbox to its inbox. When in doubt, the gate (`tools/validation/handoffs.ts`) is the specification.
+
 ## Prohibitions
 
 - Never weaken or delete tests, validation gates, CI checks, or security controls merely to make a change pass.
