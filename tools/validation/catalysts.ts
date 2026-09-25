@@ -11,7 +11,11 @@
  * Integration cases share one fixture seed (balanced 24681357).
  *
  * Run: pnpm test:catalysts
+ * Fast daily mode (unit only, seconds): pnpm test:catalysts:fast
  */
+
+/** Fast mode runs the millisecond policy checks; full mode adds the live integration cases. */
+const FAST = process.argv.includes("--fast");
 import assert from "node:assert/strict";
 import type {
   CatalystContext,
@@ -451,11 +455,15 @@ function testInterveneBlockedWhilePending() {
 
 testEligibilityBoundaries();
 testQuietAndCooldown();
-testFirstWindow();
-testSameTickPriority();
-testCatalystGateAndChoices();
-testInterveneBlockedWhilePending();
-testCrashAndCooldown();
-testCatalystCheckpoint();
-testCatalystEvidenceAndReplay();
-console.log(`catalyst validation: PASS (checkpoint schema ${CHECKPOINT_SCHEMA_VERSION}, engine ${ENGINE_VERSION})`);
+if (!FAST) {
+  testFirstWindow();
+  testSameTickPriority();
+  testCatalystGateAndChoices();
+  testInterveneBlockedWhilePending();
+  testCrashAndCooldown();
+  testCatalystCheckpoint();
+  testCatalystEvidenceAndReplay();
+  console.log(`catalyst validation: PASS (checkpoint schema ${CHECKPOINT_SCHEMA_VERSION}, engine ${ENGINE_VERSION})`);
+} else {
+  console.log(`catalyst validation (fast): PASS (engine ${ENGINE_VERSION})`);
+}

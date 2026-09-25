@@ -24,6 +24,25 @@ See `README.md` for product direction and `docs/architecture/MIGRATION.md` for m
 - **Node** >= 24 (see `.nvmrc`), **pnpm** 12.5.1 via corepack (`packageManager` field pins it).
 - No other runtimes are required. There is no build step outside the package scripts below.
 
+### Local toolchain note: proot / hardlinked native binaries
+
+Applies to local proot-distro (Termux) environments only. CI and normal Linux/macOS installs are unaffected, and nothing here belongs in the repo.
+
+pnpm hardlinks packages out of its content-addressable store by default. TypeScript 7 is a Go binary that locates its bundled `lib.*.d.ts` via `os.Executable()`, and **proot cannot resolve `/proc/self/exe` for a hardlinked file**. The binary therefore computes a bogus directory and dies at startup:
+
+```text
+panic: bundled: /.l2s/lib.d.ts does not exist; this executable may be misplaced
+```
+
+This is misleading — the lib files are present and readable. Two tells: the panic happens before any source is read, and `stat -c %h` on the `tsc` binary reports `2` instead of `1`. To confirm, copy the binary to any plain directory and run it; if it works there, the hardlink is the cause.
+
+Fix, in order of preference:
+
+1. `pnpm config set package-import-method copy --global` (writes outside the repo), then reinstall. Prevents recurrence.
+2. To repair an already-broken install, `rm` the binary **before** copying a replacement. Copying over a hardlink writes through the shared inode and corrupts the pnpm store for every other project on the machine.
+
+While proot is flaky, a `pnpm install` can leave `tsc` reporting **phantom** `TS2307 Cannot find module` errors that change between runs and vanish on re-run. Re-run before investigating a missing module after an install; do not edit `package.json` or the lockfile to chase one.
+
 ## Commands
 
 | Task | Command |
