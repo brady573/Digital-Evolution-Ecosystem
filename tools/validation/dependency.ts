@@ -10,6 +10,9 @@ import {
 import { ENGINE_VERSION } from "../../packages/sim-core/src/index.ts";
 import { CHECKPOINT_SCHEMA_VERSION } from "../../packages/sim-runtime/src/session.ts";
 
+/** Fast mode runs the synthetic unit arcs; full mode adds live integration (fixture, multi-seed, tradeoff, washout). */
+const FAST = process.argv.includes("--fast");
+
 /**
  * Issue #30 Phase C1: C-dependency guild arcs. The guild is role-defined
  * (byproduct scavengers) and lineage-identified (top C-energy consumer):
@@ -472,9 +475,13 @@ function testWashoutCheckpoint() {
   console.log("washout checkpoint continuation: PASS");
 }
 
-testFixtureArc();
-testWashoutCheckpoint();
-testMultiSeedPossibility();
-testTradeoffHolds();
-testWashoutReliance();
-console.log(`dependency validation: PASS (engine ${ENGINE_VERSION})`);
+if (!FAST) {
+  testFixtureArc();
+  testWashoutCheckpoint();
+  testMultiSeedPossibility();
+  testTradeoffHolds();
+  testWashoutReliance();
+  console.log(`dependency validation: PASS (engine ${ENGINE_VERSION})`);
+} else {
+  console.log(`dependency validation (fast): PASS (engine ${ENGINE_VERSION})`);
+}
