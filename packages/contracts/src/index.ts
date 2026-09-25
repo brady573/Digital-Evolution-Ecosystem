@@ -205,6 +205,19 @@ export interface CatalystOpportunity {
 /** Either pending-decision source. Never a fake event. */
 export type PendingDecision = DecisionOpportunity | CatalystOpportunity;
 
+/** Deterministic per-stride biological interval rates (one stride of flows). */
+export interface IntervalRates {
+  readonly producedC: number;
+  readonly consumedA: number;
+  readonly consumedB: number;
+  readonly consumedC: number;
+  readonly energyA: number;
+  readonly energyB: number;
+  readonly energyC: number;
+  readonly births: number;
+  readonly deaths: number;
+}
+
 /**
  * Deterministic biological flow facts for one lineage at one observation
  * tick, aggregated over living organisms only. Causal facts (who ate,
