@@ -8,9 +8,10 @@
   "scripts": {
     "typecheck": "pnpm exec tsc -p packages/contracts/tsconfig.json --noEmit --pretty false && pnpm exec tsc -p packages/sim-core/tsconfig.json --noEmit --pretty false && pnpm exec tsc -p packages/sim-analysis/tsconfig.json --noEmit --pretty false && pnpm exec tsc -p packages/sim-decisions/tsconfig.json --noEmit --pretty false && pnpm exec tsc -p packages/sim-runtime/tsconfig.json --noEmit --pretty false && pnpm exec tsc -p packages/phenotype/tsconfig.json --noEmit --pretty false && pnpm exec tsc -p apps/explorer/tsconfig.json --noEmit --pretty false",
     "test:migration": "tsx tools/validation/parity.ts",
+    "test:handoffs": "tsx tools/validation/handoffs.ts",
     "build": "pnpm --filter @digital-evolution/explorer build",
     "dev": "pnpm --filter @digital-evolution/explorer dev",
-    "verify": "pnpm typecheck && pnpm test:migration && pnpm test:decisions && pnpm test:catalysts && pnpm test:phenotype && pnpm test:ecology && pnpm build",
+    "verify": "pnpm typecheck && pnpm test:migration && pnpm test:decisions && pnpm test:catalysts && pnpm test:phenotype && pnpm test:ecology && pnpm test:handoffs && pnpm build",
     "test:ecology": "tsx tools/validation/ecology.ts",
     "test:survey": "tsx tools/validation/ecology-survey.ts",
     "test:browser": "tsx tools/validation/browser-smoke.ts",
