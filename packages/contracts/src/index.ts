@@ -205,6 +205,57 @@ export interface CatalystOpportunity {
 /** Either pending-decision source. Never a fake event. */
 export type PendingDecision = DecisionOpportunity | CatalystOpportunity;
 
+/** Deterministic per-stride biological interval rates (one stride of flows). */
+export interface IntervalRates {
+  readonly producedC: number;
+  readonly consumedA: number;
+  readonly consumedB: number;
+  readonly consumedC: number;
+  readonly energyA: number;
+  readonly energyB: number;
+  readonly energyC: number;
+  readonly births: number;
+  readonly deaths: number;
+}
+
+/**
+ * Deterministic biological flow facts for one lineage at one observation
+ * tick, aggregated over living organisms only. Causal facts (who ate,
+ * gained, and produced what), never semantic labels: analysis may classify
+ * from these, biology never reads them back.
+ */
+export interface LineageFlow {
+  readonly lineageId: number;
+  readonly members: number;
+  /** Lifetime consumed mass summed over living members, by substance. */
+  readonly consumedA: number;
+  readonly consumedB: number;
+  readonly consumedC: number;
+  /** Lifetime realized energy summed over living members, by source. */
+  readonly energyA: number;
+  readonly energyB: number;
+  readonly energyC: number;
+  /** Lifetime biologically produced Metabolite C summed over living members. */
+  readonly producedC: number;
+}
+
+/** Deterministic per-lineage flow snapshot with living-population totals. */
+export interface FlowFacts {
+  readonly tick: number;
+  /** Lineage order follows first-seen living-member order: deterministic. */
+  readonly lineages: readonly LineageFlow[];
+  readonly totals: {
+    readonly members: number;
+    readonly consumedA: number;
+    readonly consumedB: number;
+    readonly consumedC: number;
+    readonly energyA: number;
+    readonly energyB: number;
+    readonly energyC: number;
+    readonly producedC: number;
+  };
+}
+
 
 export interface RenderOrganism {
   readonly id: number;
