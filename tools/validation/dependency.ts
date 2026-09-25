@@ -18,11 +18,26 @@ function frame(
   o: {
     scav?: number; pop?: number; cShare?: number; intervalProd?: number;
     top?: { id: number; share: number } | null;
+    extraLineages?: Array<{ id: number; members: number; eA: number; eB: number; eC: number; prod?: number }>;
   } = {},
 ): ObservationFrame {
   const pop = o.pop ?? 400;
   const scav = o.scav ?? 0;
   const top = o.top ?? null;
+  const lineages: ObservationFrame["flows"]["lineages"] = top ? [{
+    lineageId: top.id, members: Math.max(1, scav),
+    consumedA: 0, consumedB: 0, consumedC: 100,
+    energyA: (1 - top.share) * 100, energyB: 0, energyC: top.share * 100,
+    producedC: 50,
+  }] : [];
+  for (const extra of o.extraLineages ?? []) {
+    lineages.push({
+      lineageId: extra.id, members: extra.members,
+      consumedA: 0, consumedB: 0, consumedC: 100,
+      energyA: extra.eA, energyB: extra.eB, energyC: extra.eC,
+      producedC: extra.prod ?? 0,
+    });
+  }
   return {
     tick, population: pop, starting_population: 30,
     active_population: pop, dormant_population: 0, dormant_fraction: 0,
@@ -33,12 +48,7 @@ function frame(
     wake_events: 0, wake_clades: {}, dormant_clade_fraction: {}, clade_totals: {},
     flows: {
       tick,
-      lineages: top ? [{
-        lineageId: top.id, members: Math.max(1, scav),
-        consumedA: 0, consumedB: 0, consumedC: 100,
-        energyA: (1 - top.share) * 100, energyB: 0, energyC: top.share * 100,
-        producedC: 50,
-      }] : [],
+      lineages,
       totals: {
         members: pop, consumedA: 0, consumedB: 0, consumedC: 100,
         energyA: 0, energyB: 0, energyC: 100, producedC: 50,
@@ -142,9 +152,13 @@ function testRecoverySameLineage() {
   observer.observe(frame(52500, { scav: 4, intervalProd: 20, top: { id: 9, share: 0.2 } }));
   assert.equal((observer as any).dep.state, "disrupted", "guild disrupted");
   observer.observe(frame(57500, { scav: 28, intervalProd: 60, top: { id: 9, share: 0.38 } }));
-  assert.equal((observer as any).dep.state, "established", "guild recovers into established");
+  assert.equal((observer as any).dep.state, "disrupted", "first return restarts the clock");
+  assert.equal(depRecords(observer).length, 2, "first return narrates nothing");
+  observer.observe(frame(62500, { scav: 28, intervalProd: 60, top: { id: 9, share: 0.38 } }));
+  assert.equal((observer as any).dep.state, "established", "durable return recovers");
   const records = depRecords(observer);
   assert.equal(records.length, 3, "establishment + disruption + recovery records");
+  assert.equal(records[2].tick, 62500, "recovery stamped at persistence");
   assert.equal(records[2].phase, "recovered", "recovered phase");
   assert.ok(records[2].title.includes("recovered"), "same lineage worded as recovery");
   assert.deepEqual(records[2].entity_refs, [9], "returning lineage referenced");
@@ -158,11 +172,67 @@ function testRecoveryReplacement() {
   observer.observe(frame(47500, { scav: 4, intervalProd: 20, top: { id: 9, share: 0.2 } }));
   observer.observe(frame(52500, { scav: 4, intervalProd: 20, top: { id: 9, share: 0.2 } }));
   observer.observe(frame(57500, { scav: 28, intervalProd: 60, top: { id: 41, share: 0.35 } }));
+  assert.equal(depRecords(observer).length, 2, "first return narrates nothing");
+  observer.observe(frame(62500, { scav: 28, intervalProd: 60, top: { id: 41, share: 0.35 } }));
   const records = depRecords(observer);
   assert.equal(records.length, 3, "establishment + disruption + replacement records");
   assert.ok(records[2].title.includes("took over"), "new lineage worded as replacement");
   assert.deepEqual(records[2].entity_refs, [41], "replacing lineage referenced");
   console.log("dependency replacement: PASS");
+}
+
+function testRecoveryNeedsFreshPersistence() {
+  // Review defect: candidateSince survived establishment and disruption, so
+  // the first post-disruption return fired immediately. The recovery clock
+  // must restart at disruption.
+  const observer = new EcologyObserver();
+  observer.observe(frame(40000, { scav: 28, top: { id: 9, share: 0.4 } }));
+  observer.observe(frame(45000, { scav: 28, top: { id: 9, share: 0.4 } }));
+  observer.observe(frame(47500, { scav: 4, intervalProd: 20, top: { id: 9, share: 0.2 } }));
+  observer.observe(frame(52500, { scav: 4, intervalProd: 20, top: { id: 9, share: 0.2 } }));
+  assert.equal((observer as any).dep.state, "disrupted", "guild disrupted");
+  // Sub-persistence return: starts the clock but narrates nothing.
+  observer.observe(frame(53000, { scav: 28, intervalProd: 60, top: { id: 9, share: 0.38 } }));
+  assert.equal((observer as any).dep.state, "disrupted", "brief return does not recover");
+  assert.equal(depRecords(observer).length, 2, "brief return narrates nothing");
+  // Loss resets the clock; a fresh durable return records.
+  observer.observe(frame(54000, { scav: 4, intervalProd: 20, top: { id: 9, share: 0.2 } }));
+  assert.equal((observer as any).dep.state, "disrupted", "relapse stays disrupted");
+  observer.observe(frame(55000, { scav: 28, intervalProd: 60, top: { id: 9, share: 0.38 } }));
+  assert.equal((observer as any).dep.state, "disrupted", "restarted clock not yet met");
+  observer.observe(frame(60000, { scav: 28, intervalProd: 60, top: { id: 9, share: 0.38 } }));
+  assert.equal((observer as any).dep.state, "established", "durable return recovers");
+  const records = depRecords(observer);
+  assert.equal(records.length, 3, "only the durable return records");
+  assert.equal(records[2].tick, 60000, "recovery stamped at persistence, not first sighting");
+  console.log("dependency recovery persistence: PASS");
+}
+
+function testTopConsumerRanksAbsolute() {
+  // Review defect: a singleton at 100% C outranked the guild's main supplier.
+  // Rank by absolute C-energy contribution instead.
+  const observer = new EcologyObserver();
+  const tiny = { id: 7, members: 1, eA: 0, eB: 0, eC: 100 };
+  const main = { id: 9, members: 100, eA: 6000, eB: 0, eC: 4000 };
+  observer.observe(frame(40000, { scav: 28, top: null, extraLineages: [tiny, main] }));
+  observer.observe(frame(45000, { scav: 28, top: null, extraLineages: [tiny, main] }));
+  const records = depRecords(observer);
+  assert.equal(records.length, 1, "one establishment record");
+  assert.deepEqual(records[0].entity_refs, [9], "main supplier named, not the 100% singleton");
+  console.log("dependency absolute ranking: PASS");
+}
+
+function testDiffuseGuildNamesNobody() {
+  // C use spread across many lineages with no dominant consumer: the guild
+  // still establishes, but no lineage is named as taking over.
+  const diffuse = Array.from({ length: 12 }, (_, i) => ({ id: 100 + i, members: 5, eA: 920, eB: 0, eC: 80 }));
+  const observer = new EcologyObserver();
+  observer.observe(frame(40000, { scav: 28, extraLineages: diffuse }));
+  observer.observe(frame(45000, { scav: 28, extraLineages: diffuse }));
+  const records = depRecords(observer);
+  assert.equal(records.length, 1, "diffuse guild still establishes");
+  assert.deepEqual(records[0].entity_refs, [], "no lineage named without a meaningful consumer");
+  console.log("dependency diffuse guild: PASS");
 }
 
 function testZeroPopulationSafe() {
@@ -180,13 +250,19 @@ testDisruption();
 testProductionIsContextNotTripwire();
 testRecoverySameLineage();
 testRecoveryReplacement();
+testRecoveryNeedsFreshPersistence();
+testTopConsumerRanksAbsolute();
+testDiffuseGuildNamesNobody();
 testZeroPopulationSafe();
 
 // --- Integration: full arc on one deterministic run --------------------------
 // Balanced seed 24681357: guild establishes @45431, drought_b @~60k collapses
-// it (16% -> 3% with production at 58%: the relative tripwire firing on real
-// dynamics), and a new lineage takes over @91113. Recovery-with-
-// reorganization, honestly worded, bit-for-bit reproducible.
+// it (16% -> 3%), and the guild recovers @91113. The return is diffuse (no
+// single lineage holds >=10% of C energy), so the record stays generic
+// instead of naming a takeover: lineage replacement wording is covered by
+// unit tests, the integration proves real recovery. Recovery-with-
+// reorganization at the composition level was observed separately
+// (post-drought mixed_primary takeover with scavengers at zero).
 
 const FIXTURE_SEED = 24681357;
 function fixtureConfig(seed: number): EngineConfig {
@@ -222,18 +298,14 @@ function testFixtureArc() {
   assert.equal(records.length, 3, "establishment, disruption, and replacement all fire");
   assert.equal(records[0].phase, "established", "first record establishes");
   assert.equal(records[0].tick, 45431, "establishment is deterministic");
-  assert.deepEqual(records[0].entity_refs, [1140], "founding top consumer identified");
+  assert.deepEqual(records[0].entity_refs, [906], "founding top consumer identified");
   assert.equal(records[1].phase, "disrupted", "second record disrupts");
   assert.equal(records[1].tick, 81324, "disruption is deterministic");
-  assert.deepEqual(records[1].entity_refs, [1140], "disruption names the fallen consumer");
+  assert.deepEqual(records[1].entity_refs, [906], "disruption names the fallen consumer");
   assert.equal(records[2].phase, "recovered", "third record recovers");
   assert.equal(records[2].tick, 91113, "recovery is deterministic");
-  assert.ok(records[2].title.includes("took over"), "new lineage worded as replacement");
-  assert.deepEqual(records[2].entity_refs, [1994], "replacing lineage identified");
-  assert.ok(
-    records[2].entity_refs[0] !== records[0].entity_refs[0],
-    "recovery with reorganization, not return",
-  );
+  assert.equal(records[2].title, "The C-dependent guild recovered", "diffuse return stays generic");
+  assert.deepEqual(records[2].entity_refs, [], "no lineage named without a dominant consumer");
   console.log("dependency fixture arc: PASS");
 }
 

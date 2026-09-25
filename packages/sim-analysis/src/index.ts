@@ -46,6 +46,11 @@ const DEP_PERSIST=5000;
 // dynamics. Causal reading belongs to matched-branch comparison, not the
 // single-run record (see validation).
 const DEP_GUILD_COLLAPSE=.33;
+// Takeover attribution ranks by absolute C-energy contribution, never by
+// within-lineage fraction (a singleton at 100% C must not outrank the guild's
+// main supplier). Naming a lineage additionally requires a meaningful guild
+// share; otherwise the record stays generic. Owner-visible constant.
+const DEP_GUILD_SHARE=.10;
 
 export class EcologyObserver {
   cross={id:"eco-crossfeeding-1",state:"absent",candidateSince:null as number|null,lowSince:null as number|null};
@@ -118,18 +123,21 @@ export class EcologyObserver {
     const scav=pop>0?(s.roles.byproduct_scavenger||0)/pop:0;
     const depForm=scav>=DEP_FORM_SCAV&&s.c_energy_share>=DEP_FORM_C;
     const depEst=scav>=DEP_EST_SCAV&&s.c_energy_share>=DEP_EST_C;
-    let topConsumer:null|number=null,topConsumerShare=0;
+    let topConsumer:null|number=null,topConsumerShare=0,topEnergyC=0,guildC=0;
     for(const l of s.flows.lineages){
       const e=l.energyA+l.energyB+l.energyC;
-      if(e>0){const share=l.energyC/e;if(share>topConsumerShare){topConsumerShare=share;topConsumer=l.lineageId}}
+      guildC+=l.energyC;
+      if(l.energyC>topEnergyC){topEnergyC=l.energyC;topConsumer=l.lineageId;topConsumerShare=e>0?l.energyC/e:0}
     }
+    const topMeaningful=topConsumer!==null&&guildC>0&&topEnergyC/guildC>=DEP_GUILD_SHARE;
+    const topRefs=topMeaningful&&topConsumer!==null?[topConsumer]:[];
     if(dd.state==="absent"&&depForm){dd.state="forming";dd.candidateSince=s.tick}
     else if(dd.state==="forming"){
       if(!depForm){dd.state="absent";dd.candidateSince=null}
       else if(depEst&&dd.candidateSince!==null&&s.tick-dd.candidateSince>=DEP_PERSIST){
         dd.state="established";dd.establishedTick=s.tick;dd.estScav=scav;dd.baselineProduced=s.interval.producedC;
-        dd.topConsumer=topConsumer;dd.topConsumerShare=topConsumerShare;dd.lowSince=null;
-        this.add("dependency",dd.id,s.tick,"established","A C-dependent guild became established",`${Math.round(scav*100)}% of living organisms meet the byproduct-scavenger evidence rule while ${Math.round(s.c_energy_share*100)}% of living energy history comes from biologically produced Metabolite C.`,"major",s,topConsumer===null?[]:[topConsumer]);
+        dd.topConsumer=topConsumer;dd.topConsumerShare=topConsumerShare;dd.lowSince=null;dd.candidateSince=null;
+        this.add("dependency",dd.id,s.tick,"established","A C-dependent guild became established",`${Math.round(scav*100)}% of living organisms meet the byproduct-scavenger evidence rule while ${Math.round(s.c_energy_share*100)}% of living energy history comes from biologically produced Metabolite C.`,"major",s,topRefs);
       }
     } else if(dd.state==="established"){
       // Guild collapse is the tripwire; production is measured context.
@@ -138,7 +146,7 @@ export class EcologyObserver {
       if(scav<dd.estScav*DEP_GUILD_COLLAPSE){
         if(dd.lowSince===null)dd.lowSince=s.tick;
         if(s.tick-dd.lowSince>=DEP_PERSIST){
-          dd.state="disrupted";
+          dd.state="disrupted";dd.candidateSince=null;dd.lowSince=null;
           this.add("dependency",dd.id,s.tick,"disrupted","The C-dependent guild collapsed",`Scavenger share fell from ${Math.round(dd.estScav*100)}% to ${Math.round(scav*100)}% of the living population; per-stride C production stood at ${Math.round(dd.baselineProduced>0?100*s.interval.producedC/dd.baselineProduced:0)}% of its established level.`,"major",s,dd.topConsumer===null?[]:[dd.topConsumer]);
         }
       } else dd.lowSince=null;
@@ -148,8 +156,14 @@ export class EcologyObserver {
         if(s.tick-dd.candidateSince>=DEP_PERSIST){
           const same=topConsumer!==null&&topConsumer===dd.topConsumer;
           dd.state="recovered";
-          this.add("dependency",dd.id,s.tick,"recovered",same?"The C-dependent lineage recovered":"A new lineage took over C-dependent life",same?`Lineage L-${String(topConsumer).padStart(4,"0")} again realizes ${Math.round(topConsumerShare*100)}% of its energy from biologically produced Metabolite C after disruption.`:`Lineage L-${String(topConsumer).padStart(4,"0")} now realizes ${Math.round(topConsumerShare*100)}% of its energy from C, occupying the niche the disrupted guild left behind.`,"major",s,topConsumer===null?[]:[topConsumer]);
-          dd.state="established";dd.establishedTick=s.tick;dd.baselineProduced=s.interval.producedC;
+          if(!topMeaningful||topConsumer===null){
+            this.add("dependency",dd.id,s.tick,"recovered","The C-dependent guild recovered",`Scavenger share returned to ${Math.round(scav*100)}% of the living population; C use is spread across many lineages with no single dominant consumer.`,"major",s,[]);
+          }else if(same){
+            this.add("dependency",dd.id,s.tick,"recovered","The C-dependent lineage recovered",`Lineage L-${String(topConsumer).padStart(4,"0")} again realizes ${Math.round(topConsumerShare*100)}% of its energy from biologically produced Metabolite C after disruption.`,"major",s,[topConsumer]);
+          }else{
+            this.add("dependency",dd.id,s.tick,"recovered","A new lineage took over C-dependent life",`Lineage L-${String(topConsumer).padStart(4,"0")} now realizes ${Math.round(topConsumerShare*100)}% of its energy from C, occupying the niche the disrupted guild left behind.`,"major",s,[topConsumer]);
+          }
+          dd.state="established";dd.establishedTick=s.tick;dd.estScav=scav;dd.baselineProduced=s.interval.producedC;
           dd.topConsumer=topConsumer;dd.topConsumerShare=topConsumerShare;dd.candidateSince=null;dd.lowSince=null;
         }
       } else dd.candidateSince=null;
@@ -207,6 +221,7 @@ export class EcologyObserver {
         dependency_established_c_share:DEP_EST_C,
         dependency_persistence_ticks:DEP_PERSIST,
         dependency_collapse_guild_fraction:DEP_GUILD_COLLAPSE,
+        dependency_takeover_guild_share:DEP_GUILD_SHARE,
       },
     };
   }
