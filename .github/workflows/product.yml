@@ -37,8 +37,6 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test:migration
       - run: pnpm test:decisions
-      # NOTE: chore/fast-test-split adds test:handoffs; append
-      # `- run: pnpm test:handoffs` here once that merges.
 
   sim-a:
     runs-on: ubuntu-latest
