@@ -49,6 +49,13 @@ function livingSums(session: UniverseSession) {
   return { members, mc, gc, pc };
 }
 
+/** Float sums accumulate in different orders, so compare with tight tolerance. */
+const close = (a: number, b: number, label: string) =>
+  assert.ok(
+    Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b)),
+    `${label}: ${a} vs ${b}`,
+  );
+
 function testFlowDeterminism() {
   const a = new UniverseSession();
   a.create(config(FIXTURE_SEED));
@@ -75,13 +82,6 @@ function testFlowSelfConsistency() {
   assert.equal(facts.tick, session.snapshot().tick, "facts stamped at the current tick");
   assert.equal(facts.totals.members, session.snapshot().population, "member total equals population");
   assert.equal(facts.totals.members, sums.members, "member total equals living count");
-  // Float sums accumulate in different orders (lineage-grouped vs flat), so
-  // compare with a tight relative tolerance instead of exact equality.
-  const close = (a: number, b: number, label: string) =>
-    assert.ok(
-      Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b)),
-      `${label}: ${a} vs ${b}`,
-    );
   close(facts.totals.consumedC, sums.mc, "C consumption matches living organisms");
   close(facts.totals.energyC, sums.gc, "C energy matches living organisms");
   close(facts.totals.producedC, sums.pc, "C production matches living organisms");
@@ -219,6 +219,26 @@ function testIntervalDeterminism() {
   console.log("interval determinism: PASS");
 }
 
+function testIntervalProduction() {
+  // Review regression: production credit sat on the C branch (which never
+  // produces) instead of the A/B branches (which do). Per-lineage interval
+  // production must be nonzero and reconcile to the authoritative stride
+  // counter, which is the Stage 2 "who produced C" evidence.
+  const session = new UniverseSession();
+  session.create(config(FIXTURE_SEED));
+  settle(session, 10000);
+  const sim = session.simulation as any;
+  const facts = intervalFlows(session);
+  assert.ok(sim.last.produced_c > 0, "stride produced C");
+  assert.ok(facts.totals.producedC > 0, "interval production attributed, not zero");
+  close(facts.totals.producedC, sim.last.produced_c, "lineage production reconciles to interval total");
+  assert.ok(
+    facts.lineages.some((l) => l.producedC > 0),
+    "at least one producing lineage identified",
+  );
+  console.log("interval production: PASS");
+}
+
 function testIntervalNetMembers() {
   // Births minus deaths over a stride must equal the population change:
   // exact membership accounting, dead included.
@@ -258,6 +278,7 @@ function testIntervalCoversDead() {
 testFlowDeterminism();
 testProcessActivations();
 testIntervalDeterminism();
+testIntervalProduction();
 testIntervalNetMembers();
 testIntervalCoversDead();
 testFlowSelfConsistency();

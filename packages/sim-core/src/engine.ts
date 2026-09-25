@@ -1,5 +1,8 @@
 /**
- * Compatibility extraction of the v0.29.0 / engine 0.19.0 prototype core, extended to engine 0.20.0 (rich clamp only). APP_VERSION tracks the product app version (0.31.0); it is metadata and affects no biological behavior.
+ * Compatibility extraction of the v0.29.0 / engine 0.19.0 prototype core, extended to engine 0.20.0 (rich clamp only).
+ * Engine 0.21.0 adds the c_washout environmental command (Stage 2); default
+ * biological paths are bit-identical, parity-proven. APP_VERSION tracks the
+ * product app version (0.31.0); it is metadata and affects no biological behavior.
  *
  * MIGRATION RULE: preserve this algorithm byte-for-byte in behavior while the
  * repository parity harness is active. Structural/type cleanup follows parity,
@@ -11,12 +14,12 @@
  * checkpoints. Parity proves zero biological change.
  */
 import type { EngineConfig, FlowFacts, IntervalFlowFacts } from "@digital-evolution/contracts";
+import { APP_VERSION, ENGINE_VERSION, EXPORT_FORMAT_VERSION as EXPORT_VERSION } from "./version";
 const Q=(v:number,a:number,b:number):number=>Math.max(a,Math.min(b,v));
 const A=(a:number[]):number=>a.length?a.reduce((s,v)=>s+v,0)/a.length:0;
 /** Seeded callable RNG stream with serializable state (legacy extraction; new code prefers DeterministicRng). */
 interface LegacyRng{():number;getState():number;setState(v:number):void}
 const R=(s:number):LegacyRng=>{let a=s>>>0;let f=(()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}) as LegacyRng;f.getState=()=>a>>>0;f.setState=(v:number)=>{a=v>>>0};return f};
-const APP_VERSION='0.31.0',ENGINE_VERSION='0.20.0',EXPORT_VERSION='0.30';
 const C_BYPRODUCT_YIELD=.32,C_ENERGY_YIELD=9,C_DECAY_RATE=.00022,C_DIFFUSION_RATE=.06,BU_MAINT_COST=.010,DORMANT_MAINTENANCE=.12,DORMANCY_CHECK=40,CROSSFEED_FORM=.035,CROSSFEED_EST=.055,CROSSFEED_PERSIST=5000,DORMANCY_PERSIST=5000,ERA_PERSIST=7500;
 const H01=(seed:number,id:number,salt=0):number=>{let x=(seed^(Math.imul(id+salt,0x9E3779B1)))>>>0;x^=x>>>16;x=Math.imul(x,0x7FEB352D);x^=x>>>15;x=Math.imul(x,0x846CA68B);x^=x>>>16;return(x>>>0)/4294967296};
 const C_ACCESS=(bu:number):number=>{let v=Q(bu,0,1.5);return v<=0?0:(v*v)/(v*v+.1024)};
@@ -265,7 +268,7 @@ class S{
    not mass. Only read by lineage flow attribution, which labels them as
    counts. Interval deltas carry true mass. Do not 'fix' without an
    engine-version change. */
-   if(eat.kind===0){o.ma++;o.ga+=eat.gain;o.ra+=eat.gain;this.cur.energy_a+=eat.gain;this.lineageCredit(o.l,{consumedA:eat.amount,energyA:eat.gain})}else if(eat.kind===1){o.mb++;o.gb+=eat.gain;o.rb+=eat.gain;this.cur.energy_b+=eat.gain;this.lineageCredit(o.l,{consumedB:eat.amount,energyB:eat.gain})}else{o.mc=(o.mc||0)+1;o.gc=(o.gc||0)+eat.gain;o.rc=(o.rc||0)+eat.gain;this.cur.energy_c+=eat.gain;this.lineageCredit(o.l,{consumedC:eat.amount,energyC:eat.gain,producedC:eat.produced})}this.totalUse[eat.kind]!+=eat.amount;this.totalEnergy[eat.kind]!+=eat.gain}
+   if(eat.kind===0){o.ma++;o.ga+=eat.gain;o.ra+=eat.gain;this.cur.energy_a+=eat.gain;this.lineageCredit(o.l,{consumedA:eat.amount,energyA:eat.gain,producedC:eat.produced})}else if(eat.kind===1){o.mb++;o.gb+=eat.gain;o.rb+=eat.gain;this.cur.energy_b+=eat.gain;this.lineageCredit(o.l,{consumedB:eat.amount,energyB:eat.gain,producedC:eat.produced})}else{o.mc=(o.mc||0)+1;o.gc=(o.gc||0)+eat.gain;o.rc=(o.rc||0)+eat.gain;this.cur.energy_c+=eat.gain;this.lineageCredit(o.l,{consumedC:eat.amount,energyC:eat.gain})}this.totalUse[eat.kind]!+=eat.amount;this.totalEnergy[eat.kind]!+=eat.gain}
    if(this.t>=(o.matureAt||0)&&this.t>=(o.readyAt||0)&&o.en>=o.rp){let support=this.reproSupport(o);this.totalReproSupport[support]!++;if(support===0)this.cur.repro_supported_a++;else if(support===1)this.cur.repro_supported_b++;else if(support===3)this.cur.repro_supported_c++;else this.cur.repro_supported_mixed++;o.ra=0;o.rb=0;o.rc=0;o.en*=.52;o.readyAt=this.t+REPRO_COOLDOWN;let baby=this.child(o);born.push(baby);this.cur.births++;this.lineageCredit(baby.l,{births:1})}if(o.en>0)live.push(o);else{this.cur.deaths++;this.lineageCredit(o.l,{deaths:1})}
   }
   this.o=live.concat(born);if(this.o.length>this.peakPopulation){this.peakPopulation=this.o.length;this.peakPopulationTick=this.t}
