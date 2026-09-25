@@ -1,4 +1,4 @@
-import type { ObservedEvent } from "@digital-evolution/contracts";
+import type { FlowFacts, ObservedEvent } from "@digital-evolution/contracts";
 
 export interface ObservationFrame {
   readonly tick: number;
@@ -16,6 +16,8 @@ export interface ObservationFrame {
   readonly wake_clades: Readonly<Record<string, number>>;
   readonly dormant_clade_fraction: Readonly<Record<string, number>>;
   readonly clade_totals: Readonly<Record<string, number>>;
+  /** Deterministic per-lineage flow facts at this tick (analysis reads, never writes). */
+  readonly flows: FlowFacts;
 }
 
 const CROSSFEED_FORM=.035;
