@@ -91,6 +91,8 @@ export interface DecisionChoice {
   readonly directEffectDescription: string;
   /** null is the leave-unchanged choice. */
   readonly intervention: InterventionSpec | null;
+  /** The catalyst this choice applies, if offered from a catalyst window. */
+  readonly catalystId?: CatalystId | null;
 }
 
 export interface DecisionOpportunity {
@@ -98,6 +100,7 @@ export interface DecisionOpportunity {
   readonly opportunityId: string;
   /** So a restored opportunity stays interpretable after the catalog evolves. */
   readonly policyVersion: string;
+  readonly source: "observed_event";
   readonly sourceEventId: string;
   readonly sourceArcId: string | null;
   readonly createdTick: number;
@@ -116,15 +119,21 @@ export interface DecisionResolution {
   readonly commandId: string;
   /** Tick at resolution/application. Resolution never advances the world. */
   readonly tick: number;
+  /** Tick the opportunity was offered. Preserved so History and evidence can
+   *  order offer before resolution without re-derivation. */
+  readonly offerTick: number;
   readonly opportunityId: string;
-  readonly sourceEventId: string;
+  /** Null for world-catalyst decisions: never a fabricated event id. */
+  readonly sourceEventId: string | null;
   readonly choiceId: string;
   /** Presentation copy as offered, recorded so History never needs its own
    *  choice catalog and cannot drift from what was actually applied. */
   readonly choiceTitle: string;
   readonly directEffectDescription: string;
   readonly intervention: InterventionSpec | null;
-  readonly source: "event_decision";
+  readonly source: "event_decision" | "world_catalyst";
+  /** The selected catalyst, if resolved from a catalyst window. */
+  readonly catalystId?: CatalystId | null;
   readonly policyVersion: string;
 }
 
@@ -136,6 +145,65 @@ export interface DecisionContext {
   readonly cEnergyShare: number;
   readonly crossfeederFraction: number;
 }
+
+/* ------------------------------------------------------------------ *
+ * M3 world catalysts: quiet-period environmental intervention windows.
+ *
+ * A catalyst window is NOT an observed biological event and must never be
+ * represented as one. It shares the pause gate, resolution validation, and
+ * persistence machinery with event decisions, but carries explicit
+ * world-catalyst provenance end to end.
+ * ------------------------------------------------------------------ */
+
+/** Stable catalyst identifiers, M3 v1 catalog. */
+export type CatalystId = "drought-a" | "drought-b" | "global-crash";
+
+/** Read-only world state a catalyst eligibility check may consult. */
+export interface CatalystContext {
+  readonly tick: number;
+  readonly population: number;
+  /** True while any drought effect is active. */
+  readonly droughtActive: boolean;
+  /** Share of realized cumulative resource energy from Nutrient A (0..1). */
+  readonly energyShareA: number;
+  /** Share of realized cumulative resource energy from Nutrient B (0..1). */
+  readonly energyShareB: number;
+  /** Nutrient A field stock as a share of modeled A capacity (0..1). */
+  readonly stockFractionA: number;
+  /** Nutrient B field stock as a share of modeled B capacity (0..1). */
+  readonly stockFractionB: number;
+  /** Total abiotic stock as a share of modeled abiotic capacity (0..1). */
+  readonly abioticStockFraction: number;
+}
+
+/** Per-catalyst diagnostic: why it was or was not offered. */
+export interface CatalystDiagnosis {
+  readonly catalystId: CatalystId;
+  readonly eligible: boolean;
+  /** Human-readable reasons, in evaluation order. For validation, not biology. */
+  readonly reasons: readonly string[];
+}
+
+export interface CatalystOpportunity {
+  readonly schemaVersion: 1;
+  readonly opportunityId: string;
+  /** Catalyst catalog version that generated this window. */
+  readonly policyVersion: string;
+  readonly source: "world_catalyst";
+  /** Eligible catalysts at offer, in deterministic catalog order. */
+  readonly catalystIds: readonly CatalystId[];
+  readonly createdTick: number;
+  readonly status: "pending" | "resolved";
+  readonly prompt: string;
+  readonly context: string;
+  /** The exact eligibility snapshot, so the offer stays interpretable. */
+  readonly contextSnapshot: CatalystContext;
+  readonly diagnoses: readonly CatalystDiagnosis[];
+  readonly choices: readonly DecisionChoice[];
+}
+
+/** Either pending-decision source. Never a fake event. */
+export type PendingDecision = DecisionOpportunity | CatalystOpportunity;
 
 
 export interface RenderOrganism {
@@ -180,7 +248,7 @@ export interface RenderSnapshot {
   readonly analysis: AnalysisState;
   readonly events: readonly { readonly tick: number; readonly label: string }[];
   /** Pending decision gate. While set, no further tick may execute. */
-  readonly pendingDecision: DecisionOpportunity | null;
+  readonly pendingDecision: PendingDecision | null;
   /** Immutable history of what the player actually chose (action, not cause). */
   readonly resolvedDecisions: readonly DecisionResolution[];
   readonly control: {
@@ -191,14 +259,22 @@ export interface RenderSnapshot {
 }
 
 export interface DecisionCheckpoint {
-  readonly pending: DecisionOpportunity | null;
+  readonly pending: PendingDecision | null;
   readonly resolutions: readonly DecisionResolution[];
+  /** Event-decision catalog version that will generate future opportunities. */
   readonly policyVersion: string;
+  /** Catalyst catalog version that will generate future windows. */
+  readonly catalystPolicyVersion: string;
+  /** Tick of the most recent decision opportunity creation, either source.
+   *  Drives the catalyst quiet interval; 0 means none yet (measure from 0). */
+  readonly lastDecisionTick: number;
+  /** Tick of the most recent non-null catalyst application, or null. */
+  readonly lastMajorCatalystTick: number | null;
 }
 
-/** Resumable checkpoint, schema 0.2: adds resumable decision state. */
+/** Resumable checkpoint, schema 0.3: adds catalyst windows and pacing state. */
 export interface UniverseCheckpoint {
-  readonly checkpointSchemaVersion: "0.2";
+  readonly checkpointSchemaVersion: "0.3";
   readonly engineVersion: string;
   readonly createdTick: number;
   readonly experiment: unknown;
@@ -206,6 +282,28 @@ export interface UniverseCheckpoint {
   readonly control: unknown | null;
   readonly controlAnalysis: unknown | null;
   readonly decisions: DecisionCheckpoint;
+}
+
+/**
+ * Schema 0.2, still loadable. Pending event decisions normalize forward
+ * (absent `source` with a `sourceEventId` means observed_event); resolutions
+ * backfill `offerTick` from their resolution tick and `catalystId` null.
+ * Pacing state restarts honestly: last decision tick becomes the newest known
+ * decision tick (or 0), cooldown becomes null. Never written by this version.
+ */
+export interface UniverseCheckpointV02 {
+  readonly checkpointSchemaVersion: "0.2";
+  readonly engineVersion: string;
+  readonly createdTick: number;
+  readonly experiment: unknown;
+  readonly analysis: unknown;
+  readonly control: unknown | null;
+  readonly controlAnalysis: unknown | null;
+  readonly decisions: {
+    readonly pending: unknown;
+    readonly resolutions: unknown;
+    readonly policyVersion: unknown;
+  };
 }
 
 /**
@@ -222,7 +320,7 @@ export interface LegacyUniverseCheckpoint {
   readonly controlAnalysis: unknown | null;
 }
 
-export type SupportedUniverseCheckpoint = UniverseCheckpoint | LegacyUniverseCheckpoint;
+export type SupportedUniverseCheckpoint = UniverseCheckpoint | UniverseCheckpointV02 | LegacyUniverseCheckpoint;
 
 export type RuntimeCommand =
   | { readonly type: "CREATE_UNIVERSE"; readonly config: EngineConfig }
