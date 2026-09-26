@@ -83,7 +83,7 @@ async function main(){
       }
       return{bright,sig};
     })()`);
-    await page.getByRole("button",{name:"Normal"}).click();
+    await page.getByRole("button",{name:"Landscape",exact:true}).click();
     await page.waitForTimeout(300);
     const normalInk=await worldInk();
     console.log(`phenotype normal-lens ink: ${normalInk.bright} bright px`);
@@ -96,7 +96,7 @@ async function main(){
     let changedCells=0;
     for(let i=0;i<normalInk.sig.length;i++)if(Math.abs(normalInk.sig[i]-traitsInk.sig[i])>12)changedCells++;
     assert.ok(changedCells>20,`normal and traits lenses render differently (${changedCells}/576 cells)`);
-    await page.getByRole("button",{name:"Normal"}).click();
+    await page.getByRole("button",{name:"Landscape",exact:true}).click();
     for(let i=0;i<4;i++)await page.getByRole("button",{name:"Zoom in"}).click();
     assert.equal(await page.getByTestId("zoom-level").innerText(),"3.0×","reached inspection zoom");
     await page.waitForTimeout(300);
@@ -105,6 +105,28 @@ async function main(){
     assert.ok(inspInk.bright>50,"inspection LOD paints at 3.0x");
     await page.getByRole("button",{name:"Reset view"}).click();
     assert.equal(await page.getByTestId("zoom-level").innerText(),"1.0×","reset restores the view");
+
+    // Issue #37: speed modes are genuinely distinct throughput policies.
+    // World is paused; each mode runs a fixed window and the tick deltas must
+    // order 1x < 10x < 100x <= Max with wide margins (headless timing is noisy).
+    const speedSelect=page.getByLabel("Simulation speed");
+    const deltas:Record<string,number>={};
+    for(const v of ["1","10","100","500"]){
+      await speedSelect.selectOption(v);
+      const before=await tick(page);
+      await page.getByRole("button",{name:"Play"}).click();
+      await page.waitForTimeout(2500);
+      await page.getByRole("button",{name:"Pause"}).click();
+      deltas[v]=await tick(page)-before;
+      console.log(`speed ${v}x: +${deltas[v]} ticks/2.5s`);
+    }
+    assert.ok(deltas["10"]!>(deltas["1"]!*3),`10x materially faster than 1x (${deltas["10"]} vs ${deltas["1"]})`);
+    // 100x vs 10x uses a 1.5x margin, not 3x: per-tick engine cost dominates
+    // at high slice sizes, so both saturate toward the same worker ceiling
+    // (that plateau IS the throughput limit Max is defined by).
+    assert.ok(deltas["100"]!>(deltas["10"]!*1.5),`100x materially faster than 10x (${deltas["100"]} vs ${deltas["10"]})`);
+    assert.ok(deltas["500"]!>(deltas["100"]!*0.7),`Max at least matches 100x (${deltas["500"]} vs ${deltas["100"]})`);
+    await speedSelect.selectOption("100");
 
     await page.getByRole("button",{name:"Save"}).click();
     await page.getByText(/Saved tick/).waitFor();

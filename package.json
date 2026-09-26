@@ -10,7 +10,7 @@
     "test:migration": "tsx tools/validation/parity.ts",
     "build": "pnpm --filter @digital-evolution/explorer build",
     "dev": "pnpm --filter @digital-evolution/explorer dev",
-    "verify": "pnpm typecheck && pnpm test:migration && pnpm test:decisions && pnpm test:catalysts && pnpm test:flows && pnpm test:dependency && pnpm test:niche && pnpm test:landscape && pnpm test:phenotype && pnpm test:ecology && pnpm build",
+    "verify": "pnpm typecheck && pnpm test:migration && pnpm test:decisions && pnpm test:catalysts && pnpm test:flows && pnpm test:dependency && pnpm test:time-controls && pnpm test:niche && pnpm test:landscape && pnpm test:phenotype && pnpm test:ecology && pnpm build",
     "test:ecology": "tsx tools/validation/ecology.ts",
     "test:survey": "tsx tools/validation/ecology-survey.ts",
     "test:browser": "tsx tools/validation/browser-smoke.ts",
@@ -24,7 +24,8 @@
     "test:niche-survey": "tsx tools/validation/niche-survey.ts",
     "test:phenotype": "tsx tools/validation/phenotype.ts && tsx tools/validation/phenotype-world.ts",
     "test:landscape": "tsx tools/validation/landscape.ts",
-    "test:visual": "tsx tools/validation/landscape-capture.ts"
+    "test:visual": "tsx tools/validation/landscape-capture.ts",
+    "test:time-controls": "tsx tools/validation/time-controls.ts"
   },
   "devDependencies": {
     "@types/node": "26.6.2",
