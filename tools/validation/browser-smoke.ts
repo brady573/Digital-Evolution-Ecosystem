@@ -109,16 +109,38 @@ async function main(){
     // Issue #37: speed modes are genuinely distinct throughput policies.
     // World is paused; each mode runs a fixed window and the tick deltas must
     // order 1x < 10x < 100x <= Max with wide margins (headless timing is noisy).
+    // Decision-gate aware: a legitimate pending decision auto-pauses mid-window.
+    // Never bypass the gate — resolve through the normal Keep-watching UI and
+    // restart that window fresh (up to 3 attempts per speed).
     const speedSelect=page.getByLabel("Simulation speed");
     const deltas:Record<string,number>={};
     for(const v of ["1","10","100","500"]){
       await speedSelect.selectOption(v);
-      const before=await tick(page);
-      await page.getByRole("button",{name:"Play"}).click();
-      await page.waitForTimeout(2500);
-      await page.getByRole("button",{name:"Pause"}).click();
-      deltas[v]=await tick(page)-before;
-      console.log(`speed ${v}x: +${deltas[v]} ticks/2.5s`);
+      let done=false;
+      for(let attempt=0;attempt<3&&!done;attempt++){
+        const before=await tick(page);
+        await page.getByRole("button",{name:"Play"}).click();
+        let elapsed=0;
+        let gated=false;
+        while(elapsed<2500){
+          await page.waitForTimeout(250);
+          elapsed+=250;
+          if(await page.getByTestId("decision-sheet").isVisible().catch(()=>false)){
+            gated=true;
+            break;
+          }
+        }
+        if(gated){
+          await page.getByTestId("decision-sheet").getByText("Keep watching").click();
+          await page.getByTestId("decision-sheet").waitFor({state:"detached",timeout:15_000});
+          continue;
+        }
+        await page.getByRole("button",{name:"Pause"}).click();
+        deltas[v]=await tick(page)-before;
+        console.log(`speed ${v}x: +${deltas[v]} ticks/2.5s`);
+        done=true;
+      }
+      assert.ok(done,`speed ${v}x completed a gate-free window`);
     }
     assert.ok(deltas["10"]!>(deltas["1"]!*3),`10x materially faster than 1x (${deltas["10"]} vs ${deltas["1"]})`);
     // 100x vs 10x uses a 1.5x margin, not 3x: per-tick engine cost dominates
