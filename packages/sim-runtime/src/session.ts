@@ -62,12 +62,17 @@ function renderSnapshot(sim:any,analysis:EcologyObserver,control:any|null,pendin
       x:o.x,y:o.y,energy:o.en,activity:o.activity||"active",
       cladeId:sim.cladeRoot(o.l),
       speed:o.sp,sensing:o.se,metabolism:o.me,reproduction:o.rp,diet:o.di,habitat:o.ha,
-      byproductUse:o.bu||0,dormancyResponse:o.dr||0,
+      byproductUse:o.bu||0,dormancyResponse:o.dr||0,tolerance:o.to||0,cleanup:o.cu||0,
     })),
     resources:{
       gridSize:sim.resources.n,
       stock:sim.resources.stock.map((a:ArrayLike<number>)=>Array.from(a)),
       capacity:sim.resources.cap.map((a:ArrayLike<number>)=>Array.from(a)),
+    },
+    waste:{
+      gridSize:sim.resources.waste.n,
+      stock:Array.from(sim.resources.waste.stock),
+      capacity:Array.from(sim.resources.waste.cap),
     },
     metrics,
     analysis:analysis.export(),

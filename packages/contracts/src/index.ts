@@ -342,12 +342,25 @@ export interface RenderOrganism {
   readonly habitat: number;
   readonly byproductUse: number;
   readonly dormancyResponse: number;
+  /** Inherited waste-response traits (Slice 2). Presentation only: the
+   *  landscape and history evidence read them, biology never does. */
+  readonly tolerance: number;
+  readonly cleanup: number;
 }
 
 export interface RenderResourceField {
   readonly gridSize: number;
   readonly stock: readonly (readonly number[])[];
   readonly capacity: readonly (readonly number[])[];
+}
+
+/** Spatial Metabolic Waste field (Slice 2), same grid and cell convention as
+ *  `RenderResourceField`. Read-only rendering input for the landscape
+ *  substrate and the analytical waste overlay. */
+export interface RenderWasteField {
+  readonly gridSize: number;
+  readonly stock: readonly number[];
+  readonly capacity: readonly number[];
 }
 
 export interface RenderSnapshot {
@@ -362,6 +375,9 @@ export interface RenderSnapshot {
   readonly dormantPopulation: number;
   readonly organisms: readonly RenderOrganism[];
   readonly resources: RenderResourceField;
+  /** Metabolic Waste field. Read-only rendering input; independent of
+   *  nutrients in storage and in meaning. */
+  readonly waste: RenderWasteField;
   readonly metrics: any;
   readonly analysis: AnalysisState;
   readonly events: readonly { readonly tick: number; readonly label: string }[];
