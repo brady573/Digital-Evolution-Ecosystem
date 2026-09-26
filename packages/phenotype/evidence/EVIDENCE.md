@@ -658,26 +658,30 @@ active         dorm-weak      dorm-strong
 
 ## 8. Dense-world LOD scenes (real engine populations)
 
-- **scene-50**: tick 1000, pop 64 (2 dormant), sim 321ms. Families — blob:64 segm:0 radi:0 plat:0 bran:0 padd:0.
-  Grid render totals: eco 1ms / pop 1ms / insp 0ms (Date.now resolution; see §9 for precise timings).
-- **scene-250**: tick 2500, pop 267 (28 dormant), sim 839ms. Families — blob:267 segm:0 radi:0 plat:0 bran:0 padd:0.
-  Grid render totals: eco 0ms / pop 0ms / insp 1ms (Date.now resolution; see §9 for precise timings).
-- **scene-1000**: tick 4000, pop 1122 (256 dormant), sim 3954ms. Families — blob:1122 segm:0 radi:0 plat:0 bran:0 padd:0.
-  Grid render totals: eco 3ms / pop 3ms / insp 14ms (Date.now resolution; see §9 for precise timings).
-- **scene-3000**: tick 5000, pop 3104 (524 dormant), sim 11379ms. Families — blob:3104 segm:0 radi:0 plat:0 bran:0 padd:0.
-  Grid render totals: eco 7ms / pop 8ms / insp 19ms (Date.now resolution; see §9 for precise timings).
+- **scene-50**: tick 1000, pop 64 (2 dormant), sim 303ms. Families — blob:64 segm:0 radi:0 plat:0 bran:0 padd:0.
+  Grid render totals: eco 0ms / pop 1ms / insp 1ms (Date.now resolution; see §9 for precise timings).
+- **scene-250**: tick 2500, pop 267 (28 dormant), sim 1078ms. Families — blob:267 segm:0 radi:0 plat:0 bran:0 padd:0.
+  Grid render totals: eco 1ms / pop 0ms / insp 4ms (Date.now resolution; see §9 for precise timings).
+- **scene-1000**: tick 4000, pop 1122 (256 dormant), sim 4223ms. Families — blob:1122 segm:0 radi:0 plat:0 bran:0 padd:0.
+  Grid render totals: eco 6ms / pop 3ms / insp 7ms (Date.now resolution; see §9 for precise timings).
+- **scene-3000**: tick 5000, pop 3104 (524 dormant), sim 11605ms. Families — blob:3104 segm:0 radi:0 plat:0 bran:0 padd:0.
+  Grid render totals: eco 11ms / pop 7ms / insp 13ms (Date.now resolution; see §9 for precise timings).
+Design-fixture worlds (synthetic, all six families; art-direction review only):
+- **design-50**: synthetic, pop 50 (10 dormant). Families — blob:9 segm:9 radi:8 plat:8 bran:8 padd:8.
+- **design-250**: synthetic, pop 250 (45 dormant). Families — blob:42 segm:42 radi:42 plat:42 bran:41 padd:41.
+- **design-1000**: synthetic, pop 1000 (146 dormant). Families — blob:167 segm:167 radi:167 plat:167 bran:166 padd:166.
 
 ## 9. Performance observations (same machine, mock canvas)
 
 Mock 2D context counts rects instead of painting, so this compares presentation logic cost, not GPU paint. Timed separately: resolve-only, each tier render+draw, and a faithful port of the App.tsx voxel loop. Same organisms, same process, 5 repetitions.
 
 - organisms timed: 1122 (scene-1000 snapshot, mixed active/dormant states)
-- resolve only: mean 5.9ms / best 4.3ms (3.79us/org)
-- ecosystem tier render+draw: best 1.3ms (1.17us/org), 6449 rects
-- population tier render+draw: best 3.0ms (2.69us/org), 36341 rects
-- inspection tier render+draw: best 5.8ms (5.15us/org), 90479 rects
+- resolve only: mean 4.6ms / best 4.3ms (3.84us/org)
+- ecosystem tier render+draw: best 1.5ms (1.32us/org), 6449 rects
+- population tier render+draw: best 3.0ms (2.71us/org), 36341 rects
+- inspection tier render+draw: best 5.8ms (5.19us/org), 90479 rects
 - baseline voxel+draw: best 0.2ms (0.19us/org), 5409 rects
-- Live rendering uses ONE tier per frame (the visible zoom), not all three: expect ecosystem ~1.17us/org vs baseline 0.19us/org. No acceptance threshold exists for the prototype; observed cost only.
+- Live rendering uses ONE tier per frame (the visible zoom), not all three: expect ecosystem ~1.32us/org vs baseline 0.19us/org. No acceptance threshold exists for the prototype; observed cost only.
 - scene render totals from §8 cover 50→3000+ populations at all three tiers (see evidence.json). Grids memoize cleanly on (family, quantized, tier, activity, cosmeticSeed) — unimplemented; Phase 3 optimization candidate.
 
 ## 10. Tuning evidence (observations, not promotions)
