@@ -228,22 +228,19 @@ function WorldCanvas({
           ctx.drawImage(buffer,x0,y0,x1-x0,y1-y0);
           ctx.imageSmoothingEnabled=prevSmooth;
         }
-        // Close-zoom detail: the interpolated field alone is too smooth to
-        // reward zooming, so loaded ground gets a screen-space stipple whose
-        // density rises with the measured waste. It is cosmetic, deterministic
-        // per cell, and subordinate to the field it sits on.
-        if(cell>6){
-          for(let i=0;i<n*n;i++){
-            const load=wv[i]!;
-            if(load<0.25)continue;
-            const px=toX((i%n+.5)*(WORLD_EXTENT/n)),py=toY((Math.floor(i/n)+.5)*(WORLD_EXTENT/n));
-            if(px<-cell||py<-cell||px>w+cell||py>h+cell)continue;
-            const dots=1+Math.min(3,Math.floor((load-0.25)*4));
-            ctx.fillStyle=`rgba(246,236,220,${0.05+0.035*dots})`;
-            for(let k=0;k<dots;k++){
-              const t=microTexture(i*8+k);
-              ctx.fillRect(px+((t-.5)*cell),py+((microTexture(i*13+k)-.5)*cell),1.5,1.5);
-            }
+        // Detail on loaded ground: a deterministic stipple whose density rises
+        // with the measured waste. It is a second, non-colour channel and
+        // cosmetic only, so it is drawn at every zoom, not just close ones.
+        for(let i=0;i<n*n;i++){
+          const load=wv[i]!;
+          if(load<0.18)continue;
+          const px=toX((i%n+.5)*(WORLD_EXTENT/n)),py=toY((Math.floor(i/n)+.5)*(WORLD_EXTENT/n));
+          if(px<-cell||py<-cell||px>w+cell||py>h+cell)continue;
+          const dots=1+Math.min(3,Math.floor((load-0.18)*4));
+          ctx.fillStyle=`rgba(58,48,40,${0.06+0.035*dots})`;
+          for(let k=0;k<dots;k++){
+            const t=microTexture(i*8+k);
+            ctx.fillRect(px+((t-.5)*cell),py+((microTexture(i*13+k)-.5)*cell),1.5,1.5);
           }
         }
       }else{
@@ -597,7 +594,7 @@ export function App(){
         <div className="lensbar">
           {(["normal","nutrients","waste","clades","traits"] as Lens[]).map(v=><button key={v} className={lens===v?"active":""} onClick={()=>setLens(v)}>{v==="normal"?"Landscape":v.charAt(0).toUpperCase()+v.slice(1)}</button>)}
           {lens==="nutrients"&&<select aria-label="Resource view" value={resourceView} onChange={e=>setResourceView(e.target.value as ResourceView)}><option value="combined">Combined</option><option value="a">Nutrient A</option><option value="b">Nutrient B</option><option value="c">Metabolite C</option></select>}
-          {lens==="waste"&&<span className="lensnote" role="note">Metabolic Waste, exact and untextured: brighter means more waste in that cell (a luminance ramp, so the reading does not depend on hue). The Landscape lens shows the same field differently — waste settles the ground toward bleached, desaturated ash at mid-tone, so it never darkens into a hole and never competes with fertility for brightness.</span>}
+          {lens==="waste"&&<span className="lensnote" role="note">Metabolic Waste, exact and untextured: brighter means more waste in that cell (a luminance ramp, so the reading does not depend on hue). The Landscape lens shows the same field differently — loaded ground loses its green cast and settles toward pale, desaturated ash, lifted well clear of barren soil and stippled so the texture reads without colour.</span>}
           {lens==="traits"&&<select aria-label="Trait view" value={traitView} onChange={e=>setTraitView(e.target.value as TraitView)}>{Object.entries(TRAIT_RANGES).map(([key,[,,label]])=><option key={key} value={key}>{label}</option>)}</select>}
         </div>
         <div className="world-wrap">

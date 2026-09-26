@@ -105,7 +105,7 @@ function testLensEncodingsAreHonest() {
   // encoding (a brighter exact ramp) and the UI note describes each.
   const clean = landscapeCell(0.4, 0.4, 0.1, 0, 0.5);
   const loaded = landscapeCell(0.4, 0.4, 0.1, 0.9, 0.5);
-  const ASH = [82, 76, 70];
+  const ASH = [116, 107, 96];
   const dist = (c: readonly [number, number, number]) =>
     Math.abs(c[0] - ASH[0]!) + Math.abs(c[1] - ASH[1]!) + Math.abs(c[2] - ASH[2]!);
   assert.ok(dist(loaded) < dist(clean), "landscape: waste moves ground toward ash");
@@ -114,15 +114,22 @@ function testLensEncodingsAreHonest() {
   assert.ok(chroma(loaded) / luma(loaded) < chroma(clean) / luma(clean),
     "landscape: waste desaturates relative to its brightness");
   assert.ok(loaded[0]! > loaded[1]! && loaded[1]! > loaded[2]!, "landscape: ash stays warm");
-  assert.ok(luma(loaded) > 45, "landscape: loaded ground stays legible, never near-black");
+  assert.ok(luma(loaded) > 60, "landscape: loaded ground stays legible, never near-black");
   assert.notDeepEqual(loaded, clean, "waste changes the landscape character, not only a hue");
   assert.ok(
     luma(wasteOverlayCell(0.9)) > luma(wasteOverlayCell(0.05)),
     "waste overlay: more waste is brighter",
   );
-  // Fertility must stay readable: rich ground still outshines ash.
+  // Fertility must stay readable, and waste must be visibly distinct from
+  // the ground it covers: loaded ground moves toward ash (far closer to ash
+  // than unloaded fertile ground is) and loses the green cast, while still
+  // sitting clearly above barren soil in brightness.
   const fertile = landscapeCell(0.95, 0.95, 0.1, 0, 0.5);
-  assert.ok(luma(fertile) > luma(loaded), "landscape: fertility still reads richer than waste");
+  const barren = landscapeCell(0, 0, 0, 0, 0.5);
+  assert.ok(dist(loaded) < dist(fertile), "landscape: loaded ground moves toward ash");
+  assert.ok(chroma(loaded) < chroma(fertile), "landscape: waste removes the fertility green cast");
+  assert.ok(luma(loaded) > luma(barren) + 20, "landscape: loaded ground is clearly distinct from barren soil");
+  assert.ok(chroma(fertile) > chroma(loaded) + 10, "landscape: fertility keeps its own colour identity");
   // The two nutrient sources must stay distinguishable without an overlay,
   // because the world's real patch geometry depends on them.
   const aRich = landscapeCell(0.9, 0.05, 0, 0, 0.5);

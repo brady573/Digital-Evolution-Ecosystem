@@ -178,10 +178,14 @@ export type Rgb = readonly [number, number, number];
 
 const clamp255 = (v: number) => (v < 0 ? 0 : v > 255 ? 255 : v | 0);
 const sat = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
-// Ash: a near-neutral warm grey, deliberately low-chroma. Waste blends the
-// ground toward this rather than toward black, because dark degradation
-// reads as a hole in the world and hides the organisms standing in it.
-const ASH_R = 82, ASH_G = 76, ASH_B = 70;
+// Ash: a near-neutral warm grey, deliberately low-chroma, and deliberately
+// PALER than both fertile and barren ground. Waste must visibly alter the
+// local character (a stated acceptance criterion), so the ash target sits
+// above the fertility lift: a loaded cell reads bleached rather than merely
+// subdued. It stays low-chroma and warm so the character survives without
+// hue, and it never darkens, because dark degradation reads as a hole in the
+// world and hides the organisms standing in it.
+const ASH_R = 116, ASH_G = 107, ASH_B = 96;
 
 /**
  * Semantic compositing: one coherent ecological character per cell.
@@ -235,7 +239,7 @@ export function landscapeCell(
   // it pales the ground, drops colour relative to brightness (so the
   // character survives without hue), and warms it. The blend is strong but
   // never total, so a loaded cell still carries the fertility beneath it.
-  const t = degraded * 0.9;
+  const t = degraded * 0.95;
   r += (ASH_R - r) * t;
   g += (ASH_G - g) * t;
   bl += (ASH_B - bl) * t;
