@@ -230,3 +230,6 @@ button,input{outline:none}
   .surface-world .inspector.sheet.collapsed{max-height:none;overflow:visible;padding:8px 10px}
   .surface-world .inspector.sheet.collapsed .sheet-toggle{margin:0}
 }
+.family-portrait{margin:6px 0 10px}
+.family-portrait img{width:128px;height:128px;image-rendering:pixelated;display:block;border:1px solid var(--line);border-radius:10px;background:#060b0f}
+.family-portrait figcaption{font-size:.75rem;color:var(--green);text-transform:capitalize;margin-top:4px}
