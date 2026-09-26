@@ -1,0 +1,352 @@
+{
+  "engine": "0.22.0",
+  "horizon": 100000,
+  "assayTicks": 15000,
+  "rule": "establishment needs persistent modification plus a durable tolerance/cleanup composition shift; exposure is supporting context only",
+  "rows": [
+    {
+      "config": "patchwork",
+      "seed": 24681357,
+      "horizon": 100870,
+      "nicheState": "established",
+      "records": [
+        {
+          "phase": "established",
+          "tick": 48694,
+          "refs": [
+            1185,
+            991
+          ]
+        }
+      ],
+      "wasteMax": 0.308,
+      "wasteFinal": 0.2309,
+      "exposedFinal": 0,
+      "tolBase": 0.1999,
+      "tolMaxDelta": 0,
+      "cuBase": 0.0905,
+      "cuMaxDelta": 0.0689,
+      "tolFinal": 0.1173,
+      "cuFinal": 0.1595,
+      "population": 384,
+      "response": "established",
+      "assay": {
+        "keptWaste": 0.2011,
+        "cleanWaste": 0,
+        "keptCu": 0.172,
+        "cleanCu": 0.0765,
+        "keptTol": 0.1086,
+        "cleanTol": 0.1705,
+        "material": true
+      }
+    },
+    {
+      "config": "patchwork",
+      "seed": 821947219,
+      "horizon": 100308,
+      "nicheState": "absent",
+      "records": [],
+      "wasteMax": 0.0536,
+      "wasteFinal": 0.0027,
+      "exposedFinal": 0,
+      "tolBase": 0.1769,
+      "tolMaxDelta": 0.0124,
+      "cuBase": 0.1713,
+      "cuMaxDelta": 0.0656,
+      "tolFinal": 0.1224,
+      "cuFinal": 0.2343,
+      "population": 446,
+      "response": "strategy-shift-without-establishment",
+      "assay": {
+        "applicable": false,
+        "reason": "no established regime to fork"
+      }
+    },
+    {
+      "config": "patchwork",
+      "seed": 3543950664,
+      "horizon": 100184,
+      "nicheState": "absent",
+      "records": [],
+      "wasteMax": 0.0426,
+      "wasteFinal": 0.0026,
+      "exposedFinal": 0,
+      "tolBase": null,
+      "tolMaxDelta": 0,
+      "cuBase": null,
+      "cuMaxDelta": 0,
+      "tolFinal": 0.1703,
+      "cuFinal": 0.2586,
+      "population": 453,
+      "response": "no-modification",
+      "assay": {
+        "applicable": false,
+        "reason": "no established regime to fork"
+      }
+    },
+    {
+      "config": "patchwork",
+      "seed": 111111111,
+      "horizon": 100515,
+      "nicheState": "forming",
+      "records": [],
+      "wasteMax": 0.0797,
+      "wasteFinal": 0.0532,
+      "exposedFinal": 0,
+      "tolBase": 0.1575,
+      "tolMaxDelta": 0.083,
+      "cuBase": 0.1539,
+      "cuMaxDelta": 0.0046,
+      "tolFinal": 0.2252,
+      "cuFinal": 0.107,
+      "population": 358,
+      "response": "strategy-shift-without-establishment",
+      "assay": {
+        "applicable": false,
+        "reason": "no established regime to fork"
+      }
+    },
+    {
+      "config": "patchwork",
+      "seed": 222222222,
+      "horizon": 100798,
+      "nicheState": "absent",
+      "records": [],
+      "wasteMax": 0.0414,
+      "wasteFinal": 0.0036,
+      "exposedFinal": 0,
+      "tolBase": null,
+      "tolMaxDelta": 0,
+      "cuBase": null,
+      "cuMaxDelta": 0,
+      "tolFinal": 0.2561,
+      "cuFinal": 0.1538,
+      "population": 450,
+      "response": "no-modification",
+      "assay": {
+        "applicable": false,
+        "reason": "no established regime to fork"
+      }
+    },
+    {
+      "config": "balanced",
+      "seed": 24681357,
+      "horizon": 100523,
+      "nicheState": "absent",
+      "records": [],
+      "wasteMax": 0.0535,
+      "wasteFinal": 0.0079,
+      "exposedFinal": 0,
+      "tolBase": 0.1912,
+      "tolMaxDelta": 0.0794,
+      "cuBase": 0.1792,
+      "cuMaxDelta": 0.0083,
+      "tolFinal": 0.2445,
+      "cuFinal": 0.0986,
+      "population": 437,
+      "response": "strategy-shift-without-establishment",
+      "assay": {
+        "applicable": false,
+        "reason": "no established regime to fork"
+      }
+    },
+    {
+      "config": "balanced",
+      "seed": 821947219,
+      "horizon": 100530,
+      "nicheState": "absent",
+      "records": [],
+      "wasteMax": 0.0623,
+      "wasteFinal": 0.0033,
+      "exposedFinal": 0,
+      "tolBase": 0.1819,
+      "tolMaxDelta": 0.0144,
+      "cuBase": 0.1709,
+      "cuMaxDelta": 0.0664,
+      "tolFinal": 0.1026,
+      "cuFinal": 0.2373,
+      "population": 334,
+      "response": "strategy-shift-without-establishment",
+      "assay": {
+        "applicable": false,
+        "reason": "no established regime to fork"
+      }
+    },
+    {
+      "config": "balanced",
+      "seed": 3543950664,
+      "horizon": 100611,
+      "nicheState": "absent",
+      "records": [],
+      "wasteMax": 0.0394,
+      "wasteFinal": 0.003,
+      "exposedFinal": 0,
+      "tolBase": null,
+      "tolMaxDelta": 0,
+      "cuBase": null,
+      "cuMaxDelta": 0,
+      "tolFinal": 0.2401,
+      "cuFinal": 0.2573,
+      "population": 402,
+      "response": "no-modification",
+      "assay": {
+        "applicable": false,
+        "reason": "no established regime to fork"
+      }
+    },
+    {
+      "config": "balanced",
+      "seed": 111111111,
+      "horizon": 100388,
+      "nicheState": "absent",
+      "records": [],
+      "wasteMax": 0.0803,
+      "wasteFinal": 0.006,
+      "exposedFinal": 0,
+      "tolBase": 0.1668,
+      "tolMaxDelta": 0.1191,
+      "cuBase": 0.1534,
+      "cuMaxDelta": 0.008,
+      "tolFinal": 0.2828,
+      "cuFinal": 0.1161,
+      "population": 342,
+      "response": "strategy-shift-without-establishment",
+      "assay": {
+        "applicable": false,
+        "reason": "no established regime to fork"
+      }
+    },
+    {
+      "config": "balanced",
+      "seed": 222222222,
+      "horizon": 100117,
+      "nicheState": "absent",
+      "records": [],
+      "wasteMax": 0.0424,
+      "wasteFinal": 0.0048,
+      "exposedFinal": 0,
+      "tolBase": null,
+      "tolMaxDelta": 0,
+      "cuBase": null,
+      "cuMaxDelta": 0,
+      "tolFinal": 0.2904,
+      "cuFinal": 0.1508,
+      "population": 329,
+      "response": "no-modification",
+      "assay": {
+        "applicable": false,
+        "reason": "no established regime to fork"
+      }
+    },
+    {
+      "config": "harsh",
+      "seed": 24681357,
+      "horizon": 100627,
+      "nicheState": "absent",
+      "records": [],
+      "wasteMax": 0.0543,
+      "wasteFinal": 0.02,
+      "exposedFinal": 0,
+      "tolBase": 0.1487,
+      "tolMaxDelta": 0.0027,
+      "cuBase": 0.1407,
+      "cuMaxDelta": 0.0439,
+      "tolFinal": 0.106,
+      "cuFinal": 0.1841,
+      "population": 213,
+      "response": "exposure-without-strategy-shift",
+      "assay": {
+        "applicable": false,
+        "reason": "no established regime to fork"
+      }
+    },
+    {
+      "config": "harsh",
+      "seed": 821947219,
+      "horizon": 100447,
+      "nicheState": "absent",
+      "records": [],
+      "wasteMax": 0.0417,
+      "wasteFinal": 0.0042,
+      "exposedFinal": 0,
+      "tolBase": null,
+      "tolMaxDelta": 0,
+      "cuBase": null,
+      "cuMaxDelta": 0,
+      "tolFinal": 0.1225,
+      "cuFinal": 0.2291,
+      "population": 227,
+      "response": "no-modification",
+      "assay": {
+        "applicable": false,
+        "reason": "no established regime to fork"
+      }
+    },
+    {
+      "config": "harsh",
+      "seed": 3543950664,
+      "horizon": 100376,
+      "nicheState": "absent",
+      "records": [],
+      "wasteMax": 0.0311,
+      "wasteFinal": 0.0039,
+      "exposedFinal": 0,
+      "tolBase": null,
+      "tolMaxDelta": 0,
+      "cuBase": null,
+      "cuMaxDelta": 0,
+      "tolFinal": 0.2239,
+      "cuFinal": 0.25,
+      "population": 251,
+      "response": "no-modification",
+      "assay": {
+        "applicable": false,
+        "reason": "no established regime to fork"
+      }
+    },
+    {
+      "config": "harsh",
+      "seed": 111111111,
+      "horizon": 100619,
+      "nicheState": "absent",
+      "records": [],
+      "wasteMax": 0.0595,
+      "wasteFinal": 0.0073,
+      "exposedFinal": 0,
+      "tolBase": 0.1741,
+      "tolMaxDelta": 0.0751,
+      "cuBase": 0.1543,
+      "cuMaxDelta": 0.0075,
+      "tolFinal": 0.2435,
+      "cuFinal": 0.12,
+      "population": 245,
+      "response": "strategy-shift-without-establishment",
+      "assay": {
+        "applicable": false,
+        "reason": "no established regime to fork"
+      }
+    },
+    {
+      "config": "harsh",
+      "seed": 222222222,
+      "horizon": 100364,
+      "nicheState": "absent",
+      "records": [],
+      "wasteMax": 0.033,
+      "wasteFinal": 0.005,
+      "exposedFinal": 0,
+      "tolBase": null,
+      "tolMaxDelta": 0,
+      "cuBase": null,
+      "cuMaxDelta": 0,
+      "tolFinal": 0.2395,
+      "cuFinal": 0.1607,
+      "population": 236,
+      "response": "no-modification",
+      "assay": {
+        "applicable": false,
+        "reason": "no established regime to fork"
+      }
+    }
+  ]
+}

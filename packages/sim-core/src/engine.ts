@@ -92,11 +92,17 @@ const metabolicRole=(o:Organism):string=>{let total=(o.ga||0)+(o.gb||0)+(o.gc||0
  * field definitions and are read through processYield, so no number here
  * can drift from the fields.
  */
-interface BioProcess{id:'primary_a'|'primary_b'|'c_scavenge';kind:0|1|2;access:(o:Organism)=>number;producesByproduct:boolean}
+interface BioProcess{id:'primary_a'|'primary_b'|'c_scavenge'|'waste_cleanup';kind:0|1|2|3;access:(o:Organism)=>number;producesByproduct:boolean}
 const PROCESSES:Record<number,BioProcess>={
  0:{id:'primary_a',kind:0,access:(o)=>AE(o.di,0)*HP(o.ha,0),producesByproduct:true},
  1:{id:'primary_b',kind:1,access:(o)=>AE(o.di,1)*HP(o.ha,1),producesByproduct:true},
  2:{id:'c_scavenge',kind:2,access:(o)=>C_ACCESS(o.bu||0),producesByproduct:false},
+ // Slice 2 cleanup is the fourth supported metabolism: capability derives
+ // ONLY from the inherited cleanup trait (like C_ACCESS derives from bu),
+ // while opportunity (local waste present) is checked at execution. Rate
+ // and activity cost stay module constants next to the process, the same
+ // way energy yields stay authoritative in the RS field definitions.
+ 3:{id:'waste_cleanup',kind:3,access:(o)=>Q(o.cu||0,0,1.5)/1.5,producesByproduct:false},
 };
 function processFor(kind:number):BioProcess{return PROCESSES[kind]!}
 function processYield(defs:FieldDef[],kind:number):number{return defs[kind]!.energy_yield}
@@ -144,7 +150,12 @@ class EcologyObserver{
 }
 const FIELD_N=60,FIELD_CELLS=FIELD_N*FIELD_N,FIELD_CELL=600/FIELD_N,FIELD_UPDATE=20,FIELD_UPTAKE=.16,INTERACTIVE_POP_SOFT_LIMIT=5000;
 class RS{
- declare n:number;declare cell:number;declare size:number;declare updateStride:number;declare uptake:number;declare enabledByproduct:boolean;declare enabledWaste:boolean;
+ declare n:number;declare cell:number;declare size:number;declare updateStride:number;declare uptake:number;declare enabledByproduct:boolean;
+ /** Waste-economy master switch. Internal default true; validation assays
+  * may override it post-construction on a fork (same white-box precedent as
+  * the cSink washout instrument). NOT a supported config surface: EngineConfig
+  * carries no waste flag, so production worlds always run the full economy. */
+ declare enabledWaste:boolean;
  declare defs:FieldDef[];
  declare stock:Float32Array[];declare cap:Float32Array[];declare source:Float32Array[];
  declare input:number[];declare biologicalProduction:number[];declare consumed:number[];declare decayed:number[];declare externalRemoved:number[];declare removalEvents:RemovalEvent[];declare diffusionAdjustment:number[];declare minFraction:number;declare maxFraction:number;declare lastInput:number[];declare diffusionRate:number[];declare delta:Float32Array[];
@@ -153,7 +164,7 @@ class RS{
  /** Temporary external C sink (validation washout assays): multiplies C decay while active. Null when absent. */
  declare cSink:{end:number;factor:number}|null;
  constructor(c:EngineConfig){
-  this.n=FIELD_N;this.cell=FIELD_CELL;this.size=FIELD_CELLS;this.updateStride=FIELD_UPDATE;this.uptake=FIELD_UPTAKE;this.enabledByproduct=c.enable_byproduct!==false;this.enabledWaste=c.enable_waste!==false;
+  this.n=FIELD_N;this.cell=FIELD_CELL;this.size=FIELD_CELLS;this.updateStride=FIELD_UPDATE;this.uptake=FIELD_UPTAKE;this.enabledByproduct=c.enable_byproduct!==false;this.enabledWaste=true;
   this.defs=[
    {id:'nutrient_a',display_name:'Nutrient A',role:'abiotic_primary',energy_yield:15,source_mode:'seeded_environmental',regeneration_rate:null,diffusion_rate:.08,decay_rate:0},
    {id:'nutrient_b',display_name:'Nutrient B',role:'abiotic_primary',energy_yield:15,source_mode:'seeded_environmental',regeneration_rate:null,diffusion_rate:.08,decay_rate:0},
@@ -176,6 +187,24 @@ class RS{
  fractionAt(kind:number,x:number,y:number):number{let i=this.idx(x,y),c=this.cap[kind]![i]!;return c>1e-9?this.stock[kind]![i]!/c:0}
  amountAt(kind:number,x:number,y:number):number{return this.stock[kind]![this.idx(x,y)]!}
  access(o:Organism,k:number):number{return processFor(k).access(o)}
+ /**
+  * Slice 2 cleanup as an explicit opportunity-dependent biological process.
+  * Capability comes from the waste_cleanup process descriptor (inherited
+  * cleanup trait only); opportunity is local waste presence. No execution
+  * without both — the same capability/opportunity split as nutrient
+  * consume(). Field removal plus interval fact accounting happen here;
+  * energy application and lineage credit stay with the caller in S.step,
+  * mirroring how consume() returns gains for the caller to apply.
+  */
+ execCleanup(o:Organism,interval:Interval|null):{removed:number;activeCost:number}{
+  if(!this.enabledWaste)return{removed:0,activeCost:0};
+  let capability=processFor(3).access(o);
+  if(capability<=0)return{removed:0,activeCost:0};
+  if(this.waste.amountAt(o.x,o.y)<=1e-9)return{removed:0,activeCost:0};
+  let removed=this.waste.removeAt(o.x,o.y,CU_RATE*capability,interval);
+  if(removed>0&&interval)interval.cleanup_exec=(interval.cleanup_exec||0)+1;
+  return{removed,activeCost:CU_ACTIVE*removed};
+ }
  scoreIndex(o:Organism,i:number):{score:number;kind:number}{let best=-1,bestKind=0,limit=this.enabledByproduct?3:2;for(let k=0;k<limit;k++){let amt=this.stock[k]![i]!,c=this.cap[k]![i]!;if(c<=1e-9||amt<=1e-9)continue;let score=amt*this.access(o,k);if(score>best){best=score;bestKind=k}}return{score:Math.max(0,best),kind:bestKind}}
  scoreAt(o:Organism,x:number,y:number):{score:number;kind:number}{return this.scoreIndex(o,this.idx(x,y))}
  opportunity(o:Organism):number{let i=this.idx(o.x,o.y),best=0,limit=this.enabledByproduct?3:2;for(let k=0;k<limit;k++){let c=this.cap[k]![i]!,f=c>1e-9?this.stock[k]![i]!/c:0;best=Math.max(best,f*this.access(o,k))}return best}
@@ -287,17 +316,17 @@ class S{
  declare extinctTick:number|null;declare extinctionContext:any|null;declare nh:NicheHistoryPoint[];
  declare lineageInterval:Map<number,LineageDelta>;declare lastLineageFlows:IntervalFlowFacts|null;
  constructor(c:EngineConfig){
-  this.c={enable_byproduct:c.enable_byproduct!==false,enable_dormancy:c.enable_dormancy!==false,enable_waste:c.enable_waste!==false,...(c as Omit<EngineConfig,'enable_byproduct'|'enable_dormancy'|'enable_waste'>)};this.study=!!c.study;
+  this.c={enable_byproduct:c.enable_byproduct!==false,enable_dormancy:c.enable_dormancy!==false,...(c as Omit<EngineConfig,'enable_byproduct'|'enable_dormancy'>)};this.study=!!c.study;
   this.rInit=R((c.seed^0xA341316C)>>>0);this.rFood=R((c.seed^0xC8013EA4)>>>0);this.rMove=R((c.seed^0xAD90777D)>>>0);this.rMut=R((c.seed^0x7E95761E)>>>0);this.rCat=R((c.seed^0x9E3779B9)>>>0);
   this.t=0;this.o=[];this.ev=[];this.sn=[];this.long=[];this.longStride=2503;this.eventSn=[];this.L=new Map;this.FAM=new Map;this.nL=1;this.nO=1;this.peakPopulation=0;this.peakPopulationTick=0;this.tb=B();this.last=I();this.cur=I();this.totalUse=[0,0,0];this.totalEnergy=[0,0,0];this.totalReproSupport=[0,0,0,0];this.resources=new RS(this.c);this.drought=null;this.response=null;this.extinctTick=null;this.extinctionContext=null;this.nh=[];this.lineageInterval=new Map();this.lastLineageFlows=null;
   let ri=this.rInit;
-  for(let k=0;k<c.pop;k++){let z=c.div,l=this.newL(0,[]),di=Q((ri()*2-1)*z,-1,1),ha=Q(di*.45+(ri()*2-1)*z*.75,-1,1);let matureAt=FOUNDER_MATURITY_MIN+Math.floor(ri()*FOUNDER_MATURITY_SPAN),id=this.nO++,bu=this.c.enable_byproduct?Q(.04+.28*H01(c.seed,id,17),0,1.5):0,dr=this.c.enable_dormancy?Q(.18+.62*H01(c.seed,id,29),0,1.5):0,to=this.c.enable_waste?Q(.05+.25*H01(c.seed,id,41),0,1.5):0,cu=this.c.enable_waste?Q(.05+.25*H01(c.seed,id,53),0,1.5):0;this.o.push({id,parent:null,generation:0,born:0,matureAt,readyAt:matureAt,x:ri()*600,y:ri()*600,en:60,h:ri()*6.28,sp:Q(1.15*(1+(ri()*2-1)*z),.25,4),se:Q(55*(1+(ri()*2-1)*z),10,180),me:Q(.16*(1+(ri()*2-1)*z),.04,.5),rp:Q(92*(1+(ri()*2-1)*z),55,220),di,ha,bu,dr,to,cu,activity:'active',dormantSince:null,wakeCount:0,lastWakeTick:null,ma:0,mb:0,mc:0,pc:0,ga:0,gb:0,gc:0,ra:0,rb:0,rc:0,l})}
+  for(let k=0;k<c.pop;k++){let z=c.div,l=this.newL(0,[]),di=Q((ri()*2-1)*z,-1,1),ha=Q(di*.45+(ri()*2-1)*z*.75,-1,1);let matureAt=FOUNDER_MATURITY_MIN+Math.floor(ri()*FOUNDER_MATURITY_SPAN),id=this.nO++,bu=this.c.enable_byproduct?Q(.04+.28*H01(c.seed,id,17),0,1.5):0,dr=this.c.enable_dormancy?Q(.18+.62*H01(c.seed,id,29),0,1.5):0,to=Q(.05+.25*H01(c.seed,id,41),0,1.5),cu=Q(.05+.25*H01(c.seed,id,53),0,1.5);this.o.push({id,parent:null,generation:0,born:0,matureAt,readyAt:matureAt,x:ri()*600,y:ri()*600,en:60,h:ri()*6.28,sp:Q(1.15*(1+(ri()*2-1)*z),.25,4),se:Q(55*(1+(ri()*2-1)*z),10,180),me:Q(.16*(1+(ri()*2-1)*z),.04,.5),rp:Q(92*(1+(ri()*2-1)*z),55,220),di,ha,bu,dr,to,cu,activity:'active',dormantSince:null,wakeCount:0,lastWakeTick:null,ma:0,mb:0,mc:0,pc:0,ga:0,gb:0,gc:0,ra:0,rb:0,rc:0,l})}
   this.peakPopulation=this.o.length;this.updateLineageHistory();this.updateFamilyHistory();this.log('Universe created');if(!this.study)this.long.push(this.pack());
  }
  newL(p:number,m:string[]):number{let id=this.nL++;this.L.set(id,{id,parent:p,born:this.t,mutations:m,peak:0,last:this.t,established:false});return id}
  resourceKind(){return this.rFood()<this.c.resource_b_fraction?1:0}
- mut(n:string,v:number):[number,boolean]{let[k,lo,hi]=T[n]!,r=this.rMut;if((n==='byproduct_use'&&!this.c.enable_byproduct)||(n==='dormancy_response'&&!this.c.enable_dormancy)||((n==='tolerance'||n==='cleanup')&&!this.c.enable_waste))return[v,false];if(r()>=this.c.mr)return[v,false];this.cur.mutation_attempts++;let additive=n==='diet'||n==='habitat'||n==='byproduct_use'||n==='dormancy_response',p=additive?v+(r()*2-1)*this.c.ms*1.15:v*(1+(r()*2-1)*this.c.ms);if(p<lo)this.tb[n]![0]!++;if(p>hi)this.tb[n]![1]!++;let nv=Q(p,lo,hi),changed=Math.abs(nv-v)>1e-12;if(changed)this.cur.effective_mutations++;return[nv,changed]}
- child(o:Organism):Organism{let q:Record<string,number>={},m:string[]=[];for(let n in T){if((n==='byproduct_use'&&!this.c.enable_byproduct)||(n==='dormancy_response'&&!this.c.enable_dormancy)||((n==='tolerance'||n==='cleanup')&&!this.c.enable_waste)){q[T[n]![0]!]=(o[T[n]![0]!] as number)||0;continue}let[v,x]=this.mut(n,o[T[n]![0]!] as number);q[T[n]![0]!]=v;if(x)m.push(n)}let ang=this.rMove()*6.28,dist=2+18*Math.sqrt(this.rMove()),matureAt=this.t+OFFSPRING_MATURITY_MIN+Math.floor(this.rMove()*OFFSPRING_MATURITY_SPAN);return{id:this.nO++,parent:o.id,generation:(o.generation||0)+1,born:this.t,matureAt,readyAt:matureAt,x:(o.x+Math.cos(ang)*dist+600)%600,y:(o.y+Math.sin(ang)*dist+600)%600,en:o.en*.92,h:this.rMove()*6.28,sp:q.sp!,se:q.se!,me:q.me!,rp:q.rp!,di:q.di!,ha:q.ha!,bu:q.bu||0,dr:q.dr||0,to:q.to!,cu:q.cu!,activity:'active',dormantSince:null,wakeCount:0,lastWakeTick:null,ma:0,mb:0,mc:0,pc:0,ga:0,gb:0,gc:0,ra:0,rb:0,rc:0,l:m.length?this.newL(o.l,m):o.l}}
+ mut(n:string,v:number):[number,boolean]{let[k,lo,hi]=T[n]!,r=this.rMut;if((n==='byproduct_use'&&!this.c.enable_byproduct)||(n==='dormancy_response'&&!this.c.enable_dormancy))return[v,false];if(r()>=this.c.mr)return[v,false];this.cur.mutation_attempts++;let additive=n==='diet'||n==='habitat'||n==='byproduct_use'||n==='dormancy_response',p=additive?v+(r()*2-1)*this.c.ms*1.15:v*(1+(r()*2-1)*this.c.ms);if(p<lo)this.tb[n]![0]!++;if(p>hi)this.tb[n]![1]!++;let nv=Q(p,lo,hi),changed=Math.abs(nv-v)>1e-12;if(changed)this.cur.effective_mutations++;return[nv,changed]}
+ child(o:Organism):Organism{let q:Record<string,number>={},m:string[]=[];for(let n in T){if((n==='byproduct_use'&&!this.c.enable_byproduct)||(n==='dormancy_response'&&!this.c.enable_dormancy)){q[T[n]![0]!]=(o[T[n]![0]!] as number)||0;continue}let[v,x]=this.mut(n,o[T[n]![0]!] as number);q[T[n]![0]!]=v;if(x)m.push(n)}let ang=this.rMove()*6.28,dist=2+18*Math.sqrt(this.rMove()),matureAt=this.t+OFFSPRING_MATURITY_MIN+Math.floor(this.rMove()*OFFSPRING_MATURITY_SPAN);return{id:this.nO++,parent:o.id,generation:(o.generation||0)+1,born:this.t,matureAt,readyAt:matureAt,x:(o.x+Math.cos(ang)*dist+600)%600,y:(o.y+Math.sin(ang)*dist+600)%600,en:o.en*.92,h:this.rMove()*6.28,sp:q.sp!,se:q.se!,me:q.me!,rp:q.rp!,di:q.di!,ha:q.ha!,bu:q.bu||0,dr:q.dr||0,to:q.to!,cu:q.cu!,activity:'active',dormantSince:null,wakeCount:0,lastWakeTick:null,ma:0,mb:0,mc:0,pc:0,ga:0,gb:0,gc:0,ra:0,rb:0,rc:0,l:m.length?this.newL(o.l,m):o.l}}
  reproSupport(o:Organism):number{let t=(o.ra||0)+(o.rb||0)+(o.rc||0);if(t<=0)return 2;let c=(o.rc||0)/t;if(c>=.45)return 3;let p=(o.ra||0)+(o.rb||0),a=p?o.ra/p:.5;return a>=.65?0:a<=.35?1:2}
  catalyst(type:string,src:string):void{
   this.eventSn.push({...this.pack(),phase:'before_catalyst',source:src,catalyst:type});let pre=this.o.length,removed:number[];
@@ -350,20 +379,24 @@ class S{
    if(((this.t+o.id)%DORMANCY_CHECK)===0&&this.dormancyEntry(o)){o.activity='dormant';o.dormantSince=this.t;this.cur.dormancy_entries++;o.en-=(PC(o.me)*DORMANT_MAINTENANCE)*this.c.press;if(o.en>0)live.push(o);else{this.cur.deaths++;this.lineageCredit(o.l,{deaths:1})}continue}
    if(((this.t+o.id)&3)===0){let sensed=this.resources.sense(o);if(sensed.score>.003)o.h=sensed.angle;else{let pull=.04+.12*Math.abs(o.ha);if(Math.abs(o.ha)>.08&&this.rMove()<pull){let kind=o.ha>0?1:0,cx=kind?445:155,cy=kind?390:210;o.h=Math.atan2(WD(o.y,cy),WD(o.x,cx))+(this.rMove()-.5)*.75}else if(this.rMove()<.10)o.h+=this.rMove()*1.6-.8}}
    let mv=MV(o.sp);o.x=(o.x+Math.cos(o.h)*mv+600)%600;o.y=(o.y+Math.sin(o.h)*mv+600)%600;o.en-=(PC(o.me)+MC(o.sp)+DC(o.di)+SC(o.en)+(this.c.enable_byproduct?BUC(o.bu||0):0))*this.c.press;
-   // Waste economy (Slice 2): gated by enable_waste so clean control worlds
-   // stay clean by biology, not by surgery. Dormant organisms skip this
-   // block via the continue above: shutdown means shutdown.
-   if(this.c.enable_waste!==false){let wf=this.resources.waste.fractionAt(o.x,o.y),to=Q(o.to||0,0,1.5),cu=Q(o.cu||0,0,1.5);
+   // Waste economy (Slice 2): gated by the resource system's internal switch
+   // (validation assays may disable it on a fork; production always runs
+   // the full economy). Cleanup executes as the waste_cleanup BioProcess —
+   // inherited capability via the descriptor, opportunity via local waste.
+   // Burden and standing costs are passive trait economics, not process
+   // executions. Dormant organisms skip this block via the continue above:
+   // shutdown means shutdown.
+   if(this.resources.enabledWaste){let wf=this.resources.waste.fractionAt(o.x,o.y),to=Q(o.to||0,0,1.5),cu=Q(o.cu||0,0,1.5);
    if(wf>0||to>0||cu>0){
     let exposure=wf/(wf+WASTE_HALF_SAT);
     let burden=WASTE_BURDEN_MAX*exposure*(1-WASTE_TOL_EFFICACY*(to/1.5))+WASTE_TOL_COST*to;
-    let cleanCost=CU_STANDING*cu,removed=0;
-    if(cu>0&&wf>0){let amt=this.resources.waste.amountAt(o.x,o.y);if(amt>1e-9){let capAct=CU_RATE*(cu/1.5);removed=this.resources.waste.removeAt(o.x,o.y,capAct,this.cur);cleanCost+=CU_ACTIVE*removed}}
+    let ex=this.resources.execCleanup(o,this.cur),removed=ex.removed;
+    let cleanCost=CU_STANDING*cu+ex.activeCost;
     let wcost=(burden+cleanCost)*this.c.press;
     o.en-=wcost;
     this.cur.burden_energy=(this.cur.burden_energy||0)+burden*this.c.press;
     this.cur.cleanup_energy=(this.cur.cleanup_energy||0)+cleanCost*this.c.press;
-    if(removed>0){this.cur.cleanup_exec=(this.cur.cleanup_exec||0)+1;this.lineageCredit(o.l,{wasteRemoved:removed,burdenEnergy:burden*this.c.press,cleanupEnergy:cleanCost*this.c.press,cleanupExec:1})}
+    if(removed>0){this.lineageCredit(o.l,{wasteRemoved:removed,burdenEnergy:burden*this.c.press,cleanupEnergy:cleanCost*this.c.press,cleanupExec:1})}
     else this.lineageCredit(o.l,{burdenEnergy:burden*this.c.press,cleanupEnergy:cleanCost*this.c.press});
    }}
    let eat=this.resources.consume(o,this.cur);if(eat){o.en+=eat.gain;/* Frozen counters (parity-protected): ma/mb/mc count consumption EVENTS,

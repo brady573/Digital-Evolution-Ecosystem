@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { EcologyObserver, type ObservationFrame } from "../../packages/sim-analysis/src/index.ts";
 import { UniverseSession } from "../../packages/sim-runtime/src/session.ts";
 import type { EngineConfig } from "../../packages/contracts/src/index.ts";
@@ -94,7 +95,7 @@ function testFormAndEstablish() {
   observer.observe(frame(63000, { waste: 0.1, exposed: 0.02 }));
   assert.equal((observer as any).niche.state, "forming", "strategy shift still missing");
   // Exposure moves 0.02 -> 0.20: a genuine shift, not a level.
-  observer.observe(frame(65500, { waste: 0.12, exposed: 0.2 }));
+  observer.observe(frame(65500, { waste: 0.12, exposed: 0.2, tol: 0.27 }));
   assert.equal((observer as any).niche.state, "established", "paired shift establishes");
   const records = nicheRecords(observer);
   assert.equal(records.length, 1, "one establishment record");
@@ -136,7 +137,7 @@ function testFormAborted() {
 function testDisruption() {
   const observer = new EcologyObserver();
   observer.observe(frame(60000, { waste: 0.1, exposed: 0.02 }));
-  observer.observe(frame(65500, { waste: 0.12, exposed: 0.2 }));
+  observer.observe(frame(65500, { waste: 0.12, exposed: 0.2, tol: 0.27 }));
   assert.equal((observer as any).niche.state, "established", "guild established");
   observer.observe(frame(70500, { waste: 0.02, exposed: 0 }));
   assert.equal((observer as any).niche.state, "established", "collapse persistence not yet met");
@@ -151,7 +152,7 @@ function testDisruption() {
 function testSuperseded() {
   const observer = new EcologyObserver();
   observer.observe(frame(60000, { waste: 0.1, exposed: 0.02 }));
-  observer.observe(frame(65500, { waste: 0.12, exposed: 0.25 }));
+  observer.observe(frame(65500, { waste: 0.12, exposed: 0.25, cu: 0.12 }));
   assert.equal((observer as any).niche.state, "established", "guild established");
   // Waste persists but occupancy reorganizes away from modified cells.
   observer.observe(frame(70500, { waste: 0.11, exposed: 0.02 }));
@@ -169,7 +170,7 @@ function testSupersededExits() {
   // the arc returns to absent and can fire again on a new regime.
   const observer = new EcologyObserver();
   observer.observe(frame(60000, { waste: 0.1, exposed: 0.02 }));
-  observer.observe(frame(65500, { waste: 0.12, exposed: 0.25 }));
+  observer.observe(frame(65500, { waste: 0.12, exposed: 0.25, cu: 0.12 }));
   observer.observe(frame(70500, { waste: 0.11, exposed: 0.02 }));
   observer.observe(frame(76000, { waste: 0.11, exposed: 0.02 }));
   assert.equal((observer as any).niche.state, "superseded", "regime superseded");
@@ -177,7 +178,7 @@ function testSupersededExits() {
   assert.equal((observer as any).niche.state, "absent", "lost modification clears supersession");
   observer.observe(frame(86000, { waste: 0.1, exposed: 0.02 }));
   assert.equal((observer as any).niche.state, "forming", "new regime re-forms");
-  observer.observe(frame(91500, { waste: 0.12, exposed: 0.2 }));
+  observer.observe(frame(91500, { waste: 0.12, exposed: 0.2, tol: 0.27 }));
   const records = nicheRecords(observer);
   assert.equal((observer as any).niche.state, "established", "new regime establishes");
   assert.equal(records.length, 3, "establishment + supersession + new establishment");
@@ -188,14 +189,14 @@ function testSupersededExits() {
 function testRecovery() {
   const observer = new EcologyObserver();
   observer.observe(frame(60000, { waste: 0.1, exposed: 0.02 }));
-  observer.observe(frame(65500, { waste: 0.12, exposed: 0.2 }));
+  observer.observe(frame(65500, { waste: 0.12, exposed: 0.2, tol: 0.27 }));
   observer.observe(frame(70500, { waste: 0.02, exposed: 0 }));
   observer.observe(frame(76000, { waste: 0.02, exposed: 0 }));
   assert.equal((observer as any).niche.state, "disrupted", "guild disrupted");
   observer.observe(frame(81500, { waste: 0.1, exposed: 0.02 }));
   assert.equal((observer as any).niche.state, "forming", "return re-forms");
   assert.equal(nicheRecords(observer).length, 2, "return narrates nothing yet");
-  observer.observe(frame(87000, { waste: 0.12, exposed: 0.2 }));
+  observer.observe(frame(87000, { waste: 0.12, exposed: 0.2, tol: 0.27 }));
   assert.equal((observer as any).niche.state, "established", "durable return recovers");
   const records = nicheRecords(observer);
   assert.equal(records.length, 3, "establishment + disruption + recovery records");
@@ -213,7 +214,7 @@ function testLineageRefs() {
     removers: [{ id: 9, share: 0.5 }],
   }));
   observer.observe(frame(65500, {
-    waste: 0.12, exposed: 0.2,
+    waste: 0.12, exposed: 0.2, tol: 0.27,
     producers: [{ id: 5, share: 0.6 }, { id: 6, share: 0.1 }],
     removers: [{ id: 9, share: 0.5 }],
   }));
@@ -224,7 +225,7 @@ function testLineageRefs() {
   const diffuse = new EcologyObserver();
   const many = Array.from({ length: 12 }, (_, i) => ({ id: 100 + i, share: 0.05 }));
   diffuse.observe(frame(60000, { waste: 0.1, exposed: 0.02, producers: many, removers: many }));
-  diffuse.observe(frame(65500, { waste: 0.1, exposed: 0.2, producers: many, removers: many }));
+  diffuse.observe(frame(65500, { waste: 0.1, exposed: 0.2, tol: 0.27, producers: many, removers: many }));
   const diffuseRecords = nicheRecords(diffuse);
   assert.equal(diffuseRecords.length, 1, "diffuse flows still establish");
   assert.deepEqual(diffuseRecords[0].entity_refs, [], "diffuse flows name nobody");
@@ -236,7 +237,7 @@ function testLineageRefs() {
     removers: [{ id: 7, share: 0.8 }],
   }));
   both.observe(frame(65500, {
-    waste: 0.12, exposed: 0.2,
+    waste: 0.12, exposed: 0.2, tol: 0.27,
     producers: [{ id: 7, share: 0.8 }],
     removers: [{ id: 7, share: 0.8 }],
   }));
@@ -278,18 +279,20 @@ function settle(session: UniverseSession, target: number): void {
 
 function testNicheIntegration() {
   // Patchwork seed 24681357: waste accumulates and the arc establishes
-  // @30622 on a genuine exposure shift (0.000 -> 0.164 at establishment;
-  // tolerance actually declines 0.201 -> 0.114, so the exposure-shift
-  // disjunct is doing the work). Balanced shows no arc by 150k (pinned
-  // below at 70k as a retune guard): possibility, never frequency.
+  // @48694 on a genuine cleanup-composition shift (0.09 -> 0.14 at
+  // establishment; tolerance declines 0.20 -> 0.13, so the cleanup disjunct
+  // is doing the work and exposure is supporting context only). Producer
+  // and remover lineages both clear the meaningful-share bar. Balanced
+  // shows no arc by 150k (pinned below at 70k as a retune guard):
+  // possibility, never frequency.
   const session = new UniverseSession();
   session.create(patchworkConfig(PATCHWORK_SEED));
   settle(session, 70000);
   const records = (session.analysis as any).records.filter((r: any) => r.kind === "niche");
   assert.equal(records.length, 1, "one establishment record");
   assert.equal(records[0].phase, "established", "record establishes");
-  assert.equal(records[0].tick, 30622, "establishment is deterministic");
-  assert.deepEqual(records[0].entity_refs, [368], "dominant interval producer named");
+  assert.equal(records[0].tick, 48694, "establishment is deterministic");
+  assert.deepEqual(records[0].entity_refs, [1185, 991], "producer and remover named");
   console.log("niche fixture arc: PASS");
 }
 
@@ -313,21 +316,20 @@ function testNoArcOnBalanced() {
 
 function testMatchedClearing() {
   // Counterfactual through biology, not surgery: fork an established regime
-  // and run the cleared branch with the waste economy switched off
-  // (enable_waste:false). A one-time stock clear initializes the
-  // "always clean" counterfactual; after that both branches run unmodified
-  // biology. The cleanup strategy persists iff waste persists (material
-  // reliance shown by controlled comparison, not temporal order).
+  // and run the cleared branch with the waste economy's internal switch
+  // flipped off. The switch is validation-only white-box machinery (same
+  // precedent as the cSink washout instrument): EngineConfig carries no
+  // waste flag, so production worlds always run the full economy. A
+  // one-time stock clear initializes the "always clean" counterfactual;
+  // after that both branches run unmodified biology. The cleanup strategy
+  // persists iff waste persists (material reliance shown by controlled
+  // comparison, not temporal order).
   const session = new UniverseSession();
   session.create(patchworkConfig(PATCHWORK_SEED));
   settle(session, 70000);
   const sim = session.simulation as any;
   const forkProduced: number = sim.resources.waste.produced;
   const cleared = sim.clone();
-  // Two gates read the flag (S-step burden block via sim config, deposition
-  // via the resource system's own copy): switch both, exactly as a
-  // waste-free construction would set them.
-  cleared.c.enable_waste = false;
   cleared.resources.enabledWaste = false;
   cleared.resources.waste.stock.fill(0);
   // Fork-path honesty: a checkpoint round-trip must continue identically to
@@ -336,7 +338,6 @@ function testMatchedClearing() {
   const revivedSession = new UniverseSession();
   revivedSession.restore(JSON.parse(JSON.stringify(session.checkpoint())));
   const revived = revivedSession.simulation as any;
-  revived.c.enable_waste = false;
   revived.resources.enabledWaste = false;
   revived.resources.waste.stock.fill(0);
   for (let i = 0; i < 500; i++) {
@@ -372,6 +373,33 @@ function testMatchedClearing() {
   console.log("niche matched clearing: PASS");
 }
 
+function testSurveyArtifact() {
+  // Retained multi-seed evidence (tools/validation/niche-survey.ts; manual
+  // run, resume-safe, committed at testdata/niche-survey-0.22.json). This
+  // fast gate checks the artifact in: identity, coverage, and the presence
+  // of both emergence and non-emergence. It never asserts a frequency.
+  let artifact: any;
+  try {
+    artifact = JSON.parse(readFileSync("testdata/niche-survey-0.22.json", "utf8"));
+  } catch {
+    assert.fail("niche survey artifact missing or unreadable: run pnpm test:niche-survey (manual, resume-safe) to retain testdata/niche-survey-0.22.json");
+  }
+  assert.equal(artifact.engine, ENGINE_VERSION, "artifact matches current engine");
+  assert.ok(Array.isArray(artifact.rows) && artifact.rows.length >= 15, "survey covers 5 seeds x 3 configs");
+  const configs = new Set(artifact.rows.map((r: any) => r.config));
+  for (const c of ["patchwork", "balanced", "harsh"]) assert.ok(configs.has(c), `survey covers ${c}`);
+  const responses = new Set(artifact.rows.map((r: any) => r.response));
+  assert.ok(responses.has("established"), "survey retains at least one establishment");
+  assert.ok([...responses].some((r) => r !== "established"), "survey retains non-establishment");
+  for (const row of artifact.rows) {
+    for (const k of ["config", "seed", "horizon", "nicheState", "records", "wasteMax", "tolMaxDelta", "cuMaxDelta", "response", "assay"]) {
+      assert.ok(row[k] !== undefined, `survey row carries ${k}`);
+    }
+    if (row.records.length > 0) assert.ok(row.assay && row.assay.applicable !== false, "established rows carry a matched assay");
+  }
+  console.log(`niche survey artifact: PASS (${artifact.rows.length} rows, engine ${artifact.engine})`);
+}
+
 testFormAndEstablish();
 testNoEstablishOnExposureLevel();
 testEstablishViaTraitShift();
@@ -385,4 +413,5 @@ testZeroPopulationSafe();
 testNicheIntegration();
 testNoArcOnBalanced();
 testMatchedClearing();
+testSurveyArtifact();
 console.log(`niche validation: PASS (engine ${ENGINE_VERSION})`);

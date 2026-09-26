@@ -61,13 +61,15 @@ const DEP_GUILD_COLLAPSE=.33;
 // share; otherwise the record stays generic. Owner-visible constant.
 const DEP_MAJOR_SHARE=.10;
 // Niche-construction (Slice 2) thresholds. Modification first: waste alone
-// never suffices. Establishment needs a measured strategy SHIFT relative to
-// the forming baseline (exposure, tolerance, or cleanup moving by at least
-// NC_STRAT_SHIFT) — a high exposure LEVEL with no movement is occupancy,
-// not construction. Calibrated on 0.22 multi-config probes; Owner-visible.
+// never suffices. Establishment needs a durable STRATEGY-COMPOSITION shift
+// relative to the forming baseline: the tolerance or cleanup trait mean
+// moving by at least NC_STRAT_SHIFT, i.e. a durable share change of a
+// waste-response strategy class. Exposure (share of organisms in modified
+// cells) is supporting evidence only — waste spreading around organisms can
+// raise it with no strategy responding, so it can never establish the arc
+// alone. Calibrated on 0.22 multi-config probes; Owner-visible.
 const NC_FORM_WASTE=.05;
 const NC_PERSIST=5000;
-const NC_EXPOSED=.15;
 const NC_STRAT_SHIFT=.05;
 const NC_WASTE_COLLAPSE=.5;
 // Lineage refs name only meaningful interval waste producers/removers
@@ -198,19 +200,18 @@ export class EcologyObserver {
     }
 
     // Niche construction (Slice 2): persistent waste modification paired with
-    // a durable measured strategy shift. Modification alone never suffices;
-    // temporal pairing is recorded without asserting causation. Strategy is
-    // read from movement in the population bundle (exposure, tolerance /
-    // cleanup means vs the forming baseline), never a scalar score and never
-    // a level. Lineage refs name only meaningful interval waste
+    // a durable measured shift in strategy composition. Modification alone
+    // never suffices, and neither does occupancy: temporal pairing is
+    // recorded without asserting causation. Strategy change is read from
+    // movement in the inherited tolerance/cleanup means vs the forming
+    // baseline — a durable share change of a waste-response strategy class
+    // — never a scalar score and never a level. Exposure is quoted as
+    // supporting context. Lineage refs name only meaningful interval waste
     // producers/removers (>=NC_MEANINGFUL_SHARE of interval flow), else
     // nobody; one lineage topping both lists is named once.
     const nc=this.niche;
     const mod=s.waste_fraction>=NC_FORM_WASTE;
-    const exposedShift=(s.waste_exposed_share>=NC_EXPOSED)
-      &&(s.waste_exposed_share-(nc.baseExposed||0)>=NC_STRAT_SHIFT);
-    const stratShift=exposedShift
-      ||(s.tolerance_mean-nc.baseTol>=NC_STRAT_SHIFT)
+    const stratShift=(s.tolerance_mean-nc.baseTol>=NC_STRAT_SHIFT)
       ||(s.cleanup_mean-nc.baseCu>=NC_STRAT_SHIFT);
     let topProd:null|number=null,topProdShare=0,topRem:null|number=null,topRemShare=0,ivProd=0,ivRem=0;
     for(const l of s.intervalFlows.lineages){ivProd+=l.wasteProduced;ivRem+=l.wasteRemoved}
@@ -226,7 +227,7 @@ export class EcologyObserver {
         const returning=nc.wasDisrupted;
         nc.state="established";nc.establishedTick=s.tick;nc.estWaste=s.waste_fraction;nc.estExposed=s.waste_exposed_share;
         nc.lowSince=null;nc.candidateSince=null;nc.wasDisrupted=false;
-        this.add("niche",nc.id,s.tick,returning?"recovered":"established",returning?"The constructed niche returned":"A constructed niche became established",`Waste load ${Math.round(100*s.waste_fraction)}% of waste-field capacity (${Math.round(100*nc.baseWaste)}% when the regime first formed). Exposure: ${Math.round(100*s.waste_exposed_share)}% of organisms in burden-relevant cells (dirty enough to cost energy), up from ${Math.round(100*(nc.baseExposed||0))}%. Tolerance mean ${nc.baseTol.toFixed(2)}->${s.tolerance_mean.toFixed(2)}; cleanup mean ${nc.baseCu.toFixed(2)}->${s.cleanup_mean.toFixed(2)}. The modification and the shift appeared together in time, which is not proof of cause.`,"major",s,ncRefs);
+        this.add("niche",nc.id,s.tick,returning?"recovered":"established",returning?"The constructed niche returned":"A constructed niche became established",`Waste load ${Math.round(100*s.waste_fraction)}% of waste-field capacity (${Math.round(100*nc.baseWaste)}% when the regime first formed). Strategy composition moved: tolerance mean ${nc.baseTol.toFixed(2)}->${s.tolerance_mean.toFixed(2)}; cleanup mean ${nc.baseCu.toFixed(2)}->${s.cleanup_mean.toFixed(2)}. Supporting context: ${Math.round(100*s.waste_exposed_share)}% of organisms in burden-relevant cells (dirty enough to cost energy), up from ${Math.round(100*(nc.baseExposed||0))}%. The modification and the shift appeared together in time, which is not proof of cause.`,"major",s,ncRefs);
       }
     } else if(nc.state==="established"){
       const modGone=s.waste_fraction<nc.estWaste*NC_WASTE_COLLAPSE;
@@ -306,7 +307,6 @@ export class EcologyObserver {
         cuse_major_consumer_guild_share:DEP_MAJOR_SHARE,
         niche_detector_form_waste:NC_FORM_WASTE,
         niche_detector_persistence_ticks:NC_PERSIST,
-        niche_detector_exposed_share:NC_EXPOSED,
         niche_detector_strategy_shift:NC_STRAT_SHIFT,
         niche_detector_waste_collapse_fraction:NC_WASTE_COLLAPSE,
         niche_detector_meaningful_lineage_share:NC_MEANINGFUL_SHARE,

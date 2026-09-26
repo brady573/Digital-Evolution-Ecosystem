@@ -20,7 +20,8 @@
     "test:dependency": "tsx tools/validation/dependency.ts",
     "test:dependency:fast": "tsx tools/validation/dependency.ts -- --fast",
     "test:catalysts:fast": "tsx tools/validation/catalysts.ts -- --fast",
-    "test:niche": "tsx tools/validation/niche.ts"
+    "test:niche": "tsx tools/validation/niche.ts",
+    "test:niche-survey": "tsx tools/validation/niche-survey.ts"
   },
   "devDependencies": {
     "@types/node": "26.6.2",
