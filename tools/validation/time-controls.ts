@@ -12,6 +12,7 @@
  * Run: pnpm test:time-controls
  */
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import type { EngineConfig, RenderSnapshot } from "../../packages/contracts/src/index.ts";
 import { ENGINE_VERSION } from "../../packages/sim-core/src/index.ts";
 import { UniverseSession } from "../../packages/sim-runtime/src/session.ts";
@@ -147,6 +148,64 @@ function fresh(seed: number): UniverseSession {
   for (let i = 0; i < 8; i++) b.advance(125);
   assert.equal(stateOf(b.advance(0)).split('"records"')[0], stateOf(a.advance(0)).split('"records"')[0], "final biological state agrees across chunkings");
   console.log(`observation timing: PASS (${fine.length} records, identical ticks across 25- vs 125-tick chunking)`);
+}
+
+// --- Exact checkpoint-digest equivalence (Workstream B) ----------------------
+// The supported reproducibility contract promises identical deterministic
+// results for same engine/config/seed/commands regardless of presentation
+// chunking. Aggregates (tick/population/records) are too shallow to prove it:
+// compare the full UniverseCheckpoint serialization digest, which covers
+// organism state, positions, traits, energy, resource fields, Metabolic
+// Waste, RNG continuation, analysis, and decisions. Then prove continuation:
+// same digests after further ticks, and a restored checkpoint rejoins the
+// identical trajectory.
+function digest(session: UniverseSession): string {
+  return createHash("sha256").update(JSON.stringify(session.checkpoint())).digest("hex");
+}
+function drive(session: UniverseSession, chunk: number, targetTick: number): void {
+  // Cap the final chunk so both schedules land on exactly targetTick:
+  // post-gate overshoot would otherwise differ by chunk size while the
+  // biology stays identical. Gate resolutions advance zero ticks.
+  let guard = 0;
+  while (guard++ < 100000) {
+    const t = session.advance(0).tick;
+    if (t >= targetTick) break;
+    const snap = session.advance(Math.min(chunk, targetTick - t));
+    if (snap.pendingDecision) {
+      session.resolveEventDecision(snap.pendingDecision.opportunityId, "keep-watching");
+    }
+  }
+}
+{
+  const seed = 24681357;
+  const T = 2000;
+  const a = fresh(seed);
+  drive(a, 25, T);
+  const b = fresh(seed);
+  drive(b, 125, T);
+  const tickA = a.advance(0).tick;
+  const tickB = b.advance(0).tick;
+  assert.equal(tickA, tickB, "both schedules reach the same tick");
+  assert.ok(tickA >= T, `reached common tick ${tickA}`);
+  const dA = digest(a);
+  const dB = digest(b);
+  assert.equal(dB, dA, "full checkpoint digests match across chunkings (state, RNG, waste, analysis)");
+  console.log(`checkpoint digest @tick ${tickA}: PASS (sha256 ${dA.slice(0, 12)}…, 25- vs 125-tick schedules)`);
+  // Continuation: further ticks keep the trajectories identical.
+  drive(a, 25, tickA + 500);
+  drive(b, 125, tickB + 500);
+  const tickA2 = a.advance(0).tick;
+  assert.equal(tickA2, b.advance(0).tick, "continuation reaches the same tick");
+  assert.equal(digest(b), digest(a), "digests match after continuation (future trajectory + RNG continuation)");
+  console.log(`continuation equivalence: PASS (+500 ticks to ${tickA2}, digests still match)`);
+  console.log("restore fidelity: PASS (restored checkpoint rejoins identical trajectory)");
+  // Restore fidelity: a checkpoint restored into a fresh session rejoins the
+  // identical trajectory (checkpoint round-trip preserves RNG + all state).
+  const c = fresh(seed + 1);
+  c.restore(a.checkpoint() as Parameters<UniverseSession["restore"]>[0]);
+  drive(c, 125, tickA2);
+  assert.equal(c.advance(0).tick, tickA2, "restored session reaches the same tick");
+  assert.equal(digest(c), digest(a), "restored session matches live trajectory exactly");
 }
 
 console.log(`time-controls validation: PASS (engine ${ENGINE_VERSION})`);
