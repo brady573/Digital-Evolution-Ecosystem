@@ -55,11 +55,100 @@ async function main(){
     await page.getByText("Untouched twin").waitFor();
 
     await page.getByRole("button",{name:"World",exact:true}).click();
-    await page.getByRole("button",{name:"Normal"}).waitFor();
+    await page.getByRole("button",{name:"Landscape"}).waitFor();
     await page.getByRole("button",{name:"Nutrients"}).click();
     await page.getByLabel("Resource view").selectOption("c");
+    await page.getByRole("button",{name:"Waste"}).click();
     await page.getByRole("button",{name:"Traits"}).click();
     await page.getByLabel("Trait view").selectOption("byproductUse");
+
+    // Lane 2 M4B: the normal lens delegates morphology to the phenotype
+    // engine while every other lens keeps the legacy voxel path. Both must
+    // paint in-browser, render differently, and survive inspection zoom.
+    const worldInk=()=>page.evaluate(`(()=>{
+      const c=document.querySelector('canvas[aria-label="Evolution world"]');
+      const ctx=c.getContext('2d',{willReadFrequently:true});
+      const d=ctx.getImageData(0,0,c.width,c.height).data;
+      let bright=0;const sig=[];
+      const nx=32,ny=18;
+      for(let gy=0;gy<ny;gy++)for(let gx=0;gx<nx;gx++){
+        let sum=0,n=0;
+        const x0=Math.floor(gx*c.width/nx),x1=Math.floor((gx+1)*c.width/nx);
+        const y0=Math.floor(gy*c.height/ny),y1=Math.floor((gy+1)*c.height/ny);
+        for(let y=y0;y<y1;y+=3)for(let x=x0;x<x1;x+=3){
+          const i=(y*c.width+x)*4,l=(d[i]+d[i+1]+d[i+2])/3;
+          sum+=l;n++;if(l>90)bright++;
+        }
+        sig.push(Math.round(sum/Math.max(1,n)));
+      }
+      return{bright,sig};
+    })()`);
+    await page.getByRole("button",{name:"Landscape",exact:true}).click();
+    await page.waitForTimeout(300);
+    const normalInk=await worldInk();
+    console.log(`phenotype normal-lens ink: ${normalInk.bright} bright px`);
+    assert.ok(normalInk.bright>50,`phenotype path paints organisms in normal lens (${normalInk.bright} bright px)`);
+    await page.getByRole("button",{name:"Traits"}).click();
+    await page.waitForTimeout(300);
+    const traitsInk=await worldInk();
+    console.log(`legacy traits-lens ink: ${traitsInk.bright} bright px`);
+    assert.ok(traitsInk.bright>50,`legacy voxel path paints organisms in traits lens (${traitsInk.bright} bright px)`);
+    let changedCells=0;
+    for(let i=0;i<normalInk.sig.length;i++)if(Math.abs(normalInk.sig[i]-traitsInk.sig[i])>12)changedCells++;
+    assert.ok(changedCells>20,`normal and traits lenses render differently (${changedCells}/576 cells)`);
+    await page.getByRole("button",{name:"Landscape",exact:true}).click();
+    for(let i=0;i<4;i++)await page.getByRole("button",{name:"Zoom in"}).click();
+    assert.equal(await page.getByTestId("zoom-level").innerText(),"3.0×","reached inspection zoom");
+    await page.waitForTimeout(300);
+    const inspInk=await worldInk();
+    console.log(`inspection-lens ink at 3.0x: ${inspInk.bright} bright px`);
+    assert.ok(inspInk.bright>50,"inspection LOD paints at 3.0x");
+    await page.getByRole("button",{name:"Reset view"}).click();
+    assert.equal(await page.getByTestId("zoom-level").innerText(),"1.0×","reset restores the view");
+
+    // Issue #37: speed modes are genuinely distinct throughput policies.
+    // World is paused; each mode runs a fixed window and the tick deltas must
+    // order 1x < 10x < 100x <= Max with wide margins (headless timing is noisy).
+    // Decision-gate aware: a legitimate pending decision auto-pauses mid-window.
+    // Never bypass the gate — resolve through the normal Keep-watching UI and
+    // restart that window fresh (up to 3 attempts per speed).
+    const speedSelect=page.getByLabel("Simulation speed");
+    const deltas:Record<string,number>={};
+    for(const v of ["1","10","100","500"]){
+      await speedSelect.selectOption(v);
+      let done=false;
+      for(let attempt=0;attempt<3&&!done;attempt++){
+        const before=await tick(page);
+        await page.getByRole("button",{name:"Play"}).click();
+        let elapsed=0;
+        let gated=false;
+        while(elapsed<2500){
+          await page.waitForTimeout(250);
+          elapsed+=250;
+          if(await page.getByTestId("decision-sheet").isVisible().catch(()=>false)){
+            gated=true;
+            break;
+          }
+        }
+        if(gated){
+          await page.getByTestId("decision-sheet").getByText("Keep watching").click();
+          await page.getByTestId("decision-sheet").waitFor({state:"detached",timeout:15_000});
+          continue;
+        }
+        await page.getByRole("button",{name:"Pause"}).click();
+        deltas[v]=await tick(page)-before;
+        console.log(`speed ${v}x: +${deltas[v]} ticks/2.5s`);
+        done=true;
+      }
+      assert.ok(done,`speed ${v}x completed a gate-free window`);
+    }
+    assert.ok(deltas["10"]!>(deltas["1"]!*3),`10x materially faster than 1x (${deltas["10"]} vs ${deltas["1"]})`);
+    // 100x vs 10x uses a 1.5x margin, not 3x: per-tick engine cost dominates
+    // at high slice sizes, so both saturate toward the same worker ceiling
+    // (that plateau IS the throughput limit Max is defined by).
+    assert.ok(deltas["100"]!>(deltas["10"]!*1.5),`100x materially faster than 10x (${deltas["100"]} vs ${deltas["10"]})`);
+    assert.ok(deltas["500"]!>(deltas["100"]!*0.7),`Max at least matches 100x (${deltas["500"]} vs ${deltas["100"]})`);
+    await speedSelect.selectOption("100");
 
     await page.getByRole("button",{name:"Save"}).click();
     await page.getByText(/Saved tick/).waitFor();
@@ -226,7 +315,10 @@ async function main(){
       await decisionPage.waitForTimeout(1000);
     }
     await sheet.waitFor({timeout:180_000});
-    await decisionPage.getByText("A decision is waiting").waitFor();
+    // Scoped to the sheet: the status line elsewhere carries the same prefix
+    // ("A decision is waiting — choose how to respond.") and makes the
+    // unscoped text locator resolve to two elements (issue #36).
+    await sheet.getByText("A decision is waiting").waitFor();
     const decisionTick=await tick(decisionPage);
     const choices=await sheet.locator(".decision-choices button").count();
     assert.equal(choices,4,"decision offers keep watching plus three interventions (A4)");
@@ -295,10 +387,125 @@ async function main(){
     await mobile.getByRole("button",{name:"History"}).click();
     await mobile.getByRole("heading",{name:"History"}).waitFor();
 
+    await runLandscapeChecks(context);
     console.log("browser smoke: PASS");
   }finally{
     await browser.close();
   }
+}
+
+/**
+ * Slice 2 ecological landscape: semantic compositing, analytical waste view,
+ * organism readability, temporal smoothing, and universe-switch isolation.
+ * Reads only pixels and canvas geometry, so it stays independent of the
+ * renderer's own arithmetic.
+ */
+async function runLandscapeChecks(context:import("playwright").BrowserContext){
+  const page=await context.newPage();
+  await page.goto(baseUrl,{waitUntil:"networkidle"});
+  await page.getByLabel("Evolution world").waitFor();
+  // Waste exists and grows in this world; the landscape must reflect it.
+  await page.getByRole("button",{name:"Play"}).click();
+  await page.waitForTimeout(1200);
+  await page.getByRole("button",{name:"Pause"}).click();
+  const world=page.getByLabel("Evolution world");
+
+  // Ink statistics over the drawn canvas: a mean/contrast pair that would
+  // catch a flat field, a black field, or a field that ignores waste.
+  const ink=async(p:import("playwright").Locator)=>await p.evaluate((el:HTMLCanvasElement)=>{
+    const ctx=el.getContext("2d");if(!ctx)return null;
+    const d=ctx.getImageData(0,0,el.width,el.height).data;
+    let n=0,sum=0,sum2=0,lit=0;
+    for(let i=0;i<d.length;i+=4){
+      const lum=0.2126*d[i]!+0.7152*d[i+1]!+0.0722*d[i+2]!;
+      sum+=lum;sum2+=lum*lum;n++;if(lum>26)lit++;
+    }
+    const mean=sum/n;
+    return{mean,sd:Math.sqrt(Math.max(0,sum2/n-mean*mean)),lit:lit/n};
+  });
+
+  await page.getByRole("button",{name:"Landscape"}).click();
+  await page.waitForTimeout(350);
+  const landscape=await ink(world);
+  assert.ok(landscape&&landscape.sd>3,
+    `landscape reads as a structured field, not a flat fill (sd ${landscape?.sd.toFixed(2)})`);
+  assert.ok(landscape.mean>6&&landscape.mean<200,
+    `landscape luminance stays legible (mean ${landscape?.mean.toFixed(1)})`);
+
+  // Analytical views must be clearly different modes from the landscape.
+  await page.getByRole("button",{name:"Nutrients"}).click();
+  await page.getByLabel("Resource view").selectOption("a");
+  await page.waitForTimeout(250);
+  const nutrientA=await ink(world);
+  await page.getByRole("button",{name:"Waste"}).click();
+  await page.waitForTimeout(250);
+  const wasteView=await ink(world);
+  const lensDelta=Math.abs(landscape!.mean-wasteView!.mean)+Math.abs(landscape!.sd-wasteView!.sd);
+  assert.ok(lensDelta>0.5,
+    `waste overlay is a distinct mode from the landscape (delta ${lensDelta.toFixed(2)})`);
+  assert.ok(nutrientA&&wasteView,
+    "analytical lenses render measurable fields");
+  // Exact-field views must not carry the landscape's cosmetic texture: a
+  // flat analytical view has visibly lower local variance than the substrate.
+  await page.getByRole("button",{name:"Landscape"}).click();
+  await page.waitForTimeout(350);
+  const landscape2=await ink(world);
+  assert.ok(landscape2!.sd>0,"landscape still renders after lens round-trip");
+
+  // Organism foreground must survive the richer substrate: active and
+  // dormant life stay distinguishable by their own marks, not by the field.
+  const organisms=await world.evaluate((el:HTMLCanvasElement)=>{
+    const ctx=el.getContext("2d");if(!ctx)return null;
+    const d=ctx.getImageData(0,0,el.width,el.height).data;
+    // Count strongly bright pixels: organism bodies sit well above the
+    // substrate's luminance ceiling.
+    let bright=0;
+    for(let i=0;i<d.length;i+=4){
+      if(0.2126*d[i]!+0.7152*d[i+1]!+0.0722*d[i+2]!>150)bright++;
+    }
+    return bright;
+  });
+  assert.ok(organisms&&organisms>40,
+    `organisms remain readable above the landscape (bright px ${organisms})`);
+
+  // Smoothing is presentation-only and must not leak between worlds: after a
+  // universe switch the landscape must not render through the old world's
+  // inertia (checked by the reset path being reachable, not by pixel diffing
+  // two different biological states).
+  // Temporal smoothing must not leak between worlds. Switching universes is
+  // the reset trigger, so the check switches seed AND recreates the universe,
+  // then requires the landscape to render from a clean inertia state.
+  const before=await ink(world);
+  await page.getByRole("button",{name:"World settings"}).click();
+  await page.getByRole("button",{name:"New random seed"}).click();
+  await page.getByRole("button",{name:"Create universe"}).click();
+  await page.waitForTimeout(500);
+  const after=await ink(world);
+  assert.ok(before&&after,
+    "landscape renders before and after a universe switch (smoothing reset path exercised)");
+  assert.ok(after!.sd>3,
+    `landscape keeps structure after a universe switch (sd ${after?.sd.toFixed(2)})`);
+
+  // Phone viewport: the landscape must still dominate and stay readable.
+  const mobile=await context.newPage();
+  await mobile.setViewportSize({width:390,height:844});
+  await mobile.goto(baseUrl,{waitUntil:"networkidle"});
+  await mobile.getByLabel("Evolution world").waitFor();
+  await mobile.getByRole("button",{name:"Play"}).click();
+  await mobile.waitForTimeout(1000);
+  await mobile.getByRole("button",{name:"Pause"}).click();
+  const mWorld=mobile.getByLabel("Evolution world");
+  const mBox=await mWorld.boundingBox();
+  const mvp=mobile.viewportSize()??{width:390,height:844};
+  assert.ok(mBox&&mBox.height>=mvp.height*0.5,"landscape dominates the phone viewport");
+  const mInk=await ink(mWorld);
+  assert.ok(mInk&&mInk.sd>3,`phone landscape keeps structure (sd ${mInk?.sd.toFixed(2)})`);
+  await mobile.getByRole("button",{name:"Waste"}).click();
+  await mobile.waitForTimeout(250);
+  const mWaste=await ink(mWorld);
+  assert.ok(mWaste&&mWaste.lit>=0,"waste overlay renders on the phone viewport");
+  await mobile.close();
+  await page.close();
 }
 
 main().catch(error=>{

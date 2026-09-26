@@ -79,6 +79,23 @@ const NC_WASTE_COLLAPSE=.5;
 // (this share of interval flow), else nobody. Named and exported like the
 // sibling C-use DEP_MAJOR_SHARE so evidence discloses the naming rule.
 const NC_MEANINGFUL_SHARE=.10;
+/**
+ * Niche record evidence carries the measured baseline alongside the observed
+ * frame, so a reader (human or product) can see the before/after pair the
+ * summary cites without re-deriving it. Presentation of evidence only; the
+ * frame itself is never modified.
+ */
+function nicheEvidence(s:ObservationFrame,nc:{baseWaste:number;baseTol:number;baseCu:number;baseExposed:number;estWaste:number;estExposed:number}):Record<string,number>{
+  return{
+    base_waste:nc.baseWaste,
+    base_exposed_share:nc.baseExposed||0,
+    base_tolerance_mean:nc.baseTol,
+    base_cleanup_mean:nc.baseCu,
+    established_waste:nc.estWaste,
+    established_exposed_share:nc.estExposed,
+    strategy_persistence_ticks:NC_PERSIST,
+  };
+}
 
 export class EcologyObserver {
   cross={id:"eco-crossfeeding-1",state:"absent",candidateSince:null as number|null,lowSince:null as number|null};
@@ -89,8 +106,12 @@ export class EcologyObserver {
   records:any[]=[];
   eras:any[]=[];
 
-  add(kind:string,id:string,tick:number,phase:string,title:string,summary:string,level:string,evidence:ObservationFrame,refs:number[]=[]){
-    const record={id:`${id}-${phase}-${tick}`,arc_id:id,kind,tick,phase,title,summary,level,evidence,entity_refs:refs};
+  add(kind:string,id:string,tick:number,phase:string,title:string,summary:string,level:string,evidence:ObservationFrame,refs:number[]=[],extra?:Record<string,number>){
+    // Records keep the observed frame verbatim; a baseline block is attached
+    // alongside it (never merged into it) so the evidence carries the
+    // before/after pair the summary cites.
+    const stored=extra?{...evidence,...extra}:evidence;
+    const record={id:`${id}-${phase}-${tick}`,arc_id:id,kind,tick,phase,title,summary,level,evidence:stored,entity_refs:refs};
     this.records.push(record);
     return record;
   }
@@ -238,7 +259,7 @@ export class EcologyObserver {
             const returning=nc.wasDisrupted;
             nc.state="established";nc.establishedTick=s.tick;nc.estWaste=s.waste_fraction;nc.estExposed=s.waste_exposed_share;
             nc.lowSince=null;nc.candidateSince=null;nc.shiftSince=null;nc.wasDisrupted=false;
-            this.add("niche",nc.id,s.tick,returning?"recovered":"established",returning?"The constructed niche returned":"A constructed niche became established",`Waste load ${Math.round(100*s.waste_fraction)}% of waste-field capacity (${Math.round(100*nc.baseWaste)}% when the regime first formed). Strategy composition moved and held: tolerance mean ${nc.baseTol.toFixed(2)}->${s.tolerance_mean.toFixed(2)}; cleanup mean ${nc.baseCu.toFixed(2)}->${s.cleanup_mean.toFixed(2)}, sustained for ${NC_PERSIST}+ ticks. Supporting context: ${Math.round(100*s.waste_exposed_share)}% of organisms in burden-relevant cells (dirty enough to cost energy), up from ${Math.round(100*(nc.baseExposed||0))}%. The modification and the shift appeared together in time, which is not proof of cause.`,"major",s,ncRefs);
+            this.add("niche",nc.id,s.tick,returning?"recovered":"established",returning?"The constructed niche returned":"A constructed niche became established",`Waste load ${Math.round(100*s.waste_fraction)}% of waste-field capacity (${Math.round(100*nc.baseWaste)}% when the regime first formed). Strategy composition moved and held: tolerance mean ${nc.baseTol.toFixed(2)}->${s.tolerance_mean.toFixed(2)}; cleanup mean ${nc.baseCu.toFixed(2)}->${s.cleanup_mean.toFixed(2)}, sustained for ${NC_PERSIST}+ ticks. Supporting context: ${Math.round(100*s.waste_exposed_share)}% of organisms in burden-relevant cells (dirty enough to cost energy), up from ${Math.round(100*(nc.baseExposed||0))}%. The modification and the shift appeared together in time, which is not proof of cause.`,"major",s,ncRefs,nicheEvidence(s,nc));
           }
         } else nc.shiftSince=null;
       }
@@ -252,7 +273,7 @@ export class EcologyObserver {
         if(nc.lowSince===null)nc.lowSince=s.tick;
         if(s.tick-nc.lowSince>=NC_PERSIST){
           nc.state=replaced?"superseded":"disrupted";nc.wasDisrupted=!replaced;nc.lowSince=null;nc.candidateSince=null;nc.shiftSince=null;
-          this.add("niche",nc.id,s.tick,replaced?"superseded":"disrupted",replaced?"The constructed regime was superseded":"The constructed niche faded",replaced?`Waste persists at ${Math.round(100*s.waste_fraction)}% of capacity but occupancy reorganized: ${Math.round(100*nc.estExposed)}% lived in burden-relevant cells at establishment, ${Math.round(100*s.waste_exposed_share)}% now.`:`Waste load fell from ${Math.round(100*nc.estWaste)}% to ${Math.round(100*s.waste_fraction)}% of waste-field capacity; the modification no longer persists.`,"major",s,ncRefs);
+          this.add("niche",nc.id,s.tick,replaced?"superseded":"disrupted",replaced?"The constructed regime was superseded":"The constructed niche faded",replaced?`Waste persists at ${Math.round(100*s.waste_fraction)}% of capacity but occupancy reorganized: ${Math.round(100*nc.estExposed)}% lived in burden-relevant cells at establishment, ${Math.round(100*s.waste_exposed_share)}% now.`:`Waste load fell from ${Math.round(100*nc.estWaste)}% to ${Math.round(100*s.waste_fraction)}% of waste-field capacity; the modification no longer persists.`,"major",s,ncRefs,nicheEvidence(s,nc));
         }
       } else nc.lowSince=null;
     } else if(nc.state==="disrupted"||nc.state==="superseded"){

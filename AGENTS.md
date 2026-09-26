@@ -57,8 +57,42 @@ While proot is flaky, a `pnpm install` can leave `tsc` reporting **phantom** `TS
 | Full verification | `pnpm verify` (typecheck + migration + ecology + build) |
 | Browser smoke (needs Playwright Chromium) | `pnpm test:browser` against a `vite preview` server (see `.github/workflows/product.yml`) |
 | Dev server | `pnpm dev` |
+| Landscape visual captures (needs Playwright Chromium + preview) | `pnpm test:visual` (manual; also runs in CI as non-gating evidence, PNGs uploaded as the `landscape-visual-evidence` artifact) |
 
 **Before considering any change complete, run `pnpm verify`.** CI runs the same command plus the browser smoke (currently non-blocking, see issue #5).
+
+### Prefer GitHub Actions over the device for validation
+
+The phone (Termux + proot) is the *authoring* environment, not the place to
+wait for evidence. It is slower than CI, its proot layer is flaky, and long
+runs get killed by device or session restarts — which has repeatedly
+destroyed multi-minute `verify`, survey, and capture runs mid-flight.
+
+**Default: run narrow checks locally, let CI carry everything slow.**
+
+| Check | Where it should run |
+|---|---|
+| `pnpm typecheck` | Local. Fast enough (~1 min) to be worth the immediate answer. |
+| A single validation suite (`test:migration`, `test:niche`, `test:landscape`, `test:flows`) | Local, while iterating. |
+| Full `pnpm verify` | Either, but prefer **CI** once a change is more than a line or two. `quick` alone is ~1–2 min and gives most of the signal. |
+| `pnpm test:browser`, `pnpm test:visual` | **CI.** Both need Playwright Chromium plus a preview server, and the visual capture only reaches a meaningful world depth on CI hardware. |
+| `pnpm test:survey`, `test:niche-survey` | **CI or a machine that will not be interrupted.** Both are resume-safe; if one dies, re-run and it continues from the retained artifact. |
+| Android `apk` | **CI only.** ~22 minutes locally is not viable. |
+
+Practical consequences:
+
+- A green CI run on the pushed head is the completion signal. Do not
+  re-run `pnpm verify` on the device to "confirm" something CI has already
+  proved — that only burns the device and risks another restart.
+- Push to a **branch** and read results with `gh pr checks <n>`. Do not
+  push to `main`: `gh pr edit --body` is broken (Projects-classic sunset)
+  and the same breakage cancels in-flight main runs.
+- Retrieve CI evidence artifacts instead of regenerating locally:
+  `gh run download <run-id> -n landscape-visual-evidence -D <dir>`. Reading
+  the captured PNGs caught two real rendering defects that every
+  statistical canvas assertion had passed.
+- When a local run dies from a restart, resume the resume-safe runner rather
+  than restarting it; the retained artifact is the expensive part.
 
 ## Architecture rules (enforced by review, not tooling)
 
@@ -90,6 +124,7 @@ all product packages -> contracts
 4. **Tests over assertions.** Behavioral claims (determinism, parity, round-trips) must be backed by `tools/validation/*` or package checks, not comments.
 5. **Small, reviewable diffs.** Prefer focused PRs; use the PR template in `.github/pull_request_template.md`.
 6. **Offline-first.** Simulation, saves, history, experiments, and inspection must remain usable with no network.
+7. **Review outputs go to shared storage, repos stay on local disk.** On Termux/proot devices the repo must stay under the Linux home (`/root/...`): shared phone storage (`/sdcard`) is mounted `noexec` and may reject symlinks, so `node_modules` native binaries and `pnpm` linking break there. Copy *reviewable outputs only* — viewer HTML, `EVIDENCE.md`, exports, screenshots, handoff files — to `/sdcard/DEE/<topic>/` (e.g. `/sdcard/DEE/review/phenotype-art-review.html`) and open them from the phone. Never move the repo, `node_modules`, or OpenCode state (`~/.local/share/opencode`, SQLite db) to shared storage. This is a copy, not a move: the repo remains the source of truth.
 
 ## Prohibitions
 
