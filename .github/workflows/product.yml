@@ -142,3 +142,21 @@ jobs:
             sleep 1
           done
           DEE_BASE_URL=http://127.0.0.1:4173 pnpm test:browser
+      # Evidence generation, deliberately NOT a merge gate: the capture run is
+      # timing-dependent (it advances a world until waste is measurably
+      # present), so a slow or flaky run must not block a PR whose code is
+      # verified. The artifact is uploaded either way, so a failed capture is
+      # visible rather than silent.
+      - name: Visual evidence captures
+        continue-on-error: true
+        run: |
+          DEE_BASE_URL=http://127.0.0.1:4173 pnpm test:visual
+      - name: Report capture coverage
+        if: always()
+        run: cat testdata/visual/MANIFEST.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: landscape-visual-evidence
+          path: testdata/visual
+          retention-days: 14

@@ -342,6 +342,10 @@ export interface RenderOrganism {
   readonly habitat: number;
   readonly byproductUse: number;
   readonly dormancyResponse: number;
+  /** Inherited waste-response traits (Slice 2). Presentation only: the
+   *  landscape and history evidence read them, biology never does. */
+  readonly tolerance: number;
+  readonly cleanup: number;
 }
 
 export interface RenderResourceField {
@@ -350,8 +354,23 @@ export interface RenderResourceField {
   readonly capacity: readonly (readonly number[])[];
 }
 
+/** Spatial Metabolic Waste field (Slice 2), same grid and cell convention as
+ *  `RenderResourceField`. Read-only rendering input for the landscape
+ *  substrate and the analytical waste overlay. */
+export interface RenderWasteField {
+  readonly gridSize: number;
+  readonly stock: readonly number[];
+  readonly capacity: readonly number[];
+}
+
 export interface RenderSnapshot {
   readonly tick: number;
+  /** Presentation-only identity of this displayed universe instance. Unique
+   *  per create/restore, and NOT biological state: it is not stored in
+   *  checkpoints and does not affect replay. The renderer uses it to scope
+   *  presentation-only state, because two universes can share a seed and a
+   *  resolved config. */
+  readonly worldId: number;
   /** Exact resolved engine configuration of the running universe (0.20.0+).
    *  Presentation uses it to show the active recipe without ever restaging
    *  it as pending. Read-only: it never changes simulation behavior. */
@@ -362,6 +381,9 @@ export interface RenderSnapshot {
   readonly dormantPopulation: number;
   readonly organisms: readonly RenderOrganism[];
   readonly resources: RenderResourceField;
+  /** Metabolic Waste field. Read-only rendering input; independent of
+   *  nutrients in storage and in meaning. */
+  readonly waste: RenderWasteField;
   readonly metrics: any;
   readonly analysis: AnalysisState;
   readonly events: readonly { readonly tick: number; readonly label: string }[];

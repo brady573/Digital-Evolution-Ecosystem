@@ -40,6 +40,14 @@ import {
 
 export const CHECKPOINT_SCHEMA_VERSION = "0.3" as const;
 
+/**
+ * Process-unique universe counter. Presentation identity only: it is
+ * deliberately NOT part of the simulation, the checkpoint, or any
+ * reproducibility claim, and two runs of the same config still replay
+ * identically without it.
+ */
+let worldIdCounter=0;
+
 function analysisFrame(sim:any){
   return sim.observerSnapshot(sim.metrics(),sim.last);
 }
@@ -48,10 +56,11 @@ function observeIfDue(sim:any,observer:EcologyObserver){
   if(sim.t>0&&sim.t%EVENT_STRIDE===0)observer.observe(analysisFrame(sim));
 }
 
-function renderSnapshot(sim:any,analysis:EcologyObserver,control:any|null,pendingDecision:PendingDecision|null,resolvedDecisions:readonly DecisionResolution[]):RenderSnapshot{
+function renderSnapshot(sim:any,analysis:EcologyObserver,control:any|null,pendingDecision:PendingDecision|null,resolvedDecisions:readonly DecisionResolution[],worldId:number):RenderSnapshot{
   const metrics=sim.metrics();
   return{
     tick:sim.t,
+    worldId,
     config:sim.c,
     seed:sim.c.seed,
     population:metrics.population,
@@ -62,12 +71,17 @@ function renderSnapshot(sim:any,analysis:EcologyObserver,control:any|null,pendin
       x:o.x,y:o.y,energy:o.en,activity:o.activity||"active",
       cladeId:sim.cladeRoot(o.l),
       speed:o.sp,sensing:o.se,metabolism:o.me,reproduction:o.rp,diet:o.di,habitat:o.ha,
-      byproductUse:o.bu||0,dormancyResponse:o.dr||0,
+      byproductUse:o.bu||0,dormancyResponse:o.dr||0,tolerance:o.to||0,cleanup:o.cu||0,
     })),
     resources:{
       gridSize:sim.resources.n,
       stock:sim.resources.stock.map((a:ArrayLike<number>)=>Array.from(a)),
       capacity:sim.resources.cap.map((a:ArrayLike<number>)=>Array.from(a)),
+    },
+    waste:{
+      gridSize:sim.resources.waste.n,
+      stock:Array.from(sim.resources.waste.stock),
+      capacity:Array.from(sim.resources.waste.cap),
     },
     metrics,
     analysis:analysis.export(),
@@ -140,7 +154,19 @@ export class UniverseSession {
   get pendingDecision(){return this.#pendingDecision}
   get decisionResolutions(){return this.#decisionResolutions}
 
+  /**
+   * Presentation-level world identity: a monotonic, process-unique id handed
+   * out once per universe instance. It exists ONLY so the renderer can tell
+   * two displayed worlds apart; it is not biological state, is not stored in
+   * checkpoints, and never reaches the simulation. Seed and config are not
+   * sufficient: two universes (or a fork, or a same-seed restore) can
+   * legitimately share both.
+   */
+  #worldId=0;
+  get worldId(){return this.#worldId}
+
   create(config:EngineConfig){
+    this.#worldId=++worldIdCounter;
     this.#experiment=new Simulation(config);
     this.#analysis=new EcologyObserver();
     this.#control=null;
@@ -425,6 +451,9 @@ export class UniverseSession {
     const schema=(checkpoint as any)?.checkpointSchemaVersion;
     if(schema!=="0.1"&&schema!=="0.2"&&schema!=="0.3")throw new Error(`Unsupported runtime checkpoint schema: ${String(schema)}`);
     if(checkpoint.engineVersion!==ENGINE_VERSION)throw new Error(`Checkpoint engine ${checkpoint.engineVersion} does not match ${ENGINE_VERSION}`);
+    // A restore is a new displayed world, not the old one continued: hand out
+    // a fresh presentation identity so rendering inertia cannot carry over.
+    this.#worldId=++worldIdCounter;
     this.#experiment=restoreSimulationCheckpoint(checkpoint.experiment as any);
     this.#analysis=EcologyObserver.restore(checkpoint.analysis);
     this.#control=checkpoint.control?restoreSimulationCheckpoint(checkpoint.control as any):null;
@@ -499,7 +528,7 @@ export class UniverseSession {
 
   snapshot():RenderSnapshot{
     if(!this.#experiment)throw new Error("Universe has not been created");
-    return renderSnapshot(this.#experiment,this.#analysis,this.#control,this.#pendingDecision,this.#decisionResolutions);
+    return renderSnapshot(this.#experiment,this.#analysis,this.#control,this.#pendingDecision,this.#decisionResolutions,this.#worldId);
   }
 
   handle(command:RuntimeCommand):RuntimeResponse[]{

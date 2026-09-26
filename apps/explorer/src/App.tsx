@@ -7,9 +7,13 @@ import { Directory, Encoding, Filesystem } from "@capacitor/filesystem";
 import { Share } from "@capacitor/share";
 import { IndexedDbWorldRepository } from "./persistence";
 import { formatTickAge, formatYear, glossOutcome } from "./language";
+import {
+  LandscapeSmoother, fillWaste, fracArray, landscapeCell,
+  microTexture, nutrientOverlayCell, wasteOverlayCell,
+} from "./landscape";
 
 type Surface="world"|"history"|"tree"|"experiments";
-type Lens="normal"|"nutrients"|"clades"|"traits";
+type Lens="normal"|"nutrients"|"waste"|"clades"|"traits";
 type ResourceView="combined"|"a"|"b"|"c";
 type TraitView="speed"|"sensing"|"metabolism"|"reproduction"|"diet"|"habitat"|"byproductUse"|"dormancyResponse";
 
@@ -133,6 +137,11 @@ function traitColor(value:number,[lo,hi]:[number,number]){
   return `hsl(${hue} 68% 62%)`;
 }
 
+/** Presentation-only landscape smoothing state. Lives for the canvas's
+ * lifetime, holds no simulation meaning, and re-primes from the current
+ * fields whenever the displayed universe identity changes. */
+const landscapeSmoother=new LandscapeSmoother();
+
 function WorldCanvas({
   snapshot,lens,resourceView,traitView,selectedId,onSelect,cam,zoom,onCamera,onView,
 }:{
@@ -174,21 +183,77 @@ function WorldCanvas({
     onView({w:w/s,h:h/s});
 
     const stocks=snapshot.resources.stock,caps=snapshot.resources.capacity;
-    const drawEnvironment=lens==="normal"||lens==="nutrients";
+    const drawEnvironment=lens==="normal"||lens==="nutrients"||lens==="waste";
     if(drawEnvironment){
-      for(let i=0;i<n*n;i++){
-        const px=toX((i%n+.5)*(WORLD_EXTENT/n)),py=toY((Math.floor(i/n)+.5)*(WORLD_EXTENT/n));
-        if(px<-cell||py<-cell||px>w+cell||py>h+cell)continue;
-        const frac=(k:number)=>((caps[k]?.[i]||0)>0?(stocks[k]?.[i]||0)/(caps[k]?.[i]||1):0);
-        const a=frac(0),b=frac(1),c=frac(2);
-        let r=8,g=14,bl=16;
-        if(lens==="normal"){r+=22*b+14*c;g+=26*a+12*c;bl+=20*b+24*c}
-        else if(resourceView==="a"){r+=8*a;g+=150*a;bl+=72*a}
-        else if(resourceView==="b"){r+=110*b;g+=55*b;bl+=155*b}
-        else if(resourceView==="c"){r+=190*c;g+=115*c;bl+=35*c}
-        else {r+=72*b+95*c;g+=105*a+55*c;bl+=92*b+35*c}
-        ctx.fillStyle=`rgb(${Math.min(255,Math.round(r))},${Math.min(255,Math.round(g))},${Math.min(255,Math.round(bl))})`;
-        ctx.fillRect(px-cell/2,py-cell/2,cell+1,cell+1);
+      // Analytical lenses read exact fields: no smoothing, no texture, flat
+      // per-cell values, because measurement is the task. The ecological
+      // default reads smoothed fields, composes them by role, and is drawn
+      // as a continuous field: 3600 hard rectangles read as a grid, so the
+      // composited field goes into a grid-sized buffer and is scaled up with
+      // the browser's own interpolation. Large-scale structure is therefore
+      // real simulation structure with smooth transitions, not cells.
+      const analytical=lens!=="normal";
+      const a=new Float32Array(n*n),b=new Float32Array(n*n),c=new Float32Array(n*n),wf=new Float32Array(n*n);
+      fracArray(stocks,caps,0,a);fracArray(stocks,caps,1,b);fracArray(stocks,caps,2,c);
+      fillWaste(snapshot.waste,wf);
+      let av=a,bv=b,cv=c,wv=wf;
+      if(lens==="normal"){
+        // Presentation-only inertia, scoped by the universe's presentation
+        // identity (unique per create/restore; seed and config are NOT
+        // sufficient because two universes can share both). The smoother
+        // primes from the current fields on a new identity, so a created or
+        // restored world shows its real environment on the first frame
+        // instead of a fictitious depleted one.
+        const id=`w${snapshot.worldId}`;
+        const sm=landscapeSmoother.advance(id,snapshot.tick,a,b,c,wf,0.35);
+        av=new Float32Array(n*n);bv=new Float32Array(n*n);cv=new Float32Array(n*n);wv=new Float32Array(n*n);
+        for(let i=0;i<n*n;i++){const j=i*4;av[i]=sm[j]!;bv[i]=sm[j+1]!;cv[i]=sm[j+2]!;wv[i]=sm[j+3]!}
+      }
+      const kind=resourceView==="a"?0:resourceView==="b"?1:resourceView==="c"?2:-1;
+      if(!analytical){
+        const buffer=document.createElement("canvas");
+        buffer.width=n;buffer.height=n;
+        const bctx=buffer.getContext("2d");
+        if(bctx){
+          const img=bctx.createImageData(n,n);
+          for(let i=0;i<n*n;i++){
+            const rgb=landscapeCell(av[i]!,bv[i]!,cv[i]!,wv[i]!,microTexture(i));
+            const o=i*4;
+            img.data[o]=rgb[0];img.data[o+1]=rgb[1];img.data[o+2]=rgb[2];img.data[o+3]=255;
+          }
+          bctx.putImageData(img,0,0);
+          const x0=toX(0),y0=toY(0),x1=toX(WORLD_EXTENT),y1=toY(WORLD_EXTENT);
+          const prevSmooth=ctx.imageSmoothingEnabled;
+          ctx.imageSmoothingEnabled=true;
+          ctx.drawImage(buffer,x0,y0,x1-x0,y1-y0);
+          ctx.imageSmoothingEnabled=prevSmooth;
+        }
+        // Detail on loaded ground: a deterministic stipple whose density rises
+        // with the measured waste. It is a second, non-colour channel and
+        // cosmetic only, so it is drawn at every zoom, not just close ones.
+        for(let i=0;i<n*n;i++){
+          const load=wv[i]!;
+          if(load<0.18)continue;
+          const px=toX((i%n+.5)*(WORLD_EXTENT/n)),py=toY((Math.floor(i/n)+.5)*(WORLD_EXTENT/n));
+          if(px<-cell||py<-cell||px>w+cell||py>h+cell)continue;
+          const dots=1+Math.min(3,Math.floor((load-0.18)*4));
+          ctx.fillStyle=`rgba(58,48,40,${0.06+0.035*dots})`;
+          for(let k=0;k<dots;k++){
+            const t=microTexture(i*8+k);
+            ctx.fillRect(px+((t-.5)*cell),py+((microTexture(i*13+k)-.5)*cell),1.5,1.5);
+          }
+        }
+      }else{
+        for(let i=0;i<n*n;i++){
+          const px=toX((i%n+.5)*(WORLD_EXTENT/n)),py=toY((Math.floor(i/n)+.5)*(WORLD_EXTENT/n));
+          if(px<-cell||py<-cell||px>w+cell||py>h+cell)continue;
+          let rgb:readonly [number,number,number];
+          if(lens==="waste")rgb=wasteOverlayCell(wv[i]!);
+          else if(kind>=0)rgb=nutrientOverlayCell(kind,av[i]!);
+          else rgb=nutrientOverlayCell(-1,(av[i]!+bv[i]!+cv[i]!)/3);
+          ctx.fillStyle=`rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+          ctx.fillRect(px-cell/2,py-cell/2,cell+1,cell+1);
+        }
       }
     }
 
@@ -527,8 +592,9 @@ export function App(){
     <main className={surface==="world"?"surface surface-world":"surface"}>
       <section className="world-column" aria-label="Living world">
         <div className="lensbar">
-          {(["normal","nutrients","clades","traits"] as Lens[]).map(v=><button key={v} className={lens===v?"active":""} onClick={()=>setLens(v)}>{v.charAt(0).toUpperCase()+v.slice(1)}</button>)}
+          {(["normal","nutrients","waste","clades","traits"] as Lens[]).map(v=><button key={v} className={lens===v?"active":""} onClick={()=>setLens(v)}>{v==="normal"?"Landscape":v.charAt(0).toUpperCase()+v.slice(1)}</button>)}
           {lens==="nutrients"&&<select aria-label="Resource view" value={resourceView} onChange={e=>setResourceView(e.target.value as ResourceView)}><option value="combined">Combined</option><option value="a">Nutrient A</option><option value="b">Nutrient B</option><option value="c">Metabolite C</option></select>}
+          {lens==="waste"&&<span className="lensnote" role="note">Metabolic Waste, exact and untextured: brighter means more waste in that cell (a luminance ramp, so the reading does not depend on hue). The Landscape lens shows the same field differently — loaded ground loses its green cast and settles toward pale, desaturated ash, lifted well clear of barren soil and stippled so the texture reads without colour.</span>}
           {lens==="traits"&&<select aria-label="Trait view" value={traitView} onChange={e=>setTraitView(e.target.value as TraitView)}>{Object.entries(TRAIT_RANGES).map(([key,[,,label]])=><option key={key} value={key}>{label}</option>)}</select>}
         </div>
         <div className="world-wrap">
@@ -582,7 +648,7 @@ export function App(){
 
         {surface==="history"&&<section className="panel">
         <div className="panel-head"><div><span className="eyebrow">What happened here?</span><h2>History</h2></div><span>{records.length} durable ecological records</span></div>
-        {(()=>{const story=records.find((r:any)=>r.id===selectedStoryId);if(!story)return null;const ev=story.evidence||{};return<article key={story.id} className="story-detail"><span>{formatTickAge(story.tick)} · {story.phase}</span><h3>{story.title}</h3><p>{story.summary}</p>{typeof ev.population==="number"&&<dl className="evidence"><div><dt>Population then</dt><dd>{ev.population}</dd></div><div><dt>Dormant share</dt><dd>{Math.round((ev.dormant_fraction||0)*100)}%</dd></div><div><dt>Metabolite C energy</dt><dd>{Math.round((ev.c_energy_share||0)*100)}%</dd></div><div><dt>Leading way of life</dt><dd>{String(ev.dominant_role||"—")}</dd></div></dl>}{Array.isArray(story.entity_refs)&&story.entity_refs.length>0&&<p>Lineages involved: {story.entity_refs.map((n:number)=>`L-${String(Number(n)).padStart(4,"0")}`).join(", ")}</p>}<button onClick={()=>setSelectedStoryId(null)}>Back to all stories</button></article>})()}
+        {(()=>{const story=records.find((r:any)=>r.id===selectedStoryId);if(!story)return null;const ev=story.evidence||{};const niche=story.kind==="niche";return<article key={story.id} className="story-detail"><span>{formatTickAge(story.tick)} · {story.phase}</span><h3>{story.title}</h3><p>{story.summary}</p>{niche&&<dl className="evidence"><div><dt>Waste load then</dt><dd>{typeof ev.waste_fraction==="number"?`${Math.round(ev.waste_fraction*100)}% of waste-field capacity`:"not measured"}</dd></div><div><dt>Waste load when the regime first formed</dt><dd>{typeof ev.base_waste==="number"?`${Math.round(ev.base_waste*100)}%`:"not measured"}</dd></div><div><dt>Organisms in burden-relevant cells</dt><dd>{typeof ev.waste_exposed_share==="number"?`${Math.round(ev.waste_exposed_share*100)}%`:"not measured"}</dd></div><div><dt>Waste tolerance mean</dt><dd>{typeof ev.tolerance_mean==="number"?ev.tolerance_mean.toFixed(3):"not measured"}</dd></div><div><dt>Waste cleanup mean</dt><dd>{typeof ev.cleanup_mean==="number"?ev.cleanup_mean.toFixed(3):"not measured"}</dd></div></dl>}{niche&&<p className="causal-note"><strong>Observational.</strong> This record pairs the environmental change with a measured strategy shift in the same run. It is not a matched comparison, so it cannot show that the modification caused the shift. Matched evidence for waste reliance exists only in the Slice 2 validation survey, where one of 24 surveyed worlds established such a regime — possible, not typical.</p>}{!niche&&<dl className="evidence"><div><dt>Population then</dt><dd>{ev.population}</dd></div><div><dt>Dormant share</dt><dd>{Math.round((ev.dormant_fraction||0)*100)}%</dd></div><div><dt>Metabolite C energy</dt><dd>{Math.round((ev.c_energy_share||0)*100)}%</dd></div><div><dt>Leading way of life</dt><dd>{String(ev.dominant_role||"—")}</dd></div></dl>}{Array.isArray(story.entity_refs)&&story.entity_refs.length>0&&<p>Lineages involved: {story.entity_refs.map((n:number)=>`L-${String(Number(n)).padStart(4,"0")}`).join(", ")}</p>}{Array.isArray(story.entity_refs)&&story.entity_refs.length===0&&niche&&<p>No single lineage accounted for enough of the interval waste flow to be named.</p>}<button onClick={()=>setSelectedStoryId(null)}>Back to all stories</button></article>})()}
         {records.length===0?<><p>No durable ecological arc has been established yet.</p><h3>Recent simulation events</h3>{snapshot.events.slice(-8).reverse().map((e,i)=><article key={`${e.tick}-${i}`}><span>Tick {e.tick.toLocaleString()}</span><p>{e.label}</p></article>)}</>:records.slice().reverse().map((r:any)=><article key={r.id}><button className="record-button" onClick={()=>setSelectedStoryId(r.id)}><span>{formatTickAge(r.tick)} · {r.phase}</span><h3>{r.title}</h3><p>{r.summary}</p></button></article>)}
         {snapshot.resolvedDecisions.length>0&&<>
           <h3>Your decisions</h3>

@@ -10,7 +10,7 @@
     "test:migration": "tsx tools/validation/parity.ts",
     "build": "pnpm --filter @digital-evolution/explorer build",
     "dev": "pnpm --filter @digital-evolution/explorer dev",
-    "verify": "pnpm typecheck && pnpm test:migration && pnpm test:decisions && pnpm test:catalysts && pnpm test:flows && pnpm test:dependency && pnpm test:niche && pnpm test:ecology && pnpm build",
+    "verify": "pnpm typecheck && pnpm test:migration && pnpm test:decisions && pnpm test:catalysts && pnpm test:flows && pnpm test:dependency && pnpm test:niche && pnpm test:landscape && pnpm test:ecology && pnpm build",
     "test:ecology": "tsx tools/validation/ecology.ts",
     "test:survey": "tsx tools/validation/ecology-survey.ts",
     "test:browser": "tsx tools/validation/browser-smoke.ts",
@@ -21,7 +21,9 @@
     "test:dependency:fast": "tsx tools/validation/dependency.ts -- --fast",
     "test:catalysts:fast": "tsx tools/validation/catalysts.ts -- --fast",
     "test:niche": "tsx tools/validation/niche.ts",
-    "test:niche-survey": "tsx tools/validation/niche-survey.ts"
+    "test:niche-survey": "tsx tools/validation/niche-survey.ts",
+    "test:landscape": "tsx tools/validation/landscape.ts",
+    "test:visual": "tsx tools/validation/landscape-capture.ts"
   },
   "devDependencies": {
     "@types/node": "26.6.2",

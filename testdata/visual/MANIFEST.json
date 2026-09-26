@@ -1,0 +1,20 @@
+{
+  "seed": 24681357,
+  "engine": "0.22.0",
+  "preset": "Patchwork",
+  "captureTick": 29125,
+  "wasteCellCoverage": 1.44,
+  "captures": [
+    "01-landscape-desktop-default-zoom",
+    "02-landscape-waste-modified",
+    "03-landscape-close-zoom",
+    "04-waste-overlay",
+    "05-nutrient-a-overlay",
+    "06-landscape-selected-organism",
+    "07-history-surface",
+    "08-phone-landscape",
+    "09-phone-waste-overlay"
+  ],
+  "nicheHistoryCapture": "omitted by decision: establishment occurs around tick 63k, outside a bounded interactive run. Deterministic establishment evidence lives in the engine/analysis validation and testdata/niche-survey-0.22.json; the history surface's record fields and causal caveat are covered there, not by a screenshot.",
+  "note": "Deterministic captures of the Slice 2 ecological landscape. Regenerate with pnpm test:visual against a preview server. wasteCellCoverage is the measured share of world cells whose waste overlay is lit, so 'waste-modified' is a measured claim rather than a label."
+}
