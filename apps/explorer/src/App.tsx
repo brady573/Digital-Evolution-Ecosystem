@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { EngineConfig, RenderOrganism, RenderSnapshot } from "@digital-evolution/contracts";
 import { ENGINE_VERSION } from "@digital-evolution/sim-core";
-import { WorkerRuntimeClient } from "@digital-evolution/sim-runtime";
+import { WorkerRuntimeClient, normalizeSpeedMode, sliceFor } from "@digital-evolution/sim-runtime";
 import { Capacitor } from "@capacitor/core";
 import { Directory, Encoding, Filesystem } from "@capacitor/filesystem";
 import { Share } from "@capacitor/share";
@@ -491,16 +491,22 @@ export function App(){
 
   useEffect(()=>{
     if(!running)return;
-    // Frame-paced loop (prototype-authentic feel): advance a speed-scaled
-    // slice of ticks every animation frame and render each snapshot, so
-    // ticks visibly count up and organisms glide instead of teleporting.
-    // Backpressure keeps slow workers responsive: a new slice is only sent
-    // once the previous snapshot has arrived.
-    let raf=0;
-    const frame=()=>{
+    // Time-control scheduler (issue #37): each speed mode is a genuinely
+    // distinct ticks/second target, decoupled from render cadence by a
+    // wall-clock accumulator. Biology stays deterministic because the engine
+    // steps per-tick with per-tick event breaks regardless of chunking;
+    // backpressure keeps one slice in flight so slow workers stay responsive
+    // and Max is worker-throughput-limited rather than a nominal multiplier.
+    let raf=0,carry=0,last=performance.now();
+    const frame=(now:number)=>{
+      const elapsed=now-last;last=now;
       if(!advanceDebt.current){
-        advanceDebt.current=true;
-        runtime.advance(Math.max(1,Math.round(speed/60)));
+        const slice=sliceFor(normalizeSpeedMode(speed),elapsed,carry);
+        carry=slice.carry;
+        if(slice.ticks>0){
+          advanceDebt.current=true;
+          runtime.advance(slice.ticks);
+        }
       }
       raf=requestAnimationFrame(frame);
     };
