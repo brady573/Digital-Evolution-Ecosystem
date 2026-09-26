@@ -19,8 +19,8 @@ import { ENGINE_VERSION } from "../../packages/sim-core/src/index.ts";
  */
 
 const OUT = "testdata/niche-survey-0.22.json";
-const SEEDS = [24681357, 821947219, 3543950664, 111111111, 222222222];
-const HORIZON = 100000;
+const SEEDS = [24681357, 821947219, 3543950664, 111111111, 222222222, 333333333, 444444444, 555555555];
+const HORIZON = 150000;
 const ASSAY_TICKS = 15000;
 
 function config(name: string, seed: number): EngineConfig {
@@ -70,6 +70,11 @@ for (const name of ["patchwork", "balanced", "harsh"]) {
     const session = new UniverseSession();
     session.create(config(name, seed));
     let baseTol = -1, baseCu = -1, maxTolD = 0, maxCuD = 0, maxWaste = 0;
+    // Matched counterfactual is anchored at ESTABLISHMENT (the first
+    // established record), not at the horizon end: forking a world that has
+    // already disrupted measures the wrong regime. Clones only — the main
+    // run is never perturbed by the assay.
+    let assay: any = null;
     for (let i = 0; i < 2000 && session.snapshot().tick < HORIZON; i++) {
       const snapshot = session.advance(1000);
       const pending = snapshot.pendingDecision;
@@ -84,6 +89,45 @@ for (const name of ["patchwork", "balanced", "harsh"]) {
         maxCuD = Math.max(maxCuD, m.traits.cleanup.mean - baseCu);
       }
       maxWaste = Math.max(maxWaste, m.waste.fraction);
+      if (!assay) {
+        const established = (((session.analysis as any).records as any[])
+          .find((r: any) => r.kind === "niche" && r.phase === "established") ?? null) as any;
+        if (established) {
+          const sim = session.simulation as any;
+          const kept = sim.clone();
+          const clean = sim.clone();
+          clean.resources.enabledWaste = false;
+          clean.resources.waste.stock.fill(0);
+          for (let k = 0; k < ASSAY_TICKS; k++) {
+            kept.step();
+            clean.step();
+          }
+          const km = kept.metrics();
+          const cm = clean.metrics();
+          const popGap = Math.abs(cm.population - km.population) / km.population;
+          assay = {
+            anchoredAt: established.tick,
+            assayTicks: ASSAY_TICKS,
+            keptWaste: +km.waste.fraction.toFixed(4),
+            cleanWaste: +cm.waste.fraction.toFixed(4),
+            keptCu: +km.traits.cleanup.mean.toFixed(4),
+            cleanCu: +cm.traits.cleanup.mean.toFixed(4),
+            cuDelta: +(km.traits.cleanup.mean - cm.traits.cleanup.mean).toFixed(4),
+            keptTol: +km.traits.tolerance.mean.toFixed(4),
+            cleanTol: +cm.traits.tolerance.mean.toFixed(4),
+            tolDelta: +(km.traits.tolerance.mean - cm.traits.tolerance.mean).toFixed(4),
+            keptPop: km.population,
+            cleanPop: cm.population,
+            popGap: +popGap.toFixed(4),
+          };
+          // Observed matched-response class: material reliance, weak/no
+          // effect, or confounded (populations not comparable). Weak is
+          // wanted evidence, not something to manufacture.
+          assay.response = popGap >= 0.2
+            ? "confounded"
+            : assay.cuDelta > 0.03 ? "material" : "weak";
+        }
+      }
     }
     const leftover = session.snapshot().pendingDecision;
     if (leftover) session.resolveEventDecision(leftover.opportunityId, "keep-watching");
@@ -113,36 +157,13 @@ for (const name of ["patchwork", "balanced", "harsh"]) {
       baseTol < 0 ? "no-modification" :
       maxTolD >= 0.05 || maxCuD >= 0.05 ? "strategy-shift-without-establishment" :
       maxWaste >= 0.05 ? "exposure-without-strategy-shift" : "no-response";
-    // Matched counterfactual where a regime established: fork, switch the
-    // waste economy off on one branch (validation-only internal switch),
-    // run both ASSAY_TICKS unmodified.
-    if (records.length > 0) {
-      const sim = session.simulation as any;
-      const cleared = sim.clone();
-      cleared.resources.enabledWaste = false;
-      cleared.resources.waste.stock.fill(0);
-      for (let i = 0; i < ASSAY_TICKS; i++) {
-        sim.step();
-        cleared.step();
-      }
-      const kept = sim.metrics();
-      const clean = cleared.metrics();
-      entry.assay = {
-        keptWaste: +kept.waste.fraction.toFixed(4),
-        cleanWaste: +clean.waste.fraction.toFixed(4),
-        keptCu: +kept.traits.cleanup.mean.toFixed(4),
-        cleanCu: +clean.traits.cleanup.mean.toFixed(4),
-        keptTol: +kept.traits.tolerance.mean.toFixed(4),
-        cleanTol: +clean.traits.tolerance.mean.toFixed(4),
-        material: clean.traits.cleanup.mean < kept.traits.cleanup.mean - 0.03
-          && Math.abs(clean.population - kept.population) / kept.population < 0.2,
-      };
-    } else {
-      entry.assay = { applicable: false, reason: "no established regime to fork" };
-    }
+    entry.assay = assay ?? { applicable: false, reason: records.length > 0 ? "assay window ended before an establishment observation" : "no established regime to fork" };
     result.rows.push(entry);
     writeFileSync(OUT, JSON.stringify(result, null, 2) + "\n");
-    console.log(`${name}/${seed}: ${entry.response} records=${records.length} assay=${entry.assay.applicable === false ? "n/a" : entry.assay.material ? "material" : "weak"}`);
+    const assayLabel = entry.assay.applicable === false
+      ? "n/a"
+      : `${entry.assay.response}(cuΔ ${entry.assay.cuDelta})`;
+    console.log(`${name}/${seed}: ${entry.response} recs=${records.length} assay=${assayLabel}`);
   }
 }
 

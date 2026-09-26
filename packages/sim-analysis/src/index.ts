@@ -64,10 +64,13 @@ const DEP_MAJOR_SHARE=.10;
 // never suffices. Establishment needs a durable STRATEGY-COMPOSITION shift
 // relative to the forming baseline: the tolerance or cleanup trait mean
 // moving by at least NC_STRAT_SHIFT, i.e. a durable share change of a
-// waste-response strategy class. Exposure (share of organisms in modified
-// cells) is supporting evidence only — waste spreading around organisms can
-// raise it with no strategy responding, so it can never establish the arc
-// alone. Calibrated on 0.22 multi-config probes; Owner-visible.
+// waste-response strategy class, SUSTAINED for NC_PERSIST after first
+// crossing. Modification and strategy each carry their own clock; a
+// transient excursion is not a constructed regime. Exposure (share of
+// organisms in modified cells) is supporting evidence only — waste
+// spreading around organisms can raise it with no strategy responding, so
+// it can never establish the arc alone. Calibrated on 0.22 multi-config
+// probes; Owner-visible.
 const NC_FORM_WASTE=.05;
 const NC_PERSIST=5000;
 const NC_STRAT_SHIFT=.05;
@@ -82,7 +85,7 @@ export class EcologyObserver {
   seedbank={id:"eco-seedbank-1",state:"absent",candidateSince:null as number|null,lowSince:null as number|null,establishedTick:null as number|null,lastReturnTick:null as number|null,priorDormantClades:{} as Record<string,number>,returnedClades:{} as Record<string,number>};
   era={current:null as string|null,candidate:null as string|null,candidateSince:null as number|null,index:0};
   dep={id:"eco-cuse-1",state:"absent",candidateSince:null as number|null,lowSince:null as number|null,establishedTick:null as number|null,estScav:0,baselineProduced:0,topConsumer:null as number|null,topConsumerShare:0};
-  niche={id:"eco-niche-1",state:"absent",candidateSince:null as number|null,lowSince:null as number|null,establishedTick:null as number|null,baseWaste:0,baseTol:0,baseCu:0,baseExposed:0,estWaste:0,estExposed:0,wasDisrupted:false};
+  niche={id:"eco-niche-1",state:"absent",candidateSince:null as number|null,shiftSince:null as number|null,lowSince:null as number|null,establishedTick:null as number|null,baseWaste:0,baseTol:0,baseCu:0,baseExposed:0,estWaste:0,estExposed:0,wasDisrupted:false};
   records:any[]=[];
   eras:any[]=[];
 
@@ -220,14 +223,24 @@ export class EcologyObserver {
       if(ivRem>0&&l.wasteRemoved/ivRem>topRemShare){topRemShare=l.wasteRemoved/ivRem;topRem=l.lineageId}
     }
     const ncRefs=[...new Set([topProdShare>=NC_MEANINGFUL_SHARE&&topProd!==null?topProd:null,topRemShare>=NC_MEANINGFUL_SHARE&&topRem!==null?topRem:null].filter((v):v is number=>v!==null))];
-    if(nc.state==="absent"&&mod){nc.state="forming";nc.candidateSince=s.tick;nc.baseWaste=s.waste_fraction;nc.baseTol=s.tolerance_mean;nc.baseCu=s.cleanup_mean;nc.baseExposed=s.waste_exposed_share}
+    if(nc.state==="absent"&&mod){nc.state="forming";nc.candidateSince=s.tick;nc.shiftSince=null;nc.baseWaste=s.waste_fraction;nc.baseTol=s.tolerance_mean;nc.baseCu=s.cleanup_mean;nc.baseExposed=s.waste_exposed_share}
     else if(nc.state==="forming"){
-      if(!mod){nc.state="absent";nc.candidateSince=null}
-      else if(nc.candidateSince!==null&&s.tick-nc.candidateSince>=NC_PERSIST&&stratShift){
-        const returning=nc.wasDisrupted;
-        nc.state="established";nc.establishedTick=s.tick;nc.estWaste=s.waste_fraction;nc.estExposed=s.waste_exposed_share;
-        nc.lowSince=null;nc.candidateSince=null;nc.wasDisrupted=false;
-        this.add("niche",nc.id,s.tick,returning?"recovered":"established",returning?"The constructed niche returned":"A constructed niche became established",`Waste load ${Math.round(100*s.waste_fraction)}% of waste-field capacity (${Math.round(100*nc.baseWaste)}% when the regime first formed). Strategy composition moved: tolerance mean ${nc.baseTol.toFixed(2)}->${s.tolerance_mean.toFixed(2)}; cleanup mean ${nc.baseCu.toFixed(2)}->${s.cleanup_mean.toFixed(2)}. Supporting context: ${Math.round(100*s.waste_exposed_share)}% of organisms in burden-relevant cells (dirty enough to cost energy), up from ${Math.round(100*(nc.baseExposed||0))}%. The modification and the shift appeared together in time, which is not proof of cause.`,"major",s,ncRefs);
+      // Modification and strategy response each carry their own clock: the
+      // modification must persist NC_PERSIST, and the strategy response must
+      // persist NC_PERSIST after first crossing, not merely be true at the
+      // single endpoint frame. A shift that appears and reverts keeps the
+      // arc forming (a transient excursion is not a constructed regime).
+      if(!mod){nc.state="absent";nc.candidateSince=null;nc.shiftSince=null}
+      else if(nc.candidateSince!==null&&s.tick-nc.candidateSince>=NC_PERSIST){
+        if(stratShift){
+          if(nc.shiftSince===null)nc.shiftSince=s.tick;
+          if(s.tick-nc.shiftSince>=NC_PERSIST){
+            const returning=nc.wasDisrupted;
+            nc.state="established";nc.establishedTick=s.tick;nc.estWaste=s.waste_fraction;nc.estExposed=s.waste_exposed_share;
+            nc.lowSince=null;nc.candidateSince=null;nc.shiftSince=null;nc.wasDisrupted=false;
+            this.add("niche",nc.id,s.tick,returning?"recovered":"established",returning?"The constructed niche returned":"A constructed niche became established",`Waste load ${Math.round(100*s.waste_fraction)}% of waste-field capacity (${Math.round(100*nc.baseWaste)}% when the regime first formed). Strategy composition moved and held: tolerance mean ${nc.baseTol.toFixed(2)}->${s.tolerance_mean.toFixed(2)}; cleanup mean ${nc.baseCu.toFixed(2)}->${s.cleanup_mean.toFixed(2)}, sustained for ${NC_PERSIST}+ ticks. Supporting context: ${Math.round(100*s.waste_exposed_share)}% of organisms in burden-relevant cells (dirty enough to cost energy), up from ${Math.round(100*(nc.baseExposed||0))}%. The modification and the shift appeared together in time, which is not proof of cause.`,"major",s,ncRefs);
+          }
+        } else nc.shiftSince=null;
       }
     } else if(nc.state==="established"){
       const modGone=s.waste_fraction<nc.estWaste*NC_WASTE_COLLAPSE;
@@ -238,7 +251,7 @@ export class EcologyObserver {
       if(modGone||replaced){
         if(nc.lowSince===null)nc.lowSince=s.tick;
         if(s.tick-nc.lowSince>=NC_PERSIST){
-          nc.state=replaced?"superseded":"disrupted";nc.wasDisrupted=!replaced;nc.lowSince=null;nc.candidateSince=null;
+          nc.state=replaced?"superseded":"disrupted";nc.wasDisrupted=!replaced;nc.lowSince=null;nc.candidateSince=null;nc.shiftSince=null;
           this.add("niche",nc.id,s.tick,replaced?"superseded":"disrupted",replaced?"The constructed regime was superseded":"The constructed niche faded",replaced?`Waste persists at ${Math.round(100*s.waste_fraction)}% of capacity but occupancy reorganized: ${Math.round(100*nc.estExposed)}% lived in burden-relevant cells at establishment, ${Math.round(100*s.waste_exposed_share)}% now.`:`Waste load fell from ${Math.round(100*nc.estWaste)}% to ${Math.round(100*s.waste_fraction)}% of waste-field capacity; the modification no longer persists.`,"major",s,ncRefs);
         }
       } else nc.lowSince=null;
@@ -248,7 +261,7 @@ export class EcologyObserver {
       // a regime that was superseded and re-forms narrates as a new
       // establishment, not a recovery.
       if(!mod)nc.state="absent";
-      else if(mod){nc.state="forming";nc.candidateSince=s.tick;nc.baseWaste=s.waste_fraction;nc.baseTol=s.tolerance_mean;nc.baseCu=s.cleanup_mean;nc.baseExposed=s.waste_exposed_share}
+      else if(mod){nc.state="forming";nc.candidateSince=s.tick;nc.shiftSince=null;nc.baseWaste=s.waste_fraction;nc.baseTol=s.tolerance_mean;nc.baseCu=s.cleanup_mean;nc.baseExposed=s.waste_exposed_share}
     }
 
     d.priorDormantClades={...s.dormant_clade_fraction};
