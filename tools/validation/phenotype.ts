@@ -186,11 +186,14 @@ function testLineageAndHysteresis() {
   assert.ok(dAlt70 <= HYSTERESIS_RATIO * dCur70, "t=0.7 clears the ratio gate");
   assert.ok(dCur70 - dAlt70 < HYSTERESIS_MIN_IMPROVEMENT, "t=0.7 fails the absolute gate");
   assert.equal(resolveDescendantFamily(lerpAxes(blob, seg, 0.7), "blob"), "blob", "t=0.7 stays (absolute gate, AC4)");
-  // Accumulated divergence transitions stably and explanatorily.
-  assert.equal(resolveDescendantFamily(lerpAxes(blob, seg, 0.85), "blob"), "segmented", "t=0.85 transitions (AC4)");
+  // Accumulated divergence transitions stably and explanatorily. Under the
+  // hybrid calibration the segmented center moved toward the explored
+  // manifold, so the transition fires at t=0.95 (was 0.85); both gates and
+  // the no-flicker property are unchanged, only the boundary location moved.
+  assert.equal(resolveDescendantFamily(lerpAxes(blob, seg, 0.95), "blob"), "segmented", "t=0.95 transitions (AC4)");
   // The transition sticks: resolving from the new family keeps it.
   assert.equal(
-    resolveDescendantFamily(lerpAxes(blob, seg, 0.85), "segmented"),
+    resolveDescendantFamily(lerpAxes(blob, seg, 0.95), "segmented"),
     "segmented",
     "transitioned family is stable",
   );
@@ -349,7 +352,7 @@ function testContinuity() {
       return [m.mobility, m.sensing, m.metabolism, m.specialization];
     })()), parent: "blob" },
     { name: "recently transitioned", traits: traitsForAxes(...((): [number, number, number, number] => {
-      const m = lerpAxes(axesAt("blob"), axesAt("segmented"), 0.85);
+      const m = lerpAxes(axesAt("blob"), axesAt("segmented"), 0.95);
       return [m.mobility, m.sensing, m.metabolism, m.specialization];
     })()), parent: "segmented" },
   ];

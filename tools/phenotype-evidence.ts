@@ -165,7 +165,10 @@ const matrix: MatrixCell[] = [];
     radial: { trait: "sensing", range: TRAIT_RANGES.sensing, values: [110, 140, 170] },
     plated: { trait: "metabolism", range: TRAIT_RANGES.metabolism, values: [0.25, 0.36, 0.48] },
     branching: { trait: "sensing", range: TRAIT_RANGES.sensing, values: [70, 120, 170] },
-    paddled: { trait: "speed", range: TRAIT_RANGES.speed, values: [2.0, 2.9, 3.8] },
+    // Hybrid calibration moved the segmented attractor toward the explored
+    // manifold, so paddled/low at speed 2.0 now sits in the segmented basin.
+    // Re-anchored to 2.2 (still the low end; verified to hold paddled).
+    paddled: { trait: "speed", range: TRAIT_RANGES.speed, values: [2.2, 2.9, 3.8] },
   };
   const levels = ["low", "medium", "high"] as const;
   const sec1: Record<string, unknown> = {};
@@ -639,10 +642,10 @@ function resolveScene(snapshot: RenderSnapshot): { fams: Map<number, ResolvedPhe
     }
   }
   emit(`- Evolved-manifold coverage (n=${all.length} organisms across all 4 scenes): ${ranges.join("; ")}.`);
-  emit(`  Closest any evolved organism comes to a non-blob attractor: ${closest.d.toFixed(3)} (${closest.fam}). Five of six centers sit far outside the evolved range (e.g. radial needs sensing~0.82 vs evolved<=0.4; paddled needs mobility~0.88 vs evolved<=0.4; plated needs metabolism~0.78 vs evolved<=0.26).`);
-  emit(`  Reading: today's attractors span the supported trait space, not the evolved manifold. Non-blob families will be rare until deep-time divergence reaches them. Whether to (a) accept rarity, (b) recalibrate centers toward the manifold, or (c) keep potential-space attractors is an OWNER DECISION — no constant is changed or promoted here.`);
+  emit(`  Closest any evolved organism comes to a non-blob attractor: ${closest.d.toFixed(3)} (${closest.fam}). Radial/branching/paddled centers sit far outside the evolved range (e.g. radial needs sensing~0.82 vs evolved<=0.4; paddled needs mobility~0.88 vs evolved<=0.4) — kept far deliberately for long-range potential.`);
+  emit(`  Reading (hybrid calibration, owner-accepted): segmented mobility 0.70->0.60 and plated metabolism 0.78->0.65 move toward explored trait regions while preserving baseline pairwise separation; all weights, hysteresis gates, and other centers unchanged. Today's scenes still resolve Blob-dominant (honest: closer attractors do not manufacture diversity the biology does not support). Continued evolution toward higher mobility/metabolism now encounters a stable hysteresis transition sooner — see the lineage transition strip. Blob remains common, as supported.`);
   emit("");
-  (json.sections as Record<string, unknown>).tuning = { hysteresisUp: upAt, hysteresisDown: downAt, closestPair: minPair, closestDiff: minDiff, manifoldRanges: ranges, closestNonBlob: closest, manifoldNote: "owner decision required" };
+  (json.sections as Record<string, unknown>).tuning = { hysteresisUp: upAt, hysteresisDown: downAt, closestPair: minPair, closestDiff: minDiff, manifoldRanges: ranges, closestNonBlob: closest, manifoldNote: "hybrid calibration applied (owner-accepted); blob-dominant retained honestly" };
 }
 
 // ------------------------------------------------------- 11. viewer
