@@ -226,7 +226,12 @@ async function main(){
       await decisionPage.waitForTimeout(1000);
     }
     await sheet.waitFor({timeout:180_000});
-    await decisionPage.getByText("A decision is waiting").waitFor();
+    // Scoped to the sheet: the pending status line ("A decision is waiting —
+    // choose how to respond.") shares this prefix, so an unscoped locator
+    // strict-mode-fails whenever the two are visible together. Also pins the
+    // sheet as an observed event decision, not a catalyst window (which reads
+    // "World catalyst - your move").
+    await sheet.getByText("A decision is waiting").waitFor();
     const decisionTick=await tick(decisionPage);
     const choices=await sheet.locator(".decision-choices button").count();
     assert.equal(choices,4,"decision offers keep watching plus three interventions (A4)");
