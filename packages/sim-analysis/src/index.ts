@@ -22,6 +22,13 @@ export interface ObservationFrame {
   readonly interval: IntervalRates;
   /** Per-lineage interval activity, dead included. Read-only. */
   readonly intervalFlows: IntervalFlowFacts;
+  /** Waste field share of capacity (0..1): persistent modification signal. */
+  readonly waste_fraction: number;
+  /** Share of living organisms in burden-relevant cells (fraction >= half-max). */
+  readonly waste_exposed_share: number;
+  /** Population mean inherited tolerance / cleanup (strategy bundle). */
+  readonly tolerance_mean: number;
+  readonly cleanup_mean: number;
 }
 
 const CROSSFEED_FORM=.035;
@@ -53,12 +60,22 @@ const DEP_GUILD_COLLAPSE=.33;
 // main supplier). Naming a lineage additionally requires a meaningful guild
 // share; otherwise the record stays generic. Owner-visible constant.
 const DEP_MAJOR_SHARE=.10;
+// Niche-construction (Slice 2) thresholds. Modification first: waste alone
+// never suffices. Strategy change is a before/after shift in the measured
+// bundle (exposure share, tolerance/cleanup means), never a scalar score.
+// Calibrated on 0.22 multi-config probes; Owner-visible constants.
+const NC_FORM_WASTE=.05;
+const NC_PERSIST=5000;
+const NC_EXPOSED=.15;
+const NC_STRAT_SHIFT=.05;
+const NC_WASTE_COLLAPSE=.5;
 
 export class EcologyObserver {
   cross={id:"eco-crossfeeding-1",state:"absent",candidateSince:null as number|null,lowSince:null as number|null};
   seedbank={id:"eco-seedbank-1",state:"absent",candidateSince:null as number|null,lowSince:null as number|null,establishedTick:null as number|null,lastReturnTick:null as number|null,priorDormantClades:{} as Record<string,number>,returnedClades:{} as Record<string,number>};
   era={current:null as string|null,candidate:null as string|null,candidateSince:null as number|null,index:0};
   dep={id:"eco-cuse-1",state:"absent",candidateSince:null as number|null,lowSince:null as number|null,establishedTick:null as number|null,estScav:0,baselineProduced:0,topConsumer:null as number|null,topConsumerShare:0};
+  niche={id:"eco-niche-1",state:"absent",candidateSince:null as number|null,lowSince:null as number|null,establishedTick:null as number|null,baseWaste:0,baseTol:0,baseCu:0,estWaste:0,estExposed:0,wasDisrupted:false};
   records:any[]=[];
   eras:any[]=[];
 
@@ -177,6 +194,50 @@ export class EcologyObserver {
 
     d.priorDormantClades={...s.dormant_clade_fraction};
 
+    // Niche construction (Slice 2): persistent waste modification paired with
+    // a durable measured strategy shift. Modification alone never suffices;
+    // temporal pairing is recorded without asserting causation. Strategy is
+    // read from the population bundle (exposure, tolerance/cleanup means),
+    // never a scalar score. Lineage refs name only meaningful interval
+    // waste producers/removers (>=10% of interval flow), else nobody.
+    const nc=this.niche;
+    const mod=s.waste_fraction>=NC_FORM_WASTE;
+    const stratShift=(s.waste_exposed_share>=NC_EXPOSED)
+      ||(s.tolerance_mean-nc.baseTol>=NC_STRAT_SHIFT)
+      ||(s.cleanup_mean-nc.baseCu>=NC_STRAT_SHIFT);
+    let topProd:null|number=null,topProdShare=0,topRem:null|number=null,topRemShare=0,ivProd=0,ivRem=0;
+    for(const l of s.intervalFlows.lineages){ivProd+=l.wasteProduced;ivRem+=l.wasteRemoved}
+    for(const l of s.intervalFlows.lineages){
+      if(ivProd>0&&l.wasteProduced/ivProd>topProdShare){topProdShare=l.wasteProduced/ivProd;topProd=l.lineageId}
+      if(ivRem>0&&l.wasteRemoved/ivRem>topRemShare){topRemShare=l.wasteRemoved/ivRem;topRem=l.lineageId}
+    }
+    const ncRefs=[topProdShare>=.1&&topProd!==null?topProd:null,topRemShare>=.1&&topRem!==null?topRem:null].filter((v):v is number=>v!==null);
+    if(nc.state==="absent"&&mod){nc.state="forming";nc.candidateSince=s.tick;nc.baseWaste=s.waste_fraction;nc.baseTol=s.tolerance_mean;nc.baseCu=s.cleanup_mean}
+    else if(nc.state==="forming"){
+      if(!mod){nc.state="absent";nc.candidateSince=null}
+      else if(nc.candidateSince!==null&&s.tick-nc.candidateSince>=NC_PERSIST&&stratShift){
+        const returning=nc.wasDisrupted;
+        nc.state="established";nc.establishedTick=s.tick;nc.estWaste=s.waste_fraction;nc.estExposed=s.waste_exposed_share;
+        nc.lowSince=null;nc.candidateSince=null;nc.wasDisrupted=false;
+        this.add("niche",nc.id,s.tick,returning?"recovered":"established",returning?"The constructed niche returned":"A constructed niche became established",`Waste covered ${Math.round(100*s.waste_fraction)}% of field capacity while ${Math.round(100*s.waste_exposed_share)}% of organisms lived in burden-relevant cells; tolerance ${nc.baseTol.toFixed(2)}->${s.tolerance_mean.toFixed(2)}, cleanup ${nc.baseCu.toFixed(2)}->${s.cleanup_mean.toFixed(2)}. Pairing in time is not proof of cause.`,"major",s,ncRefs);
+      }
+    } else if(nc.state==="established"){
+      const modGone=s.waste_fraction<nc.estWaste*NC_WASTE_COLLAPSE;
+      const replaced=s.waste_fraction>=NC_FORM_WASTE&&nc.estExposed>0&&s.waste_exposed_share<nc.estExposed/3;
+      if(modGone||replaced){
+        if(nc.lowSince===null)nc.lowSince=s.tick;
+        if(s.tick-nc.lowSince>=NC_PERSIST){
+          nc.state=replaced?"superseded":"disrupted";nc.wasDisrupted=true;nc.lowSince=null;nc.candidateSince=null;
+          this.add("niche",nc.id,s.tick,replaced?"superseded":"disrupted",replaced?"The constructed regime was superseded":"The constructed niche faded",replaced?`Waste persists at ${Math.round(100*s.waste_fraction)}% of capacity but occupancy reorganized: ${Math.round(100*nc.estExposed)}% lived in modified cells at establishment, ${Math.round(100*s.waste_exposed_share)}% now.`:`Waste fell from ${Math.round(100*nc.estWaste)}% to ${Math.round(100*s.waste_fraction)}% of capacity; the modification no longer persists.`,"major",s,ncRefs);
+        }
+      } else nc.lowSince=null;
+    } else if(nc.state==="disrupted"||nc.state==="superseded"){
+      if(!mod&&nc.state==="disrupted")nc.state="absent";
+      else if(mod){nc.state="forming";nc.candidateSince=s.tick;nc.baseWaste=s.waste_fraction;nc.baseTol=s.tolerance_mean;nc.baseCu=s.cleanup_mean}
+    }
+
+    d.priorDormantClades={...s.dormant_clade_fraction};
+
     const pb=s.population===0?"extinct":s.population<s.starting_population*.7?"bottleneck":s.population>s.starting_population*3?"expanded":"established";
     const es=s.c_energy_share>=.2?"biogenic":"primary";
     const db=df>=.25?"high-dormancy":df>=.05?"some-dormancy":"active";
@@ -199,7 +260,7 @@ export class EcologyObserver {
   }
 
   checkpoint(){
-    return JSON.parse(JSON.stringify({cross:this.cross,seedbank:this.seedbank,era:this.era,dep:this.dep,records:this.records,eras:this.eras}));
+    return JSON.parse(JSON.stringify({cross:this.cross,seedbank:this.seedbank,era:this.era,dep:this.dep,niche:this.niche,records:this.records,eras:this.eras}));
   }
 
   static restore(state:any){
@@ -213,6 +274,7 @@ export class EcologyObserver {
       crossfeeding:{...this.cross},
       seed_bank:{...this.seedbank},
       cuse_guild:{...this.dep},
+      niche_construction:{...this.niche},
       eras:JSON.parse(JSON.stringify(this.eras)),
       records:JSON.parse(JSON.stringify(this.records)),
       rules:{
@@ -228,6 +290,11 @@ export class EcologyObserver {
         cuse_persistence_ticks:DEP_PERSIST,
         cuse_collapse_guild_fraction:DEP_GUILD_COLLAPSE,
         cuse_major_consumer_guild_share:DEP_MAJOR_SHARE,
+        niche_form_waste:NC_FORM_WASTE,
+        niche_persistence_ticks:NC_PERSIST,
+        niche_exposed_share:NC_EXPOSED,
+        niche_strategy_shift:NC_STRAT_SHIFT,
+        niche_waste_collapse_fraction:NC_WASTE_COLLAPSE,
       },
     };
   }
