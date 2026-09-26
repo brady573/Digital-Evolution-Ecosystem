@@ -47,11 +47,23 @@ export const TRAIT_RANGES = {
 };
 
 /** Presentation axes: [mobility, sensing, metabolism, specialization]. */
+/**
+ * Hybrid calibration (owner-accepted direction): the six-family system and all
+ * weights/hysteresis gates are unchanged, but segmented mobility (0.70 -> 0.60)
+ * and plated metabolism (0.78 -> 0.65) move toward inherited trait regions the
+ * current engine demonstrably explores (evolved p95: mobility ~0.34, metabolism
+ * ~0.37), while preserving the baseline minimum pairwise separation. Today's
+ * manifold still resolves Blob-dominant (honest: no diversity manufactured);
+ * the moves buy reachable fringe so continued evolution in those directions
+ * encounters a stable hysteresis transition sooner. Radial/branching/paddled
+ * stay far for long-range potential. See evidence tuning section for the
+ * before/after manifold summary.
+ */
 export const FAMILY_CENTERS: Record<PhenotypeFamily, readonly [number, number, number, number]> = {
   blob: [0.35, 0.35, 0.4, 0.2],
-  segmented: [0.7, 0.45, 0.5, 0.35],
+  segmented: [0.6, 0.45, 0.5, 0.35],
   radial: [0.3, 0.82, 0.45, 0.4],
-  plated: [0.3, 0.35, 0.78, 0.45],
+  plated: [0.3, 0.35, 0.65, 0.45],
   branching: [0.2, 0.76, 0.45, 0.82],
   paddled: [0.88, 0.62, 0.72, 0.45],
 };

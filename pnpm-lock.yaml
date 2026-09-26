@@ -196,6 +196,9 @@ importers:
       '@digital-evolution/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@digital-evolution/phenotype':
+        specifier: workspace:*
+        version: link:../../packages/phenotype
       '@digital-evolution/sim-analysis':
         specifier: workspace:*
         version: link:../../packages/sim-analysis
@@ -227,8 +230,8 @@ importers:
 
   packages/contracts: {}
 
-  packages/phenotype:
-    dependencies: {}
+  packages/phenotype: {}
+
 
   packages/sim-analysis:
     dependencies:
