@@ -271,7 +271,10 @@ async function main(){
       await decisionPage.waitForTimeout(1000);
     }
     await sheet.waitFor({timeout:180_000});
-    await decisionPage.getByText("A decision is waiting").waitFor();
+    // Scoped to the sheet: the status line elsewhere carries the same prefix
+    // ("A decision is waiting — choose how to respond.") and makes the
+    // unscoped text locator resolve to two elements (issue #36).
+    await sheet.getByText("A decision is waiting").waitFor();
     const decisionTick=await tick(decisionPage);
     const choices=await sheet.locator(".decision-choices button").count();
     assert.equal(choices,4,"decision offers keep watching plus three interventions (A4)");
