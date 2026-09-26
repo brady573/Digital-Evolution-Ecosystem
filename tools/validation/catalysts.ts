@@ -182,10 +182,12 @@ testEligibilityBoundaries();
 testQuietAndCooldown();
 
 // --- Integration: first window, priority, gate, resolution -------------------
-// Pinned deterministic chain, balanced seed 24681357:
-// dormancy event @7530 -> catalyst window @17570 [drought-a, drought-b] ->
-// era event @27359 -> catalyst window @42670 [drought-b, global-crash]
-// (cooldown clears exactly there) -> era @51455 -> window @67770 [drought-a].
+// Pinned deterministic chain, balanced seed 24681357 (keep watching):
+// dormancy @7279 -> window @17319 [drought-a, drought-b, global-crash] ->
+// windows @27359/@37399/@47439/@57981/@68523 -> era-2 @113954 ->
+// crossfeeding @123994. Applied drought-a @17319 instead shifts the arc:
+// era-2 @26857 -> window @42419 [drought-b, global-crash] (cooldown clears
+// exactly at the stride) -> crossfeeding @48694.
 
 /** Fresh session paused on the first catalyst window (dormancy resolved). */
 function atFirstWindow(): { session: UniverseSession; window: CatalystOpportunity } {
@@ -201,16 +203,16 @@ function atFirstWindow(): { session: UniverseSession; window: CatalystOpportunit
 
 function testFirstWindow() {
   const { session, window } = atFirstWindow();
-  assert.equal(window.createdTick, 17_570, "first window opens at the first quiet stride");
-  assert.equal(window.opportunityId, "wcat:17570", "stable window id");
+  assert.equal(window.createdTick, 17_319, "first window opens at the first quiet stride");
+  assert.equal(window.opportunityId, "wcat:17319", "stable window id");
   assert.equal(window.policyVersion, CATALYST_POLICY_VERSION, "stamped with the catalyst catalog");
-  assert.deepEqual(window.catalystIds, ["drought-a", "drought-b"], "only eligible catalysts offered");
+  assert.deepEqual(window.catalystIds, ["drought-a", "drought-b", "global-crash"], "only eligible catalysts offered");
   assert.deepEqual(
     window.choices.map((c) => c.choiceId),
-    ["keep-watching", "drought-a", "drought-b"],
+    ["keep-watching", "drought-a", "drought-b", "global-crash"],
     "keep watching first, then catalog order",
   );
-  assert.equal(session.snapshot().tick, 17_570, "gate stopped exactly at the window tick");
+  assert.equal(session.snapshot().tick, 17_319, "gate stopped exactly at the window tick");
   assert.equal(session.snapshot().pendingDecision, window as any, "window is pending");
   console.log("first catalyst window: PASS");
 }
@@ -225,14 +227,14 @@ function testSameTickPriority() {
   session.create(config(FIXTURE_SEED));
   session.resolveEventDecision(session.advance(120_000).pendingDecision!.opportunityId, "keep-watching");
   session.advance(10_000);
-  assert.equal(session.snapshot().tick, 17_530, "positioned one stride before the window tick");
+  assert.equal(session.snapshot().tick, 17_279, "positioned just before the window tick");
   assert.equal(session.snapshot().pendingDecision, null, "nothing pending yet");
   (session.analysis as any).records.push({
-    id: "eco-crossfeeding-9-established-17530",
+    id: "eco-crossfeeding-9-established-17279",
     arc_id: "eco-crossfeeding-9",
     kind: "crossfeeding",
     phase: "established",
-    tick: 17_530,
+    tick: 17_279,
     level: "major",
     title: "Synthetic ordering-test event",
     summary: "Test-only record proving same-tick priority; not a biological claim.",
@@ -242,7 +244,7 @@ function testSameTickPriority() {
   const pending = session.advance(100).pendingDecision as any;
   assert.ok(pending, "the boundary produced a decision");
   assert.equal(pending.source, "observed_event", "the event wins over the eligible catalyst");
-  assert.equal(pending.opportunityId, "dop:eco-crossfeeding-9-established-17530", "the event is the synthetic one");
+  assert.equal(pending.opportunityId, "dop:eco-crossfeeding-9-established-17279", "the event is the synthetic one");
   // The catalyst was genuinely ready: quiet satisfied and eligible at this tick.
   const diagnosis = session.describeCatalystEligibility();
   assert.ok(
@@ -250,13 +252,13 @@ function testSameTickPriority() {
     `catalyst eligible at the event tick (${diagnosis.diagnoses.filter((d) => d.eligible).map((d) => d.catalystId).join(",")})`,
   );
   // The event creation restarted quiet at its own creation tick, so the window
-  // cadence shifts with it. Advancing on must therefore reach the next natural
-  // event untouched: if any window had fired in between, the gate would have
-  // stopped there instead.
+  // cadence shifts with it. The very next decision must therefore be the
+  // catalyst window at the shifted cadence: the event waited its turn and the
+  // catalyst waited its turn.
   session.resolveEventDecision(pending.opportunityId, "keep-watching");
   const later = session.advance(30_000).pendingDecision as any;
-  assert.equal(later?.source, "observed_event", "continued flow reaches the next event");
-  assert.equal(later?.createdTick, 45_431, "crossfeeding establishes on its deterministic tick");
+  assert.equal(later?.source, "world_catalyst", "catalyst follows once the event clears");
+  assert.equal(later?.createdTick, 27_359, "window opens at the shifted quiet stride");
   console.log("same-tick event priority: PASS");
 }
 
@@ -310,16 +312,19 @@ function testCrashAndCooldown() {
   session.create(config(FIXTURE_SEED));
   session.resolveEventDecision(session.advance(120_000).pendingDecision!.opportunityId, "keep-watching");
   const w1 = session.advance(120_000).pendingDecision as CatalystOpportunity;
+  assert.equal(w1.createdTick, 17_319, "first window opens on its deterministic tick");
   session.resolveEventDecision(w1.opportunityId, "drought-a");
   const appliedTick = w1.createdTick;
 
   // An unrelated era establishes mid-cooldown: events are unaffected by it.
   const mid = session.advance(200_000).pendingDecision as any;
   assert.equal(mid?.source, "observed_event", "events still fire during the catalyst cooldown");
+  assert.equal(mid?.sourceEventId, "eco-era-2-established-26857", "drought shifts the era deterministically");
   session.resolveEventDecision(mid.opportunityId, "keep-watching");
 
   const w2 = session.advance(200_000).pendingDecision as CatalystOpportunity;
   assert.equal(w2.source, "world_catalyst", "second window opens after cooldown");
+  assert.equal(w2.createdTick, 42_419, "cooldown clears exactly at the stride");
   assert.ok(
     w2.createdTick >= appliedTick + MAJOR_CATALYST_COOLDOWN_TICKS,
     `cooldown respected (applied ${appliedTick}, window ${w2.createdTick})`,

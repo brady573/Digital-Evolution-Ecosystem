@@ -222,6 +222,12 @@ export interface IntervalRates {
   readonly energyC: number;
   readonly births: number;
   readonly deaths: number;
+  readonly wasteProduced: number;
+  readonly wasteRemoved: number;
+  readonly wasteDecayed: number;
+  readonly burdenEnergy: number;
+  readonly cleanupEnergy: number;
+  readonly cleanupExec: number;
 }
 
 /**
@@ -241,6 +247,14 @@ export interface IntervalLineageFlow {
   readonly producedC: number;
   readonly births: number;
   readonly deaths: number;
+  /** Deposited waste mass (entered the field). Saturated surplus that never
+   * entered the field is counted as saturated loss in the waste accounting,
+   * not here. */
+  readonly wasteProduced: number;
+  readonly wasteRemoved: number;
+  readonly burdenEnergy: number;
+  readonly cleanupEnergy: number;
+  readonly cleanupExec: number;
 }
 
 /** Deterministic per-lineage interval activity with window totals. */
@@ -259,6 +273,11 @@ export interface IntervalFlowFacts {
     readonly producedC: number;
     readonly births: number;
     readonly deaths: number;
+    readonly wasteProduced: number;
+    readonly wasteRemoved: number;
+    readonly burdenEnergy: number;
+    readonly cleanupEnergy: number;
+    readonly cleanupExec: number;
   };
 }
 

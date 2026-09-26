@@ -187,7 +187,7 @@ function testVerticalSliceAndGate() {
   assert.equal(pending.createdTick, triggerTick, "opportunity created at the current tick");
   assert.equal(
     pending.sourceEventId,
-    "eco-seedbank-1-established-7530",
+    "eco-seedbank-1-established-7279",
     "first decision comes from the earliest durable formation (deterministic)",
   );
   // The policy saw the same context the evidence supports: contextSnapshot must
@@ -290,7 +290,7 @@ function testForwardCompatPolicyVersion() {
   const window = session.advance(120_000).pendingDecision as CatalystOpportunity;
   assert.ok(window, "a catalyst window follows");
   assert.equal(window.source, "world_catalyst", "interceding decision is a catalyst window");
-  assert.equal(window.createdTick, 17_570, "first window opens at the first quiet stride");
+  assert.equal(window.createdTick, 17_319, "first window opens at the first quiet stride");
   assert.equal(window.policyVersion, CATALYST_POLICY_VERSION, "new window stamped current");
   session.resolveEventDecision(window.opportunityId, "keep-watching");
   assert.equal(
@@ -299,21 +299,31 @@ function testForwardCompatPolicyVersion() {
     "window resolution stamped current",
   );
 
+  // Windows recur at every quiet stride until the next natural event: drain
+  // them all (keep watching throughout) to reach it. Each must carry the
+  // current catalog version.
+  let second = session.advance(200_000).pendingDecision as DecisionOpportunity | CatalystOpportunity;
+  while (second && second.source === "world_catalyst") {
+    assert.equal(second.policyVersion, CATALYST_POLICY_VERSION, "every window stamped current");
+    session.resolveEventDecision(second.opportunityId, "keep-watching");
+    second = session.advance(200_000).pendingDecision as DecisionOpportunity | CatalystOpportunity;
+  }
   // The next natural event is stamped with the current policy version, and so
   // is its resolution: no stale labels leak into new decisions or evidence.
-  const second = session.advance(120_000).pendingDecision as DecisionOpportunity;
-  assert.ok(second, "a second natural decision follows");
-  assert.equal(second.sourceEventId, "eco-crossfeeding-1-established-45431", "second decision is deterministic");
-  assert.equal(second.policyVersion, DECISION_POLICY_VERSION, "new opportunity stamped current");
+  assert.ok(second && second.source === "observed_event", "a second natural decision follows");
+  const natural = second as DecisionOpportunity;
+  assert.equal(natural.sourceEventId, "eco-era-2-established-113954", "second decision is deterministic");
+  assert.equal(natural.policyVersion, DECISION_POLICY_VERSION, "new opportunity stamped current");
   assert.equal(
-    second.contextSnapshot.cEnergyShare,
-    ((session.exportEvidence() as any).observed_events as any[]).find((e: any) => e.eventId === second.sourceEventId)
+    natural.contextSnapshot.cEnergyShare,
+    ((session.exportEvidence() as any).observed_events as any[]).find((e: any) => e.eventId === natural.sourceEventId)
       .evidence.c_energy_share,
     "second context matches its triggering evidence",
   );
-  session.resolveEventDecision(second.opportunityId, "drought-a");
+  session.resolveEventDecision(natural.opportunityId, "drought-a");
+  const resolutions = session.decisionResolutions;
   assert.equal(
-    session.decisionResolutions[2]!.policyVersion,
+    resolutions[resolutions.length - 1]!.policyVersion,
     DECISION_POLICY_VERSION,
     "new resolution stamped current",
   );
