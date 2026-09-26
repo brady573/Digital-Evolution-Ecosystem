@@ -34,6 +34,13 @@ export interface EngineConfig {
   readonly resource_grid: number;
   readonly enable_byproduct: boolean;
   readonly enable_dormancy: boolean;
+  /**
+   * Waste economy switch (Slice 2). Optional, default true: omit for the
+   * standard waste-accumulating world. Set false for a clean control world
+   * (no deposition, no burden, no cleanup; tolerance/cleanup traits stay at
+   * zero) so matched comparisons run through biology, not field surgery.
+   */
+  readonly enable_waste?: boolean;
   readonly study?: boolean;
 }
 
@@ -247,6 +254,9 @@ export interface IntervalLineageFlow {
   readonly producedC: number;
   readonly births: number;
   readonly deaths: number;
+  /** Deposited waste mass (entered the field). Saturated surplus that never
+   * entered the field is counted as saturated loss in the waste accounting,
+   * not here. */
   readonly wasteProduced: number;
   readonly wasteRemoved: number;
   readonly burdenEnergy: number;

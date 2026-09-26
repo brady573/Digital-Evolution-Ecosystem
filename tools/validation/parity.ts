@@ -1,4 +1,22 @@
 import assert from "node:assert/strict";
+/**
+ * Engine determinism parity (0.22.0+).
+ *
+ * Owner-approved 2026-09-26 (issue #30 Slice 2 review): the legacy
+ * trajectory parity gate — which replayed the frozen prototype's class S
+ * side by side with the migrated engine — is retired at engine 0.22.0.
+ * Reason: 0.22 adds intentional versioned biology (spatial Metabolic Waste
+ * field plus tolerance/cleanup heritable traits), so trajectory equality
+ * with the pre-waste prototype cannot pass by design. The frozen sources in
+ * legacy/prototype are untouched; what replaces the gate is stronger
+ * same-version coverage: twin determinism at five checkpoints, clone
+ * continuation, inspection non-interference, and a compared state that now
+ * includes tolerance/cleanup means plus the full waste stock (see
+ * assertSame below). RNG parity against the legacy stream is retained
+ * (runRngParity). Re-pinned suite ticks elsewhere (decisions, catalysts,
+ * dependency) moved only because waste biology shifts event timing; each
+ * pin carries its own deterministic-tick comment.
+ */
 import {
   Simulation,
   createLegacyRng,
@@ -105,7 +123,6 @@ function parityState(sim: any) {
         dormancyResponse: o.dr || 0,
         tolerance: o.to || 0,
         cleanup: o.cu || 0,
-        wasteProduced: o.pw || 0,
         activity: o.activity || "active",
         dormantSince: o.dormantSince ?? null,
         wakeCount: o.wakeCount || 0,

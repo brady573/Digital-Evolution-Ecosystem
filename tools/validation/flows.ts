@@ -276,9 +276,11 @@ function testIntervalCoversDead() {
 }
 
 function testWasteAccounting() {
-  // Slice 2: waste mass conservation. Produced minus biological removal
+  // Slice 2: waste mass conservation. Deposited minus biological removal
   // minus decay plus clamp adjustment must equal the stock change; the
-  // accounting identity carries any residual explicitly.
+  // accounting identity carries any residual explicitly. Saturated surplus
+  // that never entered the field is counted as saturated loss, never
+  // silently dropped (lineage wasteProduced means deposited mass).
   const session = new UniverseSession();
   session.create(config(FIXTURE_SEED));
   settle(session, 20000);
@@ -287,8 +289,24 @@ function testWasteAccounting() {
   assert.ok(Number.isFinite(acc.residual), "waste residual is finite");
   assert.ok(Math.abs(acc.residual) < 1e-6 * Math.max(1, Math.abs(acc.produced)), `waste conserves (residual ${acc.residual})`);
   assert.ok(acc.produced > 0, "waste is produced by primary metabolism");
+  assert.ok(Number.isFinite(acc.saturated_loss) && acc.saturated_loss >= 0, "saturated loss counted, not hidden");
+  // Independent total: summing the stock array directly must match the
+  // reported final stock, so the identity is checked against the field
+  // itself rather than only against its own counters.
+  let stockSum = 0;
+  for (const v of sim.resources.waste.stock as Float32Array) stockSum += v;
+  assert.ok(Math.abs(stockSum - acc.final_stock) < 1e-6 * Math.max(1, Math.abs(acc.final_stock)), "reported stock matches the field");
+  // Saturation probe: overfilling one cell deposits what fits and counts
+  // the rest as discarded.
+  const waste = sim.resources.waste;
+  const beforeDiscarded: number = waste.discarded;
+  const room = waste.cap[0]! - waste.stock[0]!;
+  const added = waste.deposit(5, 5, room + 1000, null);
+  assert.ok(added <= room + 1e-6, "deposit capped at cell room");
+  assert.ok(waste.discarded > beforeDiscarded, "surplus counted as saturated loss");
   const m = session.snapshot().metrics as any;
   assert.ok(m.waste && Number.isFinite(m.waste.fraction), "waste summary exposed in metrics");
+  assert.ok(Number.isFinite(m.waste.discarded), "saturated loss exposed in metrics");
   assert.ok(m.traits.tolerance && Number.isFinite(m.traits.tolerance.mean), "tolerance tracked in traits");
   assert.ok(m.traits.cleanup && Number.isFinite(m.traits.cleanup.mean), "cleanup tracked in traits");
   console.log("waste accounting: PASS");
