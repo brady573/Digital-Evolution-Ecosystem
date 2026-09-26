@@ -227,6 +227,9 @@ importers:
 
   packages/contracts: {}
 
+  packages/phenotype:
+    dependencies: {}
+
   packages/sim-analysis:
     dependencies:
       '@digital-evolution/contracts':
