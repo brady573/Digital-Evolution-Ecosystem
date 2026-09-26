@@ -275,8 +275,69 @@ function testIntervalCoversDead() {
   console.log("interval covers the dead: PASS");
 }
 
+function testWasteAccounting() {
+  // Slice 2: waste mass conservation. Produced minus biological removal
+  // minus decay plus clamp adjustment must equal the stock change; the
+  // accounting identity carries any residual explicitly.
+  const session = new UniverseSession();
+  session.create(config(FIXTURE_SEED));
+  settle(session, 20000);
+  const sim = session.simulation as any;
+  const acc = sim.resources.waste.accounting();
+  assert.ok(Number.isFinite(acc.residual), "waste residual is finite");
+  assert.ok(Math.abs(acc.residual) < 1e-6 * Math.max(1, Math.abs(acc.produced)), `waste conserves (residual ${acc.residual})`);
+  assert.ok(acc.produced > 0, "waste is produced by primary metabolism");
+  const m = session.snapshot().metrics as any;
+  assert.ok(m.waste && Number.isFinite(m.waste.fraction), "waste summary exposed in metrics");
+  assert.ok(m.traits.tolerance && Number.isFinite(m.traits.tolerance.mean), "tolerance tracked in traits");
+  assert.ok(m.traits.cleanup && Number.isFinite(m.traits.cleanup.mean), "cleanup tracked in traits");
+  console.log("waste accounting: PASS");
+}
+
+function testWasteDeterminism() {
+  const run = () => {
+    const session = new UniverseSession();
+    session.create(config(FIXTURE_SEED));
+    settle(session, 20000);
+    const sim = session.simulation as any;
+    return JSON.stringify({
+      stock: Array.from(sim.resources.waste.stock),
+      traits: (session.snapshot().metrics as any).traits.tolerance,
+    });
+  };
+  assert.equal(run(), run(), "waste field and trait trajectories reproduce exactly");
+  console.log("waste determinism: PASS");
+}
+
+function testWasteCheckpoint() {
+  // Checkpoint mid-accumulation: waste stocks, trait state, and sink-free
+  // continuation must restore exactly.
+  const session = new UniverseSession();
+  session.create(config(FIXTURE_SEED));
+  settle(session, 30000);
+  const before = JSON.stringify((session.simulation as any).resources.waste.stock);
+  const restored = new UniverseSession();
+  restored.restore(JSON.parse(JSON.stringify(session.checkpoint())));
+  assert.equal(
+    JSON.stringify((restored.simulation as any).resources.waste.stock),
+    before,
+    "waste field restores exactly",
+  );
+  settle(session, 35000);
+  settle(restored, 35000);
+  assert.equal(
+    JSON.stringify((restored.simulation as any).resources.waste.stock),
+    JSON.stringify((session.simulation as any).resources.waste.stock),
+    "restored waste continues identically",
+  );
+  console.log("waste checkpoint continuation: PASS");
+}
+
 testFlowDeterminism();
 testProcessActivations();
+testWasteAccounting();
+testWasteDeterminism();
+testWasteCheckpoint();
 testIntervalDeterminism();
 testIntervalProduction();
 testIntervalNetMembers();

@@ -10,7 +10,7 @@
     "test:migration": "tsx tools/validation/parity.ts",
     "build": "pnpm --filter @digital-evolution/explorer build",
     "dev": "pnpm --filter @digital-evolution/explorer dev",
-    "verify": "pnpm typecheck && pnpm test:migration && pnpm test:decisions && pnpm test:catalysts && pnpm test:flows && pnpm test:dependency && pnpm test:ecology && pnpm build",
+    "verify": "pnpm typecheck && pnpm test:migration && pnpm test:decisions && pnpm test:catalysts && pnpm test:flows && pnpm test:dependency && pnpm test:niche && pnpm test:ecology && pnpm build",
     "test:ecology": "tsx tools/validation/ecology.ts",
     "test:survey": "tsx tools/validation/ecology-survey.ts",
     "test:browser": "tsx tools/validation/browser-smoke.ts",
@@ -19,7 +19,8 @@
     "test:flows": "tsx tools/validation/flows.ts",
     "test:dependency": "tsx tools/validation/dependency.ts",
     "test:dependency:fast": "tsx tools/validation/dependency.ts -- --fast",
-    "test:catalysts:fast": "tsx tools/validation/catalysts.ts -- --fast"
+    "test:catalysts:fast": "tsx tools/validation/catalysts.ts -- --fast",
+    "test:niche": "tsx tools/validation/niche.ts"
   },
   "devDependencies": {
     "@types/node": "26.6.2",

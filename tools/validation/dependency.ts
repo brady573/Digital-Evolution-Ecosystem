@@ -66,6 +66,8 @@ function frame(
       producedC: o.intervalProd ?? 60,
       consumedA: 0, consumedB: 0, consumedC: 0,
       energyA: 0, energyB: 0, energyC: 0, births: 0, deaths: 0,
+      wasteProduced: 0, wasteRemoved: 0, wasteDecayed: 0,
+      burdenEnergy: 0, cleanupEnergy: 0, cleanupExec: 0,
     },
     intervalFlows: {
       tick, strideTicks: 251, lineages: [],
@@ -282,12 +284,12 @@ testDiffuseGuildNamesNobody();
 testZeroPopulationSafe();
 
 // --- Integration: full arc on one deterministic run --------------------------
-// Balanced seed 24681357: guild establishes @45431, drought_b @~60k collapses
-// it (16% -> 3%), and the guild recovers @91113. The return is diffuse (no
-// single lineage holds >=10% of C energy), so the record stays generic;
-// major-consumer wording is covered by unit tests, the integration proves
-// real recovery. Composition-level reorganization was observed separately
-// (post-drought mixed_primary dominance with scavengers at zero).
+// Balanced seed 24681357 on current biology: drought_b @~60k delays the
+// guild (suppression during the shock), which then establishes @92117 with a
+// diffuse consumer base. Disruption/recovery do NOT occur here: established
+// guilds ride out shocks on 0.22 as under drought_a on 0.21. The full arc
+// machinery stays unit-covered (and 0.21-pinned historically); integration
+// proves what the current biology actually does.
 
 const FIXTURE_SEED = 24681357;
 function fixtureConfig(seed: number): EngineConfig {
@@ -320,18 +322,10 @@ function testFixtureArc() {
   );
   settle(session, 120000);
   const records = (session.analysis as any).records.filter((r: any) => r.kind === "cuse");
-  assert.equal(records.length, 3, "establishment, disruption, and replacement all fire");
-  assert.equal(records[0].phase, "established", "first record establishes");
-  assert.equal(records[0].tick, 45431, "establishment is deterministic");
-  assert.deepEqual(records[0].entity_refs, [906], "founding top consumer identified");
-  assert.equal(records[1].phase, "disrupted", "second record disrupts");
-  assert.equal(records[1].tick, 81324, "disruption is deterministic");
-  assert.deepEqual(records[1].entity_refs, [906], "disruption names the fallen consumer");
-  assert.equal(records[2].phase, "recovered", "third record recovers");
-  assert.equal(records[2].tick, 91113, "recovery is deterministic");
-  assert.equal(records[2].title, "The C-using guild recovered", "diffuse return stays generic");
-  assert.deepEqual(records[2].entity_refs, [], "no lineage named without a meaningful consumer");
-  assert.ok(records[2].summary.includes("attribution threshold"), "generic wording stays evidence-bounded");
+  assert.equal(records.length, 1, "one establishment record (no disruption on this run)");
+  assert.equal(records[0].phase, "established", "record establishes");
+  assert.equal(records[0].tick, 92117, "establishment is deterministic");
+  assert.deepEqual(records[0].entity_refs, [], "diffuse founding names nobody");
   console.log("dependency fixture arc: PASS");
 }
 
@@ -372,7 +366,7 @@ function testMultiSeedPossibility() {
   }
   assert.ok(established.length >= 1, "dependency establishment must be realizable");
   assert.ok(
-    established.some((s) => s === "3543950664@42670"),
+    established.some((s) => s === "3543950664@55973"),
     "pinned establishment reproduces exactly",
   );
   console.log(`dependency multi-seed possibility [${established.join(", ")}]: PASS`);
@@ -412,8 +406,9 @@ function testWashoutReliance() {
   const control = snap.control!.metrics as any;
   const liveShare = (live.metabolic_roles?.counts?.byproduct_scavenger || 0) / live.population;
   const controlShare = (control.metabolic_roles?.counts?.byproduct_scavenger || 0) / control.population;
-  assert.ok(liveShare < 0.1, `washed guild collapses (live ${liveShare.toFixed(3)})`);
-  assert.ok(controlShare > 0.15, `control guild holds (control ${controlShare.toFixed(3)})`);
+  assert.ok(liveShare < 0.02, `washed guild collapses (live ${liveShare.toFixed(3)})`);
+  assert.ok(controlShare > 0.03, `control guild exists (control ${controlShare.toFixed(3)})`);
+  assert.ok(liveShare < controlShare, "washed guild underperforms its own twin");
   assert.ok(liveShare < controlShare / 2, "guild effect is large, not marginal");
   assert.ok(
     live.population > control.population * 0.8,
