@@ -90,6 +90,7 @@ all product packages -> contracts
 4. **Tests over assertions.** Behavioral claims (determinism, parity, round-trips) must be backed by `tools/validation/*` or package checks, not comments.
 5. **Small, reviewable diffs.** Prefer focused PRs; use the PR template in `.github/pull_request_template.md`.
 6. **Offline-first.** Simulation, saves, history, experiments, and inspection must remain usable with no network.
+7. **Review outputs go to shared storage, repos stay on local disk.** On Termux/proot devices the repo must stay under the Linux home (`/root/...`): shared phone storage (`/sdcard`) is mounted `noexec` and may reject symlinks, so `node_modules` native binaries and `pnpm` linking break there. Copy *reviewable outputs only* — viewer HTML, `EVIDENCE.md`, exports, screenshots, handoff files — to `/sdcard/DEE/<topic>/` (e.g. `/sdcard/DEE/review/phenotype-art-review.html`) and open them from the phone. Never move the repo, `node_modules`, or OpenCode state (`~/.local/share/opencode`, SQLite db) to shared storage. This is a copy, not a move: the repo remains the source of truth.
 
 ## Prohibitions
 
