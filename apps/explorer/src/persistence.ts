@@ -1,4 +1,5 @@
 import type { UniverseCheckpoint } from "@digital-evolution/contracts";
+import type { ResolvedPhenotype } from "@digital-evolution/phenotype";
 
 export interface SavedUniverseSummary {
   readonly id:string;
@@ -8,10 +9,14 @@ export interface SavedUniverseSummary {
 }
 
 export interface WorldRepository {
-  save(id:string,checkpoint:UniverseCheckpoint):Promise<SavedUniverseSummary>;
+  save(id:string,checkpoint:UniverseCheckpoint,anchors?:Record<number,ResolvedPhenotype>):Promise<SavedUniverseSummary>;
   load(id:string):Promise<UniverseCheckpoint|null>;
+  /** Presentation-side family anchors saved alongside the checkpoint (null when absent). */
+  loadAnchors(id:string):Promise<Record<number,ResolvedPhenotype>|null>;
   list():Promise<readonly SavedUniverseSummary[]>;
 }
+
+import { sanitizeAnchors } from "./phenotype";
 
 const DB_NAME="digital-evolution-ecosystem";
 const STORE="universes";
@@ -34,10 +39,12 @@ function requestResult<T>(request:IDBRequest<T>):Promise<T>{
 }
 
 export class IndexedDbWorldRepository implements WorldRepository {
-  async save(id:string,checkpoint:UniverseCheckpoint){
+  async save(id:string,checkpoint:UniverseCheckpoint,anchors?:Record<number,ResolvedPhenotype>){
     const db=await openDb();
     try{
-      const record={id,savedAt:new Date().toISOString(),tick:checkpoint.createdTick,engineVersion:checkpoint.engineVersion,checkpoint};
+      // phenotypeAnchors travels WITH the save record, never inside the
+      // biological checkpoint: biology restores identically with or without it.
+      const record={id,savedAt:new Date().toISOString(),tick:checkpoint.createdTick,engineVersion:checkpoint.engineVersion,checkpoint,phenotypeAnchors:anchors?sanitizeAnchors(anchors):undefined};
       const tx=db.transaction(STORE,"readwrite");
       tx.objectStore(STORE).put(record);
       await new Promise<void>((resolve,reject)=>{tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error)});
@@ -50,6 +57,16 @@ export class IndexedDbWorldRepository implements WorldRepository {
     try{
       const record:any=await requestResult(db.transaction(STORE,"readonly").objectStore(STORE).get(id));
       return record?.checkpoint??null;
+    }finally{db.close()}
+  }
+
+  async loadAnchors(id:string){
+    const db=await openDb();
+    try{
+      const record:any=await requestResult(db.transaction(STORE,"readonly").objectStore(STORE).get(id));
+      if(!record||!("phenotypeAnchors" in record))return null;
+      const clean=sanitizeAnchors(record.phenotypeAnchors);
+      return Object.keys(clean).length>0?clean:null;
     }finally{db.close()}
   }
 

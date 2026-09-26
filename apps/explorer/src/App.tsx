@@ -537,6 +537,7 @@ export function App(){
   const blockWhilePending=()=>{if(!snapshot?.pendingDecision)return false;setStatus("A decision is waiting — choose how to respond.");return true};
   const newUniverse=()=>{
     setRunning(false);setSelectedId(null);
+    phenotypeCache.clearStaged();
     runtime.create(configFromSettings(settings));
     setActiveSettings(settings);setPreset(presetForSettings(settings));
     setSettingsOpen(false);setStatus("New universe created — settings now active");
@@ -544,7 +545,9 @@ export function App(){
   const save=async()=>{
     setStatus("Saving exact checkpoint…");
     const checkpoint=await runtime.requestCheckpoint();
-    const summary=await repository.save("current",checkpoint);
+    // Presentation-side family anchors travel with the save record (never in
+    // biology) so a restored world reconstructs identical families.
+    const summary=await repository.save("current",checkpoint,phenotypeCache.snapshotAnchors());
     setStatus(`Saved tick ${summary.tick.toLocaleString()}`);
   };
   const load=async()=>{
@@ -553,6 +556,9 @@ export function App(){
     setRunning(false);
     setStatus("Restoring checkpoint…");
     try{
+      // Stage anchors BEFORE restore: consumed once, on the restored world's
+      // fresh identity. Null (old saves) means a clean presentation break.
+      phenotypeCache.stageAnchors(await repository.loadAnchors("current")??{});
       const restored=await runtime.loadCheckpoint(checkpoint);
       // A3: the resumed universe becomes the active recipe; pending resets to
       // match it so staged settings can never be mistaken for the live world.
