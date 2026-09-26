@@ -30,9 +30,14 @@ const CELLS = 60 * 60;
  * field noise cannot make the whole world flicker between frames.
  *
  * Guarantees required by the handoff:
- * - it holds no simulation meaning; `reset()` (or a seed/tick jump backwards)
- *   discards all history so a stale visual can never represent another state;
+ * - it holds no simulation meaning; it is scoped by an explicit per-universe
+ *   presentation identity, so a stale visual can never represent another
+ *   world (two universes can share a seed AND a resolved config, so neither
+ *   is a sufficient key);
  * - it never reads or writes simulation RNG;
+ * - a reset PRIMES from the current actual fields instead of interpolating
+ *   from a fictitious zero environment, so a newly created or restored
+ *   paused world shows its real environment on its very first frame;
  * - blending is monotonic and bounded, so it cannot create or destroy a
  *   feature that the simulation did not produce — only soften its arrival.
  */
@@ -47,35 +52,64 @@ export class LandscapeSmoother {
     this.#identity = "";
   }
 
-  /**
-   * Identity of the state these smoothed values belong to. Any change
-   * (new universe, different seed, load/restore, tick moving backwards)
-   * discards the history so a restored world never renders through another
-   * world's inertia.
-   */
-  identity(seed: number, tick: number): string {
-    return `${seed}:${tick < 0 ? -1 : 0}`;
-  }
+  #tick = -1;
+  #primed = false;
 
+  /**
+   * Forget all history for an identity. The next `advance` primes from the
+   * CURRENT actual fields rather than blending from zero, so a created or
+   * restored universe renders its real environment immediately.
+   */
   reset(identity: string): void {
     this.#values.fill(0);
     this.#identity = identity;
+    this.#primed = false;
+    this.#tick = -1;
   }
 
-  #ensure(identity: string): void {
-    if (this.#identity !== identity) this.reset(identity);
+  /** Presentation diagnostics: true once the buffer holds real field values. */
+  get primed(): boolean {
+    return this.#primed;
   }
 
-  /** Advance smoothing toward the true field. Returns the smoothed values. */
+  /**
+   * Advance toward the true field and return the smoothed values.
+   *
+   * The first observation of an identity primes (copies exactly, no
+   * blending); every later observation blends by `strength`. A backwards
+   * tick also re-primes, because interpolating through a future would show a
+   * world a state it has not reached.
+   */
   advance(
     identity: string,
+    tick: number,
     a: Float32Array,
     b: Float32Array,
     c: Float32Array,
     waste: Float32Array,
     strength = 0.35,
   ): Float32Array {
-    this.#ensure(identity);
+    const rewind = this.#primed && tick < this.#tick;
+    if (this.#identity !== identity || rewind) {
+      this.#identity = identity;
+      const v = this.#values;
+      // The buffer is interleaved (four channels per cell), so priming must
+      // interleave too — block copies would scramble the channels.
+      for (let i = 0; i < this.size; i++) {
+        const j = i * 4;
+        v[j] = a[i]!;
+        v[j + 1] = b[i]!;
+        v[j + 2] = c[i]!;
+        v[j + 3] = waste[i]!;
+      }
+      this.#primed = true;
+      this.#tick = tick;
+      // Round-trip through the typed array so later blends see exactly the
+      // precision the renderer displays, rather than a wider intermediate
+      // that the first frame would quietly disagree with.
+      return Float32Array.from(v);
+    }
+    this.#tick = tick;
     const v = this.#values;
     const k = strength < 0 ? 0 : strength > 1 ? 1 : strength;
     for (let i = 0; i < this.size; i++) {
@@ -144,16 +178,23 @@ export type Rgb = readonly [number, number, number];
 
 const clamp255 = (v: number) => (v < 0 ? 0 : v > 255 ? 255 : v | 0);
 const sat = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
+// Ash: a near-neutral warm grey, deliberately low-chroma. Waste blends the
+// ground toward this rather than toward black, because dark degradation
+// reads as a hole in the world and hides the organisms standing in it.
+const ASH_R = 82, ASH_G = 76, ASH_B = 70;
 
 /**
  * Semantic compositing: one coherent ecological character per cell.
  *
- * - fertile: primary nutrient abundance raises luminance and green/olive
- *   weight (resource-rich character);
- * - altered: biologically produced Metabolite C shifts toward a warm,
- *   higher-chroma tint (biologically altered substrate);
- * - degraded: metabolic waste desaturates, darkens and warms, and is the
- *   only contributor allowed to push luminance DOWN.
+ * - fertile A / fertile B: the two abiotic nutrient sources carry
+ *   *distinguishable* characters (verdant vs olive) so the world's real patch
+ *   geometry stays perceptible without switching to an analytical view;
+ * - altered: biologically produced Metabolite C shifts toward a warm
+ *   high-chroma tint (biologically altered substrate);
+ * - degraded: metabolic waste reads as spent, ashen ground — it desaturates
+ *   and warms and darkens only gently. It must never crush to near-black:
+ *   dark patches read as rendering holes, not as heavy pollution, and a
+ *   player must still be able to see organisms standing in them.
  *
  * Values are bounded, monotonic in each input, and touch neither organisms
  * nor analysis. No categorical biome boundaries are implied: the result is
@@ -166,25 +207,43 @@ export function landscapeCell(
   waste: number,
   texture: number,
 ): Rgb {
-  const fertile = Math.min(1, (a + b) / 1.35);
-  const altered = sat(c * 1.25);
-  const degraded = sat(waste * 1.6);
+  const fertileA = sat(a / 0.8);
+  const fertileB = sat(b / 0.8);
+  const altered = sat(c * 1.2);
+  const degraded = sat(waste * 1.5);
 
-  // Base substrate: cool dark ground, gently lifted by resource richness.
-  let r = 13 + 26 * fertile + 30 * altered;
-  let g = 20 + 46 * fertile + 18 * altered;
-  let bl = 24 + 20 * fertile + 10 * altered;
+  // Base substrate: mid-dark ground, never a void. A wide gap between
+  // unlit and fertile ground is what makes poor soil read as a hole in the
+  // world, so the floor is high and the fertile lift is deliberately modest:
+  // the landscape carries tonal range, but no region looks absent.
+  let r = 58;
+  let g = 66;
+  let bl = 61;
 
-  // Degraded character: darken and warm without going fully black, so a
-  // heavily loaded world stays legible rather than becoming a black hole.
-  const dim = 1 - 0.55 * degraded;
-  r = r * dim + 34 * degraded;
-  g = g * dim + 16 * degraded;
-  bl = bl * dim + 12 * degraded;
+  // Fertile A: verdant, cooler green. Fertile B: olive, warmer and drier.
+  r += 8 * fertileA + 30 * fertileB;
+  g += 30 * fertileA + 28 * fertileB;
+  bl += 12 * fertileA + 9 * fertileB;
 
-  // Deterministic microvariation, subordinate to the simulated structure.
-  const grain = (texture - 0.5) * 9 * (1 - 0.6 * degraded);
-  return [clamp255(r + grain), clamp255(g + grain * 0.8), clamp255(bl + grain * 0.6)];
+  // Altered substrate: biologically produced metabolite, warm violet-pink.
+  r += 34 * altered;
+  g += 8 * altered;
+  bl += 30 * altered;
+
+  // Degraded: ash. Rather than darkening, waste blends the ground toward a
+  // near-neutral warm grey. That single move is doing three jobs at once —
+  // it pales the ground, drops colour relative to brightness (so the
+  // character survives without hue), and warms it. The blend is strong but
+  // never total, so a loaded cell still carries the fertility beneath it.
+  const t = degraded * 0.9;
+  r += (ASH_R - r) * t;
+  g += (ASH_G - g) * t;
+  bl += (ASH_B - bl) * t;
+
+  // Deterministic microvariation, subordinate to the simulated structure and
+  // stronger on fertile ground (where texture is plausible) than on ash.
+  const grain = (texture - 0.5) * 9 * (1 - 0.4 * degraded);
+  return [clamp255(r + grain), clamp255(g + grain * 0.85), clamp255(bl + grain * 0.7)];
 }
 
 /**
@@ -222,11 +281,13 @@ export function nutrientOverlayCell(kind: number, v: number): Rgb {
 }
 
 /**
- * Waste overlay. A sequential, low-chroma ramp that stays distinguishable
- * without hue: the ramp increases luminance AND chroma AND (in the renderer)
- * pattern density, so "more waste" is never a hue-only claim.
+ * Waste overlay. A sequential ramp whose DARK END IS LIFTED: a ramp that
+ * starts near black makes most of an ordinary world look like a void, which
+ * misreads as a rendering fault. Load increases through luminance, chroma
+ * and (in the renderer) a second channel, so the reading never depends on
+ * hue alone.
  */
 export function wasteOverlayCell(v: number): Rgb {
   const t = sat(v);
-  return [clamp255(26 + 200 * t), clamp255(22 + 96 * t), clamp255(30 + 128 * t)];
+  return [clamp255(58 + 176 * t), clamp255(52 + 96 * t), clamp255(62 + 108 * t)];
 }

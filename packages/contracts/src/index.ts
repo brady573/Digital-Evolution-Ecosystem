@@ -365,6 +365,12 @@ export interface RenderWasteField {
 
 export interface RenderSnapshot {
   readonly tick: number;
+  /** Presentation-only identity of this displayed universe instance. Unique
+   *  per create/restore, and NOT biological state: it is not stored in
+   *  checkpoints and does not affect replay. The renderer uses it to scope
+   *  presentation-only state, because two universes can share a seed and a
+   *  resolved config. */
+  readonly worldId: number;
   /** Exact resolved engine configuration of the running universe (0.20.0+).
    *  Presentation uses it to show the active recipe without ever restaging
    *  it as pending. Read-only: it never changes simulation behavior. */

@@ -138,13 +138,9 @@ function traitColor(value:number,[lo,hi]:[number,number]){
 }
 
 /** Presentation-only landscape smoothing state. Lives for the canvas's
- * lifetime, holds no simulation meaning, and is reset whenever the identity
- * of the displayed state changes (universe/seed switch, load/restore, tick
- * moving backwards) so a stale visual can never represent another state. */
+ * lifetime, holds no simulation meaning, and re-primes from the current
+ * fields whenever the displayed universe identity changes. */
 const landscapeSmoother=new LandscapeSmoother();
-/** Last tick seen per identity, so a rewind resets inertia instead of
- * interpolating backwards through a future. */
-const landscapeLastTick=new Map<string,number>();
 
 function WorldCanvas({
   snapshot,lens,resourceView,traitView,selectedId,onSelect,cam,zoom,onCamera,onView,
@@ -189,57 +185,77 @@ function WorldCanvas({
     const stocks=snapshot.resources.stock,caps=snapshot.resources.capacity;
     const drawEnvironment=lens==="normal"||lens==="nutrients"||lens==="waste";
     if(drawEnvironment){
-      // Analytical lenses read exact fields: no smoothing, no texture. The
-      // ecological default reads smoothed fields and composes them by role.
+      // Analytical lenses read exact fields: no smoothing, no texture, flat
+      // per-cell values, because measurement is the task. The ecological
+      // default reads smoothed fields, composes them by role, and is drawn
+      // as a continuous field: 3600 hard rectangles read as a grid, so the
+      // composited field goes into a grid-sized buffer and is scaled up with
+      // the browser's own interpolation. Large-scale structure is therefore
+      // real simulation structure with smooth transitions, not cells.
       const analytical=lens!=="normal";
       const a=new Float32Array(n*n),b=new Float32Array(n*n),c=new Float32Array(n*n),wf=new Float32Array(n*n);
       fracArray(stocks,caps,0,a);fracArray(stocks,caps,1,b);fracArray(stocks,caps,2,c);
       fillWaste(snapshot.waste,wf);
       let av=a,bv=b,cv=c,wv=wf;
       if(lens==="normal"){
-        // Presentation-only inertia. Identity covers universe, seed and
-        // direction of travel: switching worlds or scrubbing backwards
-        // discards the history rather than blending across states.
-        const id=`${snapshot.seed}:${snapshot.config?.div??0}:${lens}`;
-        const prior=landscapeLastTick.get(id);
-        if(prior===undefined||snapshot.tick<prior){
-          landscapeSmoother.reset(id);
-          av=new Float32Array(n*n);bv=new Float32Array(n*n);cv=new Float32Array(n*n);wv=new Float32Array(n*n);
-        }
-        landscapeLastTick.set(id,snapshot.tick);
-        const sm=landscapeSmoother.advance(id,a,b,c,wf,0.35);
+        // Presentation-only inertia, scoped by the universe's presentation
+        // identity (unique per create/restore; seed and config are NOT
+        // sufficient because two universes can share both). The smoother
+        // primes from the current fields on a new identity, so a created or
+        // restored world shows its real environment on the first frame
+        // instead of a fictitious depleted one.
+        const id=`w${snapshot.worldId}`;
+        const sm=landscapeSmoother.advance(id,snapshot.tick,a,b,c,wf,0.35);
         av=new Float32Array(n*n);bv=new Float32Array(n*n);cv=new Float32Array(n*n);wv=new Float32Array(n*n);
         for(let i=0;i<n*n;i++){const j=i*4;av[i]=sm[j]!;bv[i]=sm[j+1]!;cv[i]=sm[j+2]!;wv[i]=sm[j+3]!}
       }
       const kind=resourceView==="a"?0:resourceView==="b"?1:resourceView==="c"?2:-1;
-      for(let i=0;i<n*n;i++){
-        const px=toX((i%n+.5)*(WORLD_EXTENT/n)),py=toY((Math.floor(i/n)+.5)*(WORLD_EXTENT/n));
-        if(px<-cell||py<-cell||px>w+cell||py>h+cell)continue;
-        let rgb:readonly [number,number,number];
-        if(analytical&&lens==="waste")rgb=wasteOverlayCell(wv[i]!);
-        else if(analytical&&kind>=0)rgb=nutrientOverlayCell(kind,av[i]!);
-        else if(analytical)rgb=nutrientOverlayCell(kind>=0?kind:(bv[i]!+cv[i]!)/2,(av[i]!+bv[i]!+cv[i]!)/3);
-        else rgb=landscapeCell(av[i]!,bv[i]!,cv[i]!,wv[i]!,microTexture(i));
-        ctx.fillStyle=`rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
-        ctx.fillRect(px-cell/2,py-cell/2,cell+1,cell+1);
-        // Non-hue encoding: where the landscape is degraded or analytical
-        // load is high, overlay a deterministic hatch whose density rises
-        // with the measured value. Density is a second channel, so the
-        // distinction survives without color perception.
-        if(!analytical){
-          const load=Math.max(wv[i]!,0);
-          if(load>0.06){
-            const steps=1+Math.min(4,Math.floor(load*5));
-            ctx.strokeStyle=`rgba(255,240,225,${0.05+0.05*steps})`;
-            ctx.lineWidth=1;
-            for(let k=0;k<steps;k++){
-              const off=k*cell/steps;
-              ctx.beginPath();
-              ctx.moveTo(px-cell/2,py-cell/2+off);
-              ctx.lineTo(px+cell/2,py+cell/2+off);
-              ctx.stroke();
+      if(!analytical){
+        const buffer=document.createElement("canvas");
+        buffer.width=n;buffer.height=n;
+        const bctx=buffer.getContext("2d");
+        if(bctx){
+          const img=bctx.createImageData(n,n);
+          for(let i=0;i<n*n;i++){
+            const rgb=landscapeCell(av[i]!,bv[i]!,cv[i]!,wv[i]!,microTexture(i));
+            const o=i*4;
+            img.data[o]=rgb[0];img.data[o+1]=rgb[1];img.data[o+2]=rgb[2];img.data[o+3]=255;
+          }
+          bctx.putImageData(img,0,0);
+          const x0=toX(0),y0=toY(0),x1=toX(WORLD_EXTENT),y1=toY(WORLD_EXTENT);
+          const prevSmooth=ctx.imageSmoothingEnabled;
+          ctx.imageSmoothingEnabled=true;
+          ctx.drawImage(buffer,x0,y0,x1-x0,y1-y0);
+          ctx.imageSmoothingEnabled=prevSmooth;
+        }
+        // Close-zoom detail: the interpolated field alone is too smooth to
+        // reward zooming, so loaded ground gets a screen-space stipple whose
+        // density rises with the measured waste. It is cosmetic, deterministic
+        // per cell, and subordinate to the field it sits on.
+        if(cell>6){
+          for(let i=0;i<n*n;i++){
+            const load=wv[i]!;
+            if(load<0.25)continue;
+            const px=toX((i%n+.5)*(WORLD_EXTENT/n)),py=toY((Math.floor(i/n)+.5)*(WORLD_EXTENT/n));
+            if(px<-cell||py<-cell||px>w+cell||py>h+cell)continue;
+            const dots=1+Math.min(3,Math.floor((load-0.25)*4));
+            ctx.fillStyle=`rgba(246,236,220,${0.05+0.035*dots})`;
+            for(let k=0;k<dots;k++){
+              const t=microTexture(i*8+k);
+              ctx.fillRect(px+((t-.5)*cell),py+((microTexture(i*13+k)-.5)*cell),1.5,1.5);
             }
           }
+        }
+      }else{
+        for(let i=0;i<n*n;i++){
+          const px=toX((i%n+.5)*(WORLD_EXTENT/n)),py=toY((Math.floor(i/n)+.5)*(WORLD_EXTENT/n));
+          if(px<-cell||py<-cell||px>w+cell||py>h+cell)continue;
+          let rgb:readonly [number,number,number];
+          if(lens==="waste")rgb=wasteOverlayCell(wv[i]!);
+          else if(kind>=0)rgb=nutrientOverlayCell(kind,av[i]!);
+          else rgb=nutrientOverlayCell(-1,(av[i]!+bv[i]!+cv[i]!)/3);
+          ctx.fillStyle=`rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+          ctx.fillRect(px-cell/2,py-cell/2,cell+1,cell+1);
         }
       }
     }
@@ -581,7 +597,7 @@ export function App(){
         <div className="lensbar">
           {(["normal","nutrients","waste","clades","traits"] as Lens[]).map(v=><button key={v} className={lens===v?"active":""} onClick={()=>setLens(v)}>{v==="normal"?"Landscape":v.charAt(0).toUpperCase()+v.slice(1)}</button>)}
           {lens==="nutrients"&&<select aria-label="Resource view" value={resourceView} onChange={e=>setResourceView(e.target.value as ResourceView)}><option value="combined">Combined</option><option value="a">Nutrient A</option><option value="b">Nutrient B</option><option value="c">Metabolite C</option></select>}
-          {lens==="waste"&&<span className="lensnote" role="note">Metabolic Waste: exact load per cell. Darker and denser hatch = more waste (hatch density is a second, non-color channel). This is a read-only analytical view; the landscape lens shows the same field as ecological character.</span>}
+          {lens==="waste"&&<span className="lensnote" role="note">Metabolic Waste, exact and untextured: brighter means more waste in that cell (a luminance ramp, so the reading does not depend on hue). The Landscape lens shows the same field differently — waste settles the ground toward bleached, desaturated ash at mid-tone, so it never darkens into a hole and never competes with fertility for brightness.</span>}
           {lens==="traits"&&<select aria-label="Trait view" value={traitView} onChange={e=>setTraitView(e.target.value as TraitView)}>{Object.entries(TRAIT_RANGES).map(([key,[,,label]])=><option key={key} value={key}>{label}</option>)}</select>}
         </div>
         <div className="world-wrap">
