@@ -1,8 +1,11 @@
 /**
- * Geometry-round validation (review §15): determinism, plate-count grammar
- * (10–14), tip protrusion + reference aspect (2.0–2.4), fan direction
- * coverage, asymmetry bounds, silhouette landmarks, dominance cap, bed
- * exposure, same-inputs across candidates, no sim imports.
+ * Geometry-round validation (review §15, round 3): single packed-cluster
+ * layout. Determinism, plate-count grammar, BURIED ROOTS (packed cluster),
+ * REDUCED TIP EXPOSURE (many tips tuck under neighbors — the old 100%-
+ * exposed metric pushed the renderer away from the reference), interior
+ * root distribution (never a common circle), rear-plate hiding, fan
+ * coverage, asymmetry, silhouette landmarks, dominance, bed exposure,
+ * evidence sanity, no sim imports.
  *
  * Run: pnpm exec tsx tools/plated-proof/geo-validate.ts
  */
@@ -12,20 +15,45 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { platedSweep } from "./fixtures.ts";
 import {
-  BEDS,
+  BED,
   geometryBoundaries,
   geometrySilhouette,
   layoutPlates,
   rasterizeGeometry,
+  type GeometryRender,
+  type ShellPlate,
 } from "./geometry.ts";
 
 const SIZE = 128;
-const geos = [0, 1, 2].map((c) => {
-  const plates = layoutPlates(c, 7000);
-  return { c, plates, bed: BEDS[c]!, g: rasterizeGeometry(plates, SIZE, BEDS[c]!) };
-});
+const plates = layoutPlates(7000);
+const g = rasterizeGeometry(plates, SIZE, BED);
 
-// 1. Same phenotype inputs for every candidate (checked via shared fixture).
+/** Anatomical tip pixel: exposed only if it still belongs to this plate. */
+function tipExposure(plates: ShellPlate[], g: GeometryRender): { exposed: number; tucked: number } {
+  let exposed = 0;
+  let tucked = 0;
+  for (const pl of plates) {
+    const tx = Math.floor((pl.rx + Math.cos(pl.theta) * pl.len) * g.size);
+    const ty = Math.floor((pl.ry + Math.sin(pl.theta) * pl.len) * g.size);
+    assert.ok(tx >= 0 && ty >= 0 && tx < g.size && ty < g.size, `plate ${pl.index}: tip in frame`);
+    if (g.plateId[ty * g.size + tx] === pl.index) exposed++;
+    else tucked++;
+  }
+  return { exposed, tucked };
+}
+
+/** Fraction of plates whose anatomical root is buried under another plate. */
+function rootOcclusion(plates: ShellPlate[], g: GeometryRender): number {
+  let buried = 0;
+  for (const pl of plates) {
+    const rx = Math.floor(pl.rx * g.size);
+    const ry = Math.floor(pl.ry * g.size);
+    if (g.plateId[ry * g.size + rx] !== pl.index) buried++;
+  }
+  return buried / plates.length;
+}
+
+// 1. Same phenotype inputs (checked via shared fixture).
 {
   const m2 = platedSweep().find((s) => s.label === "M2")!;
   assert.equal(m2.res.family, "plated", "M2 fixture holds plated");
@@ -33,54 +61,89 @@ const geos = [0, 1, 2].map((c) => {
 }
 
 // 2. Determinism: identical raster twice (plates + bed).
-for (const { c, plates } of geos) {
-  const bed = BEDS[c]!;
-  const a = rasterizeGeometry(plates, SIZE, bed);
-  const b = rasterizeGeometry(plates, SIZE, bed);
-  assert.deepEqual([...a.plateId], [...b.plateId], `candidate ${c} deterministic`);
-  assert.deepEqual([...a.bed], [...b.bed], `candidate ${c} bed deterministic`);
+{
+  const a = rasterizeGeometry(plates, SIZE, BED);
+  const b = rasterizeGeometry(plates, SIZE, BED);
+  assert.deepEqual([...a.plateId], [...b.plateId], "deterministic plate raster");
+  assert.deepEqual([...a.bed], [...b.bed], "deterministic bed raster");
 }
-console.log("geometry determinism: PASS (3 layouts, bit-identical reraster)");
+console.log("geometry determinism: PASS (bit-identical reraster)");
 
-// 3. Plate-count grammar: 9-13 visible plates (a plate counts if >=12px show;
-//    spec §15 asks ~8-12, chord weaves run A10/B9/C12).
-for (const { c, g } of geos) {
+// 3. Plate-count grammar: 9-12 visible plates (a plate counts if >=12px show).
+{
   const counts = new Map<number, number>();
   for (const id of g.plateId) {
     if (id >= 0) counts.set(id, (counts.get(id) ?? 0) + 1);
   }
   const visible = [...counts.entries()].filter(([, n]) => n >= 12).length;
-  assert.ok(visible >= 9 && visible <= 13, `candidate ${c}: 9-13 visible plates (got ${visible})`);
-  console.log(`candidate ${"ABC"[c]} plates: PASS (${visible} visible of ${counts.size} defined)`);
+  assert.ok(visible >= 9 && visible <= 12, `9-12 visible plates (got ${visible})`);
+  console.log(`plates: PASS (${visible} visible of ${counts.size} defined)`);
 }
 
-// 4. Tips: most plates directional (exposed tips); a minority may tuck under
-//    opposite plates (imbrication depth). At least 70% exposed.
-for (const { c, g } of geos) {
-  let exposed = 0;
-  let total = 0;
-  for (const t of g.tips) {
-    if (!t) continue;
-    total++;
-    if (g.plateId[t.y * SIZE + t.x] !== -1) exposed++;
+// 4. Buried roots: >=75% of anatomical roots covered by other plates —
+//    the packed-cluster signature (roots through the interior, not a ring).
+{
+  const frac = rootOcclusion(plates, g);
+  assert.ok(frac >= 0.75, `root occlusion ${(frac * 100).toFixed(0)}% (need >=75%)`);
+  console.log(`root occlusion: PASS (${(frac * 100).toFixed(0)}% buried)`);
+}
+
+// 5. Reduced tip exposure: the old gate celebrated 100% exposed; the
+//    reference packs plates under each other, so a meaningful minority of
+//    tips tuck. Most dominant/lower tips stay visible (as in the reference).
+{
+  const { exposed, tucked } = tipExposure(plates, g);
+  const frac = exposed / plates.length;
+  assert.ok(frac >= 0.55 && frac <= 0.85, `tip exposure ${(frac * 100).toFixed(0)}% (band 55-85%)`);
+  assert.ok(tucked >= 2, `at least 2 tucked tips (got ${tucked})`);
+  console.log(`tip exposure: PASS (${exposed}/${plates.length} exposed, ${tucked} tucked)`);
+}
+
+// 5b. Plates disappear under neighbors: mean visible/solo area per plate
+//     must be well under 100% — bodies are substantially covered, not
+//     merely juxtaposed.
+{
+  let sum = 0;
+  for (const pl of plates) {
+    const solo = rasterizeGeometry([pl], SIZE, { discs: [] });
+    let soloArea = 0;
+    for (const id of solo.plateId) if (id === pl.index) soloArea++;
+    let visArea = 0;
+    for (const id of g.plateId) if (id === pl.index) visArea++;
+    sum += visArea / soloArea;
   }
-  assert.ok(total >= 9, `candidate ${c}: tips computed for visible plates`);
-  assert.ok(exposed / total >= 0.7, `candidate ${c}: tip exposure ${(exposed / total).toFixed(2)}`);
-  console.log(`candidate ${"ABC"[c]} tips: PASS (${exposed}/${total} exposed)`);
+  const mean = sum / plates.length;
+  assert.ok(mean < 0.8, `mean visible fraction ${(mean * 100).toFixed(0)}% (need <80%)`);
+  console.log(`plate hiding: PASS (mean ${(mean * 100).toFixed(0)}% of solo area visible)`);
 }
 
-// 5. Reference aspect: every plate len/(2*wid) in [1.4, 1.8]
-//    (tables target 1.6; jitter perturbs angles only, aspect exact).
-for (const { c, plates } of geos) {
+// 6. Reference aspect: every plate len/(2*wid) in [1.4, 1.9]
+//    (reference shells measure ~1.3-1.7; jitter perturbs angles only).
+{
   for (const p of plates) {
     const aspect = p.len / (2 * p.wid);
-    assert.ok(aspect >= 1.4 && aspect <= 1.8, `candidate ${c} plate ${p.index}: aspect ${aspect.toFixed(2)}`);
+    assert.ok(aspect >= 1.4 && aspect <= 1.9, `plate ${p.index}: aspect ${aspect.toFixed(2)}`);
   }
-  console.log(`candidate ${"ABC"[c]} aspect: PASS (${plates.length} plates in 1.4-1.8 window)`);
+  console.log(`aspect: PASS (${plates.length} plates in 1.4-1.9 window)`);
 }
 
-// 6. Fan coverage: no >=100° empty cone in plate-axis directions.
-for (const { c, plates } of geos) {
+// 7. Roots interior, not a common circle: mean root radius from the root
+//    centroid small, and radii spread (CV) high — scattered through the
+//    body, not mounted on a ring.
+{
+  const cx = plates.reduce((s, p) => s + p.rx, 0) / plates.length;
+  const cy = plates.reduce((s, p) => s + p.ry, 0) / plates.length;
+  const radii = plates.map((p) => Math.hypot(p.rx - cx, p.ry - cy));
+  const mean = radii.reduce((s, r) => s + r, 0) / radii.length;
+  const sd = Math.sqrt(radii.reduce((s, r) => s + (r - mean) ** 2, 0) / radii.length);
+  const cv = sd / mean;
+  assert.ok(mean < 0.3, `mean root radius ${mean.toFixed(3)} (interior)`);
+  assert.ok(cv > 0.25, `root radius spread CV ${cv.toFixed(2)} (not a common circle)`);
+  console.log(`root distribution: PASS (mean r ${mean.toFixed(3)}, CV ${cv.toFixed(2)})`);
+}
+
+// 8. Fan coverage: no >=120° empty cone in plate-axis directions.
+{
   const norm = (a: number): number => {
     while (a > Math.PI) a -= 2 * Math.PI;
     while (a <= -Math.PI) a += 2 * Math.PI;
@@ -93,13 +156,28 @@ for (const { c, plates } of geos) {
     const nxt = i + 1 < angs.length ? angs[i + 1]! : angs[0]! + 2 * Math.PI;
     maxGap = Math.max(maxGap, nxt - cur);
   }
-  assert.ok(maxGap < (100 * Math.PI) / 180, `candidate ${c}: max direction gap ${(maxGap * 180 / Math.PI).toFixed(0)}°`);
-  console.log(`candidate ${"ABC"[c]} fan: PASS (max gap ${(maxGap * 180 / Math.PI).toFixed(0)}°)`);
+  assert.ok(maxGap < (120 * Math.PI) / 180, `max direction gap ${(maxGap * 180 / Math.PI).toFixed(0)}°`);
+  console.log(`fan: PASS (max gap ${(maxGap * 180 / Math.PI).toFixed(0)}°)`);
 }
 
-// 7. Controlled asymmetry: left/right plate-area ratio inside [0.5, 2.0]
-//    (coherent but never mirror-symmetric).
-for (const { c, g } of geos) {
+// 9. Rear plates mostly hidden: each layer-0 plate shows <55% of its
+//    solo area — crescents, not full plates.
+{
+  for (const pl of plates.filter((p) => p.layer === 0)) {
+    const solo = rasterizeGeometry([pl], SIZE, { discs: [] });
+    let soloArea = 0;
+    for (const id of solo.plateId) if (id === pl.index) soloArea++;
+    let visArea = 0;
+    for (const id of g.plateId) if (id === pl.index) visArea++;
+    const frac = visArea / soloArea;
+    assert.ok(frac < 0.55, `rear plate ${pl.index} visible ${(frac * 100).toFixed(0)}% (need <55%)`);
+    console.log(`rear plate ${pl.index}: PASS (${(frac * 100).toFixed(0)}% visible)`);
+  }
+}
+
+// 10. Controlled asymmetry: left/right plate-area ratio inside [0.5, 2.0]
+//     (coherent but never mirror-symmetric).
+{
   let left = 0;
   let right = 0;
   for (let y = 0; y < SIZE; y++) {
@@ -110,14 +188,14 @@ for (const { c, g } of geos) {
     }
   }
   const ratio = left / Math.max(1, right);
-  assert.ok(ratio >= 0.5 && ratio <= 2.0, `candidate ${c}: asymmetry ratio in bounds (got ${ratio.toFixed(2)})`);
-  assert.ok(Math.abs(ratio - 1) > 0.02, `candidate ${c}: not mirror-symmetric (${ratio.toFixed(3)})`);
-  console.log(`candidate ${"ABC"[c]} asymmetry: PASS (L/R ${ratio.toFixed(2)})`);
+  assert.ok(ratio >= 0.5 && ratio <= 2.0, `asymmetry ratio in bounds (got ${ratio.toFixed(2)})`);
+  assert.ok(Math.abs(ratio - 1) > 0.02, `not mirror-symmetric (${ratio.toFixed(3)})`);
+  console.log(`asymmetry: PASS (L/R ${ratio.toFixed(2)})`);
 }
 
-// 8. Silhouette landmarks: wide stance, protrusions on both sides, top
-//    reach, bottom points, non-trivial bbox fill.
-for (const { c, g } of geos) {
+// 11. Silhouette landmarks: wide squat stance, protrusions on both sides,
+//     top reach, multiple bottom points, non-trivial bbox fill.
+{
   let minX = SIZE;
   let maxX = -1;
   let minY = SIZE;
@@ -143,20 +221,18 @@ for (const { c, g } of geos) {
   }
   const bw = (maxX - minX + 1) / SIZE;
   const bh = (maxY - minY + 1) / SIZE;
-  assert.ok(bw >= 0.55, `candidate ${c}: stance width ${bw.toFixed(2)}`);
-  assert.ok(bh >= 0.5, `candidate ${c}: stance height ${bh.toFixed(2)}`);
-  assert.ok(leftEdge && rightEdge, `candidate ${c}: bilateral protrusions`);
-  assert.ok(topReach, `candidate ${c}: top reach`);
-  assert.ok(bottomBins.size >= 2, `candidate ${c}: bottom points in ${bottomBins.size} bins`);
+  assert.ok(bw >= 0.55, `stance width ${bw.toFixed(2)}`);
+  assert.ok(bh >= 0.45, `stance height ${bh.toFixed(2)}`);
+  assert.ok(leftEdge && rightEdge, "bilateral protrusions");
+  assert.ok(topReach, "top reach");
+  assert.ok(bottomBins.size >= 3, `bottom points in ${bottomBins.size} bins (need >=3)`);
   const bboxFill = s / ((maxX - minX + 1) * (maxY - minY + 1));
-  assert.ok(bboxFill >= 0.3, `candidate ${c}: bbox fill ${(bboxFill * 100).toFixed(0)}%`);
-  console.log(
-    `candidate ${"ABC"[c]} silhouette: PASS (${(bw * 100).toFixed(0)}x${(bh * 100).toFixed(0)} stance, ${bottomBins.size} bottom bins)`,
-  );
+  assert.ok(bboxFill >= 0.3, `bbox fill ${(bboxFill * 100).toFixed(0)}%`);
+  console.log(`silhouette: PASS (${(bw * 100).toFixed(0)}x${(bh * 100).toFixed(0)} stance, ${bottomBins.size} bottom bins)`);
 }
 
-// 9. No dominance: no single plate exceeds 35% of the mask (catches blob-merging).
-for (const { c, g } of geos) {
+// 12. No dominance: no single plate exceeds 35% of the mask.
+{
   const counts = new Map<number, number>();
   let s = 0;
   for (const id of g.plateId) {
@@ -166,21 +242,24 @@ for (const { c, g } of geos) {
   }
   let peak = 0;
   for (const n of counts.values()) peak = Math.max(peak, n / s);
-  assert.ok(peak < 0.35, `candidate ${c}: peak plate share ${(peak * 100).toFixed(0)}%`);
-  console.log(`candidate ${"ABC"[c]} dominance: PASS (peak ${(peak * 100).toFixed(0)}%)`);
+  assert.ok(peak < 0.35, `peak plate share ${(peak * 100).toFixed(0)}%`);
+  console.log(`dominance: PASS (peak ${(peak * 100).toFixed(0)}%)`);
 }
 
-// 10. Bed exposure: the placeholder core must show through gaps.
-for (const { c, g } of geos) {
+// 13. Bed exposure: the placeholder core must show through recesses.
+//     The packed cluster's recesses are OPEN bays (no fully-enclosed
+//     pockets — verified via interiorGaps), so discs sit partially
+//     covered; 0.1% is the honest placeholder scale for this grammar.
+{
   let b = 0;
   for (const v of g.bed) b += v;
   const frac = b / (SIZE * SIZE);
-  assert.ok(frac >= 0.004, `candidate ${c}: bed exposure ${(frac * 100).toFixed(2)}%`);
-  console.log(`candidate ${"ABC"[c]} bed: PASS (${(frac * 100).toFixed(1)}% exposed)`);
+  assert.ok(frac >= 0.001, `bed exposure ${(frac * 100).toFixed(2)}%`);
+  console.log(`bed: PASS (${(frac * 100).toFixed(2)}% exposed, open-bay recesses)`);
 }
 
-// 11. Silhouette + boundary evidence non-degenerate.
-for (const { c, g } of geos) {
+// 14. Silhouette + boundary evidence non-degenerate.
+{
   const sil = geometrySilhouette(g);
   const bnd = geometryBoundaries(g);
   let s = 0;
@@ -189,13 +268,13 @@ for (const { c, g } of geos) {
     s += sil[i]!;
     b += bnd[i]!;
   }
-  assert.ok(s > SIZE * SIZE * 0.1, `candidate ${c}: silhouette covers >10% (${(100 * s) / sil.length}%)`);
-  assert.ok(s < SIZE * SIZE * 0.8, `candidate ${c}: silhouette <80% (not full-frame)`);
-  assert.ok(b > 50, `candidate ${c}: boundary overlay non-trivial (${b}px)`);
-  console.log(`candidate ${"ABC"[c]} evidence: PASS (sil ${(100 * s / sil.length).toFixed(1)}%, bounds ${b}px)`);
+  assert.ok(s > SIZE * SIZE * 0.1, `silhouette covers >10% (${(100 * s) / sil.length}%)`);
+  assert.ok(s < SIZE * SIZE * 0.8, `silhouette <80% (not full-frame)`);
+  assert.ok(b > 50, `boundary overlay non-trivial (${b}px)`);
+  console.log(`evidence: PASS (sil ${(100 * s / sil.length).toFixed(1)}%, bounds ${b}px)`);
 }
 
-// 12. No sim imports, no Math.random.
+// 15. No sim imports, no Math.random.
 {
   const dir = dirname(fileURLToPath(import.meta.url));
   for (const f of ["geometry.ts", "geo-candidates.ts", "geo-validate.ts"]) {

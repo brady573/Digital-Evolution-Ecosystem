@@ -1,18 +1,27 @@
 /**
- * Plated geometry round (review §15): imbricated shell-cluster construction.
+ * Plated geometry round 3 (review §15 gate): packed-cluster construction.
  *
  * Plates are spine-driven teardrops: root point + axis angle + length +
- * convex body profile (narrow rounded root cap, widest at t≈0.3, tapered
- * distal tip with a small cap) + asymmetric shoulders. Reference-calibrated
- * aspect: len/(2*wid) in 2.0–2.4, tips radiating outward in a fan.
+ * convex body profile (rounded root cap, full domed body peaking near
+ * t≈0.3, soft blunt-teardrop tip) + asymmetric shoulders. Plates are broad
+ * and plump (aspect 1.4–1.9, reference-measured 1.3–1.7) — four rounds at
+ * 2.0–2.4 produced blades/fingers/stars, never packed shells.
  *
- * Paint order is strictly back-to-front by layer (0 back, 1 mid, 2 front).
- * A flat dark pearl-bed placeholder ellipse sits underneath and shows
- * through gaps (plateId -2) — topology only, no material.
+ * Grammar: one packed cluster, roots scattered through the body INTERIOR
+ * (never a common circle), paint order back-to-front by layer:
+ *   layer 0 — 2–3 rear plates, mostly hidden, crescents at the edges;
+ *   layer 1 — 2–3 broad dominant plates spanning the upper/center body,
+ *             2 side plates breaking the contour, 3–4 lower plates with
+ *             short downward tips;
+ *   layer 2 — 1 foreground hero diagonal.
+ * Many tips tuck UNDER neighbors (imbrication depth); roots are buried.
  *
- * Geometry-only: flat neutral fill (two plate values by depth + dark bed
- * placeholder), silhouette masks, plate-boundary overlays. No texture, no
- * specular, no metabolism, no glow. Deterministic integer hashing only.
+ * A flat dark pearl-bed placeholder (discs) sits underneath and shows
+ * through recesses (plateId -2) — topology only, no material.
+ *
+ * Geometry-only: flat neutral fill (two greys alternating by paint order
+ * + dark bed placeholder), silhouette masks, plate-boundary overlays. No
+ * texture, no specular, no metabolism, no glow. Deterministic hashing.
  */
 import { hash01 } from "./render.ts";
 
@@ -44,15 +53,14 @@ export interface BedDef {
 export const DEFAULT_BED: BedDef = { discs: [{ cx: 0.6, cy: 0.6, r: 0.1 }] };
 
 /**
- * Per-candidate bed discs, hand-placed in the actual inter-plate bays
- * (verified adjacency: discs touch plates on most of their perimeter).
- * Part of the arrangement; deterministic literals, same M2 inputs.
+ * Bed discs for the single packed-cluster layout, hand-placed in the actual
+ * inter-plate recesses (verified adjacency: discs touch plates on most of
+ * their perimeter). Part of the arrangement; deterministic literals, same
+ * M2 inputs. Flat dark placeholder only — no material.
  */
-export const BEDS: BedDef[] = [
-  { discs: [{ cx: 0.67, cy: 0.69, r: 0.08 }, { cx: 0.24, cy: 0.75, r: 0.07 }, { cx: 0.50, cy: 0.55, r: 0.04 }] },
-  { discs: [{ cx: 0.70, cy: 0.56, r: 0.08 }, { cx: 0.48, cy: 0.71, r: 0.07 }, { cx: 0.46, cy: 0.56, r: 0.04 }] },
-  { discs: [{ cx: 0.67, cy: 0.67, r: 0.08 }, { cx: 0.27, cy: 0.77, r: 0.07 }, { cx: 0.50, cy: 0.55, r: 0.04 }] },
-];
+export const BED: BedDef = {
+  discs: [{ cx: 0.58, cy: 0.74, r: 0.035 }, { cx: 0.30, cy: 0.66, r: 0.035 }],
+};
 
 function smoothstep(a: number, b: number, x: number): number {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
@@ -83,16 +91,15 @@ export function spineSamples(pl: ShellDef, n = 28): Array<{ x: number; y: number
 }
 
 /**
- * Half-width at spine parameter t: narrow rounded root cap, convex body
- * peaking near t≈0.3, tapering to a small (non-zero) tip cap. This is the
- * teardrop primitive — the old (1-t)^0.72 falloff peaked at the root and
- * produced blobs/disks.
+ * Half-width at spine parameter t: rounded root cap, full domed body
+ * peaking near t≈0.3, soft blunt-teardrop tip (only 10% taper past t=0.5).
+ * Broad and plump — the reference shells read domed, not leaf-like.
  */
 export function halfWidth(pl: ShellDef, t: number): number {
   const tc = Math.min(1, Math.max(0, t));
-  const body = 0.45 + 0.65 * Math.sin(Math.PI * Math.pow(tc, 0.55));
-  const tipTaper = 1 - 0.15 * smoothstep(0.55, 1, tc);
-  const rootCap = 0.55 + 0.45 * smoothstep(0, 0.18, tc);
+  const body = 0.42 + 0.68 * Math.sin(Math.PI * Math.pow(tc, 0.6));
+  const tipTaper = 1 - 0.10 * smoothstep(0.5, 1, tc);
+  const rootCap = 0.62 + 0.38 * smoothstep(0, 0.15, tc);
   return pl.wid * body * tipTaper * rootCap;
 }
 
@@ -311,77 +318,55 @@ export function geometryBoundaries(g: GeometryRender): Uint8Array {
 }
 
 /**
- * Deterministic plate-set generator: hand-authored shingle compositions per
- * candidate, same M2 phenotype inputs; only arrangement differs. Plates are
- * packed side-by-side (roots spread across the body, 2–3 direction
- * families) rather than fanned from one point — a radial fan of 2:1 plates
- * cannot have interstitial gaps by pure geometry. Entries are
- * [rx, ry, theta, len, aspect]; wid derives as len/(2*aspect) so the
- * reference-calibrated 2.0–2.4 aspect is explicit. Layers derive from
- * thirds of the table (back third painted first); the hero diagonal is
- * table-last so it reads foreground. A small seeded angle jitter keeps the
- * tables honest (no hand-tuned pixel fitting) while inputs stay fixed.
+ * Deterministic plate-set generator: ONE packed-cluster layout (§15 gate
+ * round 3 — single candidate until the silhouette is in-family). Same M2
+ * phenotype inputs every run; only seeded micro-jitter differs per seed.
+ *
+ * Grammar (roots scattered through the interior, never a common circle):
+ *   R1–R3  rear plates, mostly hidden, crescents at the edges;
+ *   D1–D3  broad dominant plates spanning the upper/center body;
+ *   S1–S2  side plates breaking the contour without pointing strongly out;
+ *   L1–L3  smaller lower plates with short downward tips;
+ *   D2     foreground hero diagonal (painted last).
+ * Entries are [rx, ry, theta, len, aspect, layer]; wid derives as
+ * len/(2*aspect) so the reference-calibrated 1.4–1.9 aspect is explicit.
+ * A small seeded angle jitter keeps the table honest (no hand-tuned pixel
+ * fitting) while inputs stay fixed.
  */
-export function layoutPlates(candidate: number, seed: number): ShellPlate[] {
-  // A: balanced rosette, 11 plates — closest to the reference.
-  // B: left-lean, 11 plates — max controlled asymmetry, sparser east.
-  // C: dense, 12 plates — smallest bays.
-  const tables: Array<Array<[number, number, number, number, number]>> = [
-    // A territorial rosette: pinwheel ring (shared +0.55 lean imbricates
-    // every plate under its angular neighbor) + top satellites + hero.
-    [
-      [0.382, 0.494, -2.15, 0.28, 1.6],
-      [0.452, 0.429, -1.40, 0.28, 1.6],
-      [0.547, 0.429, -0.65, 0.28, 1.6],
-      [0.617, 0.493, 0.10, 0.28, 1.6],
-      [0.624, 0.588, 0.85, 0.28, 1.6],
-      [0.565, 0.663, 1.60, 0.28, 1.6],
-      [0.470, 0.677, 2.35, 0.28, 1.6],
-      [0.392, 0.623, 3.10, 0.28, 1.6],
-      [0.420, 0.380, -1.90, 0.24, 1.6],
-      [0.600, 0.360, -1.20, 0.24, 1.6],
-      [0.480, 0.560, -0.45, 0.36, 1.6],
-    ],
-    // B left-lean rosette: ring center west, extra west satellite, no east plate.
-    [
-      [0.342, 0.504, -2.15, 0.28, 1.6],
-      [0.412, 0.439, -1.40, 0.28, 1.6],
-      [0.507, 0.439, -0.65, 0.28, 1.6],
-      [0.577, 0.503, 0.10, 0.28, 1.6],
-      [0.525, 0.673, 1.60, 0.28, 1.6],
-      [0.430, 0.687, 2.35, 0.28, 1.6],
-      [0.352, 0.633, 3.10, 0.28, 1.6],
-      [0.240, 0.560, 2.95, 0.22, 1.6],
-      [0.380, 0.380, -1.95, 0.24, 1.6],
-      [0.560, 0.370, -1.25, 0.24, 1.6],
-      [0.440, 0.570, -0.50, 0.36, 1.6],
-    ],
-    // C dense rosette: tighter ring, 9 plates + satellites + hero.
-    [
-      [0.387, 0.510, -2.25, 0.27, 1.6],
-      [0.432, 0.451, -1.62, 0.27, 1.6],
-      [0.504, 0.430, -0.99, 0.27, 1.6],
-      [0.574, 0.455, -0.36, 0.27, 1.6],
-      [0.615, 0.517, 0.27, 0.27, 1.6],
-      [0.613, 0.591, 0.90, 0.27, 1.6],
-      [0.567, 0.650, 1.53, 0.27, 1.6],
-      [0.495, 0.670, 2.16, 0.27, 1.6],
-      [0.425, 0.644, 2.79, 0.27, 1.6],
-      [0.420, 0.380, -1.90, 0.23, 1.6],
-      [0.600, 0.370, -1.20, 0.23, 1.6],
-      [0.490, 0.560, -0.50, 0.34, 1.6],
-    ],
+export function layoutPlates(seed: number): ShellPlate[] {
+  // Paint order within a layer follows table order: side/lower plates
+  // first, then the dominant plates that tuck their tips.
+  const table: Array<[number, number, number, number, number, number]> = [
+    // R1 rear upper-left crescent, tip tucked under D1.
+    [0.34, 0.38, -0.10, 0.24, 1.6, 0],
+    // R2 rear right vertical crescent, tip out at top-right.
+    [0.64, 0.52, -1.35, 0.22, 1.5, 0],
+    // R3 rear lower-left, tip tucked under L1.
+    [0.48, 0.60, 2.20, 0.22, 1.7, 0],
+    // S1 side left, sliver breaks the left contour, tip tucked under D3.
+    [0.46, 0.46, 2.95, 0.30, 1.5, 1],
+    // S2 side right, sliver breaks the right contour.
+    [0.54, 0.54, 0.75, 0.30, 1.5, 1],
+    // L1 lower, short downward tip.
+    [0.44, 0.58, 1.75, 0.22, 1.6, 1],
+    // L2 lower, short downward tip.
+    [0.52, 0.60, 1.50, 0.26, 1.6, 1],
+    // L3 lower, short downward tip.
+    [0.60, 0.58, 1.30, 0.24, 1.6, 1],
+    // D1 dominant top broad, spans the upper body (paints after S2).
+    [0.38, 0.40, 0.25, 0.44, 1.45, 1],
+    // D3 dominant left broad (paints after S1, tucks its tip).
+    [0.52, 0.48, 2.75, 0.38, 1.45, 1],
+    // D2 dominant center diagonal, foreground hero.
+    [0.46, 0.46, 0.62, 0.38, 1.75, 2],
   ];
-  const table = tables[candidate]!;
-  const n = table.length;
-  return table.map(([rx, ry, theta, len, aspect], i) => {
-    const j = (hash01(seed, candidate, i, 1) - 0.5) * 0.1;
+  return table.map(([rx, ry, theta, len, aspect, layer], i) => {
+    const j = (hash01(seed, 0, i, 1) - 0.5) * 0.1;
     return {
       rx, ry, theta: theta + j, len,
       wid: len / (2 * aspect),
-      asym: hash01(seed, candidate, i, 2) * 1.6 - 0.8,
-      layer: i < n / 3 ? 0 : i < (2 * n) / 3 ? 1 : 2,
-      index: i,
+      asym: hash01(seed, 0, i, 2) * 1.6 - 0.8,
+      layer, index: i,
     };
   });
 }
