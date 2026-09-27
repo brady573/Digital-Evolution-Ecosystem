@@ -47,9 +47,16 @@ button,input{outline:none}
 /* surface: persistent world hero + investigation rail */
 .surface{min-width:0;min-height:0;padding:18px;overflow:auto;display:grid;grid-template-columns:minmax(0,2fr) minmax(280px,1fr);gap:18px;align-items:start}
 .world-column{display:grid;gap:10px;min-width:0}
-.lensbar{display:flex;gap:7px;flex-wrap:wrap}
+.lensbar{display:flex;gap:7px;flex-wrap:wrap;align-items:center}
+.lens-active{display:none}
+.lens-options{display:contents}
 .lensbar select,.controls select{background:var(--panel2);color:#dcece4;border:1px solid var(--line2);border-radius:8px;padding:8px}
 .lensnote{flex-basis:100%;font-size:.74rem;line-height:1.45;color:#9fb8ad;padding:0 2px}
+/* Control grouping. On desktop the wrappers are transparent to layout, so the
+   existing single-row control bar is unchanged, and the progressive-disclosure
+   affordance is not needed (everything is already on one row). */
+.control-row{display:contents}
+.control-more{display:none}
 .causal-note{font-size:.78rem;line-height:1.5;color:#a8c2b6;border-left:2px solid var(--line2);padding-left:9px;margin:9px 0}
 .causal-note strong{color:#dcece4}
 .investigation-rail{min-width:0;display:grid;gap:18px;align-content:start}
@@ -181,37 +188,85 @@ button,input{outline:none}
 /* responsive */
 @media (max-width:900px){
   html,body{overflow-x:hidden}
-  .app-shell{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr) auto;height:100dvh;padding-bottom:76px}
-  .topbar{padding:calc(10px + env(safe-area-inset-top)) 12px 10px;gap:12px;position:sticky;top:0;z-index:30}
+  .app-shell{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr) auto;height:100dvh;padding-bottom:60px}
+  .topbar{padding:calc(6px + env(safe-area-inset-top)) 12px 6px;gap:10px;position:sticky;top:0;z-index:30}
   .world-name{display:none}
-  .brand-cell .eyebrow{font-size:.6rem}
-  .hud-cell{padding:0 10px}
-  .hud-value{font-size:12px}
-  .hud-label{font-size:9px}
-  .hud-settings{padding-left:10px;font-size:.8rem}
+  .brand-cell .eyebrow{font-size:.56rem}
+  .hud-cell{padding:0 8px}
+  .hud-value{font-size:11px}
+  .hud-label{font-size:8px}
+  .hud-sub{display:none}
+  .hud-settings{padding-left:8px;font-size:.76rem}
   .rail{display:none}
   .surface{padding:10px 10px 0;grid-template-columns:minmax(0,1fr)}
   .world-column{position:sticky;top:0;z-index:1;background:var(--bg);padding-bottom:10px}
   .world-wrap{position:relative;z-index:auto;background:transparent}
-  .lensbar{position:absolute;top:8px;left:10px;right:10px;z-index:6;background:rgba(6,13,20,.72);backdrop-filter:blur(8px);border:1px solid var(--line);border-radius:12px;padding:6px}
-  .world-overlay{top:58px;right:8px}
+  /* Lens control: progressive disclosure. Collapsed, it is one short chip
+     naming the active lens. It expands to the full set only when asked, and
+     a secondary selector appears only for the lens that has one. */
+  .lensbar{position:absolute;top:8px;left:10px;right:10px;z-index:6;background:rgba(6,13,20,.72);backdrop-filter:blur(8px);border:1px solid var(--line);border-radius:10px;padding:4px}
+  .lens-active{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;min-height:30px;font-size:.76rem;border-radius:8px;background:transparent;border:1px solid var(--line2);color:#cde0d7}
+  .lens-caret{font-size:.7rem;opacity:.75}
+  .lens-options{display:none;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;margin-top:4px}
+  .lensbar.open .lens-options{display:grid}
+  .lensbar.open .lens-active{margin-bottom:2px}
+  .lens-options button{padding:8px 4px;font-size:.78rem;min-height:38px;letter-spacing:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .lensbar select,.lensnote{grid-column:1/-1;margin-top:4px}
+  .lensbar select{width:100%;font-size:.76rem;min-height:36px}
+  .lensnote{font-size:.66rem;line-height:1.35;padding:2px 4px}
+  /* Overlay offset reserves the expanded lens panel so the minimap and zoom
+     controls can never sit under it, whichever lens is active. */
+  .world-overlay{top:48px;right:8px}
   .minimap-frame,.zoom-controls{transform:scale(.88);transform-origin:top right}
   .world-canvas{width:100%}
-  .lensbar button{padding:6px 10px;font-size:.8rem}
   .investigation-rail{position:relative;z-index:10}
   .inspector.sheet{border-radius:18px 18px 14px 14px;box-shadow:0 -12px 40px rgba(0,0,0,.45)}
   .sheet-toggle{width:100%;margin-bottom:6px}
   .world-canvas{width:100%}
   .inspector{display:block}
-  .controls{overflow:auto;white-space:nowrap;scrollbar-width:thin}
+  /* Two explicit rows instead of one scrolling strip: every core action is
+     reachable without an unindicated horizontal scroll (AC1/AC2), and nothing
+     disappears because the viewport is narrow. */
+  .controls{display:grid;gap:6px;overflow:visible;white-space:normal;padding:6px 10px calc(6px + env(safe-area-inset-bottom))}
+  .control-row{display:grid;gap:6px}
+  .control-row-primary{grid-template-columns:auto minmax(72px,auto) minmax(0,1fr) auto}
+  .controls button,.controls select{min-height:44px;padding:8px 10px;font-size:.82rem;white-space:normal}
+  .control-row-primary button:nth-child(3){font-weight:600;font-size:.72rem;padding:8px 6px}
+  /* Secondary actions: an explicit menu on the phone, nothing on desktop.
+     The More affordance is always visible — it is the way in. Only the
+     secondary row itself is conditional. */
+  .control-more{display:inline-flex;align-items:center;gap:4px}
+  .control-row-secondary{display:none}
+  .controls.more-open .control-row-secondary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
   .status{display:none}
-  .mobile-nav{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));position:fixed;left:0;right:0;bottom:0;min-height:76px;background:rgba(6,13,20,.96);backdrop-filter:blur(14px);border-top:1px solid #173040;z-index:40;padding:8px 10px calc(8px + env(safe-area-inset-bottom))}
-  .mnav-btn{border:0;background:transparent;color:#90a4b7;display:grid;place-items:center;align-content:center;gap:4px;border-radius:12px;font-size:10px;min-height:56px}
-  .mnav-btn span:first-child{font-size:22px;line-height:1}
+  .mobile-nav{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));position:fixed;left:0;right:0;bottom:0;min-height:58px;background:rgba(6,13,20,.96);backdrop-filter:blur(14px);border-top:1px solid #173040;z-index:40;padding:4px 10px calc(4px + env(safe-area-inset-bottom))}
+  .mnav-btn{border:0;background:transparent;color:#90a4b7;display:grid;place-items:center;align-content:center;gap:2px;border-radius:10px;font-size:9px;min-height:46px}
+  .mnav-btn span:first-child{font-size:18px;line-height:1}
   .mnav-btn.active{color:#eff9fb;background:#112431}
   .mnav-btn.active span:first-child{color:var(--teal)}
   .panel-head{align-items:flex-start}
   .compare{grid-template-columns:1fr}
+  /* Pending decision: the sheet stays a single scroll region so no scientific
+     text is ever truncated, while the FIRST actionable choice is sticky at the
+     top of that region — so the first action is reachable at any prompt length
+     without removing context (AC5). Capped well below full height so the
+     living world stays present behind it as context (AC6). */
+  .decision-sheet{max-height:46dvh;padding:12px}
+  .decision-sheet h2{font-size:.95rem;line-height:1.3}
+  .decision-tick{font-size:.7rem}
+  .decision-choices{scrollbar-width:thin;scrollbar-color:#2c4a5c transparent}
+  .decision-choices::-webkit-scrollbar{width:6px}
+  .decision-choices::-webkit-scrollbar-thumb{background:#2c4a5c;border-radius:3px}
+  .decision-choices button{padding:10px 11px;min-height:44px}
+  .decision-choices button strong{font-size:.88rem}
+  .decision-choices button span{font-size:.74rem;line-height:1.4}
+  /* The first choice never scrolls out of reach. */
+  .decision-choices button:first-child{position:sticky;top:0;z-index:2;background:#122535;
+    box-shadow:0 6px 14px rgba(4,10,16,.6),0 -1px 0 rgba(71,221,212,.35)}
+  /* Unmistakable scroll affordance: a fade at the foot of the sheet. */
+  .decision-sheet::after{content:"";position:absolute;left:1px;right:1px;bottom:1px;height:26px;pointer-events:none;
+    background:linear-gradient(to top,rgba(8,18,26,.96),rgba(8,18,26,0));border-radius:0 0 15px 15px}
+  .decision-foot{font-size:.7rem}
 }
 
 /* M4B hero: on the World surface the living world fills the stage and the
@@ -222,11 +277,24 @@ button,input{outline:none}
   .surface-world .world-column{position:absolute;inset:0;z-index:1;background:transparent;padding:0}
   .surface-world .world-wrap{position:absolute;inset:0}
   .surface-world .world-canvas{width:100%;height:100%;aspect-ratio:auto;border:0;border-radius:0}
-  .surface-world .investigation-rail{position:absolute;left:10px;right:10px;bottom:10px;z-index:10}
-  .surface-world .inspector.sheet{background:rgba(8,17,25,.86);backdrop-filter:blur(14px);max-height:44vh;max-height:44dvh;overflow:auto}
-  /* Collapsed sheet is a compact floating bar. (A percentage max-height here
-     resolves against the auto-height rail and clamps to a sliver, so the
-     collapsed state uses no max-height at all.) */
-  .surface-world .inspector.sheet.collapsed{max-height:none;overflow:visible;padding:8px 10px}
-  .surface-world .inspector.sheet.collapsed .sheet-toggle{margin:0}
+  .surface-world .investigation-rail{position:absolute;left:10px;right:auto;bottom:10px;z-index:10;max-width:min(64vw,320px)}
+  .surface-world .inspector.sheet{background:rgba(8,17,25,.86);backdrop-filter:blur(14px);max-height:38dvh;overflow:auto}
+  /* Collapsed state is a small contextual chip, never a full-width bar. (A
+     percentage max-height resolves against the auto-height rail and clamps to
+     a sliver, so the collapsed state uses no max-height at all.) */
+  .surface-world .inspector.sheet.collapsed{max-height:none;overflow:visible;padding:0;background:none;border:0}
+  .surface-world .inspector.sheet.collapsed .sheet-toggle{margin:0;width:auto;min-height:40px;padding:8px 12px;font-size:.78rem;background:rgba(8,17,25,.86);backdrop-filter:blur(10px);border:1px solid var(--line);border-radius:20px}
+}
+
+/* Phone widths: five lens labels will not fit in one row at a comfortable
+   type size, so the lens control wraps to two rows of three. Two 40px rows
+   cost about a tenth of the screen, which is a much better trade than
+   shrinking the labels to an unreadable size — and the overlay offset below
+   reserves exactly that height so the minimap and zoom controls stay clear.
+   Five readable labels beat five clipped ones. */
+@media (max-width:480px){
+  .lensbar{grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;padding:6px}
+  .lensbar button{font-size:.78rem;padding:8px 4px;letter-spacing:0}
+  .lensbar select,.lensnote{grid-column:1/-1}
+  .world-overlay{top:146px}
 }

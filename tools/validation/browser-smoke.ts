@@ -163,6 +163,14 @@ async function main(){
     assert.equal(await tick(page),saved,"IndexedDB checkpoint restores exact tick");
 
     // World view: minimap + zoom controls (uniform zoom into the same world).
+    // A pending decision yields the overlay by design (Lane A: secondary World
+    // chrome may hide to prevent occlusion), so clear any decision first —
+    // this section is about the world-view chrome, not the decision state.
+    const decisionSheetOnMain=page.getByTestId("decision-sheet");
+    if(await decisionSheetOnMain.count()){
+      await decisionSheetOnMain.getByText("Keep watching").click();
+      await decisionSheetOnMain.waitFor({state:"detached",timeout:15_000});
+    }
     await page.getByLabel("World minimap").waitFor();
     const minimap=page.getByTestId("world-minimap");
     const worldBox=await page.getByLabel("Evolution world").boundingBox();
@@ -261,7 +269,10 @@ async function main(){
     const touchPage=await touchCtx.newPage();
     await touchPage.goto(baseUrl,{waitUntil:"networkidle"});
     await touchPage.getByLabel("Evolution world").waitFor();
-    await touchPage.getByText("Show details").waitFor();
+    // The inspector handle is progressive disclosure: it appears only once
+    // something is selected, so it must be absent here rather than present.
+    assert.equal(await touchPage.locator(".sheet-toggle").count(),0,
+      "no inspector handle is shown until something is selected");
     const touchAction=await touchPage.evaluate(`getComputedStyle(document.querySelector('canvas[aria-label="Evolution world"]')).touchAction`);
     assert.equal(touchAction,"none","world canvas owns touch gestures (touch-action:none)");
     const tickBeforeTouch=await tick(touchPage);
@@ -387,7 +398,93 @@ async function main(){
     await mobile.getByRole("button",{name:"History"}).click();
     await mobile.getByRole("heading",{name:"History"}).waitFor();
 
-    await runLandscapeChecks(context);
+    // Toroidal pan regression: the substrate is one world period repeated
+    // across the canvas, and panning must not blank it. Previously the
+    // destination rect was derived from the wrapped world->screen mapping,
+    // which collapsed to zero width for every camera except the exact world
+    // centre - so the landscape rendered only un-panned and vanished on a
+    // device after a pan.
+    //
+    // This must prove BOTH halves of that failure, or it proves nothing:
+    //   1. a real pan occurred - the camera moved by a meaningful toroidal
+    //      distance, and
+    //   2. the substrate survived it.
+    // A coverage-only check passes trivially at the default camera, which is
+    // the one position that always worked, so movement must be asserted
+    // rather than assumed.
+    const panPage=await context.newPage();
+    await panPage.goto(baseUrl,{waitUntil:"networkidle"});
+    await panPage.getByLabel("Evolution world").waitFor();
+    // Freeze the world: a pending decision hard-pauses time and hides the
+    // minimap that publishes the camera, so a running world would make this
+    // check depend on simulation timing.
+    const pauseBtn=panPage.getByRole("button",{name:"Pause"});
+    if(await pauseBtn.count())await pauseBtn.click();
+    const panWorld=panPage.getByLabel("Evolution world");
+    const PAN_EXTENT=600;
+    const panWrap=(a:number,b:number)=>{let d=(a-b)%PAN_EXTENT;if(d>PAN_EXTENT/2)d-=PAN_EXTENT;else if(d<-PAN_EXTENT/2)d+=PAN_EXTENT;return d};
+    const readCam=async()=>{
+      const el=panPage.getByTestId("world-minimap");
+      await el.waitFor({state:"attached"});
+      return {
+        x:Number(await el.getAttribute("data-cam-x")),
+        y:Number(await el.getAttribute("data-cam-y")),
+      };
+    };
+    const camDist=(a:{x:number;y:number},b:{x:number;y:number})=>
+      Math.hypot(panWrap(a.x,b.x),panWrap(a.y,b.y));
+    // A genuine drag of a few percent of the frame moves the camera tens of
+    // world units, so 20 sits far above a no-op and far below a real pan.
+    const MEANINGFUL=20;
+    const fieldInk=async()=>await panWorld.evaluate((el:HTMLCanvasElement)=>{
+      const ctx=el.getContext("2d");if(!ctx)return 0;
+      const d=ctx.getImageData(0,0,el.width,el.height).data;
+      // Count substrate pixels: the field is the bulk of the frame, and
+      // organisms are a small minority, so a blank canvas reads near zero.
+      let field=0;
+      for(let i=0;i<d.length;i+=4){
+        const lum=0.2126*d[i]!+0.7152*d[i+1]!+0.0722*d[i+2]!;
+        if(lum>10&&lum<150)field++;
+      }
+      return field/(d.length/4);
+    });
+    const panBox=await panWorld.boundingBox();
+    assert.ok(panBox,"pan canvas measurable");
+    // Start at the reset camera, and require that it actually is the reset
+    // camera. That is the single position the wrapped mapping got right, so
+    // departing from it is exactly the path that used to fail.
+    const camStart=await readCam();
+    assert.ok(Number.isFinite(camStart.x)&&Math.abs(panWrap(camStart.x,PAN_EXTENT/2))<1,
+      `pan test starts at the world centre, the one position that used to work (cam ${camStart.x.toFixed(1)},${camStart.y.toFixed(1)})`);
+    const inkAtRest=await fieldInk();
+    assert.ok(inkAtRest>0.5,`substrate renders at rest (${(inkAtRest*100).toFixed(0)}% field)`);
+    let camPrev=camStart;
+    let departed=false;
+    for(const [dx,dy] of [[.42,.5],[.5,.42],[.25,.3],[.6,.62]]){
+      await panPage.mouse.move(panBox!.x+panBox!.width/2,panBox!.y+panBox!.height/2);
+      await panPage.mouse.down();
+      await panPage.mouse.move(panBox!.x+panBox!.width*dx,panBox!.y+panBox!.height*dy,{steps:6});
+      await panPage.mouse.up();
+      await panPage.waitForTimeout(250);
+      // Half one: the camera really moved, by a meaningful toroidal distance
+      // from where it stood before this drag.
+      const camNow=await readCam();
+      const moved=camDist(camPrev,camNow);
+      assert.ok(moved>MEANINGFUL,
+        `drag to (${dx},${dy}) moved the camera ${moved.toFixed(0)} world units (cam ${camPrev.x.toFixed(0)},${camPrev.y.toFixed(0)} -> ${camNow.x.toFixed(0)},${camNow.y.toFixed(0)}), so this is a pan and not a no-op`);
+      camPrev=camNow;
+      if(camDist(camStart,camNow)>MEANINGFUL)departed=true;
+      // Half two: the landscape survived the pan.
+      const after=await fieldInk();
+      assert.ok(after>0.5,`substrate still renders after panning to (${dx},${dy}) (${(after*100).toFixed(0)}% field)`);
+    }
+    // And it ended up away from the one position the old code drew correctly.
+    assert.ok(departed,
+      `camera departed the world centre (start ${camStart.x.toFixed(0)},${camStart.y.toFixed(0)} -> ${camPrev.x.toFixed(0)},${camPrev.y.toFixed(0)})`);
+    await panPage.close();
+    console.log("toroidal pan moves the camera and keeps the substrate visible: PASS");
+
+  await runLandscapeChecks(context);
     console.log("browser smoke: PASS");
   }finally{
     await browser.close();
@@ -500,7 +597,10 @@ async function runLandscapeChecks(context:import("playwright").BrowserContext){
   assert.ok(mBox&&mBox.height>=mvp.height*0.5,"landscape dominates the phone viewport");
   const mInk=await ink(mWorld);
   assert.ok(mInk&&mInk.sd>3,`phone landscape keeps structure (sd ${mInk?.sd.toFixed(2)})`);
-  await mobile.getByRole("button",{name:"Waste"}).click();
+  // The lens set is collapsed behind the active-lens chip on the phone.
+  await mobile.locator(".lens-active").click();
+  await mobile.waitForTimeout(200);
+  await mobile.getByRole("button",{name:"Waste",exact:true}).click();
   await mobile.waitForTimeout(250);
   const mWaste=await ink(mWorld);
   assert.ok(mWaste&&mWaste.lit>=0,"waste overlay renders on the phone viewport");

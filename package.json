@@ -25,6 +25,7 @@
     "test:phenotype": "tsx tools/validation/phenotype.ts && tsx tools/validation/phenotype-world.ts",
     "test:landscape": "tsx tools/validation/landscape.ts",
     "test:visual": "tsx tools/validation/landscape-capture.ts",
+    "test:mobile-ui": "tsx tools/validation/mobile-ui.ts",
     "test:time-controls": "tsx tools/validation/time-controls.ts"
   },
   "devDependencies": {

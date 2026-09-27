@@ -19,6 +19,49 @@ import type { RenderResourceField, RenderWasteField } from "@digital-evolution/c
  *   a deterministic micro-pattern density all co-vary (see `hatchDensity`).
  */
 
+/**
+ * Tile layout for the wrapped substrate draw.
+ *
+ * The substrate is one world period (a 60x60 buffer) that must be repeated
+ * across the whole visible rectangle. Deriving the destination rectangle from
+ * a *wrapped* world→screen mapping is wrong: `wrapDelta(0, cam)` and
+ * `wrapDelta(extent, cam)` are equal for every camera except the exact centre,
+ * so `toX(0)` and `toX(extent)` collapse onto the same point and the drawn
+ * rect has zero width. That made the landscape appear only at the default
+ * camera and vanish as soon as the world was panned.
+ *
+ * So: compute the un-wrapped position of world origin, then repeat the period
+ * over the integer tile range that covers the canvas. Exact, position
+ * independent, and cheap (a handful of drawImage calls).
+ */
+export function landscapeTileLayout(
+  camX: number,
+  camY: number,
+  scale: number,
+  viewW: number,
+  viewH: number,
+  extent: number,
+): {
+  baseX: number; baseY: number;
+  periodX: number; periodY: number;
+  iStart: number; iEnd: number; jStart: number; jEnd: number;
+  count: number;
+} {
+  const periodX = extent * scale;
+  const periodY = extent * scale;
+  // Un-wrapped: where world 0 lands, relative to the canvas centre.
+  const baseX = viewW / 2 - camX * scale;
+  const baseY = viewH / 2 - camY * scale;
+  const iStart = Math.floor((0 - baseX) / periodX);
+  const iEnd = Math.ceil((viewW - baseX) / periodX) - 1;
+  const jStart = Math.floor((0 - baseY) / periodY);
+  const jEnd = Math.ceil((viewH - baseY) / periodY) - 1;
+  return {
+    baseX, baseY, periodX, periodY, iStart, iEnd, jStart, jEnd,
+    count: (iEnd - iStart + 1) * (jEnd - jStart + 1),
+  };
+}
+
 export type Ecological = "normal" | "nutrients" | "waste";
 
 /** World is a 600x600 torus at a 60x60 substance grid (engine constants). */
