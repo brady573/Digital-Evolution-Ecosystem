@@ -1,4 +1,7 @@
 import type {
+  AftermathBaseline,
+  AftermathScalars,
+  AftermathState,
   CatalystContext,
   CatalystDiagnosis,
   DecisionCheckpoint,
@@ -14,6 +17,7 @@ import type {
   UniverseCheckpoint,
   UniverseCheckpointV02,
 } from "@digital-evolution/contracts";
+import { AFTERMATH_COMPARABLES } from "@digital-evolution/contracts";
 import {
   ENGINE_VERSION,
   EVENT_STRIDE,
@@ -52,11 +56,58 @@ function analysisFrame(sim:any){
   return sim.observerSnapshot(sim.metrics(),sim.last);
 }
 
+/**
+ * Retain the moment-of-intervention read model an aftermath compares against.
+ *
+ * Built from the same authorities that feed analysis: the resource/waste
+ * fields straight off the simulation, and the scalars off the observation
+ * frame, filtered to exactly the keys AFTERMATH_COMPARABLES declares. A
+ * scalar with no declared descriptor is not retained, so the comparison
+ * surface cannot grow past what the contract can label and explain.
+ *
+ * Called at the resolution tick BEFORE the intervention is applied, and
+ * resolution advances zero ticks, so `tick` here is the resolution tick and
+ * the instant the effect landed. It is a copy: nothing retained is ever
+ * written back, and the simulation keeps sole authority over these fields.
+ */
+function aftermathBaselineFor(sim:any):AftermathBaseline{
+  const scalars=aftermathScalarsFor(sim);
+  return {
+    tick:sim.t,
+    resources:{
+      gridSize:sim.resources.n,
+      stock:sim.resources.stock.map((row:ArrayLike<number>)=>Array.from(row)),
+    },
+    waste:{
+      gridSize:sim.resources.waste.n,
+      stock:Array.from(sim.resources.waste.stock),
+    },
+    scalars:scalars.scalars,
+  };
+}
+
+/**
+ * Derive the comparable scalars off the observation frame. These values are
+ * computed inside observerSnapshot (population roles, clade tallies, waste
+ * exposure), so they are NOT present in the raw metrics payload - which is why
+ * "now" has to come from here rather than from the snapshot's metrics, or the
+ * comparison would silently be reading different quantities.
+ */
+function aftermathScalarsFor(sim:any):AftermathScalars{
+  const frame=analysisFrame(sim);
+  const scalars:Record<string,number>={};
+  for(const descriptor of AFTERMATH_COMPARABLES){
+    const value=(frame as any)[descriptor.key];
+    if(typeof value==="number"&&Number.isFinite(value))scalars[descriptor.key]=value;
+  }
+  return {tick:sim.t,scalars};
+}
+
 function observeIfDue(sim:any,observer:EcologyObserver){
   if(sim.t>0&&sim.t%EVENT_STRIDE===0)observer.observe(analysisFrame(sim));
 }
 
-function renderSnapshot(sim:any,analysis:EcologyObserver,control:any|null,pendingDecision:PendingDecision|null,resolvedDecisions:readonly DecisionResolution[],worldId:number):RenderSnapshot{
+function renderSnapshot(sim:any,analysis:EcologyObserver,control:any|null,pendingDecision:PendingDecision|null,resolvedDecisions:readonly DecisionResolution[],worldId:number,aftermath:AftermathState|null):RenderSnapshot{
   const metrics=sim.metrics();
   return{
     tick:sim.t,
@@ -88,6 +139,11 @@ function renderSnapshot(sim:any,analysis:EcologyObserver,control:any|null,pendin
     events:sim.ev.map((e:any)=>({tick:e.tick,label:e.label})),
     pendingDecision,
     resolvedDecisions,
+    aftermath,
+    // Only while the impact state is on screen: deriving these costs a pass over
+    // the population, so the ordinary render path - and every later observation
+    // phase - must not pay for a comparison nobody is viewing.
+    aftermathNow:aftermath?.phase==="impact"?aftermathScalarsFor(sim):null,
     control:control?{tick:control.t,population:control.o.length,metrics:control.metrics()}:null,
   };
 }
@@ -147,12 +203,18 @@ export class UniverseSession {
   #lastMajorCatalystTick:number|null=null;
   /** Number of analysis records already evaluated for decisions. */
   #observedThrough=0;
+  /** M3 aftermath under observation, entered at decision resolution.
+   *  Evidence/presentation state, not biology. NOT checkpointed: like
+   *  phenotype anchors it is saved alongside the checkpoint, never inside it,
+   *  so a universe restores identically with or without it. */
+  #aftermath:AftermathState|null=null;
 
   get simulation(){return this.#experiment}
   get analysis(){return this.#analysis}
   get control(){return this.#control}
   get pendingDecision(){return this.#pendingDecision}
   get decisionResolutions(){return this.#decisionResolutions}
+  get aftermath(){return this.#aftermath}
 
   /**
    * Presentation-level world identity: a monotonic, process-unique id handed
@@ -173,6 +235,7 @@ export class UniverseSession {
     this.#controlAnalysis=null;
     this.#pendingDecision=null;
     this.#decisionResolutions=[];
+    this.#aftermath=null;
     this.#policyVersion=DECISION_POLICY_VERSION;
     this.#catalystPolicyVersion=CATALYST_POLICY_VERSION;
     this.#lastDecisionTick=0;
@@ -291,12 +354,46 @@ export class UniverseSession {
     }
   }
 
+  /**
+   * The hard tick gate for a PENDING DECISION. While one is pending no tick may
+   * execute through any command path: the UI frame loop cannot push through it,
+   * and an in-flight multi-tick request stops at the trigger tick. Play cannot
+   * bypass it.
+   *
+   * An aftermath impact state is a weaker, different kind of pause, and the
+   * distinction matters. Nothing advances on its own while an impact state is
+   * open - there is no timer, no scheduler tick, no background path. But an
+   * EXPLICIT command from the player is a legitimate release, which is what the
+   * handoff specifies (AC4: paused until Resume *or another explicit supported
+   * advance command*). So an explicit advance releases the pause and moves on.
+   * Refusing it would be stricter than specified and would contradict the
+   * long-standing A14 contract that an explicit advance resumes time.
+   */
+  #impactPaused(){
+    return this.#pendingDecision!==null;
+  }
+
+  /**
+   * Release an unacknowledged impact state. Transitions to "observation" rather
+   * than discarding the aftermath: the record and its retained baseline survive,
+   * so nothing is lost by moving on. A later slice presents "observation" as the
+   * compact strip; until then the impact sheet simply stops being the active
+   * state, which is what keeps it from ever showing a stale comparison.
+   */
+  #releaseImpact(){
+    if(this.#aftermath?.phase!=="impact")return;
+    this.#aftermath={...this.#aftermath,phase:"observation"};
+  }
+
   advance(ticks:number){
     if(!this.#experiment)throw new Error("Universe has not been created");
-    // A pending decision is a hard gate: the UI frame loop cannot push ticks
-    // through it, and an in-flight multi-tick request stops at the trigger tick.
-    if(this.#pendingDecision)return this.snapshot();
+    // A pending decision is a hard gate the UI frame loop cannot push through.
+    if(this.#impactPaused())return this.snapshot();
     const count=Math.max(0,Math.floor(ticks));
+    // An explicit advance releases an unacknowledged impact state. A zero-tick
+    // request stays a pure query: advance(0) must not silently dismiss a sheet
+    // the player is reading.
+    if(count>0)this.#releaseImpact();
     for(let i=0;i<count;i++){
       this.#stepOnce();
       // Observed events have priority: evaluate them first at every step, and
@@ -309,7 +406,8 @@ export class UniverseSession {
 
   runToNextEvent(maxTicks=100_000){
     if(!this.#experiment)throw new Error("Universe has not been created");
-    if(this.#pendingDecision)return this.snapshot();
+    if(this.#impactPaused())return this.snapshot();
+    this.#releaseImpact();
     const startRecords=this.#analysis.records.length;
     const startEvents=this.#experiment.ev.length;
     // Render only once at the end: per-tick snapshots made long scans hang.
@@ -358,6 +456,11 @@ export class UniverseSession {
     // second hit. Internal resolution uses applyIntervention directly and is
     // unaffected (it clears the gate itself).
     if(this.#pendingDecision)throw new Error("A decision is pending: resolve it before experimenting");
+    // An explicit world-changing command releases an unacknowledged impact
+    // state, exactly as an explicit advance does. The uniform rule: nothing
+    // automatic releases the pause, and any deliberate command from the player
+    // does.
+    this.#releaseImpact();
     if(!this.#control)this.createControlFork();
     const spec:InterventionSpec=intervention==="global"
       ?{schemaVersion:1,kind:"nutrient_disturbance",mode:"global_crash"}
@@ -402,6 +505,23 @@ export class UniverseSession {
       policyVersion:pending.policyVersion,
     };
     this.#decisionResolutions.push(resolution);
+    // Retain the comparison baseline BEFORE the effect lands, at the same
+    // tick: resolution advances zero ticks, so this is the moment of the
+    // intervention, not an earlier one. A new resolution supersedes any
+    // aftermath still under observation; the prior one is already durable in
+    // #decisionResolutions, which is what History reads.
+    this.#aftermath={
+      schemaVersion:1,
+      opportunityId:pending.opportunityId,
+      commandId:resolution.commandId,
+      resolutionTick:this.#experiment.t,
+      phase:"impact",
+      choiceTitle:choice.title,
+      directEffectDescription:choice.directEffectDescription,
+      intervention:choice.intervention,
+      source:resolution.source,
+      baseline:aftermathBaselineFor(this.#experiment),
+    };
     if(choice.intervention){
       // The quiet interval already restarted at creation; only a non-null
       // catalyst application additionally starts the major cooldown.
@@ -409,6 +529,23 @@ export class UniverseSession {
       if(fromCatalyst)this.#lastMajorCatalystTick=this.#experiment.t;
     }
     this.#pendingDecision=null;
+    return this.snapshot();
+  }
+
+  /**
+   * The impact state's explicit acknowledgement. The world stays paused until
+   * this or another explicit supported advance command; the impact state itself
+   * advances nothing, and there is no background path that could.
+   *
+   * Transitions the aftermath to "observation" rather than discarding it. The
+   * retained baseline and the intervention identity both survive, and a later
+   * slice presents "observation" as the compact aftermath strip.
+   */
+  resumeAftermath(){
+    if(!this.#experiment)throw new Error("Universe has not been created");
+    if(!this.#aftermath)throw new Error("No aftermath is awaiting acknowledgement");
+    if(this.#aftermath.phase!=="impact")throw new Error("Aftermath is not awaiting acknowledgement");
+    this.#releaseImpact();
     return this.snapshot();
   }
 
@@ -456,6 +593,13 @@ export class UniverseSession {
     this.#worldId=++worldIdCounter;
     this.#experiment=restoreSimulationCheckpoint(checkpoint.experiment as any);
     this.#analysis=EcologyObserver.restore(checkpoint.analysis);
+    // Aftermath is deliberately NOT restored. It is evidence held outside the
+    // checkpoint, so a restore that carried it would be reconstructing an
+    // observation from simulation state alone - exactly what must not happen.
+    // A restored world therefore shows no aftermath, and the durable decision
+    // record still reads from `decisions.resolutions`. Presenting the retained
+    // baseline across a save is a later, separate contract.
+    this.#aftermath=null;
     this.#control=checkpoint.control?restoreSimulationCheckpoint(checkpoint.control as any):null;
     this.#controlAnalysis=checkpoint.controlAnalysis?EcologyObserver.restore(checkpoint.controlAnalysis):null;
     if(schema==="0.3"){
@@ -528,7 +672,7 @@ export class UniverseSession {
 
   snapshot():RenderSnapshot{
     if(!this.#experiment)throw new Error("Universe has not been created");
-    return renderSnapshot(this.#experiment,this.#analysis,this.#control,this.#pendingDecision,this.#decisionResolutions,this.#worldId);
+    return renderSnapshot(this.#experiment,this.#analysis,this.#control,this.#pendingDecision,this.#decisionResolutions,this.#worldId,this.#aftermath);
   }
 
   handle(command:RuntimeCommand):RuntimeResponse[]{
@@ -543,6 +687,12 @@ export class UniverseSession {
           const snapshot=this.resolveEventDecision(command.opportunityId,command.choiceId);
           return command.requestId
             ?[{type:"DECISION_RESOLVED",requestId:command.requestId,snapshot},{type:"SNAPSHOT",snapshot}]
+            :[{type:"SNAPSHOT",snapshot}];
+        }
+        case "RESUME_AFTERMATH":{
+          const snapshot=this.resumeAftermath();
+          return command.requestId
+            ?[{type:"AFTERMATH_RESUMED",requestId:command.requestId,snapshot},{type:"SNAPSHOT",snapshot}]
             :[{type:"SNAPSHOT",snapshot}];
         }
         case "LOAD_CHECKPOINT":return[{type:"SNAPSHOT",snapshot:this.restore(command.checkpoint)}];

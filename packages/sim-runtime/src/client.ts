@@ -15,6 +15,9 @@ export interface RuntimeClient {
   requestExport(): Promise<unknown>;
   /** Resolves the pending opportunity; rejects on validation failure. */
   resolveEventDecision(opportunityId: string, choiceId: string): Promise<RenderSnapshot>;
+  /** Acknowledges the aftermath impact state. The world stays paused until
+   *  this or another supported advance command; it never advances on its own. */
+  resumeAftermath(): Promise<RenderSnapshot>;
   destroy(): void;
 }
 
@@ -40,6 +43,9 @@ export class WorkerRuntimeClient implements RuntimeClient {
   createControlFork(){this.command({type:"CREATE_CONTROL_FORK"})}
   resolveEventDecision(opportunityId:string,choiceId:string){
     return this.#request<RenderSnapshot>("RESOLVE_EVENT_DECISION",{opportunityId,choiceId});
+  }
+  resumeAftermath(){
+    return this.#request<RenderSnapshot>("RESUME_AFTERMATH",{});
   }
   loadCheckpoint(checkpoint:SupportedUniverseCheckpoint){
     // Acknowledged restore: resolves only after the worker has restored the
@@ -96,7 +102,7 @@ export class WorkerRuntimeClient implements RuntimeClient {
     if(pending){clearTimeout(pending.timer);pending.reject(reason)}
   }
 
-  #request<T>(type:"REQUEST_CHECKPOINT"|"REQUEST_EXPORT"|"RESOLVE_EVENT_DECISION",extra:Record<string,unknown>={}):Promise<T>{
+  #request<T>(type:"REQUEST_CHECKPOINT"|"REQUEST_EXPORT"|"RESOLVE_EVENT_DECISION"|"RESUME_AFTERMATH",extra:Record<string,unknown>={}):Promise<T>{
     const requestId=`r-${++this.#seq}`;
     return new Promise<T>((resolve,reject)=>{
       this.#pending.set(requestId,{resolve,reject});
@@ -111,7 +117,7 @@ export class WorkerRuntimeClient implements RuntimeClient {
       for(const listener of this.#listeners)listener(response.snapshot);
       return;
     }
-    if(response.type==="DECISION_RESOLVED"){
+    if(response.type==="DECISION_RESOLVED"||response.type==="AFTERMATH_RESUMED"){
       const pending=this.#pending.get(response.requestId);
       if(!pending)return;
       this.#pending.delete(response.requestId);

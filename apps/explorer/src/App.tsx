@@ -11,6 +11,7 @@ import {
   LandscapeSmoother, fillWaste, fracArray, landscapeCell, landscapeTileLayout,
   microTexture, nutrientOverlayCell, wasteOverlayCell,
 } from "./landscape";
+import { AftermathPanel } from "./AftermathPanel";
 import { drawPhenotypeOrganism, phenotypeCache, tierForZoom } from "./phenotype";
 
 type Surface="world"|"history"|"tree"|"experiments";
@@ -555,6 +556,23 @@ export function App(){
   };
   // While a decision is pending these must not advance time; they focus it.
   const blockWhilePending=()=>{if(!snapshot?.pendingDecision)return false;setStatus("A decision is waiting — choose how to respond.");return true};
+  // M3 aftermath impact state. The impact sheet is the explicit advance gate:
+  // the world stays paused until Resume, and acknowledging it is what lets time
+  // move again through the ordinary scheduler - no separate time path.
+  const [resuming,setResuming]=useState(false);
+  const resumeAftermath=async()=>{
+    if(!snapshot?.aftermath)return;
+    setResuming(true);
+    try{
+      await runtime.resumeAftermath();
+      setRunning(true);
+      setStatus("Aftermath acknowledged. The world is running.");
+    }catch(error){
+      setStatus(`Could not resume: ${error instanceof Error?error.message:String(error)}`);
+    }finally{
+      setResuming(false);
+    }
+  };
   const newUniverse=()=>{
     setRunning(false);setSelectedId(null);
     phenotypeCache.clearStaged();
@@ -622,6 +640,10 @@ export function App(){
   if(!snapshot)return <main className="loading">{status}</main>;
   const m=snapshot.metrics;
   const pending=snapshot.pendingDecision;
+  // A pending decision outranks an aftermath (AC15); the aftermath yields the
+  // slot without being discarded, so it returns after the decision resolves.
+  const showDecision=!!pending;
+  const showAftermath=!pending&&!!snapshot.aftermath&&snapshot.aftermath.phase==="impact";
   const records=(snapshot.analysis.records as any[])||[];
   const clades=m.clades?.top||[];
   const selected=snapshot.organisms.find(o=>o.id===selectedId)??null;
@@ -674,19 +696,33 @@ export function App(){
               <button aria-label="Reset view" onClick={()=>{setZoom(1);setCam({x:300,y:300})}}>⌂</button>
             </div>
           </div>}
-          {pending&&<section className="decision-sheet" role="dialog" aria-modal="false" aria-label={pending.source==="world_catalyst"?"World catalyst":"Event decision"} data-testid="decision-sheet" data-source={pending.source}>
-            <span className="eyebrow">{pending.source==="world_catalyst"?"World catalyst — your move":"A decision is waiting"}</span>
-            <h2>{pending.prompt}</h2>
-            <p className="decision-context">{pending.context}</p>
-            <p className="decision-tick">World paused at tick {pending.createdTick.toLocaleString()}</p>
-            <div className="decision-choices">
-              {pending.choices.map(choice=><button key={choice.choiceId} data-choice={choice.choiceId}
-                onClick={()=>resolveDecision(choice.choiceId)}>
-                <strong>{choice.title}</strong>
-                <span>{choice.directEffectDescription}</span>
-              </button>)}
-            </div>
-            <p className="decision-foot">Time stays paused until you choose. Leaving an intervention out changes nothing.</p>
+          {/* One sheet slot, two contents. The section is the same DOM node in
+              both states, so resolving a decision morphs the sheet in place
+              rather than closing one and opening another (AC1). The decision
+              CONTENT carries the decision-sheet testid, so it still detaches on
+              resolution - the slot outliving it is exactly what proves the morph
+              is continuous. A pending decision always outranks an aftermath
+              (AC15): it takes the slot and the aftermath record survives
+              underneath, to be shown again once this decision resolves. */}
+          {(showDecision||showAftermath)&&<section className="decision-sheet" role="dialog" aria-modal="false"
+            aria-label={showDecision?(pending!.source==="world_catalyst"?"World catalyst":"Event decision"):"Aftermath"}
+            data-testid="sheet-slot" data-mode={showDecision?"decision":"aftermath"}>
+            {showDecision
+              ? <div data-testid="decision-sheet" data-source={pending!.source}>
+                  <span className="eyebrow">{pending!.source==="world_catalyst"?"World catalyst — your move":"A decision is waiting"}</span>
+                  <h2>{pending!.prompt}</h2>
+                  <p className="decision-context">{pending!.context}</p>
+                  <p className="decision-tick">World paused at tick {pending!.createdTick.toLocaleString()}</p>
+                  <div className="decision-choices">
+                    {pending!.choices.map(choice=><button key={choice.choiceId} data-choice={choice.choiceId}
+                      onClick={()=>resolveDecision(choice.choiceId)}>
+                      <strong>{choice.title}</strong>
+                      <span>{choice.directEffectDescription}</span>
+                    </button>)}
+                  </div>
+                  <p className="decision-foot">Time stays paused until you choose. Leaving an intervention out changes nothing.</p>
+                </div>
+              : <AftermathPanel snapshot={snapshot} onResume={resumeAftermath} busy={resuming}/>}
           </section>}
         </div>
       </section>
