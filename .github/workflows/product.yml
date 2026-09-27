@@ -37,6 +37,7 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test:migration
       - run: pnpm test:decisions
+      - run: pnpm test:pixi-spike
 
   sim-a:
     runs-on: ubuntu-latest
@@ -59,6 +60,9 @@ jobs:
       - run: pnpm test:catalysts
       - run: pnpm test:flows
       - run: pnpm test:ecology
+      - run: pnpm test:niche
+      - run: pnpm test:landscape
+      - run: pnpm test:time-controls
 
   sim-b:
     runs-on: ubuntu-latest
@@ -142,6 +146,8 @@ jobs:
             sleep 1
           done
           DEE_BASE_URL=http://127.0.0.1:4173 pnpm test:browser
+      - name: Mobile UI validation (phone/tablet/desktop layout evidence)
+        run: DEE_BASE_URL=http://127.0.0.1:4173 pnpm test:mobile-ui
       # Evidence generation, deliberately NOT a merge gate: the capture run is
       # timing-dependent (it advances a world until waste is measurably
       # present), so a slow or flaky run must not block a PR whose code is
@@ -182,3 +188,42 @@ jobs:
       - run: pnpm test:phenotype
       - run: pnpm test:art-review
       - run: pnpm test:plated
+
+  # Pixi spike browser evidence. Deliberately NOT a merge gate (same
+  # rationale as the visual captures above): GPU-dependent timing and
+  # software-GL flakiness must not block a PR whose code is verified.
+  # The validation itself (pnpm test:pixi-spike, Node-only) gates in
+  # `quick`. The manifest + captures upload either way.
+  pixi-spike:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - run: corepack enable
+      - run: corepack prepare pnpm@12.5.1 --activate
+      - name: Pnpm store path
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_ENV"
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-${{ runner.os }}-
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: playwright-${{ runner.os }}-
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Pixi spike browser evidence
+        continue-on-error: true
+        run: pnpm spike:capture
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: pixi-spike-evidence
+          path: testdata/pixi-spike
+          retention-days: 14

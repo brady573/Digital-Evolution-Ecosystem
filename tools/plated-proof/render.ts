@@ -91,8 +91,8 @@ export const PLATED_PALETTE = {
    * brighten toward pearl-white with M. Color only (K_WALL) — the SET is
    * M-independent, so metabolism brightens the network without moving it.
    */
-  wallDark: { r: 88, g: 148, b: 198 },
-  wallBright: { r: 226, g: 244, b: 250 },
+  wallDark: { r: 38, g: 115, b: 190 },
+  wallBright: { r: 170, g: 255, b: 255 },
   /**
    * Per-cell hues (round 2): plate bodies stay in the cool blue/cyan/
    * restrained-violet family — warm pink/teal greens were muddy color
@@ -480,15 +480,12 @@ export function renderPlated(
           // coordinates (u along the spine, v across it).
           const lx0 = h.t * 2 - 1;
           const ly0 = h.v;
-          // Pixel-per-unit for both axes, in 128-normalized px: u spans the
-          // spine (pl.len), v spans the local half-width (wEff). The raw
-          // (u,v) space is strongly anisotropic — a wall band measured there
-          // lands ~1px along the spine but sub-pixel across it, so the
-          // honeycomb loses every cross-spine divider. The wall band is
-          // therefore measured in physical px below, as a fraction of the
-          // gap between the two competing sites (~10% ≈ 1.1–1.4px at 128).
-          const pu = pl.len * 64;
-          const pv = h.wEff * 128;
+          // Cell ownership uses the original plate-local Voronoi metric.
+          // Convert distance to its bisector to output pixels below; mixing
+          // a physical-distance wall with these plate-local winners can
+          // produce negative gaps and flood the wrong compartment.
+          const pu = pl.len * size / 2;
+          const pv = h.wEff * size;
           let best = Infinity;
           let second = Infinity;
           let bestTone = 1;
@@ -508,20 +505,20 @@ export function renderPlated(
               secondIdx = vi;
             }
           }
-          const gu = (sites.px[bestIdx]! - sites.px[secondIdx]!) * pu;
-          const gv = (sites.py[bestIdx]! - sites.py[secondIdx]!) * pv;
-          const gap2 = gu * gu + gv * gv;
-          const bU = (lx0 - sites.px[bestIdx]!) * pu;
-          const bV = (ly0 - sites.py[bestIdx]!) * pv;
-          const sU = (lx0 - sites.px[secondIdx]!) * pu;
-          const sV = (ly0 - sites.py[secondIdx]!) * pv;
-          const pGap = (sU * sU + sV * sV) - (bU * bU + bV * bV);
-          if (pGap < 0.10 * gap2 && h.q < 0.92) {
+          const du = sites.px[bestIdx]! - sites.px[secondIdx]!;
+          const dv = sites.py[bestIdx]! - sites.py[secondIdx]!;
+          // The gradient of (second-best) in screen pixels has length
+          // 2*hypot(du/pu,dv/pv). This converts the plate-local bisector's
+          // signed distance to a stable output-pixel width at every LOD.
+          const gradient = 2 * Math.hypot(du / pu, dv / pv);
+          const distancePx = gradient > 0 ? (second - best) / gradient : Infinity;
+          const wallPx = size >= 128 ? 0.55 : size >= 64 ? 0.45 : 0.4;
+          if (distancePx < wallPx && h.q < 0.97) {
             // Cell walls (round 6): the polygonal network is PERSISTENT
             // material structure — the set never depends on M — while
             // metabolism drives its intensity. At M2 walls read cyan /
             // icy-blue, never near-white; pearl-white arrives only at
-            // high M. Measured in physical pixels.
+            // high M. The wall occupies a fixed physical-pixel band.
             const wb = 0.25 + 0.5 * a;
             const ws = mat.wallStrength;
             paint(x, y, K_WALL, {
@@ -641,7 +638,7 @@ export function renderPlated(
         }
         // Rim (round 4): a narrow cool icy lip at the very shell edge —
         // pearl-white but thin, never a broad milky cap.
-        if (h.q > 0.95 && facing > 0.12) {
+        if (h.q > 0.95 && facing > 0.12 && kind[i] !== K_WALL) {
           const rw = Math.min(0.7, (h.q - 0.95) / 0.05) * (0.6 + 0.4 * mat.specular / 1.6);
           paint(x, y, K_RIDGE, {
             r: Math.round(rgb[i * 3]! * (1 - rw) + PLATED_PALETTE.ridge.r * rw),
@@ -657,7 +654,7 @@ export function renderPlated(
           // at M4 (near-complete lip). The slope matters for the 16px
           // ladder: a higher baseline saturates the tiny rim band before
           // M4 and leaves the top step with nothing to gain.
-          if (order < 0.25 + 0.7 * a) {
+          if (order < 0.25 + 0.7 * a && kind[i] !== K_WALL) {
             const sb = (0.35 + 0.65 * a) * mat.seamBoost;
             paint(x, y, K_SEAM, {
               r: Math.min(255, Math.round(PLATED_PALETTE.seam.r * sb)),
@@ -670,7 +667,7 @@ export function renderPlated(
         // for the last few distal pixels only (~6% of the spine —
         // roughly half the round-5 area). Most rims read cool cyan /
         // icy blue. Intensifies with M.
-        if (a > 0 && h.t > 0.94) {
+        if (a > 0 && h.t > 0.94 && kind[i] !== K_WALL) {
           const tg = a * Math.min(1, (h.t - 0.94) / 0.06) * (0.5 + 0.5 * h.q) * 2;
           if (tg > 0.22) {
             const st = Math.min(1, tg * 1.1) * 0.8;

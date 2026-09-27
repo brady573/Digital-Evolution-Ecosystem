@@ -58,6 +58,8 @@ export interface SpikeStats {
   tier: LodTier;
   mode: 'pixi' | 'canvas2d';
   generation: number;
+  /** Renderer backend evidence, e.g. "WebGLRenderer/webgl2:yes". */
+  backend: string;
 }
 
 export interface SpikeHandle {
@@ -86,9 +88,31 @@ const FIXTURES: Array<() => Fixture> = [
   () => engineLikeFixture('spike-engine-1000', 1000, 21),
 ];
 
+/**
+ * Backend evidence: the renderer's concrete class plus a genuine WebGL2
+ * probe (getContext('webgl2') returns the live context only when the
+ * canvas actually runs WebGL2). Reported in stats and boot logs so the
+ * return package can state what really ran.
+ */
+function backendLabel(app: Application): string {
+  const ctor = (app.renderer as unknown as { constructor?: { name?: string } })
+    .constructor?.name ?? 'unknown';
+  let webgl2 = 'unknown';
+  try {
+    webgl2 = app.canvas.getContext('webgl2') ? 'yes' : 'no';
+  } catch {
+    webgl2 = 'error';
+  }
+  return `${ctor}/webgl2:${webgl2}`;
+}
+
 export async function bootSpike(host: HTMLElement, fixtureIdx: number, initialTier?: LodTier): Promise<SpikeHandle> {
   const app = new Application();
-  await app.init({ width: WORLD, height: WORLD, background: '#060b0f', antialias: false });
+  // Accepted production direction: WebGL2 as the initial backend.
+  // 'webgl' pins the WebGL renderer family (v8 serves WebGL2 through it);
+  // backendLabel() below proves what the browser actually provided.
+  await app.init({ width: WORLD, height: WORLD, background: '#060b0f', antialias: false, preference: 'webgl' });
+  console.info(`[pixi-spike] backend=${backendLabel(app)}`);
   app.canvas.id = 'pixi-world';
   host.appendChild(app.canvas);
 
@@ -220,6 +244,7 @@ export async function bootSpike(host: HTMLElement, fixtureIdx: number, initialTi
       liveTextures: cache.live(), gpuTextures: textures.size,
       reuse: fixture.organisms.length / Math.max(1, cache.live()),
       cumulative: cache.cumulative, pruned: cache.pruned, tier, mode, generation,
+      backend: backendLabel(app),
     };
   }
 

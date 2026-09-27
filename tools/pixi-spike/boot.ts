@@ -21,6 +21,7 @@ async function main(): Promise<void> {
     const s = handle.stats();
     statsEl.textContent =
       `${s.fixture} · ${s.organisms} organisms · mode=${s.mode} tier=${s.tier} gen=${s.generation} | ` +
+      `backend=${s.backend} | ` +
       `sprites=${s.sprites} live-tex=${s.liveTextures} gpu-tex=${s.gpuTextures} reuse=${s.reuse.toFixed(1)}x ` +
       `cumulative=${s.cumulative} pruned=${s.pruned}`;
   };
