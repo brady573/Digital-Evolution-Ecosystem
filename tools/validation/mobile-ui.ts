@@ -22,7 +22,6 @@ const DESKTOP = 1280;
 const CORE_ACTIONS = [
   { name: /^(Play|Pause)$/, label: "Play/Pause" },
   { name: "Simulation speed", label: "speed" },
-  { name: "Next meaningful change", label: "Next meaningful change" },
   { name: "Save", label: "Save" },
   { name: "Resume", label: "Resume" },
   { name: "Export", label: "Export" },
@@ -41,7 +40,10 @@ async function boxOf(page: Page, name: string | RegExp, exact = false) {
 
 async function openWorld(page: Page, width: number, height = 844) {
   await page.setViewportSize({ width, height });
-  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  // The deeTest flag enables the URL-gated runtime hook, which is how this
+  // suite reaches a decision now that AC21 removes the product control. The
+  // hook is not a UI affordance and is inert without the flag.
+  await page.goto(`${baseUrl}?deeTest=1`, { waitUntil: "networkidle" });
   await page.getByLabel("Evolution world").waitFor();
 }
 
@@ -238,8 +240,10 @@ async function checkDecisionPriority(page: Page, width: number) {
   const sheet = page.getByTestId("decision-sheet");
   for (let i = 0; i < 25; i++) {
     if (await sheet.count()) break;
-    await page.getByRole("button", { name: "Next meaningful change" }).click();
-    await page.waitForTimeout(500);
+    // AC21: no "Next meaningful change" control in the product. The suite uses
+    // the URL-gated test hook, which is not a player affordance.
+    await page.evaluate(() => (window as any).__DEE_TEST__.runToNextEvent());
+    await page.waitForTimeout(400);
   }
   await sheet.waitFor();
   // The inspector must not be rendered alongside a pending decision.

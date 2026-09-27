@@ -459,6 +459,15 @@ export function App(){
   const [snapshot,setSnapshot]=useState<RenderSnapshot|null>(null);
   const [surface,setSurface]=useState<Surface>("world");
   const [running,setRunning]=useState(false);
+  // Play intent across a decision gate (AC22). The decision pause must not
+  // silently turn "was playing" into "paused", or the world would stay stopped
+  // after a choice the player never asked to stop for. Refs mirror the state so
+  // the worker subscription can read them without stale closures.
+  const [wasPlaying,setWasPlaying]=useState(false);
+  const runningRef=useRef(false);
+  const wasPlayingRef=useRef(false);
+  runningRef.current=running;
+  wasPlayingRef.current=wasPlaying;
   const [speed,setSpeed]=useState(100);
   const [status,setStatus]=useState("Creating universe…");
   const [settings,setSettings]=useState(DEFAULT_SETTINGS);
@@ -501,7 +510,21 @@ export function App(){
       advanceDebt.current=false;setSnapshot(s);setStatus("");
       // A pending decision is a visible pause: the player must choose before
       // time moves again (A13). Runtime enforces the same gate independently.
-      if(s.pendingDecision)setRunning(false);
+      //
+      // The player's intent is REMEMBERED rather than discarded (AC22): clearing
+      // running outright loses the difference between "was playing" and "was
+      // deliberately paused", and only the former should resume by itself once
+      // the choice resolves.
+      if(s.pendingDecision){
+        setWasPlaying(w=>w||runningRef.current);
+        setRunning(false);
+      }else if(s.aftermath&&wasPlayingRef.current){
+        // Playback resumes automatically at the prior bounded speed. The impact
+        // sheet overlays a running world from here, and its evidence is pinned
+        // to the resolution tick, so this cannot invalidate what it shows.
+        setRunning(true);
+        setWasPlaying(false);
+      }
     });
     runtime.create(configFromSettings(DEFAULT_SETTINGS));
     return()=>{unsub();runtime.destroy()};
@@ -532,6 +555,23 @@ export function App(){
     return()=>cancelAnimationFrame(raf);
   },[running,speed,runtime]);
 
+  // Test-only runtime hook. AC21 removes "Next meaningful change" from the
+  // product, but the suites still need a deterministic way to reach a decision
+  // without a DOM control to click. This is deliberately NOT a UI element - it
+  // is invisible to a player and carries no affordance - and it is gated behind
+  // an explicit URL flag so an ordinary session can never reach it.
+  useEffect(()=>{
+    if(typeof window==="undefined")return;
+    if(!new URLSearchParams(window.location.search).has("deeTest"))return;
+    const hook={
+      runToNextEvent:()=>runtime.runToNextEvent(),
+      acknowledgeAftermath:()=>runtime.acknowledgeAftermath(),
+      resolve:(opportunityId:string,choiceId:string)=>runtime.resolveEventDecision(opportunityId,choiceId),
+    };
+    (window as any).__DEE_TEST__=hook;
+    return()=>{delete (window as any).__DEE_TEST__};
+  },[runtime]);
+
   const updateSettings=(patch:Partial<WorldSettings>)=>{
     setSettings(v=>({...v,...patch}));setPreset("Custom");
   };
@@ -556,21 +596,21 @@ export function App(){
   };
   // While a decision is pending these must not advance time; they focus it.
   const blockWhilePending=()=>{if(!snapshot?.pendingDecision)return false;setStatus("A decision is waiting — choose how to respond.");return true};
-  // M3 aftermath impact state. The impact sheet is the explicit advance gate:
-  // the world stays paused until Resume, and acknowledging it is what lets time
-  // move again through the ordinary scheduler - no separate time path.
-  const [resuming,setResuming]=useState(false);
-  const resumeAftermath=async()=>{
+  // M3 aftermath impact state. Playback is NOT gated on the sheet (AC22):
+  // resolving a choice restores whatever the player had going, so the sheet
+  // usually overlays a world that is already running. All the affordance does
+  // is release the presentation slot.
+  const [acknowledging,setAcknowledging]=useState(false);
+  const acknowledgeAftermath=async()=>{
     if(!snapshot?.aftermath)return;
-    setResuming(true);
+    setAcknowledging(true);
     try{
-      await runtime.resumeAftermath();
-      setRunning(true);
-      setStatus("Aftermath acknowledged. The world is running.");
+      await runtime.acknowledgeAftermath();
+      setStatus("Aftermath observed. Watching the world.");
     }catch(error){
-      setStatus(`Could not resume: ${error instanceof Error?error.message:String(error)}`);
+      setStatus(`Could not continue: ${error instanceof Error?error.message:String(error)}`);
     }finally{
-      setResuming(false);
+      setAcknowledging(false);
     }
   };
   const newUniverse=()=>{
@@ -722,7 +762,7 @@ export function App(){
                   </div>
                   <p className="decision-foot">Time stays paused until you choose. Leaving an intervention out changes nothing.</p>
                 </div>
-              : <AftermathPanel snapshot={snapshot} onResume={resumeAftermath} busy={resuming}/>}
+              : <AftermathPanel snapshot={snapshot} onAcknowledge={acknowledgeAftermath} busy={acknowledging}/>}
           </section>}
         </div>
       </section>
@@ -807,8 +847,12 @@ export function App(){
           control bar is unchanged. */}
       <span className="control-row control-row-primary">
         <button onClick={()=>{if(blockWhilePending())return;setRunning(v=>!v)}}>{running?"Pause":"Play"}</button>
-        <select aria-label="Simulation speed" value={speed} onChange={e=>setSpeed(Number(e.target.value))}><option value={1}>1×</option><option value={10}>10×</option><option value={100}>100×</option><option value={500}>Max</option></select>
-        <button onClick={()=>{if(blockWhilePending())return;setRunning(false);runtime.runToNextEvent()}}>Next meaningful change</button>
+        {/* AC21: bounded speeds only. Max is gone from the product - it was a
+            throughput ceiling the player could not read, not a speed, and its
+            ratio assertion was the flaky part of #46. The internal
+            RUN_TO_NEXT_EVENT command still exists for tooling and tests; it is
+            simply not a player control any more. */}
+        <select aria-label="Simulation speed" value={speed} onChange={e=>setSpeed(Number(e.target.value))}><option value={1}>1×</option><option value={10}>10×</option><option value={100}>100×</option></select>
         {/* Secondary actions are an explicit menu on the phone and nothing at
             all on desktop, where they sit inline as before. Nothing is
             removed: the buttons are always in the DOM. */}

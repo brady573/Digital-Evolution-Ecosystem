@@ -132,9 +132,9 @@ export function buildDecisionOpportunity(
   };
 }
 
-/** Engine modes this runtime can actually apply today. c_washout is
- * validation-internal (never offered, no button); support here only lets
- * assays apply it through the same recorded path. */
+/** Engine modes this runtime can actually apply today. c_washout is now an
+ * offered catalyst as well as an assay path, but the mode set is unchanged: it
+ * still names existing engine behaviour, so no engine version bump is implied. */
 export const SUPPORTED_INTERVENTION_MODES: ReadonlySet<string> = new Set([
   "global_crash",
   "drought_a",
@@ -194,7 +194,10 @@ export const mappedPolicyKeys = (): readonly string[] => Object.keys(REGISTRY).s
  * ------------------------------------------------------------------ */
 
 /** Catalyst catalog version. Evolves independently of the event policy. */
-export const CATALYST_POLICY_VERSION = "m3-catalysts-1.0.0";
+// Bumped for the c-washout offer. Versioning is what keeps a restored
+// pending window interpretable under the catalog it was offered from, instead of
+// silently reinterpreting it against a newer one.
+export const CATALYST_POLICY_VERSION = "m3-catalysts-1.1.0";
 
 /**
  * Game-policy constants (not biological rules). Centralized and versioned
@@ -249,6 +252,16 @@ const CATALYST_SPECS: readonly CatalystSpec[] = [
     intervention: { schemaVersion: 1, kind: "nutrient_disturbance", mode: "global_crash" },
     choiceId: "global-crash",
   },
+  {
+    // Owner ruling: a legitimate product catalyst, not a test-only option. It
+    // uses the already-supported c_washout intervention path, so this adds an
+    // OFFER, not new biology and not a new engine effect.
+    id: "c-washout",
+    title: "Metabolite C washout",
+    effect: "Clear environmental Metabolite C stock and suppress its regeneration.",
+    intervention: { schemaVersion: 1, kind: "nutrient_disturbance", mode: "c_washout" },
+    choiceId: "c-washout",
+  },
 ];
 
 /** Test/inspection helper: the v1 catalyst ids in offer order. */
@@ -259,9 +272,9 @@ type CatalystRequirement = (context: CatalystContext) => string | null;
 const noDroughtActive: CatalystRequirement = (c) =>
   c.droughtActive ? "a drought is currently active" : null;
 
-function minEnergyShare(which: "A" | "B"): CatalystRequirement {
+function minEnergyShare(which: "A" | "B" | "C"): CatalystRequirement {
   return (c) => {
-    const share = which === "A" ? c.energyShareA : c.energyShareB;
+    const share = which === "A" ? c.energyShareA : which === "B" ? c.energyShareB : c.energyShareC;
     return share >= CATALYST_MIN_ENERGY_SHARE
       ? null
       : `Nutrient ${which} contributes ${(share * 100).toFixed(1)}% of realized energy (needs ${(CATALYST_MIN_ENERGY_SHARE * 100).toFixed(0)}%)`;
@@ -280,6 +293,12 @@ function minStockFraction(which: "A" | "B"): CatalystRequirement {
 const CATALYST_REQUIREMENTS: Readonly<Record<CatalystId, readonly CatalystRequirement[]>> = {
   "drought-a": [noDroughtActive, minEnergyShare("A"), minStockFraction("A")],
   "drought-b": [noDroughtActive, minEnergyShare("B"), minStockFraction("B")],
+  // C is a biologically produced metabolite rather than an abiotic nutrient, so
+  // only the energy-share floor applies: there is no modeled C field capacity to
+  // measure stock against, and inventing one would be a fabricated eligibility
+  // signal. Same requirement shape as the drought pair, same existing constant,
+  // so no threshold is retuned to accommodate it.
+  "c-washout": [noDroughtActive, minEnergyShare("C")],
   "global-crash": [
     noDroughtActive,
     (c) =>

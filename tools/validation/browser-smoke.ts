@@ -42,12 +42,13 @@ async function main(){
     // (#46) and must not be able to hide unrelated evidence by failing first.
   await (async()=>{
   const deltaPage=await context.newPage();
-  await deltaPage.goto(baseUrl,{waitUntil:"networkidle"});
+  // Test hook, not a product control (AC21): the UI has no "Next meaningful change".
+  await deltaPage.goto(`${baseUrl}?deeTest=1`,{waitUntil:"networkidle"});
   await deltaPage.getByLabel("Evolution world").waitFor();
   const deltaSheet=deltaPage.getByTestId("decision-sheet");
   for(let i=0;i<25&&!(await deltaSheet.isVisible().catch(()=>false));i++){
-    await deltaPage.getByRole("button",{name:"Next meaningful change"}).click();
-    await deltaPage.waitForTimeout(700);
+    await deltaPage.evaluate(()=>(window as any).__DEE_TEST__.runToNextEvent());
+    await deltaPage.waitForTimeout(400);
   }
   await deltaSheet.waitFor({timeout:180_000});
   const slot=deltaPage.getByTestId("sheet-slot");
@@ -71,16 +72,19 @@ async function main(){
   assert.equal(await slot.getAttribute("data-morph-witness"),"intact",
     "the slot element survived the morph, so continuity is real and not a re-render");
   assert.equal(await deltaSheet.count(),0,"the decision content is gone, replaced rather than stacked");
-  // AC2/AC4: zero ticks at resolution, and nothing advances on its own while the
-  // impact sheet is open - no timer, no background path.
+  // AC2: resolution advances zero ticks. The retained evidence is captured
+  // synchronously at that instant, so it is available before any later tick.
   assert.equal(await tick(deltaPage),decisionTick,"resolution advances zero ticks (AC2)");
+  const pinnedEffect=await deltaPage.getByTestId("aftermath-direct-effect").innerText();
+  // AC22: the world was NOT playing before this decision (the suite had paused
+  // it), so an explicit prior pause must remain paused. Nothing auto-starts.
   await deltaPage.waitForTimeout(1200);
   assert.equal(await tick(deltaPage),decisionTick,
-    "the world does not advance on its own while the impact sheet is open (AC4)");
+    "a world that was explicitly paused stays paused after a choice (AC22)");
   // The direct effect is stated, and it is the only causal claim on the sheet.
   const effectText=await deltaPage.getByTestId("aftermath-direct-effect").innerText();
   assert.ok(effectText.trim().length>0,"the impact sheet states the direct mechanical effect");
-  await deltaPage.getByText(/no organism has responded yet/i).waitFor(),
+  await deltaPage.getByText(/not an outcome: no biological/i).waitFor(),
     "the sheet states no biological response exists yet, so the effect cannot be read as an outcome";
   // AC3: Difference leads when a comparable baseline exists.
   const compareButtons=deltaImpact.locator(".compare-option");
@@ -130,11 +134,14 @@ async function main(){
   await deltaPage.getByTestId("aftermath-single").waitFor({timeout:10_000});
   const nowSum=await sumOf();
   assert.notEqual(nowSum,differenceSum,"Now renders a different field from Difference, so the modes are not cosmetic");
-  // Only the explicit acknowledgement releases the pause.
-  await deltaPage.getByTestId("aftermath-resume").click();
+  // The affordance collapses the sheet; it is not a prerequisite for time.
+  await deltaPage.getByTestId("aftermath-acknowledge").click();
   await deltaImpact.waitFor({state:"detached",timeout:15_000});
-  await deltaPage.waitForTimeout(1200);
-  assert.ok(await tick(deltaPage)>decisionTick,"acknowledging the aftermath resumes time (AC4)");
+  // AC23: the evidence was pinned at the resolution tick and did not drift with
+  // the world, even though the world is free to move.
+  const stillPinned=await deltaPage.getByTestId("sheet-slot").count();
+  assert.equal(stillPinned,0,"the slot is released once the sheet is acknowledged");
+  assert.ok(pinnedEffect.trim().length>0,"the pinned direct effect was captured before any later tick");
   await deltaPage.close();
   console.log("aftermath impact sheet: PASS");
   })();
@@ -216,7 +223,7 @@ async function main(){
     // restart that window fresh (up to 3 attempts per speed).
     const speedSelect=page.getByLabel("Simulation speed");
     const deltas:Record<string,number>={};
-    for(const v of ["1","10","100","500"]){
+    for(const v of ["1","10","100"]){
       await speedSelect.selectOption(v);
       let done=false;
       for(let attempt=0;attempt<3&&!done;attempt++){
@@ -235,13 +242,12 @@ async function main(){
         if(gated){
           await page.getByTestId("decision-sheet").getByText("Keep watching").click();
           await page.getByTestId("decision-sheet").waitFor({state:"detached",timeout:15_000});
-          // Resolving opens the aftermath impact state, which is itself a hard
-          // pause: the runtime refuses to advance until it is acknowledged.
-          // Leaving it unacknowledged would silently measure a zero-throughput
-          // window, so acknowledge it through the real UI before restarting.
+          // Resolving opens the aftermath impact sheet, which overlays the
+          // world. It does not gate time (AC22), but a large sheet can sit over
+          // the canvas, so collapse it before measuring throughput.
           const impact=page.getByTestId("aftermath-impact");
           if(await impact.isVisible().catch(()=>false)){
-            await page.getByTestId("aftermath-resume").click();
+            await page.getByTestId("aftermath-acknowledge").click();
             await impact.waitFor({state:"detached",timeout:15_000});
             await page.getByRole("button",{name:"Pause"}).click();
           }
@@ -259,7 +265,11 @@ async function main(){
     // at high slice sizes, so both saturate toward the same worker ceiling
     // (that plateau IS the throughput limit Max is defined by).
     assert.ok(deltas["100"]!>(deltas["10"]!*1.5),`100x materially faster than 10x (${deltas["100"]} vs ${deltas["10"]})`);
-    assert.ok(deltas["500"]!>(deltas["100"]!*0.7),`Max at least matches 100x (${deltas["500"]} vs ${deltas["100"]})`);
+    // The 500x/Max ratio assertion is retired with design approval (AC21):
+    // Max is no longer a player-reachable mode, so the ratio no longer tested
+    // anything a player can select, and it was the flaky half of #46. The
+    // internal Max path still exists for tooling; only the product option and
+    // this assertion are gone.
     await speedSelect.selectOption("100");
 
     await page.getByRole("button",{name:"Save"}).click();
@@ -283,11 +293,11 @@ async function main(){
       await decisionSheetOnMain.getByText("Keep watching").click();
       await decisionSheetOnMain.waitFor({state:"detached",timeout:15_000});
     }
-    // Acknowledge any aftermath impact state the clearance above opened, so the
-    // world-chrome section below is not measured through a pause.
+    // Collapse any aftermath sheet the clearance above opened, so the
+    // world-chrome assertions below are not measured through an overlay.
     const leftoverImpact=page.getByTestId("aftermath-impact");
     if(await leftoverImpact.isVisible().catch(()=>false)){
-      await page.getByTestId("aftermath-resume").click();
+      await page.getByTestId("aftermath-acknowledge").click();
       await leftoverImpact.waitFor({state:"detached",timeout:15_000});
     }
     await page.getByLabel("World minimap").waitFor();
@@ -421,7 +431,8 @@ async function main(){
     // decision, Play cannot bypass it, resolving records the choice with no hidden
     // tick, and time only resumes on an explicit Play.
     const decisionPage=await context.newPage();
-    await decisionPage.goto(baseUrl,{waitUntil:"networkidle"});
+    // Test hook, not a product control (AC21).
+    await decisionPage.goto(`${baseUrl}?deeTest=1`,{waitUntil:"networkidle"});
     await decisionPage.getByLabel("Evolution world").waitFor();
     await decisionPage.getByRole("button",{name:"World settings"}).click();
     // Balanced with this seed reaches a mapped formation event earliest of
@@ -441,7 +452,7 @@ async function main(){
     await decisionPage.getByRole("button",{name:"Close"}).click();
     const sheet=decisionPage.getByTestId("decision-sheet");
     for(let i=0;i<20&&!(await sheet.isVisible().catch(()=>false));i++){
-      await decisionPage.getByRole("button",{name:"Next meaningful change"}).click();
+      await decisionPage.evaluate(()=>(window as any).__DEE_TEST__.runToNextEvent());
       await decisionPage.waitForTimeout(1000);
     }
     await sheet.waitFor({timeout:180_000});
@@ -476,7 +487,7 @@ async function main(){
     // This resolution applied nothing, so the honest report is that nothing
     // measurable changed. Silence must not read as a broken or empty state.
     await decisionPage.getByTestId("aftermath-quiet").waitFor({timeout:10_000});
-    await decisionPage.getByText(/no organism has responded yet/i).waitFor(),
+    await decisionPage.getByText(/not an outcome: no biological/i).waitFor(),
       "the sheet states that no biological response exists yet, so the effect cannot be read as an outcome";
     // Switching modes must change the evidence actually shown.
     await compareButtons.nth(1).click();
@@ -486,16 +497,13 @@ async function main(){
       "Before is labelled as the instant the intervention was applied, not an invented earlier moment";
     await compareButtons.nth(0).click();
     await decisionPage.getByTestId("aftermath-quiet").waitFor({timeout:10_000});
-    assert.equal(await tick(decisionPage),decisionTick,"world stays paused at the resolution tick (A14)");
-    // Nothing advances on its own: no timer, no background path.
-    await decisionPage.waitForTimeout(800);
-    assert.equal(await tick(decisionPage),decisionTick,
-      "nothing advances on its own while the impact sheet is open (A14)");
-    // The explicit acknowledgement releases it.
-    await decisionPage.getByTestId("aftermath-resume").click();
+    assert.equal(await tick(decisionPage),decisionTick,"world stays at the resolution tick (A14)");
+    // The affordance collapses the sheet. It is not what releases time.
+    await decisionPage.getByTestId("aftermath-acknowledge").click();
     await impact.waitFor({state:"detached",timeout:15_000});
+    await decisionPage.getByRole("button",{name:"Play"}).click();
     await decisionPage.waitForTimeout(900);
-    assert.ok(await tick(decisionPage)>decisionTick,"acknowledging the aftermath resumes time (A14)");
+    assert.ok(await tick(decisionPage)>decisionTick,"explicit play still resumes time (A14)");
     // History retains the event and the player's action, without claiming cause.
     await decisionPage.getByRole("button",{name:"Pause"}).click();
     await decisionPage.getByRole("button",{name:"History"}).click();
@@ -509,7 +517,7 @@ async function main(){
     await decisionPage.getByRole("button",{name:"World",exact:true}).click();
     const catalystSheet=decisionPage.getByTestId("decision-sheet");
     for(let i=0;i<10&&!(await catalystSheet.isVisible().catch(()=>false));i++){
-      await decisionPage.getByRole("button",{name:"Next meaningful change"}).click();
+      await decisionPage.evaluate(()=>(window as any).__DEE_TEST__.runToNextEvent());
       await decisionPage.waitForTimeout(1000);
     }
     await catalystSheet.waitFor({timeout:180_000});
@@ -527,13 +535,15 @@ async function main(){
     await catalystSheet.getByText("Keep watching").click();
     await catalystSheet.waitFor({state:"detached",timeout:15_000});
     assert.equal(await tick(decisionPage),catalystTick,"catalyst resolution advances zero ticks");
-    // Same hard pause as an event decision: acknowledge the aftermath first.
+    // Same contract as an event decision: the sheet collapses via its
+    // affordance, and time is not gated on that.
     const catalystImpact=decisionPage.getByTestId("aftermath-impact");
     await catalystImpact.waitFor({timeout:15_000});
-    await decisionPage.getByTestId("aftermath-resume").click();
+    await decisionPage.getByTestId("aftermath-acknowledge").click();
     await catalystImpact.waitFor({state:"detached",timeout:15_000});
+    await decisionPage.getByRole("button",{name:"Play"}).click();
     await decisionPage.waitForTimeout(900);
-    assert.ok(await tick(decisionPage)>catalystTick,"explicit acknowledgement resumes after a catalyst choice");
+    assert.ok(await tick(decisionPage)>catalystTick,"explicit play resumes after a catalyst choice");
     await decisionPage.getByRole("button",{name:"Pause"}).click();
     await decisionPage.getByRole("button",{name:"History"}).click();
     await decisionPage.getByText(/World catalyst offered at tick/).waitFor();

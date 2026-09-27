@@ -1,6 +1,5 @@
 import type {
   AftermathBaseline,
-  AftermathScalars,
   AftermathState,
   CatalystContext,
   CatalystDiagnosis,
@@ -93,7 +92,7 @@ function aftermathBaselineFor(sim:any):AftermathBaseline{
  * "now" has to come from here rather than from the snapshot's metrics, or the
  * comparison would silently be reading different quantities.
  */
-function aftermathScalarsFor(sim:any):AftermathScalars{
+function aftermathScalarsFor(sim:any):{readonly tick:number;readonly scalars:Record<string,number>}{
   const frame=analysisFrame(sim);
   const scalars:Record<string,number>={};
   for(const descriptor of AFTERMATH_COMPARABLES){
@@ -140,10 +139,6 @@ function renderSnapshot(sim:any,analysis:EcologyObserver,control:any|null,pendin
     pendingDecision,
     resolvedDecisions,
     aftermath,
-    // Only while the impact state is on screen: deriving these costs a pass over
-    // the population, so the ordinary render path - and every later observation
-    // phase - must not pay for a comparison nobody is viewing.
-    aftermathNow:aftermath?.phase==="impact"?aftermathScalarsFor(sim):null,
     control:control?{tick:control.t,population:control.o.length,metrics:control.metrics()}:null,
   };
 }
@@ -305,6 +300,8 @@ export class UniverseSession {
       droughtActive:sim.drought!=null,
       energyShareA:totalEnergy>0?ea/totalEnergy:0,
       energyShareB:totalEnergy>0?eb/totalEnergy:0,
+      // Same realized-energy denominator as A and B, so the three shares sum to 1.
+      energyShareC:totalEnergy>0?ec/totalEnergy:0,
       stockFractionA:capA>0?stockA/capA:0,
       stockFractionB:capB>0?stockB/capB:0,
       abioticStockFraction:(capA+capB)>0?(stockA+stockB)/(capA+capB):0,
@@ -505,11 +502,24 @@ export class UniverseSession {
       policyVersion:pending.policyVersion,
     };
     this.#decisionResolutions.push(resolution);
-    // Retain the comparison baseline BEFORE the effect lands, at the same
-    // tick: resolution advances zero ticks, so this is the moment of the
-    // intervention, not an earlier one. A new resolution supersedes any
-    // aftermath still under observation; the prior one is already durable in
-    // #decisionResolutions, which is what History reads.
+    // Retain BOTH sides of the direct effect synchronously, at the resolution
+    // tick: one immediately before the effect lands, one immediately after.
+    // Resolution advances zero ticks, so both are the same tick and the
+    // difference between them IS the mechanical effect and nothing else.
+    //
+    // Retaining the after-state is what makes AC23 hold. Playback resumes
+    // automatically once this gate clears (AC22), so a comparison reading live
+    // state would drift under the player and stop describing the direct effect
+    // at all. A new resolution supersedes any aftermath still under observation;
+    // the prior one is already durable in #decisionResolutions, which is what
+    // History reads.
+    const baseline=aftermathBaselineFor(this.#experiment);
+    if(choice.intervention){
+      // The quiet interval already restarted at creation; only a non-null
+      // catalyst application additionally starts the major cooldown.
+      this.applyIntervention(choice.intervention,fromCatalyst?"world catalyst":"event decision");
+      if(fromCatalyst)this.#lastMajorCatalystTick=this.#experiment.t;
+    }
     this.#aftermath={
       schemaVersion:1,
       opportunityId:pending.opportunityId,
@@ -520,28 +530,26 @@ export class UniverseSession {
       directEffectDescription:choice.directEffectDescription,
       intervention:choice.intervention,
       source:resolution.source,
-      baseline:aftermathBaselineFor(this.#experiment),
+      baseline,
+      resolved:aftermathBaselineFor(this.#experiment),
     };
-    if(choice.intervention){
-      // The quiet interval already restarted at creation; only a non-null
-      // catalyst application additionally starts the major cooldown.
-      this.applyIntervention(choice.intervention,fromCatalyst?"world catalyst":"event decision");
-      if(fromCatalyst)this.#lastMajorCatalystTick=this.#experiment.t;
-    }
     this.#pendingDecision=null;
     return this.snapshot();
   }
 
   /**
-   * The impact state's explicit acknowledgement. The world stays paused until
-   * this or another explicit supported advance command; the impact state itself
-   * advances nothing, and there is no background path that could.
+   * Collapse the impact sheet: move the aftermath to "observation".
    *
-   * Transitions the aftermath to "observation" rather than discarding it. The
-   * retained baseline and the intervention identity both survive, and a later
+   * Deliberately NOT a resume. Playback is the app's business and is usually
+   * already running by the time this is called, because resolving a choice
+   * restores the player's prior play intent (AC22). All this does is release the
+   * presentation slot, and it advances zero ticks.
+   *
+   * Transitions rather than discards: the retained baseline, the retained
+   * post-effect state and the intervention identity all survive, and a later
    * slice presents "observation" as the compact aftermath strip.
    */
-  resumeAftermath(){
+  acknowledgeAftermath(){
     if(!this.#experiment)throw new Error("Universe has not been created");
     if(!this.#aftermath)throw new Error("No aftermath is awaiting acknowledgement");
     if(this.#aftermath.phase!=="impact")throw new Error("Aftermath is not awaiting acknowledgement");
@@ -689,10 +697,10 @@ export class UniverseSession {
             ?[{type:"DECISION_RESOLVED",requestId:command.requestId,snapshot},{type:"SNAPSHOT",snapshot}]
             :[{type:"SNAPSHOT",snapshot}];
         }
-        case "RESUME_AFTERMATH":{
-          const snapshot=this.resumeAftermath();
+        case "ACKNOWLEDGE_AFTERMATH":{
+          const snapshot=this.acknowledgeAftermath();
           return command.requestId
-            ?[{type:"AFTERMATH_RESUMED",requestId:command.requestId,snapshot},{type:"SNAPSHOT",snapshot}]
+            ?[{type:"AFTERMATH_ACKNOWLEDGED",requestId:command.requestId,snapshot},{type:"SNAPSHOT",snapshot}]
             :[{type:"SNAPSHOT",snapshot}];
         }
         case "LOAD_CHECKPOINT":return[{type:"SNAPSHOT",snapshot:this.restore(command.checkpoint)}];

@@ -82,7 +82,12 @@ function eligibleIds(context: CatalystContext, cooldownClear = true): string[] {
 // --- C1/C4: pure policy, versioned catalog, honest boundaries -----------------
 
 function testEligibilityBoundaries() {
-  assert.deepEqual(catalystIds(), ["drought-a", "drought-b", "global-crash"], "v1 catalog in deterministic order");
+  // Owner ruling: Metabolite C washout is a legitimate product catalyst, so the
+  // catalog is four entries. The offer ORDER is the contract - it is what makes
+  // a generated window deterministic - so the addition is asserted explicitly
+  // rather than loosened to a containment check.
+  assert.deepEqual(catalystIds(), ["drought-a", "drought-b", "global-crash", "c-washout"],
+    "catalog in deterministic order, with the washout offer appended last");
   assert.deepEqual(eligibleIds(healthyContext()), ["drought-a", "drought-b", "global-crash"], "healthy world offers all three");
 
   // Energy share boundary: exactly 15% is coherent, a hair below is not.

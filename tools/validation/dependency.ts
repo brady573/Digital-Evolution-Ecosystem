@@ -373,8 +373,11 @@ function testMultiSeedPossibility() {
 }
 
 function testWashoutReliance() {
-  // Washout is validation-internal: applicable through the recorded path but
-  // never offered in windows and without an Experiments button.
+  // Owner ruling supersedes the earlier "validation-internal, never offered"
+  // policy: the washout IS a product catalyst. What still holds, and is what this
+  // now guards, is that it is a CATALYST offer only - it must not leak into the
+  // event-decision choice catalog, and it must still apply through the ordinary
+  // recorded deterministic path rather than a special one.
   assert.equal(
     engineCatalystModeFor({ schemaVersion: 1, kind: "nutrient_disturbance", mode: "c_washout" }),
     "cWashout",
@@ -384,8 +387,13 @@ function testWashoutReliance() {
     isSupportedIntervention({ schemaVersion: 1, kind: "nutrient_disturbance", mode: "c_washout" }),
     "washout applies through the recorded path",
   );
-  assert.ok(!catalystIds().some((id) => String(id).includes("washout")), "washout never offered");
-  assert.equal(catalystIds().length, 3, "window catalog unchanged");
+  assert.ok(catalystIds().includes("c-washout"), "the washout is an offered product catalyst");
+  // The isolation that still matters is catalog-level: the washout is a CATALYST
+  // offer and must not also leak into the event-decision choice catalog, where it
+  // would be reachable from a different and wrong surface.
+  assert.equal(catalystIds().filter((id) => String(id) === "c-washout").length, 1,
+    "the washout appears exactly once, with no duplicate offer");
+  assert.equal(catalystIds().length, 4, "the catalog grew by exactly the one sanctioned offer");
   // Stage 2 Level-3: matched C-availability perturbation. An established
   // guild (20% scavengers) faces a recorded environmental C sink on the live
   // branch while the exact control twin runs untouched. The guild collapses

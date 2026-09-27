@@ -247,25 +247,19 @@ export interface AftermathState {
   readonly directEffectDescription: string;
   readonly intervention: InterventionSpec | null;
   readonly source: "event_decision" | "world_catalyst";
+  /** Retained state from immediately BEFORE the effect was applied. */
   readonly baseline: AftermathBaseline;
+  /** Retained state from immediately AFTER the effect was applied, same tick.
+   *  Both sides are retained rather than one side being read live, because
+   *  playback resumes automatically after resolution (AC22) and a live "Now"
+   *  would move while the player reads the comparison (AC23). Difference is
+   *  therefore exactly the mechanical effect, measured across one tick. */
+  readonly resolved: AftermathBaseline;
 }
 
 /** Presentation states of an aftermath. "impact" is entered at resolution and
  *  is the only phase that requires the world to be paused. */
 export type AftermathPhase = "impact" | "observation" | "development" | "settlement";
-
-/**
- * The comparable scalars as they stand right now, built by the same function
- * that built the baseline so the two can never disagree. Carries only scalars:
- * the current fields are already on the snapshot, so retaining them twice would
- * be pure duplication. Emitted only while an aftermath is active, because
- * deriving these costs a pass over the population and the ordinary render path
- * must not pay for a comparison nobody is looking at.
- */
-export interface AftermathScalars {
-  readonly tick: number;
-  readonly scalars: Readonly<Record<string, number>>;
-}
 
 /* ------------------------------------------------------------------ *
  * M3 world catalysts: quiet-period environmental intervention windows.
@@ -277,7 +271,7 @@ export interface AftermathScalars {
  * ------------------------------------------------------------------ */
 
 /** Stable catalyst identifiers, M3 v1 catalog. */
-export type CatalystId = "drought-a" | "drought-b" | "global-crash";
+export type CatalystId = "drought-a" | "drought-b" | "global-crash" | "c-washout";
 
 /** Read-only world state a catalyst eligibility check may consult. */
 export interface CatalystContext {
@@ -295,6 +289,11 @@ export interface CatalystContext {
   readonly stockFractionB: number;
   /** Total abiotic stock as a share of modeled abiotic capacity (0..1). */
   readonly abioticStockFraction: number;
+  /** Share of realized cumulative resource energy from Metabolite C (0..1).
+   *  Exposed so a C-targeting catalyst can be judged by the same kind of
+   *  read-only context the A and B catalysts use, rather than by a rule invented
+   *  for it. Derived from the same realized energy totals as energyShareA/B. */
+  readonly energyShareC: number;
 }
 
 /** Per-catalyst diagnostic: why it was or was not offered. */
@@ -512,10 +511,6 @@ export interface RenderSnapshot {
    *  is active. Presentation reads it from here rather than owning it, so the
    *  application never holds mutable aftermath state. */
   readonly aftermath: AftermathState | null;
-  /** Comparable "now" values, present exactly when `aftermath` is. Null
-   *  otherwise, so an absent comparison is visible as absence rather than
-   *  rendered as zero. */
-  readonly aftermathNow: AftermathScalars | null;
   readonly control: {
     readonly tick: number;
     readonly population: number;
@@ -601,7 +596,7 @@ export type RuntimeCommand =
       readonly choiceId: string;
       readonly requestId?: string;
     }
-  | { readonly type: "RESUME_AFTERMATH"; readonly requestId?: string }
+  | { readonly type: "ACKNOWLEDGE_AFTERMATH"; readonly requestId?: string }
   | { readonly type: "LOAD_CHECKPOINT"; readonly checkpoint: SupportedUniverseCheckpoint }
   | { readonly type: "REQUEST_CHECKPOINT"; readonly requestId: string }
   | { readonly type: "REQUEST_EXPORT"; readonly requestId: string };
@@ -611,8 +606,8 @@ export type RuntimeResponse =
   | { readonly type: "CHECKPOINT"; readonly requestId: string; readonly checkpoint: UniverseCheckpoint }
   | { readonly type: "EXPORT"; readonly requestId: string; readonly data: unknown }
   | { readonly type: "DECISION_RESOLVED"; readonly requestId: string; readonly snapshot: RenderSnapshot }
-  /** Acknowledgement reply for RESUME_AFTERMATH. Distinct from a bare SNAPSHOT
-   *  so the awaiting caller can settle: a snapshot alone only notifies
+  /** Acknowledgement reply for ACKNOWLEDGE_AFTERMATH. Distinct from a bare
+   *  SNAPSHOT so the awaiting caller can settle: a snapshot alone only notifies
    *  subscribers and would leave the request pending forever. */
-  | { readonly type: "AFTERMATH_RESUMED"; readonly requestId: string; readonly snapshot: RenderSnapshot }
+  | { readonly type: "AFTERMATH_ACKNOWLEDGED"; readonly requestId: string; readonly snapshot: RenderSnapshot }
   | { readonly type: "ERROR"; readonly message: string; readonly requestId?: string };

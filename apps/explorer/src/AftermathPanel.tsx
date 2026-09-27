@@ -64,14 +64,20 @@ function fractionsFor(
 /**
  * Which nutrients the intervention actually moved.
  *
- * Driven entirely by the two retained fields: a nutrient that did not change
- * is not shown, and nothing here re-derives which nutrient an intervention
- * mode was supposed to touch. If the engine's effect is not visible in the
- * retained evidence, the sheet says nothing rather than asserting one.
+ * Driven entirely by the two RETAINED states: a nutrient that did not change is
+ * not shown, and nothing here re-derives which nutrient an intervention was
+ * supposed to touch. If the engine's effect is not visible in the retained
+ * evidence, the sheet says nothing rather than asserting one.
+ *
+ * `capacity` is read live, and that is deliberate: capacity is a static
+ * configuration value that no intervention alters, so unlike a measurement it
+ * cannot drift while the world resumes behind the sheet. Only the changing
+ * quantities (stock, scalars) are retained.
  */
 function changedNutrients(
   baseline: AftermathBaseline,
-  current: RenderResourceField,
+  resolved: AftermathBaseline,
+  capacity: RenderResourceField["capacity"],
 ): KindChange[] {
   const grid = baseline.resources.gridSize;
   const cells = grid * grid;
@@ -85,8 +91,8 @@ function changedNutrients(
   };
   const changes: KindChange[] = [];
   for (let kind = 0; kind < NUTRIENT_LABELS.length; kind++) {
-    const before = fractionsFor(baseline.resources.stock, current.capacity, kind, cells);
-    const now = fractionsFor(current.stock, current.capacity, kind, cells);
+    const before = fractionsFor(baseline.resources.stock, capacity, kind, cells);
+    const now = fractionsFor(resolved.resources.stock, capacity, kind, cells);
     const spatial = fieldDelta(asRows(before), asRows(now));
     // A nutrient that did not move is not shown, and nothing here re-derives
     // which nutrient the intervention was supposed to touch.
@@ -150,16 +156,18 @@ function FieldCanvas({ change, mode }: { change: KindChange; mode: AftermathComp
 
 export interface AftermathPanelProps {
   readonly snapshot: RenderSnapshot;
-  readonly onResume: () => void;
+  readonly onAcknowledge: () => void;
   readonly busy: boolean;
 }
 
-export function AftermathPanel({ snapshot, onResume, busy }: AftermathPanelProps) {
+export function AftermathPanel({ snapshot, onAcknowledge, busy }: AftermathPanelProps) {
   const aftermath = snapshot.aftermath;
-  const now = snapshot.aftermathNow;
-  // A comparison is only offered when there is a baseline to compare against.
-  // Absent baseline means "Now" alone, never a zero-filled Difference.
-  const baselinePresent = !!aftermath && !!now;
+  // Both sides are RETAINED at the resolution tick, not read live. Playback
+  // resumes automatically once the choice resolves (AC22), so a live "Now"
+  // would drift while the player reads the sheet and would stop being the
+  // direct effect (AC23).
+  const resolved = aftermath?.resolved ?? null;
+  const baselinePresent = !!aftermath && !!resolved;
   const modes = availableComparisons(baselinePresent);
   const [mode, setMode] = useState<AftermathComparison>(() => defaultComparison(baselinePresent));
 
@@ -171,8 +179,10 @@ export function AftermathPanel({ snapshot, onResume, busy }: AftermathPanelProps
 
   if (!aftermath) return null;
 
-  const rows = baselinePresent && now ? changedScalars(aftermath.baseline, now.scalars) : [];
-  const nutrients = baselinePresent ? changedNutrients(aftermath.baseline, snapshot.resources) : [];
+  const rows = baselinePresent ? changedScalars(aftermath!.baseline, resolved!.scalars) : [];
+  const nutrients = baselinePresent
+    ? changedNutrients(aftermath!.baseline, aftermath!.resolved, snapshot.resources.capacity)
+    : [];
   const showingDifference = mode === "difference" && baselinePresent;
   const quiet = showingDifference && rows.length === 0 && nutrients.length === 0;
 
@@ -266,7 +276,7 @@ export function AftermathPanel({ snapshot, onResume, busy }: AftermathPanelProps
         <div className="aftermath-evidence" data-testid="aftermath-single">
           <p className="aftermath-asof">
             {mode === "before" ? "Retained baseline" : "Current state"} at tick{" "}
-            {(mode === "before" ? aftermath.baseline.tick : now?.tick ?? 0).toLocaleString()}.
+            {(mode === "before" ? aftermath!.baseline.tick : resolved!.tick).toLocaleString()}.
             {mode === "before" && " This is the moment the intervention was applied."}
           </p>
           {nutrients.map(change => (
@@ -278,20 +288,27 @@ export function AftermathPanel({ snapshot, onResume, busy }: AftermathPanelProps
         </div>
       )}
 
-      {/* Keeps the mechanical effect separate from biology, which has not
-          happened yet: the world is paused and no response can exist. */}
+      {/* Keeps the mechanical effect separate from biology. Both sides of the
+          comparison were retained at the resolution tick, so nothing here
+          depends on later ticks - and the world may already be running behind
+          the sheet, which is exactly why the evidence is pinned. */}
       <p className="aftermath-note">
-        This is the mechanical effect only. The world is paused at tick{" "}
-        {aftermath.resolutionTick.toLocaleString()}, so no organism has responded yet.
+        This is the mechanical effect only, captured at tick{" "}
+        {aftermath.resolutionTick.toLocaleString()}. It is not an outcome: no biological
+        response to this intervention is implied.
       </p>
 
+      {/* Non-blocking by design. Playback resumes on its own when the player had
+          the world playing before the decision (AC22), so this collapses the
+          sheet rather than releasing a pause. It is never a prerequisite for
+          time moving. */}
       <button
         className="aftermath-resume"
-        data-testid="aftermath-resume"
-        onClick={onResume}
+        data-testid="aftermath-acknowledge"
+        onClick={onAcknowledge}
         disabled={busy}
       >
-        Resume
+        Continue watching
       </button>
     </div>
   );

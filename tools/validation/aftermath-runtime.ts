@@ -90,33 +90,50 @@ function testResolutionAdvancesZeroTicks() {
   assert.equal(aftermath.phase, "impact", "resolution enters the impact phase");
 }
 
-function testNothingBiologicalMovedWhileTheSheetIsOpen() {
-  const { aftermath, session } = resolvedWithInterveningChoice();
-  const current = session.snapshot();
-  assert.ok(current.aftermathNow, "current comparison values are published while an aftermath is active");
-  // The decisive AC2 check. Zero ticks elapsed between the retained baseline and
-  // "Now", so every BIOLOGICAL measure must be identical. If any of these
-  // differed, the sheet would be presenting a response that has not happened.
-  // Nutrient waste is excluded deliberately: the intervention can change waste
-  // load at the instant it lands, and that is a mechanical consequence, not a
-  // biological response.
+function testNothingBiologicalMovedAcrossTheEffect() {
+  const { aftermath } = resolvedWithInterveningChoice();
+  // The decisive AC2 check. BOTH sides of the comparison were retained at the
+  // same tick, so every BIOLOGICAL measure must be identical across the
+  // intervention. If any differed, the sheet would be presenting a response to
+  // the intervention that has not had time to happen. Nutrient waste is excluded
+  // deliberately: the intervention can change waste load at the instant it
+  // lands, and that is a mechanical consequence, not a biological response.
   const mechanicalOnly = new Set(["waste_fraction", "waste_exposed_share"]);
   for (const descriptor of AFTERMATH_COMPARABLES) {
     if (mechanicalOnly.has(descriptor.key)) continue;
-    assert.equal(current.aftermathNow.scalars[descriptor.key], aftermath.baseline.scalars[descriptor.key],
-      `${descriptor.key} is identical at the resolution tick, so no response is being implied`);
+    assert.equal(aftermath.resolved.scalars[descriptor.key], aftermath.baseline.scalars[descriptor.key],
+      `${descriptor.key} is identical across the intervention, so no response is being implied`);
   }
-  assert.equal(current.aftermathNow.tick, aftermath.baseline.tick,
-    "both sides of the comparison are the same tick");
+  assert.equal(aftermath.resolved.tick, aftermath.baseline.tick,
+    "both retained states are the same tick, so Difference is exactly the mechanical effect");
+}
+
+function testComparisonSurvivesAutoResume() {
+  // AC23: playback resumes automatically once the choice resolves (AC22), so a
+  // comparison that read LIVE state would drift under the player. Both sides are
+  // retained, so let the world run a long way and prove the evidence did not
+  // move with it.
+  const { session, aftermath } = resolvedWithInterveningChoice();
+  const retainedResolved = JSON.parse(JSON.stringify(aftermath.resolved));
+  const retainedBaseline = JSON.parse(JSON.stringify(aftermath.baseline));
+  const settled = session.advance(4_000);
+  assert.ok(settled.tick > aftermath.resolutionTick + 1_000, "the world genuinely moved on");
+  assert.equal(settled.aftermath!.phase, "observation", "an explicit advance released the impact state");
+  assert.deepEqual(settled.aftermath!.resolved, retainedResolved,
+    "the retained post-effect state is untouched by later ticks, so the comparison stays the direct effect");
+  assert.deepEqual(settled.aftermath!.baseline, retainedBaseline,
+    "and so is the retained baseline");
+  // Live biology HAS moved, which is exactly why it must not be the evidence.
+  assert.notEqual(settled.population, aftermath.resolved.scalars.population,
+    "live population differs from the retained state, proving the two are not conflated");
 }
 
 // --- AC3: the baseline is the moment of the intervention ------------------------
 
 function testBaselineIsThePreEffectInstant() {
-  const { session, aftermath } = resolvedWithInterveningChoice();
-  const current = session.snapshot();
+  const { aftermath } = resolvedWithInterveningChoice();
   const grid = aftermath.baseline.resources.gridSize;
-  assert.equal(grid, current.resources.gridSize, "the baseline field is at the live grid resolution");
+  assert.equal(grid, aftermath.resolved.resources.gridSize, "both retained fields share one grid resolution");
   // The layout is kind-major and flat: 3 substances, each a row-major run of
   // gridSize*gridSize cells. Asserting the shape here is what stops a future
   // reader treating the outer index as a grid row and comparing wrong cells.
@@ -127,6 +144,8 @@ function testBaselineIsThePreEffectInstant() {
   }
   assert.equal(aftermath.baseline.waste.stock.length, grid * grid,
     "the waste field is a single flat grid");
+  assert.equal(aftermath.resolved.waste.stock.length, grid * grid,
+    "and the post-effect retention has the same geometry");
 
   // Some nutrient must actually differ, or the comparison has nothing to show
   // and the intervention did not do what its description claims.
@@ -138,11 +157,16 @@ function testBaselineIsThePreEffectInstant() {
   let movedKinds = 0;
   for (let kind = 0; kind < 3; kind++) {
     const before = aftermath.baseline.resources.stock[kind] ?? [];
-    const after = current.resources.stock[kind] ?? [];
+    const after = aftermath.resolved.resources.stock[kind] ?? [];
     const delta = fieldDelta(shaped(before), shaped(after));
     if (delta && delta.magnitude > 0) movedKinds++;
   }
   assert.ok(movedKinds > 0, "the applied intervention visibly changed at least one nutrient field");
+  // And the difference is a FALL in stock, which is what these modes do. This is
+  // the direct effect, asserted as a direction rather than assumed.
+  const totalBefore=aftermath.baseline.resources.stock.flat().reduce((a:number,b:number)=>a+b,0);
+  const totalAfter=aftermath.resolved.resources.stock.flat().reduce((a:number,b:number)=>a+b,0);
+  assert.ok(totalAfter<totalBefore, `the direct effect is a reduction in nutrient stock (${totalBefore.toFixed(1)} -> ${totalAfter.toFixed(1)})`);
 }
 
 function testBaselineIsACopyThatIsNeverWrittenBack() {
@@ -150,7 +174,7 @@ function testBaselineIsACopyThatIsNeverWrittenBack() {
   const baseline = aftermath.baseline;
   const snapshotOfBaseline = JSON.stringify(baseline);
   // Mutating the simulation must not reach back into retained evidence.
-  session.resumeAftermath();
+  session.acknowledgeAftermath();
   session.advance(2_000);
   assert.equal(JSON.stringify(baseline), snapshotOfBaseline,
     "retained evidence is inert: later ticks cannot alter what was recorded at resolution");
@@ -183,13 +207,11 @@ function testAnExplicitAdvanceIsALegitimateRelease() {
     "and it releases the impact state rather than discarding the aftermath");
   assert.equal(moved.aftermath!.baseline.tick, aftermath.baseline.tick,
     "the retained baseline survives the release, so nothing is lost by moving on");
-  assert.equal(moved.aftermathNow, null,
-    "comparison values stop being published once the impact sheet is gone");
 }
 
 function testReleasePreservesTheRecord() {
   const { session, aftermath } = resolvedWithInterveningChoice();
-  session.resumeAftermath();
+  session.acknowledgeAftermath();
   const after = session.snapshot();
   assert.equal(after.aftermath!.phase, "observation", "acknowledging moves the aftermath to observation");
   assert.equal(after.aftermath!.commandId, aftermath.commandId, "the aftermath identity is preserved");
@@ -211,15 +233,15 @@ function testPendingDecisionStillOutranksEverything() {
   session.resolveEventDecision(pending.opportunityId, "keep-watching");
   assert.equal(session.snapshot().aftermath!.phase, "impact", "resolving opened the impact state");
   // With the decision resolved, the only remaining pause is the impact state.
-  session.resumeAftermath();
+  session.acknowledgeAftermath();
   assert.ok(session.advance(3).tick > first.tick, "time moves once nothing is pending");
 }
 
 function testResumeIsIdempotentlyRefused() {
   const { session, aftermath } = resolvedWithInterveningChoice();
-  session.resumeAftermath();
+  session.acknowledgeAftermath();
   // Acknowledging twice is an explicit error rather than a silent success.
-  assert.throws(() => session.resumeAftermath(), /not awaiting acknowledgement|No aftermath/,
+  assert.throws(() => session.acknowledgeAftermath(), /not awaiting acknowledgement|No aftermath/,
     "acknowledging twice is refused rather than silently tolerated");
   assert.equal(session.snapshot().aftermath!.phase, "observation", "and the aftermath stays released");
 }
@@ -227,7 +249,7 @@ function testResumeIsIdempotentlyRefused() {
 function testResumeItselfAdvancesNothing() {
   const { session, aftermath } = resolvedWithInterveningChoice();
   const before = session.snapshot().tick;
-  const after = session.resumeAftermath();
+  const after = session.acknowledgeAftermath();
   assert.equal(after.tick, before, "acknowledging the impact advances zero ticks");
   assert.equal(aftermath.resolutionTick, before, "the resolution tick is the tick it was paused at");
 }
@@ -240,8 +262,6 @@ function testNoBaselineMeansNoComparisonIsOffered() {
   // A fresh universe has no aftermath at all.
   const snapshot = session.snapshot();
   assert.equal(snapshot.aftermath, null, "a world with no resolution has no aftermath");
-  assert.equal(snapshot.aftermathNow, null,
-    "and no comparison values are published, so an absent comparison reads as absence rather than zero");
 }
 
 function testAftermathSupersedesWithoutLosingHistory() {
@@ -259,7 +279,7 @@ function testAftermathSupersedesWithoutLosingHistory() {
   // observation of "nothing happened" is itself an aftermath.
   assert.equal(firstAftermath.intervention, null,
     "leaving an intervention out still records an aftermath, with no intervention attached");
-  session.resumeAftermath();
+  session.acknowledgeAftermath();
 
   let guard = 0;
   let secondPending = session.snapshot().pendingDecision;
@@ -314,19 +334,20 @@ function testResumeReplySettlesTheAwaitingCaller() {
   // state could not be left. A reply carrying the requestId is what makes that
   // promise resolve, so assert the wiring rather than trusting the button.
   const requestId="aftermath-req-1";
-  const responses=session.handle({type:"RESUME_AFTERMATH",requestId});
-  const reply=responses.find(r=>r.type==="AFTERMATH_RESUMED");
+  const responses=session.handle({type:"ACKNOWLEDGE_AFTERMATH",requestId});
+  const reply=responses.find(r=>r.type==="AFTERMATH_ACKNOWLEDGED");
   assert.ok(reply,"acknowledgement produces a request-correlated reply, not just a snapshot");
   assert.equal((reply as any).requestId,requestId,"the reply carries the requestId the caller awaits");
   assert.ok(responses.some(r=>r.type==="SNAPSHOT"),"subscribers are still notified with a snapshot");
   // A fire-and-forget command must not invent a reply nobody is waiting for.
   const plain=session.handle({type:"CREATE_UNIVERSE",config:config(FIXTURE_SEED)});
-  assert.ok(!plain.some(r=>r.type==="AFTERMATH_RESUMED"),"an unrelated command never emits an aftermath reply");
+  assert.ok(!plain.some(r=>r.type==="AFTERMATH_ACKNOWLEDGED"),"an unrelated command never emits an aftermath reply");
 }
 
 function main() {
   testResolutionAdvancesZeroTicks();
-  testNothingBiologicalMovedWhileTheSheetIsOpen();
+  testNothingBiologicalMovedAcrossTheEffect();
+  testComparisonSurvivesAutoResume();
   testBaselineIsThePreEffectInstant();
   testBaselineIsACopyThatIsNeverWrittenBack();
   testNothingAdvancesOnItsOwnDuringImpact();
