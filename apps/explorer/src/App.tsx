@@ -631,7 +631,12 @@ export function App(){
         <div className="world-wrap">
           <div className="world-scene" aria-hidden="true"><div className="glow g-a"/><div className="glow g-b"/><div className="glow g-c"/><div className="ambient"/></div>
           <WorldCanvas snapshot={snapshot} lens={lens} resourceView={resourceView} traitView={traitView} selectedId={selectedId} onSelect={setSelectedId} cam={cam} zoom={zoom} onCamera={setCam} onView={reportView}/>
-          <div className="world-overlay">
+          {/* A pending decision outranks inspection, so it also yields the view
+              overlay: leaving the minimap/zoom controls under the sheet made
+              zoom unreachable (AC8). The world canvas itself stays visible as
+              context. View state is untouched, so the controls return exactly
+              as they were when the decision resolves. */}
+          {!pending&&<div className="world-overlay">
             <div className="minimap-frame"><WorldMinimap snapshot={snapshot} cam={cam} view={view}/></div>
             <div className="zoom-controls" role="group" aria-label="World view">
               <button aria-label="Zoom out" onClick={()=>setZoomClamped(zoom-.5)} disabled={zoom<=ZOOM_MIN}>−</button>
@@ -639,7 +644,7 @@ export function App(){
               <button aria-label="Zoom in" onClick={()=>setZoomClamped(zoom+.5)} disabled={zoom>=ZOOM_MAX}>+</button>
               <button aria-label="Reset view" onClick={()=>{setZoom(1);setCam({x:300,y:300})}}>⌂</button>
             </div>
-          </div>
+          </div>}
           {pending&&<section className="decision-sheet" role="dialog" aria-modal="false" aria-label={pending.source==="world_catalyst"?"World catalyst":"Event decision"} data-testid="decision-sheet" data-source={pending.source}>
             <span className="eyebrow">{pending.source==="world_catalyst"?"World catalyst — your move":"A decision is waiting"}</span>
             <h2>{pending.prompt}</h2>
@@ -657,7 +662,13 @@ export function App(){
         </div>
       </section>
       <aside className="investigation-rail" aria-label="Investigation">
-        {surface==="world"&&<div className={inspectorOpen?"inspector sheet":"inspector sheet collapsed"}>
+        {/* A pending decision outranks inspection (AC7): while one is open the
+            decision sheet owns the lower screen, so the inspector is not
+            rendered at all rather than rendered underneath it. The world
+            remains visible as context, and the simulation stays paused exactly
+            as the decision contract already guarantees. Nothing about the
+            simulation changes; this only decides what is painted. */}
+        {surface==="world"&&!pending&&<div className={inspectorOpen?"inspector sheet":"inspector sheet collapsed"}>
           <button className="sheet-toggle" onClick={()=>setInspectorOpen(v=>!v)}>{inspectorOpen?"Hide details":"Show details"}</button>
           {inspectorOpen&&<>{selected?<><span className="eyebrow">Selected organism</span><h2>#{selected.id}</h2><p>{selected.activity} · generation {selected.generation}</p><p className="breadcrumb">Organism #{selected.id} → Lineage {`L-${String(selected.lineageId).padStart(4,"0")}`} → Clade {`L-${String(selected.cladeId).padStart(4,"0")}`}</p><dl>
             <div><dt>Clade</dt><dd>L-{String(selected.cladeId).padStart(4,"0")}</dd></div>
@@ -719,12 +730,21 @@ export function App(){
     </nav>
 
     <footer className="controls">
-      <button onClick={()=>{if(blockWhilePending())return;setRunning(v=>!v)}}>{running?"Pause":"Play"}</button>
-      <select aria-label="Simulation speed" value={speed} onChange={e=>setSpeed(Number(e.target.value))}><option value={1}>1×</option><option value={10}>10×</option><option value={100}>100×</option><option value={500}>Max</option></select>
-      <button onClick={()=>{if(blockWhilePending())return;setRunning(false);runtime.runToNextEvent()}}>Next meaningful change</button>
-      <button onClick={save}>Save</button>
-      <button onClick={load}>Resume</button>
-      <button onClick={exportEvidence}>Export</button>
+      {/* Primary actions first: Play/Pause, speed, and Next meaningful change
+          stay on the top row at every width. Save/Resume/Export group below
+          so nothing is ever hidden behind unindicated horizontal scrolling.
+          The wrappers are `display:contents` on desktop, so the desktop
+          control bar is unchanged. */}
+      <span className="control-row control-row-primary">
+        <button onClick={()=>{if(blockWhilePending())return;setRunning(v=>!v)}}>{running?"Pause":"Play"}</button>
+        <select aria-label="Simulation speed" value={speed} onChange={e=>setSpeed(Number(e.target.value))}><option value={1}>1×</option><option value={10}>10×</option><option value={100}>100×</option><option value={500}>Max</option></select>
+        <button onClick={()=>{if(blockWhilePending())return;setRunning(false);runtime.runToNextEvent()}}>Next meaningful change</button>
+      </span>
+      <span className="control-row control-row-secondary">
+        <button onClick={save}>Save</button>
+        <button onClick={load}>Resume</button>
+        <button onClick={exportEvidence}>Export</button>
+      </span>
       <span className="status">{status}</span>
     </footer>
 
