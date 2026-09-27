@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import {
-  LandscapeSmoother, cellFractions, landscapeCell, microTexture,
+  LandscapeSmoother, cellFractions, landscapeCell, landscapeTileLayout, microTexture,
   nutrientOverlayCell, wasteOverlayCell,
 } from "../../apps/explorer/src/landscape.ts";
 import type { RenderResourceField, RenderWasteField } from "../../packages/contracts/src/index.ts";
@@ -171,6 +171,72 @@ async function testCellInspection() {
   console.log("landscape cell inspection: PASS");
 }
 
+function testWrappedSubstrateTiles() {
+  // Regression: the substrate is one world period repeated across the canvas.
+  // Deriving the destination rect from the wrapped world->screen mapping made
+  // the rect zero-width for every camera except the exact world centre, so the
+  // landscape vanished as soon as the world was panned. Sweep cameras and
+  // zooms and require full, gapless coverage every time.
+  //
+  // The swept case count is reported from the code rather than quoted by hand,
+  // so the evidence cannot drift from what actually runs.
+  const EXTENT = 600;
+  const CAM_STEP = 25;
+  const CAM_POSITIONS = Math.ceil(EXTENT / CAM_STEP);
+  const VIEWS = [{ w: 390, h: 844 }, { w: 320, h: 844 }, { w: 1280, h: 900 }];
+  const ZOOMS = [1, 1.5, 2, 3];
+  let worstCount = 0;
+  let cases = 0;
+  for (const view of VIEWS) {
+    for (const zoom of ZOOMS) {
+      const fit = view.h > view.w ? view.h / EXTENT : Math.min(view.w, view.h) / EXTENT;
+      const s = fit * zoom;
+      for (let cam = 0; cam < EXTENT; cam += CAM_STEP) {
+        cases++;
+        const t = landscapeTileLayout(cam, cam, s, view.w, view.h, EXTENT);
+        // Tiles are contiguous, so the union spans
+        // [baseX + iStart*periodX, baseX + (iEnd+1)*periodX].
+        const left = t.baseX + t.iStart * t.periodX;
+        const right = t.baseX + (t.iEnd + 1) * t.periodX;
+        const top = t.baseY + t.jStart * t.periodY;
+        const bottom = t.baseY + (t.jEnd + 1) * t.periodY;
+        assert.ok(left <= 0.5 && right >= view.w - 0.5,
+          `tiles cover the canvas horizontally at cam ${cam} zoom ${zoom} (${left.toFixed(1)}..${right.toFixed(1)} vs ${view.w})`);
+        assert.ok(top <= 0.5 && bottom >= view.h - 0.5,
+          `tiles cover the canvas vertically at cam ${cam} zoom ${zoom} (${top.toFixed(1)}..${bottom.toFixed(1)} vs ${view.h})`);
+        // The drawn period must be the real world size on screen, never zero.
+        assert.ok(Math.abs(t.periodX - EXTENT * s) < 1e-6 && t.periodX > 0,
+          `period width is the true world size at cam ${cam} zoom ${zoom} (${t.periodX.toFixed(1)})`);
+        assert.ok(t.iEnd >= t.iStart && t.jEnd >= t.jStart,
+          `tile range is non-empty at cam ${cam} zoom ${zoom}`);
+        worstCount = Math.max(worstCount, t.count);
+      }
+    }
+  }
+  // The sweep must actually be the full cross product, so the quoted coverage
+  // in the evidence cannot silently overstate what ran.
+  const expectedCases = VIEWS.length * ZOOMS.length * CAM_POSITIONS;
+  assert.equal(cases, expectedCases,
+    `swept the full camera/zoom/viewport cross product (${cases} cases)`);
+
+  // Performance: repeating the period must stay a handful of draws and must
+  // not grow with zoom. This is the whole budget at the supported maximum.
+  assert.ok(worstCount <= 36,
+    `worst-case tile count stays small (${worstCount} drawImage calls)`);
+
+  // The specific failure, stated directly: the wrapped mapping collapses the
+  // two endpoints everywhere except the world centre, which is exactly why it
+  // looked correct in un-panned captures and failed on a device after a pan.
+  const wrapDelta=(a:number,b:number)=>{let d=(a-b)%EXTENT;if(d>EXTENT/2)d-=EXTENT;else if(d<-EXTENT/2)d+=EXTENT;return d};
+  for (const cam of [0, 100, 200, 400, 599]) {
+    assert.equal(wrapDelta(0, cam), wrapDelta(EXTENT, cam),
+      `wrapped endpoints coincide at cam ${cam} (this is why the rect collapsed)`);
+  }
+  assert.notEqual(wrapDelta(0, 300), wrapDelta(EXTENT, 300),
+    "only the exact world centre produced a non-zero rect");
+  console.log(`landscape wrapped substrate tiles: PASS (${VIEWS.length} viewports x ${ZOOMS.length} zooms x ${CAM_POSITIONS} camera positions = ${cases} cases, worst ${worstCount} draws)`);
+}
+
 async function main(){
   testPrimesFromRealFields();
   testUniverseIsolation();
@@ -178,6 +244,7 @@ async function main(){
   testBoundedAndMonotonic();
   testLensEncodingsAreHonest();
   testMicroTextureIsDeterministic();
+  testWrappedSubstrateTiles();
   await testCellInspection();
   console.log("landscape validation: PASS");
 }

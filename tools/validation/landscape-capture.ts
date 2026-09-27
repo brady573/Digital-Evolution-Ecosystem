@@ -55,11 +55,22 @@ async function main(){
     const readTick=async()=>Number((await page.getByTestId("tick").innerText()).replace(/[^0-9]/g,""));
 
     const world=page.getByLabel("Evolution world");
+    // The lens set is collapsed behind the active-lens chip, so drive it
+    // through the same disclosure the player uses.
+    const pickLens=async(lens:string)=>{
+      const first=page.locator(".lens-options button").first();
+      if(!await first.isVisible().catch(()=>false)){
+        await page.locator(".lens-active").click();
+        await page.waitForTimeout(200);
+      }
+      await page.getByRole("button",{name:lens,exact:true}).click();
+      await page.waitForTimeout(250);
+    };
     // Waste load measured from the canvas, so "waste-modified" is a verified
     // claim rather than a hopeful label.
     const wasteInk=async()=>{
-      await page.getByRole("button",{name:"Waste"}).click();
-      await page.waitForTimeout(320);
+      await pickLens("Waste");
+      await page.waitForTimeout(120);
       return await world.evaluate((el:HTMLCanvasElement)=>{
         const ctx=el.getContext("2d");if(!ctx)return 0;
         const d=ctx.getImageData(0,0,el.width,el.height).data;
@@ -116,8 +127,8 @@ async function main(){
     };
 
     // 1. Landscape, desktop, default zoom, whole world.
-    await page.getByRole("button",{name:"Landscape"}).click();
-    await page.waitForTimeout(500);
+    await pickLens("Landscape");
+    await page.waitForTimeout(400);
     await shot("01-landscape-desktop-default-zoom");
 
     // 2. Waste-modified detail: a centre crop of the SAME state, so the
@@ -148,20 +159,18 @@ async function main(){
     await page.waitForTimeout(300);
 
     // 4. Waste analytical overlay of the same state.
-    await page.getByRole("button",{name:"Waste"}).click();
-    await page.waitForTimeout(500);
+    await pickLens("Waste");
     await shot("04-waste-overlay");
 
     // 5. Nutrient analytical overlay for comparison.
-    await page.getByRole("button",{name:"Nutrients"}).click();
+    await pickLens("Nutrients");
     await page.getByLabel("Resource view").selectOption("a");
     await page.waitForTimeout(500);
     await shot("05-nutrient-a-overlay");
 
     // 6. Selected organism, landscape lens, so the focus marker and
     //    readability against the substrate are visible.
-    await page.getByRole("button",{name:"Landscape"}).click();
-    await page.waitForTimeout(400);
+    await pickLens("Landscape");
     const box=await world.boundingBox();
     if(box){
       // Click a few points until an organism is selected; the read-only
@@ -202,10 +211,69 @@ async function main(){
     },false);
     await mobile.waitForTimeout(500);
     await shot("08-phone-landscape",mobile.getByLabel("Evolution world"));
-    await mobile.getByRole("button",{name:"Waste"}).click();
+    await mobile.locator(".lens-active").click();
+    await mobile.waitForTimeout(200);
+    await mobile.getByRole("button",{name:"Waste",exact:true}).click();
     await mobile.waitForTimeout(500);
     await shot("09-phone-waste-overlay",mobile.getByLabel("Evolution world"));
     await mobile.close();
+
+    // 10. Lane A phone interaction shell: full-viewport frames at the widths
+    //     the acceptance criteria name, plus the pending-decision case. These
+    //     are viewport captures (not canvas crops) because the subject here is
+    //     the control shell and its relationship to the world.
+    const shell=async(name:string,page:import("playwright").Page,label:string)=>{
+      await page.screenshot({path:`${OUT_DIR}/${name}.png`});
+      written.push(name);
+      console.log(`captured ${label}`);
+    };
+    for(const [label,size] of Object.entries({
+      "320":{width:320,height:844},
+      "390":{width:390,height:844},
+      "820":{width:820,height:1024},
+      "1280":{width:1280,height:900},
+    })){
+      const shellPage=await context.newPage();
+      await shellPage.setViewportSize(size);
+      await shellPage.goto(baseUrl,{waitUntil:"networkidle"});
+      await shellPage.getByLabel("Evolution world").waitFor();
+      await shellPage.getByRole("button",{name:"Play"}).click().catch(()=>{});
+      await shellPage.waitForTimeout(1500);
+      await shellPage.getByRole("button",{name:"Pause"}).click().catch(()=>{});
+      await shellPage.waitForTimeout(400);
+      await shell(`10-shell-${label}px`,shellPage,`phone shell @${label}px`);
+      await shellPage.close();
+    }
+    // Secondary selector association.
+    const selectorPage=await context.newPage();
+    await selectorPage.setViewportSize({width:390,height:844});
+    await selectorPage.goto(baseUrl,{waitUntil:"networkidle"});
+    await selectorPage.getByLabel("Evolution world").waitFor();
+    await selectorPage.locator(".lens-active").click();
+    await selectorPage.waitForTimeout(200);
+    await selectorPage.getByRole("button",{name:"Nutrients",exact:true}).click();
+    await selectorPage.waitForTimeout(400);
+    await shell("11-shell-390px-nutrients-selector",selectorPage,"phone shell with Nutrients selector");
+    await selectorPage.close();
+    // Pending decision on a phone viewport.
+    const decisionShell=await context.newPage();
+    await decisionShell.setViewportSize({width:390,height:844});
+    await decisionShell.goto(baseUrl,{waitUntil:"networkidle"});
+    await decisionShell.getByLabel("Evolution world").waitFor();
+    await decisionShell.getByRole("button",{name:"World settings"}).click();
+    await decisionShell.getByLabel("World seed").fill(String(SEED));
+    await decisionShell.getByRole("button",{name:"Create universe"}).click();
+    await decisionShell.getByRole("dialog",{name:"World settings"}).waitFor({state:"detached"});
+    for(let i=0;i<25&&!(await decisionShell.getByTestId("decision-sheet").count());i++){
+      await decisionShell.getByRole("button",{name:"Next meaningful change"}).click();
+      await decisionShell.waitForTimeout(500);
+    }
+    if(await decisionShell.getByTestId("decision-sheet").count()){
+      await shell("12-shell-390px-pending-decision",decisionShell,"phone shell with pending decision");
+    }else{
+      console.log("no pending decision reached on this run; decision shell capture skipped");
+    }
+    await decisionShell.close();
 
     writeFileSync(`${OUT_DIR}/MANIFEST.json`,JSON.stringify({
       seed:SEED,engine:"0.22.0",preset:"Patchwork",
