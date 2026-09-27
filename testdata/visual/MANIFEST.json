@@ -2,8 +2,8 @@
   "seed": 24681357,
   "engine": "0.22.0",
   "preset": "Patchwork",
-  "captureTick": 35149,
-  "wasteCellCoverage": 10.47,
+  "captureTick": 37901,
+  "wasteCellCoverage": 23.52,
   "captures": [
     "01-landscape-desktop-default-zoom",
     "02-landscape-waste-modified",

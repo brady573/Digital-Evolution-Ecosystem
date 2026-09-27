@@ -163,6 +163,14 @@ async function main(){
     assert.equal(await tick(page),saved,"IndexedDB checkpoint restores exact tick");
 
     // World view: minimap + zoom controls (uniform zoom into the same world).
+    // A pending decision yields the overlay by design (Lane A: secondary World
+    // chrome may hide to prevent occlusion), so clear any decision first —
+    // this section is about the world-view chrome, not the decision state.
+    const decisionSheetOnMain=page.getByTestId("decision-sheet");
+    if(await decisionSheetOnMain.count()){
+      await decisionSheetOnMain.getByText("Keep watching").click();
+      await decisionSheetOnMain.waitFor({state:"detached",timeout:15_000});
+    }
     await page.getByLabel("World minimap").waitFor();
     const minimap=page.getByTestId("world-minimap");
     const worldBox=await page.getByLabel("Evolution world").boundingBox();
@@ -261,7 +269,10 @@ async function main(){
     const touchPage=await touchCtx.newPage();
     await touchPage.goto(baseUrl,{waitUntil:"networkidle"});
     await touchPage.getByLabel("Evolution world").waitFor();
-    await touchPage.getByText("Show details").waitFor();
+    // The inspector handle is progressive disclosure: it appears only once
+    // something is selected, so it must be absent here rather than present.
+    assert.equal(await touchPage.locator(".sheet-toggle").count(),0,
+      "no inspector handle is shown until something is selected");
     const touchAction=await touchPage.evaluate(`getComputedStyle(document.querySelector('canvas[aria-label="Evolution world"]')).touchAction`);
     assert.equal(touchAction,"none","world canvas owns touch gestures (touch-action:none)");
     const tickBeforeTouch=await tick(touchPage);
@@ -500,7 +511,10 @@ async function runLandscapeChecks(context:import("playwright").BrowserContext){
   assert.ok(mBox&&mBox.height>=mvp.height*0.5,"landscape dominates the phone viewport");
   const mInk=await ink(mWorld);
   assert.ok(mInk&&mInk.sd>3,`phone landscape keeps structure (sd ${mInk?.sd.toFixed(2)})`);
-  await mobile.getByRole("button",{name:"Waste"}).click();
+  // The lens set is collapsed behind the active-lens chip on the phone.
+  await mobile.locator(".lens-active").click();
+  await mobile.waitForTimeout(200);
+  await mobile.getByRole("button",{name:"Waste",exact:true}).click();
   await mobile.waitForTimeout(250);
   const mWaste=await ink(mWorld);
   assert.ok(mWaste&&mWaste.lit>=0,"waste overlay renders on the phone viewport");

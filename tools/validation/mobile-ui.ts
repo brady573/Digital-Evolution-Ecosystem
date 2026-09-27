@@ -45,6 +45,59 @@ async function openWorld(page: Page, width: number, height = 844) {
   await page.getByLabel("Evolution world").waitFor();
 }
 
+/**
+ * World dominance (revised AC): the evolving world is the product, not the
+ * backdrop. Measures the world canvas against the usable app height, and
+ * separately against the height not taken by persistent chrome. The earlier
+ * suite proved every action was *reachable* and never asked how much of the
+ * screen the world actually owned, which is exactly how a fully compliant
+ * layout could still feel like an interface with a world behind it.
+ */
+async function checkWorldDominance(page: Page, width: number) {
+  const viewport = page.viewportSize()!;
+  const world = (await page.getByLabel("Evolution world").boundingBox())!;
+  const worldShare = world.height / viewport.height;
+
+  // Persistent chrome is everything that stays on screen with no selection
+  // and no pending decision: top HUD, lens control, simulation controls,
+  // and bottom navigation.
+  // NOTE: no named inner functions here — tsx/esbuild injects a `__name`
+  // helper that does not exist inside the page context.
+  const chrome = await page.evaluate(() => {
+    const out: Record<string, number> = { hud: 0, lens: 0, controls: 0, nav: 0 };
+    const sels: Array<[string, string]> = [
+      ["hud", ".hud"],
+      ["lens", ".lensbar"],
+      ["controls", ".controls"],
+      ["nav", ".mobile-nav"],
+    ];
+    for (const [key, sel] of sels) {
+      const el = document.querySelector(sel) as HTMLElement | null;
+      if (el) out[key] = el.getBoundingClientRect().height;
+    }
+    return out;
+  });
+  const chromeTotal = chrome.hud + chrome.lens + chrome.controls + chrome.nav;
+  const chromeShare = chromeTotal / viewport.height;
+  const detail = `world ${(worldShare * 100).toFixed(0)}% of ${viewport.height}px; chrome ${(chromeShare * 100).toFixed(0)}% (hud ${chrome.hud.toFixed(0)}, lens ${chrome.lens.toFixed(0)}, controls ${chrome.controls.toFixed(0)}, nav ${chrome.nav.toFixed(0)})`;
+  assert.ok(worldShare >= 0.7,
+    `the world owns at least 70% of usable app height at ${width}px — ${detail}`);
+  assert.ok(chromeShare <= 0.3,
+    `persistent chrome stays at or under 30% of usable height at ${width}px — ${detail}`);
+
+  // Progressive disclosure: nothing large is permanently expanded that the
+  // user did not ask for. The inspector handle must be small and, with
+  // nothing selected, absent.
+  const handle = await page.locator(".sheet-toggle").boundingBox().catch(() => null);
+  if (!handle) {
+    assert.ok(true, `no inspector handle is shown with nothing selected at ${width}px`);
+  } else {
+    assert.ok(handle.height <= 44,
+      `the inspector handle is a small chip, not a full-width bar (${handle.height.toFixed(0)}px at ${width}px)`);
+  }
+  return { worldShare, chromeShare, chrome };
+}
+
 /** AC1/AC2: every core action is reachable, inside the viewport, and touch-sized. */
 async function checkCoreActions(page: Page, width: number) {
   const viewport = page.viewportSize()!;
@@ -53,6 +106,21 @@ async function checkCoreActions(page: Page, width: number) {
       action.name === "Simulation speed"
         ? page.getByLabel("Simulation speed")
         : page.getByRole("button", { name: action.name as RegExp });
+    // Secondary actions live behind an explicit labelled menu, so they are
+    // reached on request rather than being permanently on screen. They must
+    // still be genuinely reachable without any hidden scrolling. Open the
+    // menu only when the target is not already showing, so a second press
+    // cannot toggle it shut again.
+    if (["Save", "Resume", "Export"].includes(action.label)) {
+      const already = await locator.first().isVisible().catch(() => false);
+      if (!already) {
+        const more = page.getByRole("button", { name: "More actions" });
+        if (await more.isVisible().catch(() => false)) {
+          await more.click();
+          await page.waitForTimeout(150);
+        }
+      }
+    }
     await locator.first().waitFor();
     const box = await locator.first().boundingBox();
     assert.ok(box, `${action.label} is laid out at ${width}px`);
@@ -82,41 +150,52 @@ async function checkCoreActions(page: Page, width: number) {
 }
 
 /** AC3: all five lenses visible at once, and the lens surface stays compact. */
+/** The lens set is collapsed by design; open it before driving a lens. */
+async function openLensSet(page: Page) {
+  const first = page.locator(".lens-options button").first();
+  if (await first.isVisible().catch(() => false)) return;
+  await page.locator(".lens-active").click();
+  await page.waitForTimeout(180);
+}
+
+/** Choose a lens, expanding the collapsed control first. */
+async function chooseLens(page: Page, lens: string) {
+  await openLensSet(page);
+  await page.getByRole("button", { name: lens, exact: true }).click();
+  await page.waitForTimeout(150);
+}
+
 async function checkLensBar(page: Page, width: number) {
-  const world = await page.getByLabel("Evolution world").boundingBox();
-  let bar: Awaited<ReturnType<typeof boundingOf>> = null;
-  async function boundingOf() {
-    return await page.locator(".lensbar").boundingBox();
-  }
-  bar = await boundingOf();
-  assert.ok(bar, `lens bar present at ${width}px`);
   const viewport = page.viewportSize()!;
+  const bar = await page.locator(".lensbar").boundingBox();
+  assert.ok(bar, `lens control present at ${width}px`);
+  assert.ok(bar!.width <= viewport.width, `lens control fits the ${width}px viewport`);
+
+  // Progressive disclosure: collapsed, the lens set is one small chip naming
+  // the active lens, so the control does not permanently occupy the world.
+  const chip = await page.locator(".lens-active").boundingBox();
+  assert.ok(chip, `the active-lens chip is present at ${width}px`);
+  assert.ok(chip!.height <= 44,
+    `the collapsed lens control is a small chip at ${width}px (${chip!.height.toFixed(0)}px)`);
+  const collapsedBar = (await page.locator(".lensbar").boundingBox())!;
+  assert.ok(collapsedBar.height <= 60,
+    `the collapsed lens control stays compact at ${width}px (${collapsedBar.height.toFixed(0)}px)`);
+  assert.equal(await page.locator(".lens-options button").first().isVisible().catch(() => false), false,
+    `the full lens set is not permanently expanded at ${width}px`);
+
+  // Ask for it: every lens must then be reachable, inside the viewport, and
+  // its label fully legible. Measured against real glyph width, not
+  // scrollWidth — a nowrap button can report scrollWidth == clientWidth and
+  // still clip at the edge.
+  await page.locator(".lens-active").click();
+  await page.waitForTimeout(200);
   for (const lens of LENSES) {
+    await page.getByRole("button", { name: lens, exact: true }).waitFor();
     const box = await page.getByRole("button", { name: lens, exact: true }).boundingBox();
-    assert.ok(box, `${lens} lens present at ${width}px`);
-    assert.ok(box!.x >= -1 && box!.x + box!.width <= viewport.width + 1,
-      `${lens} lens is fully visible at ${width}px (no scrolling required)`);
-  }
-  const lensRow = await page.locator(".lensbar button").first().boundingBox();
-  const rows = new Set<LENSES>();
-  void rows;
-  assert.ok(bar!.width <= viewport.width, `lens bar fits the ${width}px viewport`);
-  // Compactness: the lens surface must not swallow the world. Measured against
-  // the lens button height (one row) rather than the whole bar, so an
-  // explanatory secondary row is not counted as lens chrome.
-  if (world && lensRow) {
-    const fraction = lensRow.height / world.height;
-    assert.ok(fraction < 0.12,
-      `lens row stays a small fraction of the world at ${width}px (${(fraction * 100).toFixed(1)}%)`);
-  }
-  // No horizontal scroll inside the lens bar itself.
-  // Every lens label must be fully legible, not clipped or ellipsised: a
-  // control the user cannot read is not discoverable. Measured against the
-  // real glyph width of the rendered text, not scrollWidth — a nowrap button
-  // can report scrollWidth == clientWidth and still clip at the edge.
-  for (const lens of LENSES) {
+    assert.ok(box && box.x >= -1 && box.x + box.width <= viewport.width + 1,
+      `${lens} lens is reachable and fully inside the ${width}px viewport`);
     const fit = await page.evaluate((name:string)=>{
-      const btn=[...document.querySelectorAll(".lensbar button")].find(b=>b.textContent?.trim()===name) as HTMLElement|undefined;
+      const btn=[...document.querySelectorAll(".lens-options button")].find(b=>b.textContent?.trim()===name) as HTMLElement|undefined;
       if(!btn)return null;
       const style=getComputedStyle(btn);
       const probe=document.createElement("canvas").getContext("2d")!;
@@ -129,32 +208,27 @@ async function checkLensBar(page: Page, width: number) {
     assert.ok(fit!.textWidth <= fit!.inner,
       `the ${lens} lens label fits its button at ${width}px (text ${fit!.textWidth}px vs ${fit!.inner}px available)`);
   }
-  const lensOverflow = await page.evaluate(() => {
-    const el = document.querySelector(".lensbar")!;
-    return { scrollWidth: el.scrollWidth, clientWidth: el.clientWidth };
-  });
-  assert.ok(lensOverflow.scrollWidth <= lensOverflow.clientWidth + 1,
-    `lens bar needs no horizontal scrolling at ${width}px`);
+  // Collapsing again must hand the space back to the world.
+  if (chip) {
+    await page.locator(".lens-active").click();
+    await page.waitForTimeout(150);
+    const collapsed = await page.locator(".lens-options button").first().isVisible().catch(() => false);
+    assert.ok(!collapsed, `the lens set collapses again on demand at ${width}px`);
+  }
 }
 
 /** AC4: the secondary selector stays visibly tied to its lens. */
 async function checkSecondarySelector(page: Page, width: number) {
-  await page.getByRole("button", { name: "Nutrients", exact: true }).click();
-  await page.waitForTimeout(120);
+  await chooseLens(page, "Nutrients");
   const select = await page.getByLabel("Resource view").boundingBox();
-  const lens = await page.getByRole("button", { name: "Nutrients", exact: true }).boundingBox();
-  assert.ok(select && lens, `Nutrients selector renders at ${width}px`);
-  assert.ok(select!.y > lens!.y, "the secondary selector sits below the lens row it belongs to");
-  assert.ok(select!.y - lens!.y < lens!.height * 3,
-    "the secondary selector is adjacent to its lens, not detached elsewhere");
-  assert.ok(select!.width > lens!.width,
+  const chip = await page.locator(".lens-active").boundingBox();
+  assert.ok(select, `Nutrients selector renders at ${width}px`);
+  assert.ok(select!.y > chip!.y, "the secondary selector sits below the lens control it belongs to");
+  assert.ok(select!.width > chip!.width,
     "the secondary selector spans the lens bar width, reading as part of it");
-  await page.getByRole("button", { name: "Traits", exact: true }).click();
-  await page.waitForTimeout(120);
-  const traitSelect = await page.getByLabel("Trait view").boundingBox();
-  assert.ok(traitSelect, `Traits selector renders at ${width}px`);
-  await page.getByRole("button", { name: "Landscape", exact: true }).click();
-  await page.waitForTimeout(120);
+  await chooseLens(page, "Traits");
+  assert.ok(await page.getByLabel("Trait view").boundingBox(), `Traits selector renders at ${width}px`);
+  await chooseLens(page, "Landscape");
   assert.equal(await page.getByLabel("Resource view").count(), 0,
     "leaving the lens also leaves its secondary selector");
 }
@@ -266,8 +340,7 @@ async function checkDesktopUnchanged(page: Page) {
 async function checkSimulationIsolation(page: Page) {
   const before = await readTick(page);
   for (const lens of LENSES) {
-    await page.getByRole("button", { name: lens, exact: true }).click();
-    await page.waitForTimeout(80);
+    await chooseLens(page, lens);
   }
   const after = await readTick(page);
   assert.equal(after, before, "switching lenses never advances or rewinds the simulation");
@@ -291,6 +364,8 @@ async function main() {
     for (const [label, width] of Object.entries(PHONE)) {
       const page = await context.newPage();
       await openWorld(page, width);
+      const dominance = await checkWorldDominance(page, width);
+      console.log(`  world ${(dominance.worldShare * 100).toFixed(0)}% / chrome ${(dominance.chromeShare * 100).toFixed(0)}% (hud ${dominance.chrome.hud.toFixed(0)}px, lens ${dominance.chrome.lens.toFixed(0)}px, controls ${dominance.chrome.controls.toFixed(0)}px, nav ${dominance.chrome.nav.toFixed(0)}px)`);
       await checkCoreActions(page, width);
       await checkLensBar(page, width);
       await checkSecondarySelector(page, width);

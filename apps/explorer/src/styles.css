@@ -47,7 +47,9 @@ button,input{outline:none}
 /* surface: persistent world hero + investigation rail */
 .surface{min-width:0;min-height:0;padding:18px;overflow:auto;display:grid;grid-template-columns:minmax(0,2fr) minmax(280px,1fr);gap:18px;align-items:start}
 .world-column{display:grid;gap:10px;min-width:0}
-.lensbar{display:flex;gap:7px;flex-wrap:wrap}
+.lensbar{display:flex;gap:7px;flex-wrap:wrap;align-items:center}
+.lens-active{display:none}
+.lens-options{display:contents}
 .lensbar select,.controls select{background:var(--panel2);color:#dcece4;border:1px solid var(--line2);border-radius:8px;padding:8px}
 .lensnote{flex-basis:100%;font-size:.74rem;line-height:1.45;color:#9fb8ad;padding:0 2px}
 /* Control grouping. On desktop the wrappers are transparent to layout, so the
@@ -184,32 +186,35 @@ button,input{outline:none}
 /* responsive */
 @media (max-width:900px){
   html,body{overflow-x:hidden}
-  .app-shell{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr) auto;height:100dvh;padding-bottom:76px}
-  .topbar{padding:calc(10px + env(safe-area-inset-top)) 12px 10px;gap:12px;position:sticky;top:0;z-index:30}
+  .app-shell{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr) auto;height:100dvh;padding-bottom:60px}
+  .topbar{padding:calc(6px + env(safe-area-inset-top)) 12px 6px;gap:10px;position:sticky;top:0;z-index:30}
   .world-name{display:none}
-  .brand-cell .eyebrow{font-size:.6rem}
-  .hud-cell{padding:0 10px}
-  .hud-value{font-size:12px}
-  .hud-label{font-size:9px}
-  .hud-settings{padding-left:10px;font-size:.8rem}
+  .brand-cell .eyebrow{font-size:.56rem}
+  .hud-cell{padding:0 8px}
+  .hud-value{font-size:11px}
+  .hud-label{font-size:8px}
+  .hud-sub{display:none}
+  .hud-settings{padding-left:8px;font-size:.76rem}
   .rail{display:none}
   .surface{padding:10px 10px 0;grid-template-columns:minmax(0,1fr)}
   .world-column{position:sticky;top:0;z-index:1;background:var(--bg);padding-bottom:10px}
   .world-wrap{position:relative;z-index:auto;background:transparent}
-  .lensbar{position:absolute;top:8px;left:10px;right:10px;z-index:6;background:rgba(6,13,20,.72);backdrop-filter:blur(8px);border:1px solid var(--line);border-radius:12px;padding:5px;
-    display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:4px;align-items:stretch}
-  /* Every lens stays visible in one row at any supported phone width, so
-     there is nothing to scroll to discover. Secondary selectors and notes span
-     the full width beneath the lens they belong to, keeping the relationship
-     obvious. */
-  .lensbar button{padding:8px 0;font-size:.62rem;min-height:40px;letter-spacing:-.015em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .lensbar select,.lensnote{grid-column:1/-1}
-  .lensbar select{width:100%;font-size:.78rem;min-height:40px}
-  .lensnote{font-size:.68rem;line-height:1.4;padding:2px 4px 3px}
-  /* Overlay offset reserves the tallest possible lens panel (lens row plus a
-     secondary selector row) so the minimap and zoom controls can never sit
-     under it, whichever lens is active. */
-  .world-overlay{top:104px;right:8px}
+  /* Lens control: progressive disclosure. Collapsed, it is one short chip
+     naming the active lens. It expands to the full set only when asked, and
+     a secondary selector appears only for the lens that has one. */
+  .lensbar{position:absolute;top:8px;left:10px;right:10px;z-index:6;background:rgba(6,13,20,.72);backdrop-filter:blur(8px);border:1px solid var(--line);border-radius:10px;padding:4px}
+  .lens-active{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;min-height:30px;font-size:.76rem;border-radius:8px;background:transparent;border:1px solid var(--line2);color:#cde0d7}
+  .lens-caret{font-size:.7rem;opacity:.75}
+  .lens-options{display:none;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;margin-top:4px}
+  .lensbar.open .lens-options{display:grid}
+  .lensbar.open .lens-active{margin-bottom:2px}
+  .lens-options button{padding:8px 4px;font-size:.78rem;min-height:38px;letter-spacing:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .lensbar select,.lensnote{grid-column:1/-1;margin-top:4px}
+  .lensbar select{width:100%;font-size:.76rem;min-height:36px}
+  .lensnote{font-size:.66rem;line-height:1.35;padding:2px 4px}
+  /* Overlay offset reserves the expanded lens panel so the minimap and zoom
+     controls can never sit under it, whichever lens is active. */
+  .world-overlay{top:48px;right:8px}
   .minimap-frame,.zoom-controls{transform:scale(.88);transform-origin:top right}
   .world-canvas{width:100%}
   .investigation-rail{position:relative;z-index:10}
@@ -220,16 +225,21 @@ button,input{outline:none}
   /* Two explicit rows instead of one scrolling strip: every core action is
      reachable without an unindicated horizontal scroll (AC1/AC2), and nothing
      disappears because the viewport is narrow. */
-  .controls{display:grid;gap:6px;overflow:visible;white-space:normal;padding:8px 10px calc(8px + env(safe-area-inset-bottom))}
+  .controls{display:grid;gap:6px;overflow:visible;white-space:normal;padding:6px 10px calc(6px + env(safe-area-inset-bottom))}
   .control-row{display:grid;gap:6px}
-  .control-row-primary{grid-template-columns:auto minmax(84px,auto) minmax(0,1fr)}
-  .control-row-secondary{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .control-row-primary{grid-template-columns:auto minmax(72px,auto) minmax(0,1fr) auto}
   .controls button,.controls select{min-height:44px;padding:8px 10px;font-size:.82rem;white-space:normal}
-  .control-row-primary button:last-child{font-weight:600}
+  .control-row-primary button:nth-child(3){font-weight:600;font-size:.72rem;padding:8px 6px}
+  /* Secondary actions: an explicit menu on the phone, nothing on desktop.
+     The More affordance is always visible — it is the way in. Only the
+     secondary row itself is conditional. */
+  .control-more{display:inline-flex;align-items:center;gap:4px}
+  .control-row-secondary{display:none}
+  .controls.more-open .control-row-secondary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
   .status{display:none}
-  .mobile-nav{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));position:fixed;left:0;right:0;bottom:0;min-height:76px;background:rgba(6,13,20,.96);backdrop-filter:blur(14px);border-top:1px solid #173040;z-index:40;padding:8px 10px calc(8px + env(safe-area-inset-bottom))}
-  .mnav-btn{border:0;background:transparent;color:#90a4b7;display:grid;place-items:center;align-content:center;gap:4px;border-radius:12px;font-size:10px;min-height:56px}
-  .mnav-btn span:first-child{font-size:22px;line-height:1}
+  .mobile-nav{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));position:fixed;left:0;right:0;bottom:0;min-height:58px;background:rgba(6,13,20,.96);backdrop-filter:blur(14px);border-top:1px solid #173040;z-index:40;padding:4px 10px calc(4px + env(safe-area-inset-bottom))}
+  .mnav-btn{border:0;background:transparent;color:#90a4b7;display:grid;place-items:center;align-content:center;gap:2px;border-radius:10px;font-size:9px;min-height:46px}
+  .mnav-btn span:first-child{font-size:18px;line-height:1}
   .mnav-btn.active{color:#eff9fb;background:#112431}
   .mnav-btn.active span:first-child{color:var(--teal)}
   .panel-head{align-items:flex-start}
@@ -265,13 +275,13 @@ button,input{outline:none}
   .surface-world .world-column{position:absolute;inset:0;z-index:1;background:transparent;padding:0}
   .surface-world .world-wrap{position:absolute;inset:0}
   .surface-world .world-canvas{width:100%;height:100%;aspect-ratio:auto;border:0;border-radius:0}
-  .surface-world .investigation-rail{position:absolute;left:10px;right:10px;bottom:10px;z-index:10}
+  .surface-world .investigation-rail{position:absolute;left:10px;right:auto;bottom:10px;z-index:10;max-width:min(64vw,320px)}
   .surface-world .inspector.sheet{background:rgba(8,17,25,.86);backdrop-filter:blur(14px);max-height:38dvh;overflow:auto}
-  /* Collapsed sheet is a compact floating bar. (A percentage max-height here
-     resolves against the auto-height rail and clamps to a sliver, so the
-     collapsed state uses no max-height at all.) */
-  .surface-world .inspector.sheet.collapsed{max-height:none;overflow:visible;padding:8px 10px}
-  .surface-world .inspector.sheet.collapsed .sheet-toggle{margin:0}
+  /* Collapsed state is a small contextual chip, never a full-width bar. (A
+     percentage max-height resolves against the auto-height rail and clamps to
+     a sliver, so the collapsed state uses no max-height at all.) */
+  .surface-world .inspector.sheet.collapsed{max-height:none;overflow:visible;padding:0;background:none;border:0}
+  .surface-world .inspector.sheet.collapsed .sheet-toggle{margin:0;width:auto;min-height:40px;padding:8px 12px;font-size:.78rem;background:rgba(8,17,25,.86);backdrop-filter:blur(10px);border:1px solid var(--line);border-radius:20px}
 }
 
 /* Phone widths: five lens labels will not fit in one row at a comfortable

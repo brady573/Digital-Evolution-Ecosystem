@@ -17,6 +17,11 @@ type Surface="world"|"history"|"tree"|"experiments";
 type Lens="normal"|"nutrients"|"waste"|"clades"|"traits";
 type ResourceView="combined"|"a"|"b"|"c";
 type TraitView="speed"|"sensing"|"metabolism"|"reproduction"|"diet"|"habitat"|"byproductUse"|"dormancyResponse";
+/** Display names for the lens set. The active-lens chip uses the same labels
+ *  as the expanded buttons, so the two never disagree. */
+const LENS_LABELS:Record<Lens,string>={
+  normal:"Landscape",nutrients:"Nutrients",waste:"Waste",clades:"Clades",traits:"Traits",
+};
 
 interface WorldSettings {
   seed:number;
@@ -455,6 +460,10 @@ export function App(){
   const [settingsOpen,setSettingsOpen]=useState(false);
   const [diagnosticsOpen,setDiagnosticsOpen]=useState(false);
   const [lens,setLens]=useState<Lens>("normal");
+  // Progressive disclosure: the lens set and the secondary save actions stay
+  // collapsed until asked for, so the world keeps the screen.
+  const [lensMenuOpen,setLensMenuOpen]=useState(false);
+  const [moreOpen,setMoreOpen]=useState(false);
   const [resourceView,setResourceView]=useState<ResourceView>("combined");
   const [traitView,setTraitView]=useState<TraitView>("speed");
   const [selectedId,setSelectedId]=useState<number|null>(null);
@@ -622,8 +631,20 @@ export function App(){
 
     <main className={surface==="world"?"surface surface-world":"surface"}>
       <section className="world-column" aria-label="Living world">
-        <div className="lensbar">
-          {(["normal","nutrients","waste","clades","traits"] as Lens[]).map(v=><button key={v} className={lens===v?"active":""} onClick={()=>setLens(v)}>{v==="normal"?"Landscape":v.charAt(0).toUpperCase()+v.slice(1)}</button>)}
+        {/* Lens control. On the phone this is progressive disclosure: one
+            compact chip naming the active lens, which expands the full set
+            only when asked. The five buttons stay in the DOM (so they remain
+            reachable, labelled and keyboard-navigable) and are revealed by
+            the expanded state; desktop shows them inline as before. */}
+        <div className={lensMenuOpen?"lensbar open":"lensbar"}>
+          <button className="lens-active" aria-haspopup="true" aria-expanded={lensMenuOpen}
+            aria-label={`Lens: ${LENS_LABELS[lens]}. Change lens`}
+            onClick={()=>setLensMenuOpen(v=>!v)}>
+            <span>{LENS_LABELS[lens]}</span><span className="lens-caret" aria-hidden="true">{lensMenuOpen?"▴":"▾"}</span>
+          </button>
+          <div className="lens-options" role="group" aria-label="Lens">
+          {(["normal","nutrients","waste","clades","traits"] as Lens[]).map(v=><button key={v} className={lens===v?"active":""} aria-pressed={lens===v} onClick={()=>{setLens(v);setLensMenuOpen(false)}}>{LENS_LABELS[v]}</button>)}
+          </div>
           {lens==="nutrients"&&<select aria-label="Resource view" value={resourceView} onChange={e=>setResourceView(e.target.value as ResourceView)}><option value="combined">Combined</option><option value="a">Nutrient A</option><option value="b">Nutrient B</option><option value="c">Metabolite C</option></select>}
           {lens==="waste"&&<span className="lensnote" role="note">Metabolic Waste, exact and untextured: brighter means more waste in that cell (a luminance ramp, so the reading does not depend on hue). The Landscape lens shows the same field differently — loaded ground loses its green cast and settles toward pale, desaturated ash, lifted well clear of barren soil and stippled so the texture reads without colour.</span>}
           {lens==="traits"&&<select aria-label="Trait view" value={traitView} onChange={e=>setTraitView(e.target.value as TraitView)}>{Object.entries(TRAIT_RANGES).map(([key,[,,label]])=><option key={key} value={key}>{label}</option>)}</select>}
@@ -669,7 +690,12 @@ export function App(){
             as the decision contract already guarantees. Nothing about the
             simulation changes; this only decides what is painted. */}
         {surface==="world"&&!pending&&<div className={inspectorOpen?"inspector sheet":"inspector sheet collapsed"}>
-          <button className="sheet-toggle" onClick={()=>setInspectorOpen(v=>!v)}>{inspectorOpen?"Hide details":"Show details"}</button>
+          {/* Progressive disclosure: with nothing selected there is no handle
+              at all, and with something selected it is a small chip naming
+              it — not a permanently expanded full-width bar. */}
+          {selected&&<button className="sheet-toggle" onClick={()=>setInspectorOpen(v=>!v)}>
+            {inspectorOpen?"Hide details":`Details · #${selected.id}`}
+          </button>}
           {inspectorOpen&&<>{selected?<><span className="eyebrow">Selected organism</span><h2>#{selected.id}</h2><p>{selected.activity} · generation {selected.generation}</p><p className="breadcrumb">Organism #{selected.id} → Lineage {`L-${String(selected.lineageId).padStart(4,"0")}`} → Clade {`L-${String(selected.cladeId).padStart(4,"0")}`}</p><dl>
             <div><dt>Clade</dt><dd>L-{String(selected.cladeId).padStart(4,"0")}</dd></div>
             <div><dt>Energy</dt><dd>{selected.energy.toFixed(1)}</dd></div>
@@ -729,7 +755,7 @@ export function App(){
       {(["world","history","tree","experiments"] as Surface[]).map(s=><button key={s} className={surface===s?"active mnav-btn":"mnav-btn"} onClick={()=>setSurface(s)}><span aria-hidden="true">{s==="world"?"◉":s==="history"?"◔":s==="tree"?"⌘":"⚗"}</span><span>{s.charAt(0).toUpperCase()+s.slice(1)}</span></button>)}
     </nav>
 
-    <footer className="controls">
+    <footer className={moreOpen?"controls more-open":"controls"}>
       {/* Primary actions first: Play/Pause, speed, and Next meaningful change
           stay on the top row at every width. Save/Resume/Export group below
           so nothing is ever hidden behind unindicated horizontal scrolling.
@@ -739,6 +765,12 @@ export function App(){
         <button onClick={()=>{if(blockWhilePending())return;setRunning(v=>!v)}}>{running?"Pause":"Play"}</button>
         <select aria-label="Simulation speed" value={speed} onChange={e=>setSpeed(Number(e.target.value))}><option value={1}>1×</option><option value={10}>10×</option><option value={100}>100×</option><option value={500}>Max</option></select>
         <button onClick={()=>{if(blockWhilePending())return;setRunning(false);runtime.runToNextEvent()}}>Next meaningful change</button>
+        {/* Secondary actions are an explicit menu on the phone and nothing at
+            all on desktop, where they sit inline as before. Nothing is
+            removed: the buttons are always in the DOM. */}
+        <button className="control-more" aria-haspopup="true" aria-expanded={moreOpen}
+          aria-label="More actions"
+          onClick={()=>setMoreOpen(v=>!v)}>More<span className="lens-caret" aria-hidden="true">{moreOpen?"▴":"▾"}</span></button>
       </span>
       <span className="control-row control-row-secondary">
         <button onClick={save}>Save</button>
