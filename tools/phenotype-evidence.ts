@@ -20,7 +20,9 @@
  * Run: pnpm exec tsx tools/phenotype-evidence.ts
  * Writes: packages/phenotype/evidence/{evidence.json, EVIDENCE.md, viewer.html}
  */
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { UniverseSession } from "../packages/sim-runtime/src/session.ts";
 import type { EngineConfig, RenderOrganism, RenderSnapshot } from "../packages/contracts/src/index.ts";
 import {
@@ -275,7 +277,11 @@ const lineageStrips: Record<string, LineageStep[]> = {};
     path.forEach(([m, s, b, p], i) => {
       const res = resolvePhenotype(traitsForAxes(m, s, b, p), { parentFamily: parent, organismId: 21 + i, lineageId: 77 });
       parent = res.family;
-      const grid = shot("lineages", name, `${name} #${i} ${res.family}`, res, "population", "active");
+      // Evolution review needs the transition visible at every LOD: shoot all
+      // three tiers per step (viewer filters by zoom). Markdown keeps pop.
+      shot("lineages", name, `${name} #${i} ${res.family} eco`, res, "ecosystem", "active");
+      const grid = shot("lineages", name, `${name} #${i} ${res.family} pop`, res, "population", "active");
+      shot("lineages", name, `${name} #${i} ${res.family} insp`, res, "inspection", "active");
       steps.push({ index: i, family: res.family, quantized: res.quantized, grid });
       cols.push({ label: `${i}:${res.family.slice(0, 4)}`, grid });
     });
@@ -418,7 +424,7 @@ const lineageStrips: Record<string, LineageStep[]> = {};
 
 // ------------------------------------------------------- 8. dense scenes
 interface SceneOrg { x: number; y: number; activity: "active" | "dormant"; family: PhenotypeFamily; eco: string; pop: string; insp: string }
-interface Scene { name: string; tick: number; population: number; dormant: number; simMs: number; families: Record<string, number>; organisms: SceneOrg[]; tierMs: Record<LodTier, number> }
+interface Scene { name: string; source: "current-engine" | "design-fixture"; tick: number; population: number; dormant: number; simMs: number; families: Record<string, number>; organisms: SceneOrg[]; tierMs: Record<LodTier, number> }
 const scenes: Scene[] = [];
 const sceneSnapshots: RenderSnapshot[] = [];
 function traitsOf(o: RenderOrganism): TraitSample {
@@ -484,11 +490,56 @@ function resolveScene(snapshot: RenderSnapshot): { fams: Map<number, ResolvedPhe
       }
       organisms.push({ x: o.x, y: o.y, activity: o.activity, family: res.family, eco: bits(grids.ecosystem), pop: bits(grids.population), insp: bits(grids.inspection) });
     }
-    scenes.push({ name: t.name, tick: snap.tick, population: snap.population, dormant: snap.dormantPopulation, simMs, families, organisms, tierMs });
+    scenes.push({ name: t.name, source: "current-engine", tick: snap.tick, population: snap.population, dormant: snap.dormantPopulation, simMs, families, organisms, tierMs });
     const hist = FAMILY_ORDER.map((f) => `${f.slice(0, 4)}:${families[f] ?? 0}`).join(" ");
     emit(`- **${t.name}**: tick ${snap.tick}, pop ${snap.population} (${snap.dormantPopulation} dormant), sim ${simMs}ms. Families — ${hist}.`);
     emit(`  Grid render totals: eco ${tierMs.ecosystem}ms / pop ${tierMs.population}ms / insp ${tierMs.inspection}ms (Date.now resolution; see §9 for precise timings).`);
-    sec8.push({ name: t.name, tick: snap.tick, population: snap.population, dormant: snap.dormantPopulation, simMs, families, tierMs });
+    sec8.push({ name: t.name, source: "current-engine", tick: snap.tick, population: snap.population, dormant: snap.dormantPopulation, simMs, families, tierMs });
+  }
+  // Design fixtures: synthetic worlds spanning all six families for art review.
+  // Deterministic layout (mulberry32); family held via lineage anchoring.
+  // Labeled design-fixture everywhere they appear — never mixed with engine evidence.
+  {
+    emit("Design-fixture worlds (synthetic, all six families; art-direction review only):");
+    const rng = mulberry32(20260925);
+    for (const [fname, count] of [["design-50", 50], ["design-250", 250], ["design-1000", 1000]] as const) {
+      const organisms: SceneOrg[] = [];
+      const families: Record<string, number> = {};
+      const tierMs: Record<LodTier, number> = { ecosystem: 0, population: 0, inspection: 0 };
+      for (let i = 0; i < count; i++) {
+        const fam = FAMILY_ORDER[i % FAMILY_ORDER.length]!;
+        const base = traitsAt(fam);
+        const j = (): number => (rng() * 2 - 1) * 0.08;
+        const tr: TraitSample = {
+          speed: base.speed * (1 + j()),
+          sensing: base.sensing * (1 + j()),
+          metabolism: base.metabolism * (1 + j()),
+          reproduction: base.reproduction,
+          diet: base.diet * (1 + j()),
+          habitat: base.habitat * (1 + j()),
+          byproductUse: Math.max(0, base.byproductUse * (1 + j())),
+          dormancyResponse: 1.0,
+        };
+        const res = resolvePhenotype(tr, { parentFamily: fam, organismId: 1000 + i, lineageId: 900 + (i % 6) });
+        if (res.family !== fam) throw new Error(`design fixture drift: wanted ${fam}, got ${res.family} at ${fname}#${i}`);
+        const activity = rng() < 0.15 ? "dormant" : "active";
+        const grids = {
+          ecosystem: renderPhenotypeGrid(res, "ecosystem", activity),
+          population: renderPhenotypeGrid(res, "population", activity),
+          inspection: renderPhenotypeGrid(res, "inspection", activity),
+        };
+        families[res.family] = (families[res.family] ?? 0) + 1;
+        organisms.push({
+          x: 20 + rng() * 560, y: 20 + rng() * 560, activity, family: res.family,
+          eco: bits(grids.ecosystem), pop: bits(grids.population), insp: bits(grids.inspection),
+        });
+      }
+      const dormant = organisms.filter((o) => o.activity === "dormant").length;
+      scenes.push({ name: fname, source: "design-fixture", tick: 0, population: count, dormant, simMs: 0, families, organisms, tierMs });
+      const hist = FAMILY_ORDER.map((f) => `${f.slice(0, 4)}:${families[f] ?? 0}`).join(" ");
+      emit(`- **${fname}**: synthetic, pop ${count} (${dormant} dormant). Families — ${hist}.`);
+      sec8.push({ name: fname, source: "design-fixture", tick: 0, population: count, dormant, simMs: 0, families, tierMs });
+    }
   }
   emit("");
   (json.sections as Record<string, unknown>).scenes = sec8;
@@ -653,78 +704,193 @@ function resolveScene(snapshot: RenderSnapshot): { fams: Map<number, ResolvedPhe
   (json.sections as Record<string, unknown>).visuals = shots;
   const payload = { baseline: PROTOTYPE_BASELINE, shots, scenes, tuning: (json.sections as Record<string, unknown>).tuning };
   const dataJson = JSON.stringify(payload).replace(/<\//g, "<\\/");
+  // Base family portraits (owner art): 6 families x 16/32/64/128, embedded as
+  // data URIs so the page stays offline and self-contained.
+  const artRoot = join(dirname(fileURLToPath(import.meta.url)), "../apps/explorer/src/family-art");
+  const art: Record<string, string> = {};
+  for (const f of FAMILY_ORDER) {
+    for (const [size, suffix] of [[128, ""], [64, "-64"], [32, "-32"], [16, "-16"]] as const) {
+      const buf = readFileSync(join(artRoot, `${f}${suffix}.png`));
+      art[`${f}/${size}`] = `data:image/png;base64,${buf.toString("base64")}`;
+    }
+  }
+  const artJson = JSON.stringify(art);
   const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Pixel Phenotype Prototype — Evidence Viewer (${PROTOTYPE_BASELINE})</title>
+<title>Pixel Phenotype Art Review — ${PROTOTYPE_BASELINE}</title>
 <style>
-  body{background:#0a1116;color:#d8e6de;font:14px/1.45 system-ui,sans-serif;margin:0 auto;max-width:1100px;padding:24px}
+  body{background:#0a1116;color:#d8e6de;font:14px/1.45 system-ui,sans-serif;margin:0 auto;max-width:1150px;padding:24px}
   h1,h2,h3{color:#eafff3} .eyebrow{color:#7fd4c1;text-transform:uppercase;font-size:.75rem;letter-spacing:.08em}
   canvas{background:#060b0f;border:1px solid #1d2f3a;image-rendering:pixelated;margin:4px}
+  .art-grid{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end}
+  .art-grid img{image-rendering:pixelated;background:#060b0f;border:1px solid #1d2f3a}
+  .art-grid img.mono{filter:grayscale(1) contrast(1.12)}
   .row{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px} figure{margin:0;text-align:center}
   figcaption{font-size:.72rem;color:#9fb8ad} table{border-collapse:collapse;margin:8px 0}
   td,th{border:1px solid #1d2f3a;padding:4px 10px;font-size:.8rem} th{color:#7fd4c1}
   .note{color:#9fb8ad;font-size:.82rem} .scene{margin:16px 0}
-  button{background:#12262f;color:#d8e6de;border:1px solid #2a4a5a;border-radius:6px;padding:4px 10px;margin:2px}
+  .src-engine{color:#7fd4c1} .src-design{color:#e7b36a}
+  button,select{background:#12262f;color:#d8e6de;border:1px solid #2a4a5a;border-radius:6px;padding:4px 10px;margin:2px}
   button.on{background:#1d4453}
+  .tabs button{font-size:1rem;padding:6px 16px}
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;background:#0d1820;border:1px solid #1d2f3a;border-radius:8px;padding:10px 12px;margin:12px 0}
+  .controls label{font-size:.8rem;color:#9fb8ad} .controls select{max-width:220px}
+  .tier-pill{border:1px solid #2a4a5a;border-radius:20px;padding:2px 10px;font-size:.75rem;color:#7fd4c1}
+  .phone{width:390px;border:3px solid #2a4a5a;border-radius:26px;padding:10px;margin:0 auto;background:#060b0f}
+  .phone canvas{width:100%;height:auto}
+  .warn{border-left:3px solid #e7b36a;padding:6px 10px;margin:10px 0;color:#e7d3a0}
 </style>
 </head>
 <body>
-<span class="eyebrow">Digital Evolution · Lane 2 M4B · prototype evidence (offline, monochrome)</span>
-<h1>Pixel Phenotype Evidence Viewer</h1>
-<p class="note">Baseline ${PROTOTYPE_BASELINE}: tuning inputs, not accepted design values. Shapes are presentation encodings of simulated state, never modeled anatomy. See EVIDENCE.md for the full report.</p>
-<h2>1 · Family matrix</h2><div id="matrix"></div>
-<h2>2 · Trait strips</h2><div id="strips"></div>
-<h2>3 · Lineage strips</h2><div id="lineages"></div>
-<h2>4 · Boundary comparisons</h2><div id="boundary"></div>
-<h2>7 · Dormancy pairs</h2><div id="dormancy"></div>
-<h2>8 · Dense scenes <span class="note">(shape = family; bright = active, dim = dormant)</span></h2>
-<div id="sceneBtns"></div><div id="scenes"></div>
-<h2>10 · Tuning</h2><div id="tuning"></div>
+<span class="eyebrow">Digital Evolution · Lane 2 M4B · art-review tool (offline, prototype evidence)</span>
+<h1>Pixel Phenotype Art Review</h1>
+<p class="note">Baseline ${PROTOTYPE_BASELINE}: tuning inputs, not accepted design values. Shapes are presentation encodings of simulated state, never modeled anatomy. Inherited form, current activity state, and ecological analysis are separate meanings — this page never turns analysis labels into morphology. See EVIDENCE.md for the full report.</p>
+<div class="tabs" role="tablist">
+  <button id="tab-gallery" class="on">Gallery</button>
+  <button id="tab-evolution" class="on0">Evolution</button>
+  <button id="tab-world" class="on0">World</button>
+</div>
+<div class="controls">
+  <label>Family <select id="ctl-family"><option value="all">All six</option><option>blob</option><option>segmented</option><option>radial</option><option>plated</option><option>branching</option><option>paddled</option></select></label>
+  <label>Zoom <select id="ctl-zoom"><option>1.0</option><option>1.5</option><option>2.0</option><option>2.5</option><option selected>3.0</option></select></label>
+  <span class="tier-pill" id="tier-pill"></span>
+  <label>Activity <select id="ctl-activity"><option value="both">Active + dormant</option><option value="active">Active only</option><option value="dormant">Dormant only</option></select></label>
+  <label>Expression <select id="ctl-expr"><option value="all">low / med / high</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select></label>
+  <label>Color <select id="ctl-color"><option value="mono">Monochrome first</option><option value="full">Presentation color</option></select></label>
+  <label>Lineage <select id="ctl-lineage"><option>stable</option><option>directional</option><option>near-boundary</option><option selected>transition</option></select></label>
+  <label>Scene <select id="ctl-scene"></select></label>
+  <label><input type="checkbox" id="ctl-phone"> Phone frame (390px)</label>
+</div>
+<div id="view-gallery"></div>
+<div id="view-evolution" style="display:none"></div>
+<div id="view-world" style="display:none"></div>
+<h2>Tuning</h2><div id="tuning"></div>
 <script>
 const DATA = ${dataJson};
-function draw(cv, bits, size, px, color){ const x=cv.getContext('2d'); x.clearRect(0,0,cv.width,cv.height); x.fillStyle=color;
-  for(let i=0;i<bits.length;i++) if(bits[i]==='1') x.fillRect((i%size)*px, Math.floor(i/size)*px, px, px); }
-function fig(shot, px, color){ const cv=document.createElement('canvas'); const s=shot.size*px; cv.width=s; cv.height=s;
-  draw(cv, shot.bits, shot.size, px, color||'#e6f2ea');
-  const f=document.createElement('figure'); f.appendChild(cv);
-  const c=document.createElement('figcaption'); c.textContent=shot.label; f.appendChild(c); return f; }
-function group(section, key){ return DATA.shots.filter(s=>s.section===section&&s.key===key); }
-function section(el, keys, px){ const host=document.getElementById(el);
-  keys.forEach(k=>{ const row=document.createElement('div'); row.className='row';
-    group(el, k).forEach(s=>row.appendChild(fig(s, px||4))); host.appendChild(row); }); }
-const keys = s=>[...new Set(DATA.shots.filter(x=>x.section===s).map(x=>x.key))];
-section('matrix', keys('matrix'), 5);
-section('strips', keys('strips'), 3);
-section('lineages', keys('lineages'), 5);
-section('boundary', keys('boundary'), 5);
-section('dormancy', keys('dormancy'), 5);
-let tier='eco';
-const btns=document.getElementById('sceneBtns');
-[['eco','Ecosystem'],['pop','Population'],['insp','Inspection']].forEach(([t,label])=>{
-  const b=document.createElement('button'); b.textContent=label; if(t===tier)b.className='on';
-  b.onclick=()=>{tier=t;[...btns.children].forEach(x=>x.className='');b.className='on';drawScenes();}; btns.appendChild(b); });
-const FAMC={blob:'#e6f2ea',segmented:'#9fd8c8',radial:'#7fb8e6',plated:'#d8c890',branching:'#b8e67f',paddled:'#e6a08f'};
-function drawScenes(){ const host=document.getElementById('scenes'); host.innerHTML='';
-  DATA.scenes.forEach(sc=>{ const d=document.createElement('div'); d.className='scene';
-    const h=document.createElement('h3'); h.textContent=sc.name+' — tick '+sc.tick+', pop '+sc.population+' ('+sc.dormant+' dormant), sim '+sc.simMs+'ms'; d.appendChild(h);
-    const hist=document.createElement('p'); hist.className='note';
-    hist.textContent='families: '+Object.entries(sc.families).map(([k,v])=>k+':'+v).join('  '); d.appendChild(hist);
-    const cv=document.createElement('canvas'); cv.width=600; cv.height=600; const x=cv.getContext('2d');
-    const cell = tier==='eco'?2:tier==='pop'?1:1;
-    sc.organisms.forEach(o=>{ const bitstr=o[tier]; const n=Math.sqrt(bitstr.length);
-      x.fillStyle=o.activity==='dormant'?'#5a6a63':(FAMC[o.family]||'#e6f2ea');
-      for(let i=0;i<bitstr.length;i++) if(bitstr[i]==='1')
-        x.fillRect(Math.round(o.x-n*cell/2+(i%n)*cell), Math.round(o.y-n*cell/2+Math.floor(i/n)*cell), cell, cell); });
-    d.appendChild(cv); host.appendChild(d); }); }
-drawScenes();
-document.getElementById('tuning').innerHTML='<table>'+Object.entries(DATA.tuning||{}).map(([k,v])=>'<tr><th>'+k+'</th><td>'+v+'</td></tr>').join('')+'</table>';
+const ART = ${artJson};
+const TIER_FOR_ZOOM = {"1.0":"ecosystem","1.5":"ecosystem","2.0":"population","2.5":"population","3.0":"inspection"};
+const MONO = "#e6f2ea";
+const FAMC = {blob:"#e6f2ea",segmented:"#9fd8c8",radial:"#7fb8e6",plated:"#d8c890",branching:"#b8e67f",paddled:"#e6a08f"};
+const S = {mode:"gallery",family:"all",zoom:"3.0",activity:"both",expr:"all",color:"mono",lineage:"transition",scene:"",phone:false,selected:null};
+const tier = ()=>TIER_FOR_ZOOM[S.zoom];
+function draw(cv,bits,size,px,color){const x=cv.getContext("2d");x.clearRect(0,0,cv.width,cv.height);x.fillStyle=color;
+  for(let i=0;i<bits.length;i++)if(bits[i]==="1")x.fillRect((i%size)*px,Math.floor(i/size)*px,px,px);}
+function fig(shot,px,color){const cv=document.createElement("canvas");const s=shot.size*px;cv.width=s;cv.height=s;
+  draw(cv,shot.bits,shot.size,px,color||MONO);
+  const f=document.createElement("figure");f.appendChild(cv);
+  const c=document.createElement("figcaption");c.textContent=shot.label+" · "+shot.tier+" · "+shot.family;f.appendChild(c);return f;}
+function colorFor(shot){return S.color==="mono"?MONO:(FAMC[shot.family]||MONO);}
+function shotMatchesActivity(shot){return S.activity==="both"?true:shot.activity===S.activity;}
+function renderGallery(){const host=document.getElementById("view-gallery");host.innerHTML="";
+  const t=tier();
+  const fams0=()=>S.family==="all"?["blob","segmented","radial","plated","branching","paddled"]:[S.family];
+  const h=document.createElement("h2");h.textContent="Gallery — six-family silhouette review ("+S.zoom+"× → "+t+" tier)";host.appendChild(h);
+  const an=document.createElement("p");an.className="note";
+  an.textContent="Owner base art only: portrait sizes follow the zoom tier (1.0/1.5× → 16+32, 2.0/2.5× → 32+64, 3.0× → 64+128). Judge: distinguishable silhouettes? Recognizable across sizes? Monochrome toggle grayscales. Expression/dormancy variants do not exist in the art package — dormancy transforms live under Evolution, labeled procedural.";host.appendChild(an);
+  const sizes=t==="ecosystem"?[16,32]:t==="population"?[32,64]:[64,128];
+  const grid=document.createElement("div");grid.className="art-grid";
+  fams0().forEach(f=>{const sec=document.createElement("div");const fh=document.createElement("h3");fh.textContent=f;sec.appendChild(fh);
+    const row=document.createElement("div");row.className="row";
+    sizes.forEach(px=>{
+      const fg=document.createElement("figure");const img=document.createElement("img");
+      img.src=ART[f+"/"+px];img.width=px*2;img.height=px*2;img.alt=f+" family portrait "+px+"px";
+      if(S.color==="mono")img.className="mono";
+      fg.appendChild(img);
+      const c=document.createElement("figcaption");c.textContent=px+"px";fg.appendChild(c);
+      row.appendChild(fg);});
+    sec.appendChild(row);grid.appendChild(sec);});
+  host.appendChild(grid);
+  const q=document.createElement("p");q.className="note";
+  q.textContent="Judge: distinguishable silhouettes in monochrome? Each family itself across low/med/high? 1× readable? 3× reveals structure, not just magnification? Dormancy readable by geometry?";host.appendChild(q);
+
+  const pill=document.getElementById("tier-pill");pill.textContent="zoom "+S.zoom+"× → "+t+" geometry";}
+function renderEvolution(){const host=document.getElementById("view-evolution");host.innerHTML="";
+  const t=tier();
+  const h=document.createElement("h2");h.textContent="Evolution — lineage "+S.lineage+" ("+S.zoom+"× → "+t+")";host.appendChild(h);
+  const q=document.createElement("p");q.className="note";
+  q.textContent="Ancestry order left→right. Transition case: does accumulated deformation anticipate the family switch, or does it read as an unrelated sprite replacement? Hysteresis comparisons below show founder vs lineage-anchored resolution at the same traits.";host.appendChild(q);
+  const steps=DATA.shots.filter(s=>s.section==="lineages"&&s.key===S.lineage&&s.tier===t)
+    .sort((a,b)=>{const ai=parseInt((a.label.match(/#(\d+)/)||[])[1]||"0");const bi=parseInt((b.label.match(/#(\d+)/)||[])[1]||"0");return ai-bi;});
+  const row=document.createElement("div");row.className="row";
+  steps.forEach(s=>{if(S.family!=="all"&&s.family!==S.family)return;row.appendChild(fig(s,5,colorFor(s)));});
+  host.appendChild(row);
+  const bh=document.createElement("h3");bh.textContent="Founder vs lineage-anchored (blob→segmented axis)";host.appendChild(bh);
+  const brow=document.createElement("div");brow.className="row";
+  DATA.shots.filter(s=>s.section==="boundary").forEach(s=>brow.appendChild(fig(s,4,colorFor(s))));
+  host.appendChild(brow);
+  const bn=document.createElement("p");bn.className="note";bn.textContent="Same traits, different ancestry: founder resolution vs child-of-blob vs child-of-segmented. The hysteresis band is the point — no flicker inside it by construction.";host.appendChild(bn);
+  const dh=document.createElement("h3");dh.textContent="Dormancy transforms (procedural — art package has no dormant form)";host.appendChild(dh);
+  const dn=document.createElement("p");dn.className="note";dn.textContent="Active vs weak/strong dormant geometry per family. This is transform evidence, not base art.";host.appendChild(dn);
+  const drow=document.createElement("div");drow.className="row";
+  DATA.shots.filter(s=>s.section==="dormancy"&&s.tier===t&&(S.family==="all"||s.family===S.family)&&shotMatchesActivity(s)).forEach(s=>drow.appendChild(fig(s,4,colorFor(s))));
+  host.appendChild(drow);}
+function renderWorld(){const host=document.getElementById("view-world");host.innerHTML="";
+  const t=tier();const key=t==="ecosystem"?"eco":t==="population"?"pop":"insp";
+  const sc=DATA.scenes.find(x=>x.name===S.scene)||DATA.scenes[0];
+  const h=document.createElement("h2");h.textContent="World — "+sc.name+" ("+S.zoom+"× → "+t+")";host.appendChild(h);
+  const meta=document.createElement("p");meta.className="note";
+  const srcCls=sc.source==="current-engine"?"src-engine":"src-design";
+  meta.innerHTML="";host.appendChild(meta);
+  const src=document.createElement("span");src.className=srcCls;
+  src.textContent=sc.source==="current-engine"?"CURRENT-ENGINE EVIDENCE — actual 0.21 population, Blob-heavy as produced (not diversified)":"DESIGN FIXTURE — synthetic six-family layout for art review (not engine output)";
+  meta.appendChild(src);
+  const det=document.createElement("span");det.textContent=" · tick "+sc.tick+", pop "+sc.population+" ("+sc.dormant+" dormant) · families: "+Object.entries(sc.families).map(([k,v])=>k+":"+v).join(" ");
+  meta.appendChild(det);
+  const wrap=document.createElement("div");if(S.phone)wrap.className="phone";
+  const cv=document.createElement("canvas");cv.width=600;cv.height=600;const x=cv.getContext("2d");
+  const cell=t==="ecosystem"?2:1;
+  const vis=sc.organisms.filter(o=>S.activity==="both"?true:o.activity===S.activity)
+    .filter(o=>S.family==="all"?true:o.family===S.family);
+  vis.forEach(o=>{const bitstr=o[key];const n=Math.sqrt(bitstr.length);
+    x.fillStyle=o.activity==="dormant"?(S.color==="mono"?"#5a6a63":"#5a6a63"):(S.color==="mono"?MONO:(FAMC[o.family]||MONO));
+    if(S.activity!=="both"||true)x.globalAlpha=o.activity==="dormant"?0.85:1;
+    for(let i=0;i<bitstr.length;i++)if(bitstr[i]==="1")
+      x.fillRect(Math.round(o.x-n*cell/2+(i%n)*cell),Math.round(o.y-n*cell/2+Math.floor(i/n)*cell),cell,cell);});
+  x.globalAlpha=1;
+  if(S.selected!=null&&vis[S.selected]){const o=vis[S.selected];x.strokeStyle="#ff5a5a";x.lineWidth=2;
+    x.strokeRect(o.x-12,o.y-12,24,24);}
+  cv.onclick=e=>{const r=cv.getBoundingClientRect();
+    const mx=(e.clientX-r.left)*600/r.width,my=(e.clientY-r.top)*600/r.height;
+    let best=-1,bd=1e9;vis.forEach((o,i)=>{const d=(o.x-mx)**2+(o.y-my)**2;if(d<bd){bd=d;best=i;}});
+    if(best>=0&&bd<900){S.selected=best;renderWorld();}};
+  wrap.appendChild(cv);host.appendChild(wrap);
+  const cap=document.createElement("p");cap.className="note";
+  cap.textContent="Click an organism to mark selection (red ring). Showing "+vis.length+" of "+sc.organisms.length+" (filters: family="+S.family+", activity="+S.activity+").";
+  host.appendChild(cap);}
+function renderAll(){renderGallery();renderEvolution();renderWorld();
+  document.getElementById("tier-pill").textContent="zoom "+S.zoom+"× → "+tier()+" geometry";}
+["gallery","evolution","world"].forEach(m=>{
+  document.getElementById("tab-"+m).onclick=()=>{
+    S.mode=m;["gallery","evolution","world"].forEach(x=>{
+      document.getElementById("tab-"+x).className=x===m?"on":"";
+      document.getElementById("view-"+x).style.display=x===m?"":"none";});};});
+document.getElementById("ctl-family").onchange=e=>{S.family=e.target.value;renderAll();};
+document.getElementById("ctl-zoom").onchange=e=>{S.zoom=e.target.value;renderAll();};
+document.getElementById("ctl-activity").onchange=e=>{S.activity=e.target.value;renderAll();};
+document.getElementById("ctl-expr").onchange=e=>{S.expr=e.target.value;renderAll();};
+document.getElementById("ctl-color").onchange=e=>{S.color=e.target.value;renderAll();};
+document.getElementById("ctl-lineage").onchange=e=>{S.lineage=e.target.value;renderAll();};
+document.getElementById("ctl-scene").onchange=e=>{S.scene=e.target.value;S.selected=null;renderWorld();};
+document.getElementById("ctl-phone").onchange=e=>{S.phone=e.target.checked;renderWorld();};
+(function init(){const sel=document.getElementById("ctl-scene");
+  const des=DATA.scenes.filter(s=>s.source==="design-fixture");
+  const eng=DATA.scenes.filter(s=>s.source!=="design-fixture");
+  const g1=document.createElement("optgroup");g1.label="Design fixtures (synthetic, six families)";
+  des.forEach(s=>{const o=document.createElement("option");o.value=s.name;o.textContent=s.name+" — fixture, pop "+s.population;g1.appendChild(o);});
+  const g2=document.createElement("optgroup");g2.label="Current-engine evidence (0.21, as produced)";
+  eng.forEach(s=>{const o=document.createElement("option");o.value=s.name;o.textContent=s.name+" — engine, pop "+s.population;g2.appendChild(o);});
+  sel.appendChild(g1);sel.appendChild(g2);
+  S.scene=(des[1]||des[0]||DATA.scenes[0]).name;sel.value=S.scene;
+  const fmtT=v=>typeof v==="number"?String(Math.round(v*1000)/1000):(v&&typeof v==="object"?JSON.stringify(v):String(v));
+document.getElementById("tuning").innerHTML="<table>"+Object.entries(DATA.tuning||{}).map(([k,v])=>"<tr><th>"+k+"</th><td>"+fmtT(v)+"</td></tr>").join("")+"</table>";
+  renderAll();})();
 </script>
 </body>
-</html>`;
-  writeFileSync(new URL("./viewer.html", OUT), html);
+</html>
+`;  writeFileSync(new URL("./viewer.html", OUT), html);
 }
 
 writeFileSync(new URL("./EVIDENCE.md", OUT), md.join("\n"));
