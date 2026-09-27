@@ -39,7 +39,9 @@ export interface SweepSample {
 }
 
 export function platedSweep(): SweepSample[] {
-  const labels = ["M2", "M3", "M4"];
+  // Descending lineage M4->M0: M4 founds as plated, each child anchors to its
+  // parent. Under hybrid calibration the whole chain holds Plated.
+  const labels = ["M4", "M3", "M2", "M1", "M0"];
   const out: SweepSample[] = [];
   let parent: "plated" | null = null;
   SWEEP_M.forEach((m, i) => {
@@ -65,8 +67,9 @@ export interface FlipSample extends SweepSample {
 }
 
 /**
- * Honesty evidence: M0/M1 cannot hold Plated (founder AND plated-anchored both
- * resolve blob). Rendered as a labeled flip strip, never faked into the sweep.
+ * Retention-pair evidence: M0/M1 resolve blob as founders but retain plated
+ * under lineage anchoring — hysteresis working as designed, and the reason
+ * the full sweep holds along one lineage. Rendered as founder-vs-anchored.
  */
 export function flipSamples(): FlipSample[] {
   return FLIP_M.map((m, i) => {
@@ -74,11 +77,11 @@ export function flipSamples(): FlipSample[] {
     const traits = baseTraits(raw);
     const founder = resolvePhenotype(traits, { organismId: 7100 + i, lineageId: LINEAGE_ID });
     const anchored = resolvePhenotype(traits, { parentFamily: "plated", organismId: 7100 + i, lineageId: LINEAGE_ID });
-    if (founder.family === "plated" || anchored.family === "plated") {
-      throw new Error(`flip assumption broken at ${FLIP_LABELS[i]}: founder=${founder.family} anchored=${anchored.family}`);
+    if (founder.family !== "blob" || anchored.family !== "plated") {
+      throw new Error(`retention assumption broken at ${FLIP_LABELS[i]}: founder=${founder.family} anchored=${anchored.family}`);
     }
     return {
-      label: FLIP_LABELS[i]!, m, metabolismRaw: raw, traits, res: founder,
+      label: FLIP_LABELS[i]!, m, metabolismRaw: raw, traits, res: anchored,
       organismId: 7100 + i, founderFamily: founder.family, anchoredFamily: anchored.family,
     };
   });

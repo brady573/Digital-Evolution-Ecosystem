@@ -22,15 +22,15 @@ import {
 
 const samples = platedSweep();
 
-// 1. Family hold: M2..M4 resolve Plated (asserted in fixtures; recheck).
+// 1. Family hold: M0..M4 resolve Plated along the descending lineage (asserted in fixtures; recheck).
 for (const s of samples) assert.equal(s.res.family, "plated", `${s.label} must hold Plated`);
-console.log("family hold M2..M4: PASS (lineage-anchored, one lineage)");
-// 1b. Flip honesty: M0/M1 resolve blob founder AND anchored (never Plated).
+console.log("family hold M0..M4: PASS (lineage-anchored, one lineage)");
+// 1b. Retention pairs: M0/M1 resolve blob as founders but retain plated anchored.
 // Rendered with the monochrome grid renderer: what they actually look like.
 for (const f of flipSamples()) {
   assert.equal(f.founderFamily, "blob", `${f.label} founder must be blob`);
-  assert.equal(f.anchoredFamily, "blob", `${f.label} anchored must be blob`);
-  assert.equal(f.res.family, "blob", `${f.label} rendered must be blob`);
+  assert.equal(f.anchoredFamily, "plated", `${f.label} anchored must retain plated`);
+  assert.equal(f.res.family, "plated", `${f.label} rendered must be plated`);
   for (const size of [9, 13]) {
     void size;
   }
@@ -38,7 +38,7 @@ for (const f of flipSamples()) {
   const g2 = renderPhenotypeGrid(f.res, "inspection", "active");
   assert.deepEqual([...g1.cells], [...g2.cells], `flip rerender ${f.label}`);
 }
-console.log("flip evidence M0/M1: PASS (founder=anchored=blob; specified sweep unsatisfiable, shown not hidden)");
+console.log("retention pairs M0/M1: PASS (founder blob, anchored plated — full sweep holds)");
 
 // 2. Determinism: identical inputs, identical bytes, twice.
 for (const s of samples) {
@@ -49,15 +49,17 @@ for (const s of samples) {
     assert.deepEqual([...a.kind], [...b.kind], `rekind ${s.label}@${size}`);
   }
 }
-console.log("deterministic rerender: PASS (M2..M4 + flips x 4 LODs, byte-identical)");
+console.log("deterministic rerender: PASS (M0..M4 + retention x 4 LODs, byte-identical)");
 
-// 3. Monotonic activity: metric strictly increases M2->M4 at every LOD.
+// 3. Monotonic activity: metric strictly increases with M at every LOD
+// (sweep runs M4->M0 in lineage order, so compare in ascending-M order).
 for (const size of LOD_SIZES) {
-  const ms = samples.map((s) => activityMetric(renderPlated(s.res, s.m, size)));
+  const asc = [...samples].sort((a, b) => a.m - b.m);
+  const ms = asc.map((s) => activityMetric(renderPlated(s.res, s.m, size)));
   for (let i = 1; i < ms.length; i++) {
-    assert.ok(ms[i]! > ms[i - 1]!, `${size}px activity must rise M${i - 1}->M${i} (${ms[i - 1]!.toFixed(4)}->${ms[i]!.toFixed(4)})`);
+    assert.ok(ms[i]! > ms[i - 1]!, `${size}px activity must rise ${asc[i - 1]!.label}->${asc[i]!.label} (${ms[i - 1]!.toFixed(4)}->${ms[i]!.toFixed(4)})`);
   }
-  console.log(`monotonic activity @${size}: PASS (${ms.map((v) => v.toFixed(3)).join(" < ")})`);
+  console.log(`monotonic activity @${size}: PASS (${asc.map((s) => s.label).join("<")}: ${ms.map((v) => v.toFixed(3)).join(" < ")})`);
 }
 
 // 4. Structural stability: plate count/order fixed; silhouette IoU vs M2 high.

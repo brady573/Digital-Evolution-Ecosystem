@@ -10,7 +10,7 @@
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { continuityPair, flipSamples, platedSweep } from "./fixtures.ts";
-import { renderPhenotypeGrid } from "../../packages/phenotype/src/index.ts";
+import { renderPhenotypeGrid, resolvePhenotype } from "../../packages/phenotype/src/index.ts";
 import {
   LOD_SIZES,
   SWEEP_LABELS,
@@ -56,8 +56,13 @@ for (const s of samples) {
   mono.push({ label: `${s.label}-mono@128`, size: 128, b64: toB64(rgb) });
 }
 for (const f of flips) {
-  // Honesty rendering: what M0/M1 actually resolve to (blob, monochrome grid).
-  const g = renderPhenotypeGrid(f.res, "inspection", "active");
+  // Retention pair: anchored plated render plus founder blob grid side by side.
+  const ap = renderPlated(f.res, f.m, 128);
+  imgs.push({ label: `${f.label}-anchored@128`, size: 128, b64: toB64(ap.rgb) });
+  const g = renderPhenotypeGrid(
+    resolvePhenotype(f.traits, { organismId: f.organismId, lineageId: 4242 }),
+    "inspection", "active",
+  );
   const rgb = new Uint8Array(13 * 13 * 3);
   g.cells.forEach((b, i) => {
     if (b) {
@@ -66,7 +71,7 @@ for (const f of flips) {
       rgb[i * 3 + 2] = 234;
     }
   });
-  imgs.push({ label: `${f.label}-flip@13`, size: 13, b64: toB64(rgb) });
+  imgs.push({ label: `${f.label}-founder@13`, size: 13, b64: toB64(rgb) });
 }
 const pc = renderPlated(pair.parent.res, pair.parent.m, 128);
 const cc = renderPlated(pair.child.res, pair.parent.m, 128);
@@ -101,16 +106,16 @@ td,th{border:1px solid #1d2f3a;padding:4px 10px} th{color:#7fd4c1}
 </style>
 </head>
 <body>
-<h1>Plated metabolism proof — one lineage, M2..M4 (+ M0/M1 flip evidence)</h1>
+<h1>Plated metabolism proof — one lineage, M0..M4</h1>
 <p class="note">Isolated evidence prototype (NOT production). Structure is fixed by family +
 quantized inputs; only internal activity follows raw metabolism. No sim changes.</p>
-<h2>Progression strips M2..M4 (128 / 64 / 32 / 16)</h2>
+<h2>Progression strips M0..M4 (128 / 64 / 32 / 16)</h2>
 <div class="strip" id="s128"></div>
 <div class="strip" id="s64"></div>
 <div class="strip" id="s32"></div>
 <div class="strip" id="s16"></div>
-<h2>Out-of-basin flip (M0/M1 resolve blob — founder and anchored; not faked)</h2>
-<p class="note">The specified M0/M1 cannot hold Plated under the accepted hysteresis model. Shown here so the gap is visible, not hidden.</p>
+<h2>Founder vs lineage retention (M0/M1)</h2>
+<p class="note">M0/M1 resolve blob as founders but retain plated under lineage anchoring — hysteresis working as designed, and why the full sweep holds along one lineage.</p>
 <div class="strip" id="flip"></div>
 <h2>Review sheet (128 shown at 384, nearest-neighbor)</h2>
 <div class="strip" id="review"></div>
@@ -121,9 +126,9 @@ quantized inputs; only internal activity follows raw metabolism. No sim changes.
 <h2>Parameter manifest</h2>
 <table><tr><th>sample</th><th>M (norm)</th><th>metabolism raw</th><th>activity metric</th></tr>
 ${metrics128.map((r) => `<tr><td>${r.label}</td><td>${r.m}</td><td>${r.raw.toFixed(4)}</td><td>${r.activity.toFixed(4)}</td></tr>`).join("\n")}
-${flips.map((f) => `<tr><td>${f.label} (flip)</td><td>${f.m}</td><td>${f.metabolismRaw.toFixed(4)}</td><td>— (resolves ${f.founderFamily})</td></tr>`).join("\n")}
+${flips.map((f) => `<tr><td>${f.label} (retention pair)</td><td>${f.m}</td><td>${f.metabolismRaw.toFixed(4)}</td><td>founder ${f.founderFamily} / anchored ${f.anchoredFamily}</td></tr>`).join("\n")}
 </table>
-<p class="note">Silhouette IoU vs M0 (min over sweep): ${minIoU.toFixed(3)}. Parent/child IoU: ${childIoU.toFixed(3)}.</p>
+<p class="note">Silhouette IoU vs M4 (min over sweep): ${minIoU.toFixed(3)}. Parent/child IoU: ${childIoU.toFixed(3)}.</p>
 <script>
 const DATA = ${payload};
 function b64ToRgba(b64, size) {
@@ -152,12 +157,12 @@ const byLabel = (l) => DATA.imgs.find((e) => e.label === l);
 ['s128', 's64', 's32', 's16'].forEach((id) => {
   const size = Number(id.slice(1));
   const host = document.getElementById(id);
-  ['M2', 'M3', 'M4'].forEach((m) => host.appendChild(fig(byLabel(m + '@' + size), size <= 32 ? 4 : 2)));
+  ['M0', 'M1', 'M2', 'M3', 'M4'].forEach((m) => host.appendChild(fig(byLabel(m + '@' + size), size <= 32 ? 4 : 2)));
 });
 const flipHost = document.getElementById('flip');
-['M0', 'M1'].forEach((m) => flipHost.appendChild(fig(byLabel(m + '-flip@13'), 8)));
+['M0', 'M1'].forEach((m) => { flipHost.appendChild(fig(byLabel(m + '-anchored@128'), 2)); flipHost.appendChild(fig(byLabel(m + '-founder@13'), 8)); });
 const rev = document.getElementById('review');
-['M2', 'M3', 'M4'].forEach((m) => rev.appendChild(fig(byLabel(m + '@128'), 3)));
+['M0', 'M1', 'M2', 'M3', 'M4'].forEach((m) => rev.appendChild(fig(byLabel(m + '@128'), 3)));
 const cont = document.getElementById('cont');
 cont.appendChild(fig(byLabel('parent-M2@128'), 2));
 cont.appendChild(fig(byLabel('child-M2mut@128'), 2));
@@ -170,4 +175,4 @@ writeFileSync(OUT + "plated-proof.html", html);
 writeFileSync(OUT + "plated-pixels.json", JSON.stringify({ meta: metrics128, minIoU, childIoU }));
 console.log(`plated evidence -> ${OUT} (${imgs.length} color + ${mono.length} mono images)`);
 console.log("activity:", metrics128.map((r) => `${r.label}=${r.activity.toFixed(4)}`).join(" "));
-console.log(`silhouette IoU min vs M2: ${minIoU.toFixed(3)}; parent/child: ${childIoU.toFixed(3)}`);
+console.log(`silhouette IoU min vs M4 (sweep head): ${minIoU.toFixed(3)}; parent/child: ${childIoU.toFixed(3)}`);

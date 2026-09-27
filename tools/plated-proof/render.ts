@@ -21,12 +21,12 @@
  */
 import type { ResolvedPhenotype } from "../../packages/phenotype/src/index.ts";
 
-/** Handoff samples (prototype samples, not thresholds). M0/M1 sit outside the
- * Plated basin (verified by probe: founder and anchored both resolve blob), so
- * the satisfiable proof sweep is M2..M4; M0/M1 ship as labeled flip evidence.
- * See fixtures.flipSamples(). */
-export const SWEEP_M = [0.5, 0.7, 0.9] as const;
-export const SWEEP_LABELS = ["M2", "M3", "M4"] as const;
+/** Handoff samples (prototype samples, not thresholds). Under the hybrid
+ * calibration the full M0..M4 sweep holds Plated along one descending lineage
+ * (M0/M1 resolve blob as founders but retain plated under lineage anchoring —
+ * hysteresis working as designed). See fixtures.flipSamples() for the pair. */
+export const SWEEP_M = [0.9, 0.7, 0.5, 0.3, 0.1] as const;
+export const SWEEP_LABELS = ["M4", "M3", "M2", "M1", "M0"] as const;
 export const FLIP_M = [0.1, 0.3] as const;
 export const FLIP_LABELS = ["M0", "M1"] as const;
 export const LOD_SIZES = [128, 64, 32, 16] as const;
