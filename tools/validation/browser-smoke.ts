@@ -27,7 +27,10 @@ async function main(){
   try{
     const context=await browser.newContext({viewport:{width:1280,height:900}});
     const page=await context.newPage();
-    await page.goto(baseUrl,{waitUntil:"networkidle"});
+    // deeTest enables the URL-gated runtime hook. Used by the throughput loop to
+    // acknowledge the aftermath without racing the DOM (see the guarded branch
+    // below). Not a product control (AC21).
+    await page.goto(`${baseUrl}?deeTest=1`,{waitUntil:"networkidle"});
     await page.getByLabel("Evolution world").waitFor();
     assert.equal(await tick(page),0,"fresh world starts at tick 0");
 
@@ -242,15 +245,25 @@ async function main(){
         if(gated){
           await page.getByTestId("decision-sheet").getByText("Keep watching").click();
           await page.getByTestId("decision-sheet").waitFor({state:"detached",timeout:15_000});
-          // Resolving opens the aftermath impact sheet, which overlays the
-          // world. It does not gate time (AC22), but a large sheet can sit over
-          // the canvas, so collapse it before measuring throughput.
-          const impact=page.getByTestId("aftermath-impact");
-          if(await impact.isVisible().catch(()=>false)){
-            await page.getByTestId("aftermath-acknowledge").click();
-            await impact.waitFor({state:"detached",timeout:15_000});
-            await page.getByRole("button",{name:"Pause"}).click();
+          // Resolving opens the aftermath impact sheet. It does not gate time
+          // (AC22) - playback auto-resumes here, because the world WAS playing -
+          // so the sheet has NO guaranteed lifetime: a new pending decision
+          // outranks it (AC15), takes the slot, and the sheet legitimately
+          // disappears. That is correct product behaviour and it invalidates
+          // this measurement window, so restart the window instead of assuming
+          // the button stays put.
+          //
+          // Acknowledged through the runtime hook rather than a click: a click
+          // races a node another sheet is entitled to remove. The real button
+          // is still exercised by click in the dedicated aftermath block, where
+          // the world is paused and preemption cannot occur.
+          if(await page.getByTestId("aftermath-impact").isVisible().catch(()=>false)){
+            await page.evaluate(()=>(window as any).__DEE_TEST__.acknowledgeAftermath());
+            await page.waitForTimeout(150);
           }
+          // Whichever sheet now owns the slot, the window is void either way.
+          if(await page.getByTestId("decision-sheet").isVisible().catch(()=>false))continue;
+          await page.getByRole("button",{name:"Pause"}).click().catch(()=>{});
           continue;
         }
         await page.getByRole("button",{name:"Pause"}).click();
