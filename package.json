@@ -27,7 +27,7 @@
     "test:visual": "tsx tools/validation/landscape-capture.ts",
     "test:time-controls": "tsx tools/validation/time-controls.ts",
     "test:art-review": "tsx tools/validation/art-review.ts",
-    "test:plated": "tsx tools/plated-proof/validate.ts"
+    "test:plated": "tsx tools/plated-proof/validate.ts && tsx tools/plated-proof/geo-validate.ts"
   },
   "devDependencies": {
     "@types/node": "26.6.2",
