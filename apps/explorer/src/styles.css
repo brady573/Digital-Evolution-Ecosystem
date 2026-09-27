@@ -53,8 +53,10 @@ button,input{outline:none}
 .lensbar select,.controls select{background:var(--panel2);color:#dcece4;border:1px solid var(--line2);border-radius:8px;padding:8px}
 .lensnote{flex-basis:100%;font-size:.74rem;line-height:1.45;color:#9fb8ad;padding:0 2px}
 /* Control grouping. On desktop the wrappers are transparent to layout, so the
-   existing single-row control bar is unchanged. */
+   existing single-row control bar is unchanged, and the progressive-disclosure
+   affordance is not needed (everything is already on one row). */
 .control-row{display:contents}
+.control-more{display:none}
 .causal-note{font-size:.78rem;line-height:1.5;color:#a8c2b6;border-left:2px solid var(--line2);padding-left:9px;margin:9px 0}
 .causal-note strong{color:#dcece4}
 .investigation-rail{min-width:0;display:grid;gap:18px;align-content:start}

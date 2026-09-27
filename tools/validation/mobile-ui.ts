@@ -323,14 +323,33 @@ async function checkNavClearance(page: Page, width: number) {
 async function checkDesktopUnchanged(page: Page) {
   const controls = await page.locator(".controls").boundingBox();
   const rows = await page.evaluate(() => {
+    // Only VISIBLE items count toward layout rows. A phone-only affordance
+    // that is display:none on desktop still exists in the DOM at top 0, which
+    // would otherwise read as a second row.
     const items = [...document.querySelectorAll(".controls button, .controls select")] as HTMLElement[];
-    const tops = new Set(items.map((el) => Math.round(el.getBoundingClientRect().top)));
+    const tops = new Set(
+      items
+        .filter((el) => el.offsetParent !== null && el.getBoundingClientRect().height > 0)
+        .map((el) => Math.round(el.getBoundingClientRect().top)),
+    );
     return tops.size;
   });
   assert.equal(rows, 1, "desktop control bar is still a single row");
   assert.ok(controls!.height < 70, `desktop control bar stays compact (${controls!.height.toFixed(0)}px)`);
   const lensDisplay = await page.evaluate(() => getComputedStyle(document.querySelector(".lensbar")!).display);
   assert.equal(lensDisplay, "flex", "desktop lens bar keeps its flex treatment");
+  // Progressive disclosure is a phone treatment: on desktop the whole control
+  // set is already one row, so the More affordance must not appear. This
+  // assertion exists because its absence let a real desktop regression ship
+  // once (the More button rendered inline on desktop).
+  assert.equal(await page.getByRole("button", { name: "More actions" }).isVisible().catch(() => false), false,
+    "desktop does not show the phone-only More affordance");
+  assert.equal(await page.locator(".lens-active").isVisible().catch(() => false), false,
+    "desktop does not show the phone-only active-lens chip");
+  for (const secondary of ["Save", "Resume", "Export"]) {
+    assert.ok(await page.getByRole("button", { name: secondary, exact: true }).isVisible(),
+      `desktop keeps ${secondary} inline on the single control row`);
+  }
   for (const lens of LENSES) {
     assert.ok(await page.getByRole("button", { name: lens, exact: true }).count(), `desktop keeps ${lens}`);
   }
