@@ -1,0 +1,212 @@
+{
+  "schema_version": 1,
+  "art_direction_brief": "assets/art-direction-brief.md",
+  "note": "This project ships no binary image assets. Every visual is generated at runtime in Canvas 2D, so each entry below is a procedural visual family with a single authoring source. 'status: approved' means the family is implemented, covered by tools/validation/landscape.ts, and visually reviewed in the retained captures under testdata/visual/.",
+  "assets": [
+    {
+      "id": "substrate-field",
+      "role": "world substrate / ecological landscape (procedural, 60x60 field scaled to the canvas)",
+      "path": "apps/explorer/src/landscape.ts::landscapeCell",
+      "status": "approved",
+      "technical": {
+        "dimensions": "procedural 60x60 RGBA buffer, scaled to the visible world rectangle",
+        "alpha": false,
+        "anchor": "world origin, toroidal",
+        "frames": 1,
+        "filtering": "bilinear (imageSmoothingEnabled) — required, do not disable"
+      },
+      "visual_locks": [
+        "palette roles",
+        "value structure (barren < fertile, waste ash above both)",
+        "no categorical biomes",
+        "no implied elevation/water/soil mechanics",
+        "deterministic per-cell microvariation"
+      ],
+      "source": {
+        "kind": "authored-in-code",
+        "url_or_tool": "",
+        "creator": "Coding Agent, approved by Project Owner",
+        "created_at": "2026-09-26",
+        "license": "project-owned",
+        "attribution": "",
+        "prompt_or_source_record": "apps/explorer/src/landscape.ts; palette documented in assets/art-direction-brief.md"
+      },
+      "verification": {
+        "native_scale_reviewed": true,
+        "in_engine_reviewed": true,
+        "technical_checks_passed": true,
+        "approved_by": "pending Owner design review (PR #40)"
+      }
+    },
+    {
+      "id": "waste-stipple",
+      "role": "cosmetic non-colour channel on waste-loaded ground (procedural)",
+      "path": "apps/explorer/src/App.tsx (stipple pass over wv[])",
+      "status": "approved",
+      "technical": {
+        "dimensions": "screen-space dots, one dot per load step",
+        "alpha": true,
+        "anchor": "cell centre",
+        "frames": 1,
+        "filtering": "n/a"
+      },
+      "visual_locks": [
+        "density rises with measured waste",
+        "never covers the whole world",
+        "cosmetic only; carries no ecological meaning beyond 'more waste'",
+        "consumes no simulation RNG"
+      ],
+      "source": {
+        "kind": "authored-in-code",
+        "url_or_tool": "",
+        "creator": "Coding Agent",
+        "created_at": "2026-09-26",
+        "license": "project-owned",
+        "attribution": "",
+        "prompt_or_source_record": "deterministic hash of cell index via landscape.ts::microTexture"
+      },
+      "verification": {
+        "native_scale_reviewed": true,
+        "in_engine_reviewed": true,
+        "technical_checks_passed": true,
+        "approved_by": "pending Owner design review (PR #40)"
+      }
+    },
+    {
+      "id": "organism-sprite",
+      "role": "living organism marker — CURRENT/LEGACY RENDERER ONLY, not target phenotype art",
+      "path": "apps/explorer/src/App.tsx (organism draw pass)",
+      "status": "provisional",
+      "superseded_by": "accepted phenotype direction (inherited recognizable body families, expressive naturalist/alien forms, organic silhouette variation)",
+      "scope_note": "Recorded only so a reviewer can tell an environmental constraint from an incidental property of today's code. This entry is NOT art-direction authority for organisms and must not be read as approving voxel morphology. The accepted phenotype direction replaces it. Requirements that survive that replacement — legibility at true scale, dormant-vs-active distinction, selection affordance, and ecological analysis that does not read morphology — are environmental requirements owned by assets/art-direction-brief.md, not morphological ones.",
+      "technical": {
+        "dimensions": "2-4 px cells, span scaled by stored energy, on-screen unit = 2.2 x world scale",
+        "alpha": true,
+        "anchor": "organism world position, centred",
+        "frames": 1,
+        "filtering": "n/a"
+      },
+      "visual_locks": [
+        "provisional: current voxel construction is incidental, not a durable lock",
+        "durable: life stays readable against every substrate value",
+        "durable: dormant and active are distinguishable without relying on hue",
+        "durable: ecological analysis must not be inferred from morphology"
+      ],
+      "source": {
+        "kind": "authored-in-code",
+        "url_or_tool": "",
+        "creator": "Coding Agent",
+        "created_at": "2026-09-26",
+        "license": "project-owned",
+        "attribution": "",
+        "prompt_or_source_record": ""
+      },
+      "verification": {
+        "native_scale_reviewed": true,
+        "in_engine_reviewed": true,
+        "technical_checks_passed": true,
+        "approved_by": "not applicable — provisional current-renderer record, superseded by the phenotype direction"
+      }
+    },
+    {
+      "id": "selection-marker",
+      "role": "focus indicator for the selected organism (interaction affordance, not morphology)",
+      "path": "apps/explorer/src/App.tsx (selection pass)",
+      "status": "approved",
+      "technical": {
+        "dimensions": "15 px radius halo, 7/9.5 px double ring, four diagonal ticks",
+        "alpha": true,
+        "anchor": "organism world position",
+        "frames": 1,
+        "filtering": "n/a"
+      },
+      "visual_locks": [
+        "brightest element on screen",
+        "must not occlude surrounding ecosystem detail",
+        "selection is read-only and must not alter the simulation"
+      ],
+      "source": {
+        "kind": "authored-in-code",
+        "url_or_tool": "",
+        "creator": "Coding Agent",
+        "created_at": "2026-09-26",
+        "license": "project-owned",
+        "attribution": "",
+        "prompt_or_source_record": ""
+      },
+      "verification": {
+        "native_scale_reviewed": true,
+        "in_engine_reviewed": true,
+        "technical_checks_passed": true,
+        "approved_by": "pending Owner design review (PR #40)"
+      }
+    },
+    {
+      "id": "waste-overlay-ramp",
+      "role": "read-only analytical waste view (procedural sequential ramp)",
+      "path": "apps/explorer/src/landscape.ts::wasteOverlayCell",
+      "status": "approved",
+      "technical": {
+        "dimensions": "60x60, flat per-cell, untextured",
+        "alpha": false,
+        "anchor": "world origin",
+        "frames": 1,
+        "filtering": "none (measurement must not be smoothed)"
+      },
+      "visual_locks": [
+        "lifted dark end: a near-black ramp makes ordinary worlds look broken",
+        "brighter means more waste",
+        "no texture: analytical views suppress cosmetic detail",
+        "luminance carries the reading so it does not depend on hue"
+      ],
+      "source": {
+        "kind": "authored-in-code",
+        "url_or_tool": "",
+        "creator": "Coding Agent",
+        "created_at": "2026-09-26",
+        "license": "project-owned",
+        "attribution": "",
+        "prompt_or_source_record": ""
+      },
+      "verification": {
+        "native_scale_reviewed": true,
+        "in_engine_reviewed": true,
+        "technical_checks_passed": true,
+        "approved_by": "pending Owner design review (PR #40)"
+      }
+    },
+    {
+      "id": "nutrient-overlay-palettes",
+      "role": "read-only analytical nutrient A/B/C and combined views (procedural)",
+      "path": "apps/explorer/src/landscape.ts::nutrientOverlayCell",
+      "status": "approved",
+      "technical": {
+        "dimensions": "60x60, flat per-cell, untextured",
+        "alpha": false,
+        "anchor": "world origin",
+        "frames": 1,
+        "filtering": "none"
+      },
+      "visual_locks": [
+        "monotonic in its own field",
+        "exact-value reading preserved: no smoothing, no interpolation",
+        "legend/label support required for player interpretation"
+      ],
+      "source": {
+        "kind": "authored-in-code",
+        "url_or_tool": "",
+        "creator": "Coding Agent",
+        "created_at": "2026-09-26",
+        "license": "project-owned",
+        "attribution": "",
+        "prompt_or_source_record": ""
+      },
+      "verification": {
+        "native_scale_reviewed": true,
+        "in_engine_reviewed": true,
+        "technical_checks_passed": true,
+        "approved_by": "pending Owner design review (PR #40)"
+      }
+    }
+  ]
+}
