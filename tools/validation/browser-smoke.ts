@@ -313,6 +313,27 @@ async function main(){
     // internal Max path still exists for tooling; only the product option and
     // this assertion are gone.
     await speedSelect.selectOption("100");
+    // Family artwork: clicking an organism opens the details card with its
+    // 128x128 base family portrait. World is paused, so a bounded grid search
+    // over canvas points is deterministic enough (first hit wins).
+    const worldCanvas=page.getByLabel("Evolution world");
+    const wbox=await worldCanvas.boundingBox();
+    let portrait=0;
+    outer: for(const fy of [0.3,0.42,0.5,0.58,0.7]){
+      for(const fx of [0.3,0.42,0.5,0.58,0.7]){
+        await page.mouse.click(wbox!.x+wbox!.width*fx,wbox!.y+wbox!.height*fy);
+        await page.waitForTimeout(200);
+        portrait=await page.locator(".family-portrait img").count();
+        if(portrait>0)break outer;
+      }
+    }
+    assert.equal(portrait,1,"selecting an organism shows one family portrait");
+    const art=page.locator(".family-portrait img").first();
+    assert.match(await art.getAttribute("alt")||"",/family portrait$/,"portrait alt names the family");
+    const artBox=await art.boundingBox();
+    assert.equal(Math.round(artBox!.width),128,"portrait renders at 128px wide");
+    assert.equal(Math.round(artBox!.height),128,"portrait renders at 128px tall");
+    assert.match(await page.locator(".family-portrait figcaption").first().innerText(),/family$/i,"portrait caption names the family");
 
     await page.getByRole("button",{name:"Save"}).click();
     await page.getByText(/Saved tick/).waitFor();

@@ -19,3 +19,4 @@ apps/explorer/android/captain-hook.log
 
 # Local tooling
 .playwright/
+testdata/pixi-spike/

@@ -634,75 +634,142 @@
     "scenes": [
       {
         "name": "scene-50",
+        "source": "current-engine",
         "tick": 1000,
         "population": 64,
         "dormant": 2,
-        "simMs": 321,
+        "simMs": 303,
         "families": {
           "blob": 64
         },
         "tierMs": {
-          "ecosystem": 1,
-          "population": 1,
-          "inspection": 0
-        }
-      },
-      {
-        "name": "scene-250",
-        "tick": 2500,
-        "population": 267,
-        "dormant": 28,
-        "simMs": 839,
-        "families": {
-          "blob": 267
-        },
-        "tierMs": {
           "ecosystem": 0,
-          "population": 0,
+          "population": 1,
           "inspection": 1
         }
       },
       {
+        "name": "scene-250",
+        "source": "current-engine",
+        "tick": 2500,
+        "population": 267,
+        "dormant": 28,
+        "simMs": 1078,
+        "families": {
+          "blob": 267
+        },
+        "tierMs": {
+          "ecosystem": 1,
+          "population": 0,
+          "inspection": 4
+        }
+      },
+      {
         "name": "scene-1000",
+        "source": "current-engine",
         "tick": 4000,
         "population": 1122,
         "dormant": 256,
-        "simMs": 3954,
+        "simMs": 4223,
         "families": {
           "blob": 1122
         },
         "tierMs": {
-          "ecosystem": 3,
+          "ecosystem": 6,
           "population": 3,
-          "inspection": 14
+          "inspection": 7
         }
       },
       {
         "name": "scene-3000",
+        "source": "current-engine",
         "tick": 5000,
         "population": 3104,
         "dormant": 524,
-        "simMs": 11379,
+        "simMs": 11605,
         "families": {
           "blob": 3104
         },
         "tierMs": {
-          "ecosystem": 7,
-          "population": 8,
-          "inspection": 19
+          "ecosystem": 11,
+          "population": 7,
+          "inspection": 13
+        }
+      },
+      {
+        "name": "design-50",
+        "source": "design-fixture",
+        "tick": 0,
+        "population": 50,
+        "dormant": 10,
+        "simMs": 0,
+        "families": {
+          "blob": 9,
+          "segmented": 9,
+          "radial": 8,
+          "plated": 8,
+          "branching": 8,
+          "paddled": 8
+        },
+        "tierMs": {
+          "ecosystem": 0,
+          "population": 0,
+          "inspection": 0
+        }
+      },
+      {
+        "name": "design-250",
+        "source": "design-fixture",
+        "tick": 0,
+        "population": 250,
+        "dormant": 45,
+        "simMs": 0,
+        "families": {
+          "blob": 42,
+          "segmented": 42,
+          "radial": 42,
+          "plated": 42,
+          "branching": 41,
+          "paddled": 41
+        },
+        "tierMs": {
+          "ecosystem": 0,
+          "population": 0,
+          "inspection": 0
+        }
+      },
+      {
+        "name": "design-1000",
+        "source": "design-fixture",
+        "tick": 0,
+        "population": 1000,
+        "dormant": 146,
+        "simMs": 0,
+        "families": {
+          "blob": 167,
+          "segmented": 167,
+          "radial": 167,
+          "plated": 167,
+          "branching": 166,
+          "paddled": 166
+        },
+        "tierMs": {
+          "ecosystem": 0,
+          "population": 0,
+          "inspection": 0
         }
       }
     ],
     "perf": {
       "organisms": 1122,
-      "resolveBestMs": 4.254061999999976,
-      "ecoBestMs": 1.3114580000001297,
+      "resolveBestMs": 4.303905999997369,
+      "ecoBestMs": 1.48218800000177,
       "ecoRects": 6449,
-      "popBestMs": 3.016978999999992,
+      "popBestMs": 3.0449999999982538,
       "popRects": 36341,
-      "inspBestMs": 5.7827610000022105,
+      "inspBestMs": 5.819062000002305,
       "inspRects": 90479,
-      "baselineBestMs": 0.2136979999995674,
+      "baselineBestMs": 0.21775999999954365,
       "baselineRects": 5409
     },
     "tuning": {
@@ -2070,7 +2137,17 @@
       {
         "section": "lineages",
         "key": "stable",
-        "label": "stable #0 blob",
+        "label": "stable #0 blob eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000000100011100010000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "stable",
+        "label": "stable #0 blob pop",
         "tier": "population",
         "activity": "active",
         "size": 9,
@@ -2080,7 +2157,27 @@
       {
         "section": "lineages",
         "key": "stable",
-        "label": "stable #1 blob",
+        "label": "stable #0 blob insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100000111111100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "stable",
+        "label": "stable #1 blob eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000000100011100010000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "stable",
+        "label": "stable #1 blob pop",
         "tier": "population",
         "activity": "active",
         "size": 9,
@@ -2090,7 +2187,27 @@
       {
         "section": "lineages",
         "key": "stable",
-        "label": "stable #2 blob",
+        "label": "stable #1 blob insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100000111111100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "stable",
+        "label": "stable #2 blob eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000000100011100010000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "stable",
+        "label": "stable #2 blob pop",
         "tier": "population",
         "activity": "active",
         "size": 9,
@@ -2100,7 +2217,27 @@
       {
         "section": "lineages",
         "key": "stable",
-        "label": "stable #3 blob",
+        "label": "stable #2 blob insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100000111111100000010010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "stable",
+        "label": "stable #3 blob eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000000100011100010000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "stable",
+        "label": "stable #3 blob pop",
         "tier": "population",
         "activity": "active",
         "size": 9,
@@ -2110,7 +2247,27 @@
       {
         "section": "lineages",
         "key": "stable",
-        "label": "stable #4 blob",
+        "label": "stable #3 blob insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100000111111100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "stable",
+        "label": "stable #4 blob eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000000100011100010000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "stable",
+        "label": "stable #4 blob pop",
         "tier": "population",
         "activity": "active",
         "size": 9,
@@ -2120,7 +2277,27 @@
       {
         "section": "lineages",
         "key": "stable",
-        "label": "stable #5 blob",
+        "label": "stable #4 blob insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111110000111111100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "stable",
+        "label": "stable #5 blob eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000000100011100010000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "stable",
+        "label": "stable #5 blob pop",
         "tier": "population",
         "activity": "active",
         "size": 9,
@@ -2130,7 +2307,27 @@
       {
         "section": "lineages",
         "key": "stable",
-        "label": "stable #6 blob",
+        "label": "stable #5 blob insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100000111111100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "stable",
+        "label": "stable #6 blob eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000000100011100010000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "stable",
+        "label": "stable #6 blob pop",
         "tier": "population",
         "activity": "active",
         "size": 9,
@@ -2140,7 +2337,27 @@
       {
         "section": "lineages",
         "key": "stable",
-        "label": "stable #7 blob",
+        "label": "stable #6 blob insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100000111111100000100010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "stable",
+        "label": "stable #7 blob eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000000100011100010000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "stable",
+        "label": "stable #7 blob pop",
         "tier": "population",
         "activity": "active",
         "size": 9,
@@ -2150,7 +2367,27 @@
       {
         "section": "lineages",
         "key": "stable",
-        "label": "stable #8 blob",
+        "label": "stable #7 blob insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100000111111100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "stable",
+        "label": "stable #8 blob eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000000100011100010000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "stable",
+        "label": "stable #8 blob pop",
         "tier": "population",
         "activity": "active",
         "size": 9,
@@ -2160,7 +2397,57 @@
       {
         "section": "lineages",
         "key": "stable",
-        "label": "stable #9 blob",
+        "label": "stable #8 blob insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100000111111100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "stable",
+        "label": "stable #9 blob eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000000100011100010000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "stable",
+        "label": "stable #9 blob pop",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "stable",
+        "label": "stable #9 blob insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100000111111100000000010000100000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "directional",
+        "label": "directional #0 blob eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000000100011100010000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "directional",
+        "label": "directional #0 blob pop",
         "tier": "population",
         "activity": "active",
         "size": 9,
@@ -2170,7 +2457,27 @@
       {
         "section": "lineages",
         "key": "directional",
-        "label": "directional #0 blob",
+        "label": "directional #0 blob insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100000111111100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "directional",
+        "label": "directional #1 blob eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000000100011100010000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "directional",
+        "label": "directional #1 blob pop",
         "tier": "population",
         "activity": "active",
         "size": 9,
@@ -2180,7 +2487,27 @@
       {
         "section": "lineages",
         "key": "directional",
-        "label": "directional #1 blob",
+        "label": "directional #1 blob insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100000111111100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "directional",
+        "label": "directional #2 blob eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000000100111110010000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "directional",
+        "label": "directional #2 blob pop",
         "tier": "population",
         "activity": "active",
         "size": 9,
@@ -2190,7 +2517,27 @@
       {
         "section": "lineages",
         "key": "directional",
-        "label": "directional #2 blob",
+        "label": "directional #2 blob insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100000111111100000010010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "directional",
+        "label": "directional #3 blob eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000000100111110010000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "directional",
+        "label": "directional #3 blob pop",
         "tier": "population",
         "activity": "active",
         "size": 9,
@@ -2200,7 +2547,27 @@
       {
         "section": "lineages",
         "key": "directional",
-        "label": "directional #3 blob",
+        "label": "directional #3 blob insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100000111111100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "directional",
+        "label": "directional #4 blob eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000000100111110010000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "directional",
+        "label": "directional #4 blob pop",
         "tier": "population",
         "activity": "active",
         "size": 9,
@@ -2210,7 +2577,27 @@
       {
         "section": "lineages",
         "key": "directional",
-        "label": "directional #4 blob",
+        "label": "directional #4 blob insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111110000111111100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "directional",
+        "label": "directional #5 blob eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000000100111110010000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "directional",
+        "label": "directional #5 blob pop",
         "tier": "population",
         "activity": "active",
         "size": 9,
@@ -2220,7 +2607,27 @@
       {
         "section": "lineages",
         "key": "directional",
-        "label": "directional #5 blob",
+        "label": "directional #5 blob insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100000111111100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "directional",
+        "label": "directional #6 blob eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000000100111110010000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "directional",
+        "label": "directional #6 blob pop",
         "tier": "population",
         "activity": "active",
         "size": 9,
@@ -2230,7 +2637,27 @@
       {
         "section": "lineages",
         "key": "directional",
-        "label": "directional #6 blob",
+        "label": "directional #6 blob insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100000111111100000100010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "directional",
+        "label": "directional #7 blob eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000000100111110010000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "directional",
+        "label": "directional #7 blob pop",
         "tier": "population",
         "activity": "active",
         "size": 9,
@@ -2240,7 +2667,27 @@
       {
         "section": "lineages",
         "key": "directional",
-        "label": "directional #7 blob",
+        "label": "directional #7 blob insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100000111111100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "directional",
+        "label": "directional #8 blob eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000000100111110010000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "directional",
+        "label": "directional #8 blob pop",
         "tier": "population",
         "activity": "active",
         "size": 9,
@@ -2250,17 +2697,27 @@
       {
         "section": "lineages",
         "key": "directional",
-        "label": "directional #8 blob",
-        "tier": "population",
+        "label": "directional #8 blob insp",
+        "tier": "inspection",
         "activity": "active",
-        "size": 9,
-        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100000111111100000000010000000000000000000",
         "family": "blob"
       },
       {
         "section": "lineages",
         "key": "directional",
-        "label": "directional #9 segmented",
+        "label": "directional #9 segmented eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0101000000010100000001010",
+        "family": "segmented"
+      },
+      {
+        "section": "lineages",
+        "key": "directional",
+        "label": "directional #9 segmented pop",
         "tier": "population",
         "activity": "active",
         "size": 9,
@@ -2269,38 +2726,28 @@
       },
       {
         "section": "lineages",
-        "key": "near-boundary",
-        "label": "near-boundary #0 blob",
-        "tier": "population",
+        "key": "directional",
+        "label": "directional #9 segmented insp",
+        "tier": "inspection",
         "activity": "active",
-        "size": 9,
-        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
+        "size": 13,
+        "bits": "0000000000000000000000000000000000000000000000000000001010101010000000000000000010101010100000000000000000101010101000000000000000000000000000000000000000100000000000000",
+        "family": "segmented"
+      },
+      {
+        "section": "lineages",
+        "key": "near-boundary",
+        "label": "near-boundary #0 blob eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000000100111110010000000",
         "family": "blob"
       },
       {
         "section": "lineages",
         "key": "near-boundary",
-        "label": "near-boundary #1 blob",
-        "tier": "population",
-        "activity": "active",
-        "size": 9,
-        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
-        "family": "blob"
-      },
-      {
-        "section": "lineages",
-        "key": "near-boundary",
-        "label": "near-boundary #2 blob",
-        "tier": "population",
-        "activity": "active",
-        "size": 9,
-        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
-        "family": "blob"
-      },
-      {
-        "section": "lineages",
-        "key": "near-boundary",
-        "label": "near-boundary #3 blob",
+        "label": "near-boundary #0 blob pop",
         "tier": "population",
         "activity": "active",
         "size": 9,
@@ -2310,7 +2757,27 @@
       {
         "section": "lineages",
         "key": "near-boundary",
-        "label": "near-boundary #4 blob",
+        "label": "near-boundary #0 blob insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100000111111100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "near-boundary",
+        "label": "near-boundary #1 blob eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000000100111110010000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "near-boundary",
+        "label": "near-boundary #1 blob pop",
         "tier": "population",
         "activity": "active",
         "size": 9,
@@ -2320,7 +2787,27 @@
       {
         "section": "lineages",
         "key": "near-boundary",
-        "label": "near-boundary #5 blob",
+        "label": "near-boundary #1 blob insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100000111111100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "near-boundary",
+        "label": "near-boundary #2 blob eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000000100111110010000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "near-boundary",
+        "label": "near-boundary #2 blob pop",
         "tier": "population",
         "activity": "active",
         "size": 9,
@@ -2330,7 +2817,27 @@
       {
         "section": "lineages",
         "key": "near-boundary",
-        "label": "near-boundary #6 blob",
+        "label": "near-boundary #2 blob insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100000111111100000010010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "near-boundary",
+        "label": "near-boundary #3 blob eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000000100111110010000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "near-boundary",
+        "label": "near-boundary #3 blob pop",
         "tier": "population",
         "activity": "active",
         "size": 9,
@@ -2340,7 +2847,27 @@
       {
         "section": "lineages",
         "key": "near-boundary",
-        "label": "near-boundary #7 blob",
+        "label": "near-boundary #3 blob insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100000111111100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "near-boundary",
+        "label": "near-boundary #4 blob eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000000100111110010000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "near-boundary",
+        "label": "near-boundary #4 blob pop",
         "tier": "population",
         "activity": "active",
         "size": 9,
@@ -2350,7 +2877,27 @@
       {
         "section": "lineages",
         "key": "near-boundary",
-        "label": "near-boundary #8 blob",
+        "label": "near-boundary #4 blob insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111110000111111100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "near-boundary",
+        "label": "near-boundary #5 blob eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000000100111110010000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "near-boundary",
+        "label": "near-boundary #5 blob pop",
         "tier": "population",
         "activity": "active",
         "size": 9,
@@ -2360,7 +2907,147 @@
       {
         "section": "lineages",
         "key": "near-boundary",
-        "label": "near-boundary #9 blob",
+        "label": "near-boundary #5 blob insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100000111111100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "near-boundary",
+        "label": "near-boundary #6 blob eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000000100111110010000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "near-boundary",
+        "label": "near-boundary #6 blob pop",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "near-boundary",
+        "label": "near-boundary #6 blob insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100000111111100000100010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "near-boundary",
+        "label": "near-boundary #7 blob eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000000100111110010000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "near-boundary",
+        "label": "near-boundary #7 blob pop",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "near-boundary",
+        "label": "near-boundary #7 blob insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100000111111100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "near-boundary",
+        "label": "near-boundary #8 blob eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000000100111110010000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "near-boundary",
+        "label": "near-boundary #8 blob pop",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "near-boundary",
+        "label": "near-boundary #8 blob insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100000111111100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "near-boundary",
+        "label": "near-boundary #9 blob eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000000100111110010000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "near-boundary",
+        "label": "near-boundary #9 blob pop",
+        "tier": "population",
+        "activity": "active",
+        "size": 9,
+        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "near-boundary",
+        "label": "near-boundary #9 blob insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100000111111100000000010000100000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "transition",
+        "label": "transition #0 blob eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000000100111110010000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "transition",
+        "label": "transition #0 blob pop",
         "tier": "population",
         "activity": "active",
         "size": 9,
@@ -2370,7 +3057,27 @@
       {
         "section": "lineages",
         "key": "transition",
-        "label": "transition #0 blob",
+        "label": "transition #0 blob insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100000111111100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "transition",
+        "label": "transition #1 blob eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000000100111110010000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "transition",
+        "label": "transition #1 blob pop",
         "tier": "population",
         "activity": "active",
         "size": 9,
@@ -2380,7 +3087,27 @@
       {
         "section": "lineages",
         "key": "transition",
-        "label": "transition #1 blob",
+        "label": "transition #1 blob insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100000111111100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "transition",
+        "label": "transition #2 blob eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000000100111110010000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "transition",
+        "label": "transition #2 blob pop",
         "tier": "population",
         "activity": "active",
         "size": 9,
@@ -2390,7 +3117,27 @@
       {
         "section": "lineages",
         "key": "transition",
-        "label": "transition #2 blob",
+        "label": "transition #2 blob insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100000111111100000010010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "transition",
+        "label": "transition #3 blob eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000000100111110010000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "transition",
+        "label": "transition #3 blob pop",
         "tier": "population",
         "activity": "active",
         "size": 9,
@@ -2400,7 +3147,27 @@
       {
         "section": "lineages",
         "key": "transition",
-        "label": "transition #3 blob",
+        "label": "transition #3 blob insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100000111111100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "transition",
+        "label": "transition #4 blob eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000000100111110010000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "transition",
+        "label": "transition #4 blob pop",
         "tier": "population",
         "activity": "active",
         "size": 9,
@@ -2410,7 +3177,27 @@
       {
         "section": "lineages",
         "key": "transition",
-        "label": "transition #4 blob",
+        "label": "transition #4 blob insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111110000111111100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "transition",
+        "label": "transition #5 blob eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000000100111110010000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "transition",
+        "label": "transition #5 blob pop",
         "tier": "population",
         "activity": "active",
         "size": 9,
@@ -2420,7 +3207,27 @@
       {
         "section": "lineages",
         "key": "transition",
-        "label": "transition #5 blob",
+        "label": "transition #5 blob insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100000111111100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "transition",
+        "label": "transition #6 blob eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000000100111110010000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "transition",
+        "label": "transition #6 blob pop",
         "tier": "population",
         "activity": "active",
         "size": 9,
@@ -2430,7 +3237,27 @@
       {
         "section": "lineages",
         "key": "transition",
-        "label": "transition #6 blob",
+        "label": "transition #6 blob insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100000111111100000100010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "transition",
+        "label": "transition #7 blob eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000000100111110010000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "transition",
+        "label": "transition #7 blob pop",
         "tier": "population",
         "activity": "active",
         "size": 9,
@@ -2440,7 +3267,27 @@
       {
         "section": "lineages",
         "key": "transition",
-        "label": "transition #7 blob",
+        "label": "transition #7 blob insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100000111111100000000010000000000000000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "transition",
+        "label": "transition #8 blob eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0000000100111110010000000",
+        "family": "blob"
+      },
+      {
+        "section": "lineages",
+        "key": "transition",
+        "label": "transition #8 blob pop",
         "tier": "population",
         "activity": "active",
         "size": 9,
@@ -2450,21 +3297,41 @@
       {
         "section": "lineages",
         "key": "transition",
-        "label": "transition #8 blob",
-        "tier": "population",
+        "label": "transition #8 blob insp",
+        "tier": "inspection",
         "activity": "active",
-        "size": 9,
-        "bits": "000000000000010000001111100011111110111111111011111110001111100000010000000000000",
+        "size": 13,
+        "bits": "0000000000000000000100000000011111110000011111111100011111111111001111111111101111111111111011111111111001111111111100011111111100000111111100000000010000000000000000000",
         "family": "blob"
       },
       {
         "section": "lineages",
         "key": "transition",
-        "label": "transition #9 segmented",
+        "label": "transition #9 segmented eco",
+        "tier": "ecosystem",
+        "activity": "active",
+        "size": 5,
+        "bits": "0101100000010100000001010",
+        "family": "segmented"
+      },
+      {
+        "section": "lineages",
+        "key": "transition",
+        "label": "transition #9 segmented pop",
         "tier": "population",
         "activity": "active",
         "size": 9,
         "bits": "000000000000000000010101011000000000010101010000000000010101010000000000000000000",
+        "family": "segmented"
+      },
+      {
+        "section": "lineages",
+        "key": "transition",
+        "label": "transition #9 segmented insp",
+        "tier": "inspection",
+        "activity": "active",
+        "size": 13,
+        "bits": "0000000000000000000000000000000000000000000000000000000101010110000000000000000001010101000000000000000000010101010000000000000000000000000000000000000000100000000000000",
         "family": "segmented"
       },
       {

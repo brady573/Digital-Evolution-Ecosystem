@@ -13,6 +13,29 @@ import {
 } from "./landscape";
 import { AftermathPanel } from "./AftermathPanel";
 import { drawPhenotypeOrganism, phenotypeCache, tierForZoom } from "./phenotype";
+import { familyArtwork } from "./familyArt";
+
+/** Details card for a selected organism, incl. its base family portrait. */
+function SelectedOrganismCard({ selected, onViewLineage, onClear }: {
+  selected: RenderOrganism;
+  onViewLineage: () => void; onClear: () => void;
+}) {
+  // Direct live-cache lookup (review fix): the normal snapshot-resolution
+  // pass already resolved this organism — never re-resolve the world here.
+  const fam = phenotypeCache.familyOf(selected.id);
+  return <>
+    <span className="eyebrow">Selected organism</span><h2>#{selected.id}</h2>
+    {fam && <figure className="family-portrait"><img src={familyArtwork(fam)} width={128} height={128} alt={`${fam} family portrait`} /><figcaption>{fam} family</figcaption></figure>}
+    <p>{selected.activity} · generation {selected.generation}</p><p className="breadcrumb">Organism #{selected.id} → Lineage {`L-${String(selected.lineageId).padStart(4, "0")}`} → Clade {`L-${String(selected.cladeId).padStart(4, "0")}`}</p><dl>
+      <div><dt>Clade</dt><dd>L-{String(selected.cladeId).padStart(4, "0")}</dd></div>
+      <div><dt>Energy</dt><dd>{selected.energy.toFixed(1)}</dd></div>
+      <div><dt>Movement</dt><dd>{selected.speed.toFixed(2)}</dd></div>
+      <div><dt>Sensing</dt><dd>{selected.sensing.toFixed(1)}</dd></div>
+      <div><dt>Byproduct use</dt><dd>{selected.byproductUse.toFixed(2)}</dd></div>
+      <div><dt>Dormancy response</dt><dd>{selected.dormancyResponse.toFixed(2)}</dd></div>
+    </dl><button onClick={onViewLineage}>View lineage in Tree</button><button onClick={onClear}>Clear selection</button>
+  </>;
+}
 
 type Surface="world"|"history"|"tree"|"experiments";
 type Lens="normal"|"nutrients"|"waste"|"clades"|"traits";
@@ -780,14 +803,7 @@ export function App(){
           {selected&&<button className="sheet-toggle" onClick={()=>setInspectorOpen(v=>!v)}>
             {inspectorOpen?"Hide details":`Details · #${selected.id}`}
           </button>}
-          {inspectorOpen&&<>{selected?<><span className="eyebrow">Selected organism</span><h2>#{selected.id}</h2><p>{selected.activity} · generation {selected.generation}</p><p className="breadcrumb">Organism #{selected.id} → Lineage {`L-${String(selected.lineageId).padStart(4,"0")}`} → Clade {`L-${String(selected.cladeId).padStart(4,"0")}`}</p><dl>
-            <div><dt>Clade</dt><dd>L-{String(selected.cladeId).padStart(4,"0")}</dd></div>
-            <div><dt>Energy</dt><dd>{selected.energy.toFixed(1)}</dd></div>
-            <div><dt>Movement</dt><dd>{selected.speed.toFixed(2)}</dd></div>
-            <div><dt>Sensing</dt><dd>{selected.sensing.toFixed(1)}</dd></div>
-            <div><dt>Byproduct use</dt><dd>{selected.byproductUse.toFixed(2)}</dd></div>
-            <div><dt>Dormancy response</dt><dd>{selected.dormancyResponse.toFixed(2)}</dd></div>
-          </dl><button onClick={()=>{setSelectedCladeId(selected.cladeId);setSurface("tree")}}>View lineage in Tree</button><button onClick={()=>setSelectedId(null)}>Clear selection</button></>:<>
+          {inspectorOpen&&<>{selected?<SelectedOrganismCard selected={selected} onViewLineage={()=>{setSelectedCladeId(selected.cladeId);setSurface("tree")}} onClear={()=>setSelectedId(null)}/>:<>
             <span className="eyebrow">World now</span><h2>{m.ecological_outcome}</h2><p className="gloss">{glossOutcome(m.ecological_outcome)}</p><p>{m.population} living · peak {m.peak_population}</p><dl>
               <div><dt>Active</dt><dd>{snapshot.activePopulation}</dd></div>
               <div><dt>Dormant</dt><dd>{snapshot.dormantPopulation}</dd></div>

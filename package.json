@@ -10,7 +10,7 @@
     "test:migration": "tsx tools/validation/parity.ts",
     "build": "pnpm --filter @digital-evolution/explorer build",
     "dev": "pnpm --filter @digital-evolution/explorer dev",
-    "verify": "pnpm typecheck && pnpm test:migration && pnpm test:decisions && pnpm test:catalysts && pnpm test:flows && pnpm test:dependency && pnpm test:time-controls && pnpm test:niche && pnpm test:landscape && pnpm test:aftermath && pnpm test:phenotype && pnpm test:ecology && pnpm build",
+    "verify": "pnpm typecheck && pnpm test:migration && pnpm test:decisions && pnpm test:catalysts && pnpm test:flows && pnpm test:dependency && pnpm test:time-controls && pnpm test:niche && pnpm test:landscape && pnpm test:aftermath && pnpm test:phenotype && pnpm test:art-review && pnpm test:ecology && pnpm build",
     "test:ecology": "tsx tools/validation/ecology.ts",
     "test:survey": "tsx tools/validation/ecology-survey.ts",
     "test:browser": "tsx tools/validation/browser-smoke.ts",
@@ -27,12 +27,18 @@
     "test:aftermath": "tsx tools/validation/aftermath.ts && tsx tools/validation/aftermath-runtime.ts",
     "test:visual": "tsx tools/validation/landscape-capture.ts",
     "test:mobile-ui": "tsx tools/validation/mobile-ui.ts",
-    "test:time-controls": "tsx tools/validation/time-controls.ts"
+    "test:time-controls": "tsx tools/validation/time-controls.ts",
+    "test:art-review": "tsx tools/validation/art-review.ts",
+    "test:plated": "tsx tools/plated-proof/validate.ts && tsx tools/plated-proof/geo-validate.ts",
+    "test:pixi-spike": "tsx tools/pixi-spike/validate.ts",
+    "spike:capture": "tsx tools/pixi-spike/capture.ts",
+    "spike:dev": "pnpm --filter @digital-evolution/explorer exec vite ../../tools/pixi-spike --port 5193 --strictPort --host 127.0.0.1"
   },
   "devDependencies": {
     "@types/node": "26.6.2",
+    "pixi.js": "^8.21.0",
+    "playwright": "1.63.0",
     "tsx": "4.23.15",
-    "typescript": "7.0.2",
-    "playwright": "1.63.0"
+    "typescript": "7.0.2"
   }
 }
