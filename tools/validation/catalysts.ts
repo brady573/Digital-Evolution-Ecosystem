@@ -82,12 +82,18 @@ function eligibleIds(context: CatalystContext, cooldownClear = true): string[] {
 // --- C1/C4: pure policy, versioned catalog, honest boundaries -----------------
 
 function testEligibilityBoundaries() {
-  // Owner ruling: Metabolite C washout is a legitimate product catalyst, so the
-  // catalog is four entries. The offer ORDER is the contract - it is what makes
-  // a generated window deterministic - so the addition is asserted explicitly
-  // rather than loosened to a containment check.
-  assert.deepEqual(catalystIds(), ["drought-a", "drought-b", "global-crash", "c-washout"],
-    "catalog in deterministic order, with the washout offer appended last");
+  // Owner ruling, restated precisely: the C washout is a valid CANDIDATE for the
+  // product but must NOT become a production catalyst in this PR. So the
+  // default catalog is exactly the original three, and the washout appears only
+  // behind an explicit opt-in. Both halves are asserted, because asserting only
+  // the opt-in would not catch a leak into production.
+  assert.deepEqual(catalystIds(), ["drought-a", "drought-b", "global-crash"],
+    "the PRODUCTION catalog is unchanged: three abiotic-nutrient catalysts");
+  assert.deepEqual(catalystIds({ includeTestCatalysts: true }),
+    ["drought-a", "drought-b", "global-crash", "c-washout"],
+    "the washout is appended only behind the explicit test opt-in, in deterministic order");
+  assert.equal(CATALYST_POLICY_VERSION, "m3-catalysts-1.0.0",
+    "the production catalog version is unchanged, because the production catalog is unchanged");
   assert.deepEqual(eligibleIds(healthyContext()), ["drought-a", "drought-b", "global-crash"], "healthy world offers all three");
 
   // Energy share boundary: exactly 15% is coherent, a hair below is not.
@@ -172,6 +178,7 @@ function testQuietAndCooldown() {
   assert.equal(window.source, "world_catalyst", "explicit catalyst provenance");
   assert.equal(window.policyVersion, CATALYST_POLICY_VERSION, "stamped with the catalyst catalog");
   assert.deepEqual(window.catalystIds, ["drought-a", "drought-b", "global-crash"], "eligible set in catalog order");
+  assert.ok(!window.catalystIds.includes("c-washout"), "a default window never offers the test-only washout");
   assert.deepEqual(
     window.choices.map((c) => c.choiceId),
     ["keep-watching", "drought-a", "drought-b", "global-crash"],

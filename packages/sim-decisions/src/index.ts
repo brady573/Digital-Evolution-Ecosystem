@@ -194,10 +194,10 @@ export const mappedPolicyKeys = (): readonly string[] => Object.keys(REGISTRY).s
  * ------------------------------------------------------------------ */
 
 /** Catalyst catalog version. Evolves independently of the event policy. */
-// Bumped for the c-washout offer. Versioning is what keeps a restored
-// pending window interpretable under the catalog it was offered from, instead of
-// silently reinterpreting it against a newer one.
-export const CATALYST_POLICY_VERSION = "m3-catalysts-1.1.0";
+// UNCHANGED from before the washout work. The washout is a test-only offer, so
+// the production catalog is byte-identical to the 1.0.0 catalog and a restored
+// pending window means exactly what it meant before.
+export const CATALYST_POLICY_VERSION = "m3-catalysts-1.0.0";
 
 /**
  * Game-policy constants (not biological rules). Centralized and versioned
@@ -252,10 +252,21 @@ const CATALYST_SPECS: readonly CatalystSpec[] = [
     intervention: { schemaVersion: 1, kind: "nutrient_disturbance", mode: "global_crash" },
     choiceId: "global-crash",
   },
+];
+
+/**
+ * Metabolite C washout: a DISTINCT PERTURBATION used to exercise catalyst,
+ * aftermath, comparison and evidence flows end to end.
+ *
+ * Owner ruling: it is a valid CANDIDATE for the product, but it must not become
+ * a production catalyst as part of this PR. So it is gated OFF by default and
+ * reachable only through an explicit opt-in, which keeps "candidate for the
+ * product" honest without quietly shipping the promotion. It uses the already
+ * supported c_washout intervention path, so enabling it adds an OFFER, never new
+ * biology and never a new engine effect.
+ */
+const TEST_CATALYST_SPECS: readonly CatalystSpec[] = [
   {
-    // Owner ruling: a legitimate product catalyst, not a test-only option. It
-    // uses the already-supported c_washout intervention path, so this adds an
-    // OFFER, not new biology and not a new engine effect.
     id: "c-washout",
     title: "Metabolite C washout",
     effect: "Clear environmental Metabolite C stock and suppress its regeneration.",
@@ -264,8 +275,18 @@ const CATALYST_SPECS: readonly CatalystSpec[] = [
   },
 ];
 
-/** Test/inspection helper: the v1 catalyst ids in offer order. */
-export const catalystIds = (): readonly CatalystId[] => CATALYST_SPECS.map((s) => s.id);
+/** Opt-in that exposes test-only catalyst offers. Off unless asked for. */
+export interface CatalystCatalogOptions {
+  /** Include dev/test-only offers such as the C washout. Never set in product. */
+  readonly includeTestCatalysts?: boolean;
+}
+
+const catalogFor = (options?: CatalystCatalogOptions): readonly CatalystSpec[] =>
+  options?.includeTestCatalysts ? [...CATALYST_SPECS, ...TEST_CATALYST_SPECS] : CATALYST_SPECS;
+
+/** Test/inspection helper: the catalyst ids in offer order. */
+export const catalystIds = (options?: CatalystCatalogOptions): readonly CatalystId[] =>
+  catalogFor(options).map((s) => s.id);
 
 type CatalystRequirement = (context: CatalystContext) => string | null;
 
@@ -320,8 +341,9 @@ const CATALYST_REQUIREMENTS: Readonly<Record<CatalystId, readonly CatalystRequir
 export function diagnoseCatalysts(
   context: CatalystContext,
   majorCooldownClear: boolean,
+  options?: CatalystCatalogOptions,
 ): readonly CatalystDiagnosis[] {
-  return CATALYST_SPECS.map((spec) => {
+  return catalogFor(options).map((spec) => {
     const reasons: string[] = [];
     for (const requirement of CATALYST_REQUIREMENTS[spec.id]) {
       const failure = requirement(context);
@@ -338,6 +360,8 @@ export interface CatalystWindowInput {
   readonly lastMajorCatalystTick: number | null;
   readonly context: CatalystContext;
   readonly policyVersion?: string;
+  /** Include dev/test-only offers. Off unless a test explicitly asks. */
+  readonly includeTestCatalysts?: boolean;
 }
 
 /**
@@ -350,7 +374,7 @@ export function selectCatalystWindow(input: CatalystWindowInput): CatalystOpport
   const policyVersion = input.policyVersion ?? CATALYST_POLICY_VERSION;
   if (input.tick - input.lastDecisionTick < CATALYST_QUIET_TICKS) return null;
   const cooldownClear = isMajorCooldownClear(input.tick, input.lastMajorCatalystTick);
-  const diagnoses = diagnoseCatalysts(input.context, cooldownClear);
+  const diagnoses = diagnoseCatalysts(input.context, cooldownClear, input);
   const eligible = diagnoses.filter((d) => d.eligible).map((d) => d.catalystId);
   if (eligible.length === 0) return null;
   const choices: DecisionChoice[] = [

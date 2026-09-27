@@ -198,6 +198,15 @@ export class UniverseSession {
   #lastMajorCatalystTick:number|null=null;
   /** Number of analysis records already evaluated for decisions. */
   #observedThrough=0;
+  /** Dev/test-only catalyst offers (e.g. the C washout) are OFF unless a test
+   *  explicitly enables them. Product never sets this, so the production
+   *  catalyst catalog is exactly the three abiotic-nutrient options. */
+  #testCatalysts=false;
+  /** Enables dev/test-only catalyst offers. Returns the snapshot so a caller
+   *  can chain. Intended for validation and browser harnesses only. */
+  enableTestCatalysts(){this.#testCatalysts=true;return this.snapshot()}
+  get testCatalysts(){return this.#testCatalysts}
+
   /** M3 aftermath under observation, entered at decision resolution.
    *  Evidence/presentation state, not biology. NOT checkpointed: like
    *  phenotype anchors it is saved alongside the checkpoint, never inside it,
@@ -317,6 +326,7 @@ export class UniverseSession {
     if(this.#pendingDecision)return false;
     const context=this.#catalystContext();
     const opportunity=selectCatalystWindow({
+      includeTestCatalysts:this.#testCatalysts,
       tick:context.tick,
       lastDecisionTick:this.#lastDecisionTick,
       lastMajorCatalystTick:this.#lastMajorCatalystTick,

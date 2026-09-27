@@ -373,11 +373,11 @@ function testMultiSeedPossibility() {
 }
 
 function testWashoutReliance() {
-  // Owner ruling supersedes the earlier "validation-internal, never offered"
-  // policy: the washout IS a product catalyst. What still holds, and is what this
-  // now guards, is that it is a CATALYST offer only - it must not leak into the
-  // event-decision choice catalog, and it must still apply through the ordinary
-  // recorded deterministic path rather than a special one.
+  // The washout is a dev/test-only offer. It is a valid CANDIDATE for the
+  // product, but promoting it is explicitly not part of this PR, so the property
+  // guarded here is ISOLATION: absent from the default catalog, reachable only
+  // through the opt-in, and still applying through the ordinary recorded
+  // deterministic path rather than a special one.
   assert.equal(
     engineCatalystModeFor({ schemaVersion: 1, kind: "nutrient_disturbance", mode: "c_washout" }),
     "cWashout",
@@ -387,13 +387,13 @@ function testWashoutReliance() {
     isSupportedIntervention({ schemaVersion: 1, kind: "nutrient_disturbance", mode: "c_washout" }),
     "washout applies through the recorded path",
   );
-  assert.ok(catalystIds().includes("c-washout"), "the washout is an offered product catalyst");
-  // The isolation that still matters is catalog-level: the washout is a CATALYST
-  // offer and must not also leak into the event-decision choice catalog, where it
-  // would be reachable from a different and wrong surface.
-  assert.equal(catalystIds().filter((id) => String(id) === "c-washout").length, 1,
-    "the washout appears exactly once, with no duplicate offer");
-  assert.equal(catalystIds().length, 4, "the catalog grew by exactly the one sanctioned offer");
+  assert.ok(!catalystIds().some((id) => String(id) === "c-washout"),
+    "the washout is absent from the production catalog");
+  assert.equal(catalystIds().length, 3, "the production catalog is unchanged in size");
+  assert.ok(catalystIds({ includeTestCatalysts: true }).includes("c-washout"),
+    "the washout is reachable through the explicit test opt-in");
+  assert.equal(catalystIds({ includeTestCatalysts: true }).filter((id) => String(id) === "c-washout").length, 1,
+    "and appears exactly once, with no duplicate offer");
   // Stage 2 Level-3: matched C-availability perturbation. An established
   // guild (20% scavengers) faces a recorded environmental C sink on the live
   // branch while the exact control twin runs untouched. The guild collapses
