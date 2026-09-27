@@ -177,13 +177,22 @@ function testWrappedSubstrateTiles() {
   // the rect zero-width for every camera except the exact world centre, so the
   // landscape vanished as soon as the world was panned. Sweep cameras and
   // zooms and require full, gapless coverage every time.
+  //
+  // The swept case count is reported from the code rather than quoted by hand,
+  // so the evidence cannot drift from what actually runs.
   const EXTENT = 600;
+  const CAM_STEP = 25;
+  const CAM_POSITIONS = Math.ceil(EXTENT / CAM_STEP);
+  const VIEWS = [{ w: 390, h: 844 }, { w: 320, h: 844 }, { w: 1280, h: 900 }];
+  const ZOOMS = [1, 1.5, 2, 3];
   let worstCount = 0;
-  for (const view of [{ w: 390, h: 844 }, { w: 320, h: 844 }, { w: 1280, h: 900 }]) {
-    for (const zoom of [1, 1.5, 2, 3]) {
+  let cases = 0;
+  for (const view of VIEWS) {
+    for (const zoom of ZOOMS) {
       const fit = view.h > view.w ? view.h / EXTENT : Math.min(view.w, view.h) / EXTENT;
       const s = fit * zoom;
-      for (let cam = 0; cam < EXTENT; cam += 25) {
+      for (let cam = 0; cam < EXTENT; cam += CAM_STEP) {
+        cases++;
         const t = landscapeTileLayout(cam, cam, s, view.w, view.h, EXTENT);
         // Tiles are contiguous, so the union spans
         // [baseX + iStart*periodX, baseX + (iEnd+1)*periodX].
@@ -204,6 +213,12 @@ function testWrappedSubstrateTiles() {
       }
     }
   }
+  // The sweep must actually be the full cross product, so the quoted coverage
+  // in the evidence cannot silently overstate what ran.
+  const expectedCases = VIEWS.length * ZOOMS.length * CAM_POSITIONS;
+  assert.equal(cases, expectedCases,
+    `swept the full camera/zoom/viewport cross product (${cases} cases)`);
+
   // Performance: repeating the period must stay a handful of draws and must
   // not grow with zoom. This is the whole budget at the supported maximum.
   assert.ok(worstCount <= 36,
@@ -219,7 +234,7 @@ function testWrappedSubstrateTiles() {
   }
   assert.notEqual(wrapDelta(0, 300), wrapDelta(EXTENT, 300),
     "only the exact world centre produced a non-zero rect");
-  console.log("landscape wrapped substrate tiles: PASS");
+  console.log(`landscape wrapped substrate tiles: PASS (${VIEWS.length} viewports x ${ZOOMS.length} zooms x ${CAM_POSITIONS} camera positions = ${cases} cases, worst ${worstCount} draws)`);
 }
 
 async function main(){
