@@ -8,7 +8,7 @@ import { Share } from "@capacitor/share";
 import { IndexedDbWorldRepository } from "./persistence";
 import { formatTickAge, formatYear, glossOutcome } from "./language";
 import {
-  LandscapeSmoother, fillWaste, fracArray, landscapeCell,
+  LandscapeSmoother, fillWaste, fracArray, landscapeCell, landscapeTileLayout,
   microTexture, nutrientOverlayCell, wasteOverlayCell,
 } from "./landscape";
 import { drawPhenotypeOrganism, phenotypeCache, tierForZoom } from "./phenotype";
@@ -228,10 +228,18 @@ function WorldCanvas({
             img.data[o]=rgb[0];img.data[o+1]=rgb[1];img.data[o+2]=rgb[2];img.data[o+3]=255;
           }
           bctx.putImageData(img,0,0);
-          const x0=toX(0),y0=toY(0),x1=toX(WORLD_EXTENT),y1=toY(WORLD_EXTENT);
+          // Repeat one world period across the whole canvas. Deriving this
+          // from the wrapped toX/toY mapping collapsed the rect to zero width
+          // for every camera except the exact world centre, so the substrate
+          // disappeared as soon as the world was panned.
+          const tiles=landscapeTileLayout(cam.x,cam.y,s,w,h,WORLD_EXTENT);
           const prevSmooth=ctx.imageSmoothingEnabled;
           ctx.imageSmoothingEnabled=true;
-          ctx.drawImage(buffer,x0,y0,x1-x0,y1-y0);
+          for(let ti=tiles.iStart;ti<=tiles.iEnd;ti++){
+            for(let tj=tiles.jStart;tj<=tiles.jEnd;tj++){
+              ctx.drawImage(buffer,tiles.baseX+ti*tiles.periodX,tiles.baseY+tj*tiles.periodY,tiles.periodX,tiles.periodY);
+            }
+          }
           ctx.imageSmoothingEnabled=prevSmooth;
         }
         // Detail on loaded ground: a deterministic stipple whose density rises

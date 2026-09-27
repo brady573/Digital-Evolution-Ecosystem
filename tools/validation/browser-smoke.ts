@@ -398,7 +398,47 @@ async function main(){
     await mobile.getByRole("button",{name:"History"}).click();
     await mobile.getByRole("heading",{name:"History"}).waitFor();
 
-    await runLandscapeChecks(context);
+    // Toroidal pan regression: the substrate is one world period repeated across
+  // the canvas. Panning must not blank it. Previously the drawn rect was
+  // derived from the wrapped world->screen mapping, which collapsed to zero
+  // width for every camera except the exact world centre, so the landscape
+  // rendered only when un-panned and disappeared on a device after a pan.
+  const panPage=await context.newPage();
+  await panPage.goto(baseUrl,{waitUntil:"networkidle"});
+  await panPage.getByLabel("Evolution world").waitFor();
+  const panWorld=panPage.getByLabel("Evolution world");
+  const fieldInk=async()=>await panWorld.evaluate((el:HTMLCanvasElement)=>{
+    const ctx=el.getContext("2d");if(!ctx)return 0;
+    const d=ctx.getImageData(0,0,el.width,el.height).data;
+    // Count substrate pixels: the field is the bulk of the frame, and
+    // organisms are a small minority, so a blank canvas reads near zero.
+    let field=0;
+    for(let i=0;i<d.length;i+=4){
+      const lum=0.2126*d[i]!+0.7152*d[i+1]!+0.0722*d[i+2]!;
+      if(lum>10&&lum<150)field++;
+    }
+    return field/(d.length/4);
+  });
+  const inkAtRest=await fieldInk();
+  assert.ok(inkAtRest>0.5,`substrate renders at rest (${(inkAtRest*100).toFixed(0)}% field)`);
+  const panBox=await panWorld.boundingBox();
+  assert.ok(panBox,"pan canvas measurable");
+  for(const [dx,dy] of [[.42,.5],[.5,.42],[.25,.3],[.6,.62]]){
+    await panPage.mouse.move(panBox!.x+panBox!.width/2,panBox!.y+panBox!.height/2);
+    await panPage.mouse.down();
+    await panPage.mouse.move(panBox!.x+panBox!.width*dx,panBox!.y+panBox!.height*dy,{steps:6});
+    await panPage.mouse.up();
+    await panPage.waitForTimeout(250);
+    const after=await fieldInk();
+    assert.ok(after>0.5,`substrate still renders after panning to (${dx},${dy}) (${(after*100).toFixed(0)}% field)`);
+  }
+  // And the camera really did move, so this is a pan and not a no-op.
+  const camX=Number(await panPage.getByTestId("world-minimap").getAttribute("data-cam-x"));
+  assert.ok(Number.isFinite(camX)&&camX>=0&&camX<600,`camera panned within the torus (cam.x ${camX.toFixed(0)})`);
+  await panPage.close();
+  console.log("toroidal pan keeps the substrate visible: PASS");
+
+  await runLandscapeChecks(context);
     console.log("browser smoke: PASS");
   }finally{
     await browser.close();
