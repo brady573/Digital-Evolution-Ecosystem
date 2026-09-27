@@ -62,6 +62,94 @@ async function main(){
     await page.getByRole("button",{name:"Traits"}).click();
     await page.getByLabel("Trait view").selectOption("byproductUse");
 
+    // Lane 2 M4B: the normal lens delegates morphology to the phenotype
+    // engine while every other lens keeps the legacy voxel path. Both must
+    // paint in-browser, render differently, and survive inspection zoom.
+    const worldInk=()=>page.evaluate(`(()=>{
+      const c=document.querySelector('canvas[aria-label="Evolution world"]');
+      const ctx=c.getContext('2d',{willReadFrequently:true});
+      const d=ctx.getImageData(0,0,c.width,c.height).data;
+      let bright=0;const sig=[];
+      const nx=32,ny=18;
+      for(let gy=0;gy<ny;gy++)for(let gx=0;gx<nx;gx++){
+        let sum=0,n=0;
+        const x0=Math.floor(gx*c.width/nx),x1=Math.floor((gx+1)*c.width/nx);
+        const y0=Math.floor(gy*c.height/ny),y1=Math.floor((gy+1)*c.height/ny);
+        for(let y=y0;y<y1;y+=3)for(let x=x0;x<x1;x+=3){
+          const i=(y*c.width+x)*4,l=(d[i]+d[i+1]+d[i+2])/3;
+          sum+=l;n++;if(l>90)bright++;
+        }
+        sig.push(Math.round(sum/Math.max(1,n)));
+      }
+      return{bright,sig};
+    })()`);
+    await page.getByRole("button",{name:"Landscape",exact:true}).click();
+    await page.waitForTimeout(300);
+    const normalInk=await worldInk();
+    console.log(`phenotype normal-lens ink: ${normalInk.bright} bright px`);
+    assert.ok(normalInk.bright>50,`phenotype path paints organisms in normal lens (${normalInk.bright} bright px)`);
+    await page.getByRole("button",{name:"Traits"}).click();
+    await page.waitForTimeout(300);
+    const traitsInk=await worldInk();
+    console.log(`legacy traits-lens ink: ${traitsInk.bright} bright px`);
+    assert.ok(traitsInk.bright>50,`legacy voxel path paints organisms in traits lens (${traitsInk.bright} bright px)`);
+    let changedCells=0;
+    for(let i=0;i<normalInk.sig.length;i++)if(Math.abs(normalInk.sig[i]-traitsInk.sig[i])>12)changedCells++;
+    assert.ok(changedCells>20,`normal and traits lenses render differently (${changedCells}/576 cells)`);
+    await page.getByRole("button",{name:"Landscape",exact:true}).click();
+    for(let i=0;i<4;i++)await page.getByRole("button",{name:"Zoom in"}).click();
+    assert.equal(await page.getByTestId("zoom-level").innerText(),"3.0×","reached inspection zoom");
+    await page.waitForTimeout(300);
+    const inspInk=await worldInk();
+    console.log(`inspection-lens ink at 3.0x: ${inspInk.bright} bright px`);
+    assert.ok(inspInk.bright>50,"inspection LOD paints at 3.0x");
+    await page.getByRole("button",{name:"Reset view"}).click();
+    assert.equal(await page.getByTestId("zoom-level").innerText(),"1.0×","reset restores the view");
+
+    // Issue #37: speed modes are genuinely distinct throughput policies.
+    // World is paused; each mode runs a fixed window and the tick deltas must
+    // order 1x < 10x < 100x <= Max with wide margins (headless timing is noisy).
+    // Decision-gate aware: a legitimate pending decision auto-pauses mid-window.
+    // Never bypass the gate — resolve through the normal Keep-watching UI and
+    // restart that window fresh (up to 3 attempts per speed).
+    const speedSelect=page.getByLabel("Simulation speed");
+    const deltas:Record<string,number>={};
+    for(const v of ["1","10","100","500"]){
+      await speedSelect.selectOption(v);
+      let done=false;
+      for(let attempt=0;attempt<3&&!done;attempt++){
+        const before=await tick(page);
+        await page.getByRole("button",{name:"Play"}).click();
+        let elapsed=0;
+        let gated=false;
+        while(elapsed<2500){
+          await page.waitForTimeout(250);
+          elapsed+=250;
+          if(await page.getByTestId("decision-sheet").isVisible().catch(()=>false)){
+            gated=true;
+            break;
+          }
+        }
+        if(gated){
+          await page.getByTestId("decision-sheet").getByText("Keep watching").click();
+          await page.getByTestId("decision-sheet").waitFor({state:"detached",timeout:15_000});
+          continue;
+        }
+        await page.getByRole("button",{name:"Pause"}).click();
+        deltas[v]=await tick(page)-before;
+        console.log(`speed ${v}x: +${deltas[v]} ticks/2.5s`);
+        done=true;
+      }
+      assert.ok(done,`speed ${v}x completed a gate-free window`);
+    }
+    assert.ok(deltas["10"]!>(deltas["1"]!*3),`10x materially faster than 1x (${deltas["10"]} vs ${deltas["1"]})`);
+    // 100x vs 10x uses a 1.5x margin, not 3x: per-tick engine cost dominates
+    // at high slice sizes, so both saturate toward the same worker ceiling
+    // (that plateau IS the throughput limit Max is defined by).
+    assert.ok(deltas["100"]!>(deltas["10"]!*1.5),`100x materially faster than 10x (${deltas["100"]} vs ${deltas["10"]})`);
+    assert.ok(deltas["500"]!>(deltas["100"]!*0.7),`Max at least matches 100x (${deltas["500"]} vs ${deltas["100"]})`);
+    await speedSelect.selectOption("100");
+
     await page.getByRole("button",{name:"Save"}).click();
     await page.getByText(/Saved tick/).waitFor();
     const saved=await tick(page);
@@ -227,7 +315,10 @@ async function main(){
       await decisionPage.waitForTimeout(1000);
     }
     await sheet.waitFor({timeout:180_000});
-    await decisionPage.getByText("A decision is waiting").waitFor();
+    // Scoped to the sheet: the status line elsewhere carries the same prefix
+    // ("A decision is waiting — choose how to respond.") and makes the
+    // unscoped text locator resolve to two elements (issue #36).
+    await sheet.getByText("A decision is waiting").waitFor();
     const decisionTick=await tick(decisionPage);
     const choices=await sheet.locator(".decision-choices button").count();
     assert.equal(choices,4,"decision offers keep watching plus three interventions (A4)");

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { EngineConfig, RenderOrganism, RenderSnapshot } from "@digital-evolution/contracts";
 import { ENGINE_VERSION } from "@digital-evolution/sim-core";
-import { WorkerRuntimeClient } from "@digital-evolution/sim-runtime";
+import { WorkerRuntimeClient, normalizeSpeedMode, sliceFor } from "@digital-evolution/sim-runtime";
 import { Capacitor } from "@capacitor/core";
 import { Directory, Encoding, Filesystem } from "@capacitor/filesystem";
 import { Share } from "@capacitor/share";
@@ -11,6 +11,7 @@ import {
   LandscapeSmoother, fillWaste, fracArray, landscapeCell,
   microTexture, nutrientOverlayCell, wasteOverlayCell,
 } from "./landscape";
+import { drawPhenotypeOrganism, phenotypeCache, tierForZoom } from "./phenotype";
 
 type Surface="world"|"history"|"tree"|"experiments";
 type Lens="normal"|"nutrients"|"waste"|"clades"|"traits";
@@ -258,6 +259,14 @@ function WorldCanvas({
     }
 
     const traitRange=TRAIT_RANGES[traitView];
+    // Lane 2 M4B: normal-lens morphology delegates to the phenotype engine.
+    // Every other lens keeps the legacy voxel path exactly, so analytical
+    // meaning always outranks decorative morphology. Phenotype resolutions
+    // are memoized per organism across snapshots (traits/ancestry are fixed
+    // at birth); only the visible tier renders each frame.
+    const phenoTier=tierForZoom(zoom);
+    const pheno=lens==="normal"?phenotypeCache.resolveSnapshot(snapshot):null;
+    const unit=Math.max(2,s*2.2);
     for(const o of snapshot.organisms){
       const px=toX(o.x),py=toY(o.y);
       if(px<-24||py<-24||px>w+24||py>h+24)continue;
@@ -269,11 +278,20 @@ function WorldCanvas({
       else if(o.diet<-.25)color="#7bd3c4";
       else if(o.diet>.25)color="#b79de4";
 
+      if(lens==="normal"&&pheno){
+        // Phenotype morphology: grid shape encodes family/traits/dormancy,
+        // lens color and dormancy dimming stay exactly as before.
+        const res=pheno.get(o.id);
+        const dormant=o.activity==="dormant";
+        ctx.fillStyle=color;
+        ctx.globalAlpha=dormant?0.55:1;
+        if(res)drawPhenotypeOrganism(ctx,o,res,phenotypeCache,phenoTier,px,py,unit);
+        ctx.globalAlpha=1;
+      }else{
       // Voxel sprite: chunky pixel cluster whose size follows stored energy,
       // texture is a deterministic function of organism id (stable per frame),
       // and density follows diet family. Positions are untouched, so
       // click-selection mapping is unchanged.
-      const unit=Math.max(2,s*2.2);
       const energyClass=o.activity==="dormant"?0:(o.energy>120?2:o.energy>60?1:0);
       const span=2+energyClass;
       let hsh=Math.imul(o.id,2654435761)^0x9e3779b9;hsh^=hsh>>>15;hsh=Math.imul(hsh,0x85ebca6b)>>>0;
@@ -293,6 +311,7 @@ function WorldCanvas({
         if(dormant)ctx.strokeRect(bx,by,unit,unit);else ctx.fillRect(bx,by,unit,unit);
       }
       ctx.globalAlpha=1;
+      }
 
       if(o.id===selectedId){
         // Luminous focus marker: soft halo + double ring + diagonal ticks.
@@ -472,16 +491,22 @@ export function App(){
 
   useEffect(()=>{
     if(!running)return;
-    // Frame-paced loop (prototype-authentic feel): advance a speed-scaled
-    // slice of ticks every animation frame and render each snapshot, so
-    // ticks visibly count up and organisms glide instead of teleporting.
-    // Backpressure keeps slow workers responsive: a new slice is only sent
-    // once the previous snapshot has arrived.
-    let raf=0;
-    const frame=()=>{
+    // Time-control scheduler (issue #37): each speed mode is a genuinely
+    // distinct ticks/second target, decoupled from render cadence by a
+    // wall-clock accumulator. Biology stays deterministic because the engine
+    // steps per-tick with per-tick event breaks regardless of chunking;
+    // backpressure keeps one slice in flight so slow workers stay responsive
+    // and Max is worker-throughput-limited rather than a nominal multiplier.
+    let raf=0,carry=0,last=performance.now();
+    const frame=(now:number)=>{
+      const elapsed=now-last;last=now;
       if(!advanceDebt.current){
-        advanceDebt.current=true;
-        runtime.advance(Math.max(1,Math.round(speed/60)));
+        const slice=sliceFor(normalizeSpeedMode(speed),elapsed,carry);
+        carry=slice.carry;
+        if(slice.ticks>0){
+          advanceDebt.current=true;
+          runtime.advance(slice.ticks);
+        }
       }
       raf=requestAnimationFrame(frame);
     };
@@ -515,6 +540,7 @@ export function App(){
   const blockWhilePending=()=>{if(!snapshot?.pendingDecision)return false;setStatus("A decision is waiting — choose how to respond.");return true};
   const newUniverse=()=>{
     setRunning(false);setSelectedId(null);
+    phenotypeCache.clearStaged();
     runtime.create(configFromSettings(settings));
     setActiveSettings(settings);setPreset(presetForSettings(settings));
     setSettingsOpen(false);setStatus("New universe created — settings now active");
@@ -522,7 +548,9 @@ export function App(){
   const save=async()=>{
     setStatus("Saving exact checkpoint…");
     const checkpoint=await runtime.requestCheckpoint();
-    const summary=await repository.save("current",checkpoint);
+    // Presentation-side family anchors travel with the save record (never in
+    // biology) so a restored world reconstructs identical families.
+    const summary=await repository.save("current",checkpoint,phenotypeCache.snapshotAnchors());
     setStatus(`Saved tick ${summary.tick.toLocaleString()}`);
   };
   const load=async()=>{
@@ -531,6 +559,9 @@ export function App(){
     setRunning(false);
     setStatus("Restoring checkpoint…");
     try{
+      // Stage anchors BEFORE restore: consumed once, on the restored world's
+      // fresh identity. Null (old saves) means a clean presentation break.
+      phenotypeCache.stageAnchors(await repository.loadAnchors("current")??{});
       const restored=await runtime.loadCheckpoint(checkpoint);
       // A3: the resumed universe becomes the active recipe; pending resets to
       // match it so staged settings can never be mistaken for the live world.
