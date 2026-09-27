@@ -50,6 +50,21 @@ function traitsForAxes(mob: number, sen: number, met: number, spec: number) {
   console.log("determinism: PASS (3 tiers x active/dormant, bit-identical)");
 }
 
+// 1b. Collision guard: a hash hit carrying different bits must throw
+// rather than render one phenotype as another (forged by corrupting a
+// stored entry — a real FNV-1a collision is not cheaply forgeable).
+{
+  const t = traitsForAxes(0.6, 0.7, 0.5, 0.5);
+  const res = resolvePhenotype(t, { organismId: 1, lineageId: 1 });
+  const cache = new TextureCache();
+  cache.acquire(res, "population", "active");
+  const inner = cache as unknown as { entries: Map<string, { bits: string }> };
+  const key = renderKeyExact(res, "population", "active");
+  inner.entries.get(key)!.bits = "corrupted";
+  assert.throws(() => cache.acquire(res, "population", "active"), /render-key collision/);
+  console.log("collision guard: PASS (mismatched bitmap on hash hit throws)");
+}
+
 // 2. Relaxed-key drift bound: group design-1000 organisms by relaxed key,
 //    max exact-grid difference within a group must be 0 at eco/pop, <=2 at insp.
 {

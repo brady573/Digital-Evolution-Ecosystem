@@ -168,9 +168,19 @@ async function main(): Promise<void> {
     };
     writeFileSync(join(OUT, "manifest.json"), JSON.stringify(manifest, null, 2));
     console.log(`pixi spike evidence -> ${OUT} (${scenes.length} scenes)`);
-    const webgl = scenes.some((s) => s.backend.includes("WebGL"));
+    // Review fix: the accepted backend is WebGL2 — EVERY intended Pixi
+    // scene must prove it, not just any scene. A WebGL1/class fallback
+    // or a mid-run context loss now fails loudly instead of hiding in
+    // the average.
+    const pixiScenes = scenes.filter((s) => s.mode === "pixi");
+    assert.ok(pixiScenes.length > 0, "no pixi scenes captured");
     assert.ok(errors.length === 0, `page errors: ${errors.join("; ")}`);
-    assert.ok(webgl, "no scene ran on a WebGL backend — GPU evidence not established");
+    for (const s of pixiScenes) {
+      assert.ok(
+        s.backend.includes("webgl2:yes"),
+        `scene f${s.fixture}/${s.tier} backend is ${s.backend}, not WebGL2`,
+      );
+    }
   } catch (e) {
     failed = e instanceof Error ? e.message : String(e);
     try {

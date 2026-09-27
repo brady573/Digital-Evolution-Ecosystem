@@ -15,11 +15,13 @@ import { drawPhenotypeOrganism, phenotypeCache, tierForZoom } from "./phenotype"
 import { familyArtwork } from "./familyArt";
 
 /** Details card for a selected organism, incl. its base family portrait. */
-function SelectedOrganismCard({ snapshot, selected, onViewLineage, onClear }: {
-  snapshot: RenderSnapshot; selected: RenderOrganism;
+function SelectedOrganismCard({ selected, onViewLineage, onClear }: {
+  selected: RenderOrganism;
   onViewLineage: () => void; onClear: () => void;
 }) {
-  const fam = phenotypeCache.resolveSnapshot(snapshot).get(selected.id)?.family ?? null;
+  // Direct live-cache lookup (review fix): the normal snapshot-resolution
+  // pass already resolved this organism — never re-resolve the world here.
+  const fam = phenotypeCache.familyOf(selected.id);
   return <>
     <span className="eyebrow">Selected organism</span><h2>#{selected.id}</h2>
     {fam && <figure className="family-portrait"><img src={familyArtwork(fam)} width={128} height={128} alt={`${fam} family portrait`} /><figcaption>{fam} family</figcaption></figure>}
@@ -725,7 +727,7 @@ export function App(){
           {selected&&<button className="sheet-toggle" onClick={()=>setInspectorOpen(v=>!v)}>
             {inspectorOpen?"Hide details":`Details · #${selected.id}`}
           </button>}
-          {inspectorOpen&&<>{selected?<SelectedOrganismCard snapshot={snapshot} selected={selected} onViewLineage={()=>{setSelectedCladeId(selected.cladeId);setSurface("tree")}} onClear={()=>setSelectedId(null)}/>:<>
+          {inspectorOpen&&<>{selected?<SelectedOrganismCard selected={selected} onViewLineage={()=>{setSelectedCladeId(selected.cladeId);setSurface("tree")}} onClear={()=>setSelectedId(null)}/>:<>
             <span className="eyebrow">World now</span><h2>{m.ecological_outcome}</h2><p className="gloss">{glossOutcome(m.ecological_outcome)}</p><p>{m.population} living · peak {m.peak_population}</p><dl>
               <div><dt>Active</dt><dd>{snapshot.activePopulation}</dd></div>
               <div><dt>Dormant</dt><dd>{snapshot.dormantPopulation}</dd></div>

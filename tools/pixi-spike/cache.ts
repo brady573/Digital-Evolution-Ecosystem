@@ -122,6 +122,14 @@ export class TextureCache {
     const key = renderKeyExact(res, tier, activity);
     const hit = this.entries.get(key);
     if (hit) {
+      // Collision guard (review fix): a 32-bit FNV-1a hit must carry the
+      // identical bitmap. A mismatch means two phenotypes share one key
+      // and rendering either would show the other's morphology — fail
+      // loudly, never silently swap organisms.
+      const bits = gridBits(renderPhenotypeGrid(res, tier, activity));
+      if (bits !== hit.bits) {
+        throw new Error(`render-key collision for ${key}: same hash, different bitmaps`);
+      }
       this.hits++;
       hit.users++;
       return hit;

@@ -158,6 +158,17 @@ export async function bootSpike(host: HTMLElement, fixtureIdx: number, initialTi
     return t;
   }
 
+  /** Drop zero-user cache entries and destroy their GPU textures. */
+  function pruneOrphans(): void {
+    cache.prune();
+    for (const [key, tex] of textures) {
+      if (!cache.entriesList().some((e) => e.key === key)) {
+        tex.destroy();
+        textures.delete(key);
+      }
+    }
+  }
+
   /** Re-map sprites to current (res, tier, activity). Creates sprites NEVER. */
   function remap(): void {
     const s = CELL_PX[tier]!;
@@ -174,13 +185,10 @@ export async function bootSpike(host: HTMLElement, fixtureIdx: number, initialTi
       sprites[i]!.scale.set(s);
       sprites[i]!.alpha = o.activity === 'dormant' ? 0.85 : 1;
     });
-    // Destroy GPU textures whose cache entries were pruned.
-    for (const [key, tex] of textures) {
-      if (!cache.entriesList().some((e) => e.key === key)) {
-        tex.destroy();
-        textures.delete(key);
-      }
-    }
+    // Retire the previous tier's textures now (review fix): LOD
+    // switches must not leave zero-user GPU textures resident until
+    // some later evolution event happens to prune them.
+    pruneOrphans();
     if (selected >= 0 && fixture.organisms[selected]) {
       const o = fixture.organisms[selected]!;
       overlay.clear();
@@ -274,15 +282,7 @@ export async function bootSpike(host: HTMLElement, fixtureIdx: number, initialTi
     evolve(turnover = 0.05): { replaced: number; live: number; cumulative: number; pruned: number } {
       generation++;
       const { replaced } = evolveFixture(fixture, churn, turnover);
-      remap();
-      cache.prune();
-      // Destroy GPU textures for pruned entries.
-      for (const [key, tex] of textures) {
-        if (!cache.entriesList().some((e) => e.key === key)) {
-          tex.destroy();
-          textures.delete(key);
-        }
-      }
+      remap(); // prunes zero-user entries (old phenotypes included) + destroys their GPU textures
       drawComparison();
       return { replaced, live: cache.live(), cumulative: cache.cumulative, pruned: cache.pruned };
     },

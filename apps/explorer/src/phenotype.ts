@@ -175,6 +175,16 @@ export class PhenotypeCache {
     return out;
   }
 
+  /**
+   * Direct family lookup for an already-resolved organism (review fix):
+   * reads the live cache populated by the normal snapshot-resolution
+   * pass — no copy, no sort, no re-resolution. Returns null when the
+   * organism has no live entry (e.g. world changed since the last pass).
+   */
+  familyOf(id: number): PhenotypeFamily | null {
+    return this.byId.get(id)?.res.family ?? null;
+  }
+
   /** Cached grid for one organism at a tier/activity (renders once). */
   grid(o: RenderOrganism, res: ResolvedPhenotype, tier: LodTier): PhenotypeGrid {
     const entry = this.byId.get(o.id);
