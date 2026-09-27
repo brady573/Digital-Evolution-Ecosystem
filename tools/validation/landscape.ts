@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import {
-  LandscapeSmoother, cellFractions, landscapeCell, landscapeTileLayout, microTexture,
+  ASH_RGB, LandscapeSmoother, cellFractions, landscapeCell, landscapeTileLayout, microTexture,
   nutrientOverlayCell, wasteOverlayCell,
 } from "../../apps/explorer/src/landscape.ts";
 import type { RenderResourceField, RenderWasteField } from "../../packages/contracts/src/index.ts";
@@ -103,9 +103,12 @@ function testLensEncodingsAreHonest() {
   // and it does not simply brighten either, because it must not compete with
   // fertility for "bright means good". The analytical view is a separate
   // encoding (a brighter exact ramp) and the UI note describes each.
-  const clean = landscapeCell(0.4, 0.4, 0.1, 0, 0.5);
-  const loaded = landscapeCell(0.4, 0.4, 0.1, 0.9, 0.5);
-  const ASH = [116, 107, 96];
+  const clean = landscapeCell(0.28, 0.28, 0.1, 0, 0.5);
+  const loaded = landscapeCell(0.28, 0.28, 0.1, 0.9, 0.5);
+  // The module's own ash target, not a second copy of it: a hardcoded
+  // duplicate desynchronises silently the moment the palette is retuned,
+  // which is exactly how a stale expectation outlives its reason.
+  const ASH = [...ASH_RGB];
   const dist = (c: readonly [number, number, number]) =>
     Math.abs(c[0] - ASH[0]!) + Math.abs(c[1] - ASH[1]!) + Math.abs(c[2] - ASH[2]!);
   assert.ok(dist(loaded) < dist(clean), "landscape: waste moves ground toward ash");
@@ -124,7 +127,7 @@ function testLensEncodingsAreHonest() {
   // the ground it covers: loaded ground moves toward ash (far closer to ash
   // than unloaded fertile ground is) and loses the green cast, while still
   // sitting clearly above barren soil in brightness.
-  const fertile = landscapeCell(0.95, 0.95, 0.1, 0, 0.5);
+  const fertile = landscapeCell(0.30, 0.30, 0.1, 0, 0.5);
   const barren = landscapeCell(0, 0, 0, 0, 0.5);
   assert.ok(dist(loaded) < dist(fertile), "landscape: loaded ground moves toward ash");
   assert.ok(chroma(loaded) < chroma(fertile), "landscape: waste removes the fertility green cast");
@@ -237,6 +240,123 @@ function testWrappedSubstrateTiles() {
   console.log(`landscape wrapped substrate tiles: PASS (${VIEWS.length} viewports x ${ZOOMS.length} zooms x ${CAM_POSITIONS} camera positions = ${cases} cases, worst ${worstCount} draws)`);
 }
 
+/**
+ * Owner rule under test: "scarcity may be highly legible, but scarcity must not
+ * visually imply damage. Damage requires separate simulation evidence."
+ *
+ * These are the guards on that rule. The positive claims (rich reads rich, poor
+ * reads poor) are easy; the load-bearing one is the NEGATIVE claim, that a
+ * depleted cell never acquires damage vocabulary.
+ */
+const BARE = landscapeCell(0, 0, 0, 0, 0.5);
+const dist = (a: readonly number[], b: readonly number[]) =>
+  Math.hypot(a[0]! - b[0]!, a[1]! - b[1]!, a[2]! - b[2]!);
+
+function testScarcityReadsAsAbsenceNotDamage() {
+  // Exhausted: every substance effectively gone.
+  const spent = landscapeCell(0.02, 0.02, 0, 0, 0.5);
+  assert.ok(dist(spent, BARE) < 26,
+    `an exhausted cell sits close to bare substrate (${dist(spent, BARE).toFixed(1)}), so it reads as ground without material`);
+  // THE negative guard. Damage vocabulary in practice means darkening, charring
+  // or a wound hue. None of those may appear as stock falls.
+  assert.ok(luma(spent) >= luma(BARE) - 1,
+    `depletion never darkens the ground (${luma(spent).toFixed(1)} vs bare ${luma(BARE).toFixed(1)}), because darkening reads as damage`);
+  assert.ok(chroma(spent) <= chroma(BARE) + 12,
+    `depletion does not add a wound hue (chroma ${chroma(spent)} vs bare ${chroma(BARE)})`);
+}
+
+function testRichnessIsUnmistakable() {
+  const rich = landscapeCell(0.30, 0.30, 0, 0, 0.5);
+  const separation = dist(rich, BARE);
+  // The design asks for this contrast to be pushed, because the field supports a
+  // large real difference. A timid lift would force a lens to see it.
+  assert.ok(separation > 70,
+    `a rich cell is unmistakably different from bare substrate (${separation.toFixed(1)})`);
+  // Polarity: material is DARKER and far more chromatic than bare ground, so
+  // losing material LIGHTENS the world. This is the inverse of the earlier
+  // brightening lift, which made a real depletion darken the ground by ~18 luma
+  // and therefore read as damage. Asserted explicitly so the polarity cannot be
+  // flipped back without this test failing.
+  assert.ok(luma(rich) < luma(BARE),
+    `resource material is darker than bare ground (${luma(rich).toFixed(1)} vs ${luma(BARE).toFixed(1)}), so depletion lightens rather than darkens`);
+  assert.ok(chroma(rich) > chroma(BARE) * 2,
+    `and far more chromatic (${chroma(rich)} vs ${chroma(BARE)}), so presence is carried by hue rather than by brightness`);
+}
+
+function testPresenceIsMonotonicAndContinuous() {
+  // Non-decreasing everywhere, and STRICTLY increasing above the scarcity floor.
+  // Below the floor presence is legitimately zero - that is the whole point of a
+  // presence language - so demanding a strict rise there would be asserting the
+  // absence of the feature under test.
+  let previous = dist(landscapeCell(0, 0, 0, 0, 0.5), BARE);
+  for (const level of [0.02, 0.05, 0.08, 0.11, 0.15, 0.19, 0.22, 0.26, 0.30]) {
+    const current = dist(landscapeCell(level, level, 0, 0, 0.5), BARE);
+    assert.ok(current >= previous - 0.001,
+      `material presence never decreases as stock rises (${level}: ${current.toFixed(1)} >= ${previous.toFixed(1)})`);
+    if (level > 0.05) {
+      assert.ok(current > previous,
+        `above the scarcity floor material presence strictly increases with stock (${level}: ${current.toFixed(1)} > ${previous.toFixed(1)})`);
+    }
+    previous = current;
+  }
+  // Below the floor there is no material at all, which is what lets a patch read
+  // as emptied rather than merely dimmed.
+  for (const level of [0, 0.02, 0.04, 0.05]) {
+    const cell = landscapeCell(level, level, 0, 0, 0.5);
+    assert.ok(dist(cell, BARE) < 3,
+      `stock at or below the scarcity floor shows no resource material (${level} -> ${dist(cell, BARE).toFixed(1)})`);
+  }
+  // No seam at the scarcity floor: presence must ease out, not switch on.
+  const justBelow = dist(landscapeCell(0.048, 0.048, 0, 0, 0.5), BARE);
+  const justAbove = dist(landscapeCell(0.052, 0.052, 0, 0, 0.5), BARE);
+  assert.ok(justAbove - justBelow < 12,
+    `material fades across the scarcity floor rather than switching on (${justBelow.toFixed(1)} -> ${justAbove.toFixed(1)})`);
+}
+
+function testPartialDepletionLeavesRefugiaVisible() {
+  // The acceptance case: an affected area empties while unaffected material
+  // remains readable, so the survivors read as refugia.
+  const bothRich = landscapeCell(0.27, 0.27, 0, 0, 0.5);
+  const aDepleted = landscapeCell(0.03, 0.27, 0, 0, 0.5);
+  const bDepleted = landscapeCell(0.27, 0.03, 0, 0, 0.5);
+  // Whichever substance survives, material is still plainly present. Asserted
+  // RELATIVE to full presence rather than against an absolute number, so the
+  // claim is "most of the material is still there", which is what makes a
+  // remaining pocket read as a refugium - and so the check cannot be satisfied
+  // or broken by an unrelated palette change.
+  const full = dist(bothRich, BARE);
+  // With ONE of two substances depleted, roughly half the combined lift remains -
+  // that is the honest number, not a flattering one. The claim that matters is
+  // that this is plainly above bare (so the pocket reads as a refugium) and far
+  // above a fully exhausted cell (so the difference is legible, not marginal).
+  const exhausted = dist(landscapeCell(0.03, 0.03, 0, 0, 0.5), BARE);
+  for (const [label, cell] of [["B survives", aDepleted], ["A survives", bDepleted]] as const) {
+    const share = dist(cell, BARE) / full;
+    assert.ok(share > 0.4,
+      `${label}: ${(share * 100).toFixed(0)}% of full presence remains, which is plainly visible`);
+    assert.ok(dist(cell, BARE) > Math.max(40, exhausted * 3),
+      `${label}: remaining material is far above an exhausted cell (${dist(cell, BARE).toFixed(1)} vs ${exhausted.toFixed(1)}), so the refugium reads as material rather than as tint`);
+  }
+  // And the two depleted states are distinguishable from each other, so a
+  // half-depleted patch does not read as a uniform grey.
+  assert.ok(dist(aDepleted, bDepleted) > 25,
+    `a half-depleted patch still distinguishes its two substances (${dist(aDepleted, bDepleted).toFixed(1)})`);
+  assert.ok(dist(bothRich, BARE) > dist(aDepleted, BARE),
+    "full presence exceeds partial presence, so depletion is a visible loss");
+}
+
+function testWasteStillReadsAsResidueNotInjury() {
+  // Waste is real simulated fouling, so it keeps its own material - but it
+  // stays neutral and never darkens, which is what keeps it on the "spent
+  // ground" side of the line rather than the "damaged" side.
+  const fouled = landscapeCell(0.28, 0.28, 0, 0.9, 0.5);
+  const clean = landscapeCell(0.28, 0.28, 0, 0, 0.5);
+  assert.ok(dist(fouled, clean) > 20, `waste visibly alters the local ground (${dist(fouled, clean).toFixed(1)})`);
+  assert.ok(luma(fouled) >= luma(clean) - 1,
+    `waste pales rather than darkens (${luma(fouled).toFixed(1)} vs ${luma(clean).toFixed(1)})`);
+  assert.ok(luma(fouled) > 40, "and a fouled cell still shows organisms standing in it");
+}
+
 async function main(){
   testPrimesFromRealFields();
   testUniverseIsolation();
@@ -245,6 +365,13 @@ async function main(){
   testLensEncodingsAreHonest();
   testMicroTextureIsDeterministic();
   testWrappedSubstrateTiles();
+  testScarcityReadsAsAbsenceNotDamage();
+  testRichnessIsUnmistakable();
+  testPresenceIsMonotonicAndContinuous();
+  testPartialDepletionLeavesRefugiaVisible();
+  testWasteStillReadsAsResidueNotInjury();
+  // Logged so a silent skip is distinguishable from a pass.
+  console.log("landscape resource presence (scarcity != damage): PASS");
   await testCellInspection();
   console.log("landscape validation: PASS");
 }
