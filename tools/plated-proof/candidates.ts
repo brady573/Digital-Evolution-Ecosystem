@@ -2,7 +2,7 @@
  * Plated M2 candidate review (design review round 3).
  *
  * Three 128px M2 renders from the EXACT same phenotype + simulation inputs,
- * one per material variant (translucent / specular / darkbio), shown beside
+ * one per material variant (specular / pearlbed / clarity), shown beside
  * the approved reference at native 128 and 3x nearest-neighbor. No sweeps:
  * the acceptance question is only whether a candidate belongs to the
  * reference family.
@@ -20,7 +20,7 @@ mkdirSync(OUT, { recursive: true });
 const toB64 = (rgb: Uint8Array): string => Buffer.from(rgb).toString("base64");
 
 const m2 = platedSweep().find((s) => s.label === "M2")!;
-const variants: MaterialVariant[] = ["translucent", "specular", "darkbio"];
+const variants: MaterialVariant[] = ["specular", "pearlbed", "clarity"];
 const shots = variants.map((v) => {
   const p = renderPlated(m2.res, m2.m, 128, v);
   return { variant: v, size: 128, b64: toB64(p.rgb) };

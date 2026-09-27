@@ -112,7 +112,7 @@ for (const size of LOD_SIZES) {
   let checked = 0;
   for (const size of LOD_SIZES) {
     const gate = geometrySilhouette(rasterizeGeometry(layoutPlates(GEOMETRY_SEED), size, BED));
-    for (const v of ["translucent", "specular", "darkbio"] as const) {
+    for (const v of ["specular", "pearlbed", "clarity"] as const) {
       const mat = silhouette(renderPlated(m2.res, m2.m, size, v));
       assert.equal(silhouetteIoU(gate, mat), 1, `${v}@${size} must match the accepted gate silhouette`);
       checked++;
@@ -161,7 +161,7 @@ console.log("input ranges: PASS (metabolism raw inside [0.04, 0.5]; M values are
 // 8. Material variants share inputs and silhouette (round-3 acceptance shape).
 {
   const m2 = samples.find((s) => s.label === "M2")!;
-  const renders = (["translucent", "specular", "darkbio"] as const).map((v) => ({
+  const renders = (["specular", "pearlbed", "clarity"] as const).map((v) => ({
     v,
     p: renderPlated(m2.res, m2.m, 128, v),
   }));

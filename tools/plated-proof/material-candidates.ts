@@ -1,9 +1,10 @@
 /**
- * Material-round evidence (stage after the §15 geometry gate): the ACCEPTED
- * packed-cluster geometry with material applied on top — translucency,
- * Voronoi interiors, gap pearls, metabolism-as-emission — plus the M0–M4
- * sweep, the LOD ladder, the three material variants, and the silhouette
- * parity proof (rendered mask == gate raster).
+ * Material-round 2 evidence: the ACCEPTED packed-cluster geometry with the
+ * refined material treatment — calmer whole-compartment interiors, stronger
+ * dome/creases, cool-only plate palette, spherical warm beads, pearly caps —
+ * plus the M0–M4 sweep, the LOD ladder, the three bounded round-2 variants
+ * (Specular-Refined / Pearl-Bed Emphasis / Shell-Clarity), and the
+ * silhouette parity proof (rendered mask == gate raster).
  *
  * Run: pnpm exec tsx tools/plated-proof/material-candidates.ts
  * Writes: /sdcard/DEE/review/plated/material-candidates.html
@@ -36,6 +37,12 @@ interface Shot {
 const samples = platedSweep();
 const m2 = samples.find((s) => s.label === "M2")!;
 const hero: MaterialVariant = "specular";
+/** Display names for the bounded round-2 variant set (handoff §5). */
+const VARIANT_NAMES: Record<MaterialVariant, string> = {
+  specular: "Specular-Refined",
+  pearlbed: "Pearl-Bed Emphasis",
+  clarity: "Shell-Clarity",
+};
 
 /** Silhouette as a flat mask image (white plates, grey bed, black bg). */
 function maskShot(rgb: Uint8Array, kind: Uint8Array): string {
@@ -55,8 +62,8 @@ const heroPx = renderPlated(m2.res, m2.m, SIZE, hero);
 const shots: Record<string, Shot[]> = {
   hero: [{ label: `M2 ${hero}@${SIZE}`, size: SIZE, b64: toB64(heroPx.rgb) }],
   // Three material variants at 3x: same inputs, same masks, material differs.
-  variants: (["translucent", "specular", "darkbio"] as const).map((v) => ({
-    label: v === hero ? `${v} (hero pick)` : v,
+  variants: (["specular", "pearlbed", "clarity"] as const).map((v) => ({
+    label: v === hero ? `${VARIANT_NAMES[v]} (hero pick)` : VARIANT_NAMES[v],
     size: SIZE,
     b64: toB64(renderPlated(m2.res, m2.m, SIZE, v).rgb),
     scale: 3,
@@ -107,7 +114,7 @@ const html = `<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Plated material round — accepted geometry with material</title>
+<title>Plated material round 2 — accepted geometry + refined material</title>
 <style>
 body{background:#070c11;color:#cfe0d8;font:14px/1.4 system-ui,sans-serif;margin:0 auto;max-width:1400px;padding:24px}
 h1,h2{color:#eafff3} .note{color:#8fa8a0;font-size:.82rem}
@@ -119,21 +126,26 @@ canvas{image-rendering:pixelated;background:#060b0f;border:1px solid #1d2f3a}
 </style>
 </head>
 <body>
-<h1>Plated material round — accepted packed-cluster geometry + material</h1>
-<p class="note">Stage after the §15 geometry gate (“geometry passes. proceed
-with next stage.”). Same accepted geometry (GEOMETRY_SEED = 7000, 11 plates),
-same silhouette — material only: translucency (variant), Voronoi interiors
-with pale walls and per-cell pink/teal/blue hues, gap pearls clustered on the
-bed recesses, and metabolism-as-emission (cell glow, seam continuity, warm
-tip glow) all scaling with M. The rendered mask is asserted equal to the §15
-gate raster at every LOD and for every variant (validate.ts group 4b,
-12 pairs, IoU 1.000). Question: does the material read belong to the
-approved reference family, and which variant carries forward?</p>
-<h2>Reference vs hero candidate at 3x (M2)</h2>
+<h1>Plated material round 2 — accepted packed-cluster geometry + refined material</h1>
+<p class="note">Round 2 of the material stage (round 1 verdict: promising but
+not accepted; specular carried forward as the base). Same accepted geometry
+(GEOMETRY_SEED = 7000, 11 plates), same silhouette — material only: whole
+compartment interiors (coarser 4×2 Voronoi, per-cell lighting, physical-pixel
+wall band, no per-pixel mottle), stronger dome lighting with darker overlap
+creases and brighter rim
+whitening, cool-only plate palette (blue/cyan/restrained violet; warmth only
+in beads and tips), spherical warm beads nested in the gap recesses, and
+pearly warm-white tip caps — all emission still scaling with M. The rendered
+mask is asserted equal to the §15 gate raster at every LOD and for every
+variant (validate.ts group 4b, 12 pairs, IoU 1.000). Review questions: (1)
+does the refined material belong to the approved Plated family? (2) which
+direction becomes the baseline? (3) is it strong enough to resume full
+M0–M4 visual tuning?</p>
+<h2>Reference vs candidate at 3x (M2, Specular-Refined)</h2>
 <div class="row"><figure class="ref"><img src="reference-crop.png" alt="approved Plated reference"><figcaption>approved reference</figcaption></figure><span id="big" style="display:contents"></span></div>
 <h2>Hero at native 128px</h2>
 <div class="row" id="hero"></div>
-<h2>Three material variants at 3x (same inputs, same silhouette)</h2>
+<h2>Material comparison sheet — three bounded variants at 3x (same inputs, same silhouette)</h2>
 <div class="row" id="variants"></div>
 <h2>M0–M4 sweep (metabolism-as-emission, fixed geometry)</h2>
 <div class="row" id="sweep"></div>
