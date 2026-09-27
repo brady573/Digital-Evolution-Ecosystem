@@ -11,6 +11,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { platedSweep } from "./fixtures.ts";
 import {
   BED,
+  GEOMETRY_SEED,
   geometryBoundaries,
   geometrySilhouette,
   layoutPlates,
@@ -34,7 +35,7 @@ interface Shot {
   b64: string;
 }
 
-const plates = layoutPlates(7000);
+const plates = layoutPlates(GEOMETRY_SEED);
 const g = rasterizeGeometry(plates, SIZE, BED);
 const byIndex = new Map(plates.map((p) => [p.index, p]));
 

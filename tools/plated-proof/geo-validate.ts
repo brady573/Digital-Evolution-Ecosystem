@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import { platedSweep } from "./fixtures.ts";
 import {
   BED,
+  GEOMETRY_SEED,
   geometryBoundaries,
   geometrySilhouette,
   layoutPlates,
@@ -25,7 +26,7 @@ import {
 } from "./geometry.ts";
 
 const SIZE = 128;
-const plates = layoutPlates(7000);
+const plates = layoutPlates(GEOMETRY_SEED);
 const g = rasterizeGeometry(plates, SIZE, BED);
 
 /** Anatomical tip pixel: exposed only if it still belongs to this plate. */

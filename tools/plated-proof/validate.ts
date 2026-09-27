@@ -1,6 +1,7 @@
 /**
  * Plated proof validation: determinism, family hold, monotonic activity,
- * structural stability, LOD continuity, simulation isolation.
+ * structural stability, material/geometry silhouette parity, LOD
+ * continuity, simulation isolation.
  *
  * Run: pnpm exec tsx tools/plated-proof/validate.ts
  */
@@ -11,10 +12,16 @@ import { fileURLToPath } from "node:url";
 import { continuityPair, flipSamples, platedSweep } from "./fixtures.ts";
 import { renderPhenotypeGrid } from "../../packages/phenotype/src/index.ts";
 import {
+  BED,
+  GEOMETRY_SEED,
+  geometrySilhouette,
+  layoutPlates,
+  rasterizeGeometry,
+} from "./geometry.ts";
+import {
   LOD_SIZES,
   SWEEP_M,
   activityMetric,
-  plateLayout,
   renderPlated,
   silhouette,
   silhouetteIoU,
@@ -72,18 +79,20 @@ for (const size of LOD_SIZES) {
   console.log(`monotonic activity @${size}: PASS (${asc.map((s) => s.label).join("<")}: ${ms.map((v) => v.toFixed(3)).join(" < ")})`);
 }
 
-// 4. Structural stability: plate count/order fixed; silhouette IoU vs M2 high.
+// 4. Structural stability: the accepted packed-cluster layout is fixed for
+//    every sample (the material round may not perturb the gated geometry),
+//    and the rendered silhouette holds across the M sweep.
 {
-  const layouts = samples.map((s) => plateLayout(s.res, s.res.cosmeticSeed >>> 0));
+  const layouts = samples.map(() => layoutPlates(GEOMETRY_SEED));
   const labels = samples.map((s) => s.label);
   const n0 = layouts[0]!.length;
   for (const [i, l] of layouts.entries()) {
     assert.equal(l.length, n0, `${labels[i]} plate count stable`);
     l.forEach((pl, j) => {
-      assert.ok(Math.abs(pl.cx - layouts[0]![j]!.cx) < 1e-9, `${labels[i]} plate ${j} cx stable`);
-      assert.ok(Math.abs(pl.cy - layouts[0]![j]!.cy) < 1e-9, `${labels[i]} plate ${j} cy stable`);
-      assert.ok(Math.abs(pl.rx - layouts[0]![j]!.rx) < 1e-9, `${labels[i]} plate ${j} rx stable`);
-      assert.ok(Math.abs(pl.ry - layouts[0]![j]!.ry) < 1e-9, `${labels[i]} plate ${j} ry stable`);
+      assert.equal(pl.rx, layouts[0]![j]!.rx, `${labels[i]} plate ${j} root x stable`);
+      assert.equal(pl.ry, layouts[0]![j]!.ry, `${labels[i]} plate ${j} root y stable`);
+      assert.equal(pl.theta, layouts[0]![j]!.theta, `${labels[i]} plate ${j} angle stable`);
+      assert.equal(pl.len, layouts[0]![j]!.len, `${labels[i]} plate ${j} length stable`);
     });
   }
   const sils = samples.map((s) => silhouette(renderPlated(s.res, s.m, 128)));
@@ -91,6 +100,25 @@ for (const size of LOD_SIZES) {
   for (let i = 1; i < sils.length; i++) min = Math.min(min, silhouetteIoU(sils[0]!, sils[i]!));
   assert.ok(min > 0.5, `silhouette IoU vs M2 must exceed 0.5 (got ${min.toFixed(3)})`);
   console.log(`structural stability: PASS (${n0} plates fixed; silhouette IoU min ${min.toFixed(3)})`);
+}
+
+// 4b. Material/geometry silhouette parity — the round-linking invariant:
+//     material is applied ON TOP of the §15-gated packed cluster, so the
+//     rendered mask must equal the gate raster at every LOD and for every
+//     material variant. Exact match by construction; asserted so future
+//     drift in either pass cannot silently decouple them.
+{
+  const m2 = samples.find((s) => s.label === "M2")!;
+  let checked = 0;
+  for (const size of LOD_SIZES) {
+    const gate = geometrySilhouette(rasterizeGeometry(layoutPlates(GEOMETRY_SEED), size, BED));
+    for (const v of ["translucent", "specular", "darkbio"] as const) {
+      const mat = silhouette(renderPlated(m2.res, m2.m, size, v));
+      assert.equal(silhouetteIoU(gate, mat), 1, `${v}@${size} must match the accepted gate silhouette`);
+      checked++;
+    }
+  }
+  console.log(`material/geometry silhouette parity: PASS (${checked} render/gate pairs, IoU 1.000)`);
 }
 
 // 5. LOD continuity: same phenotype recognizable across sizes — plate count

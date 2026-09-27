@@ -23,7 +23,22 @@
  * + dark bed placeholder), silhouette masks, plate-boundary overlays. No
  * texture, no specular, no metabolism, no glow. Deterministic hashing.
  */
-import { hash01 } from "./render.ts";
+/**
+ * Deterministic 0..1 hash from integers (presentation-side only).
+ * Lives here (not in the material renderer) so geometry and material share
+ * one seeded hash without a module cycle.
+ */
+export function hash01(...ns: number[]): number {
+  let a = 0x811c9dc5;
+  for (const n of ns) {
+    a ^= (n | 0) + 0x9e3779b9 + (a << 6) + (a >>> 2);
+    a = Math.imul(a, 0x01000193) >>> 0;
+  }
+  a ^= a >>> 13;
+  a = Math.imul(a, 0x5bd1e995) >>> 0;
+  a ^= a >>> 15;
+  return (a >>> 0) / 4294967296;
+}
 
 export interface ShellDef {
   /** Root point, normalized coords. */
@@ -61,6 +76,13 @@ export const DEFAULT_BED: BedDef = { discs: [{ cx: 0.6, cy: 0.6, r: 0.1 }] };
 export const BED: BedDef = {
   discs: [{ cx: 0.58, cy: 0.74, r: 0.035 }, { cx: 0.30, cy: 0.66, r: 0.035 }],
 };
+
+/**
+ * Seed of the §15-accepted packed-cluster layout (round 3, gate PASSED).
+ * The material renderer must draw this exact layout: material is applied
+ * on top of the gated geometry and may never perturb the silhouette.
+ */
+export const GEOMETRY_SEED = 7000;
 
 function smoothstep(a: number, b: number, x: number): number {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
@@ -104,12 +126,39 @@ export function halfWidth(pl: ShellDef, t: number): number {
 }
 
 /**
- * Test a point against one plate. Returns inside flag, spine t of the
- * nearest sample, and signed side (for asymmetric shoulders).
+ * Result of testing a point against one plate.
+ *
+ * `inside` is the exact gated-raster predicate (unchanged semantics);
+ * `q`/`v`/`t` are texture coordinates for the material pass (radial,
+ * signed cross-spine, along-spine); `nx`/`ny` is the outward surface
+ * normal used for curvature lighting.
+ */
+export interface PlateHit {
+  inside: boolean;
+  /** Distance from the spine in half-width units (0 ridge, 1 rim, >1 outside). */
+  q: number;
+  /** Absolute distance from the spine, normalized units. */
+  d: number;
+  /** Effective half-width at the nearest spine point. */
+  wEff: number;
+  /** Signed cross-spine offset / wEff — the texture v-axis. */
+  v: number;
+  /** Nearest spine parameter — the texture u-axis (root 0, tip 1). */
+  t: number;
+  /** Shoulder sign from the asymmetric width. */
+  side: number;
+  /** Outward unit normal away from the ridge (0,0 exactly on the spine). */
+  nx: number;
+  ny: number;
+}
+
+/**
+ * Test a point against one plate. Returns the exact inside predicate plus
+ * material shading coordinates derived from the nearest spine sample.
  */
 export function plateHit(
   nx: number, ny: number, pl: ShellDef, samples: Array<{ x: number; y: number; t: number }>,
-): { inside: boolean; t: number; side: number } {
+): PlateHit {
   let best = Infinity;
   let bt = 0;
   let bx = 0;
@@ -129,9 +178,22 @@ export function plateHit(
   // Asymmetric shoulders: one side slightly fuller.
   const dirx = Math.cos(pl.theta);
   const diry = Math.sin(pl.theta);
-  const side = bx * -diry + by * dirx >= 0 ? 1 : -1;
+  const cross = bx * -diry + by * dirx;
+  const side = cross >= 0 ? 1 : -1;
   const wEff = w * (1 + pl.asym * 0.22 * side * Math.min(1, bt * 2));
-  return { inside: best <= wEff * wEff, t: bt, side };
+  const d = Math.sqrt(best);
+  const inv = d > 1e-9 ? 1 / d : 0;
+  return {
+    inside: best <= wEff * wEff,
+    d,
+    wEff,
+    q: wEff > 0 ? d / wEff : 0,
+    v: wEff > 0 ? cross / wEff : 0,
+    t: bt,
+    side,
+    nx: bx * inv,
+    ny: by * inv,
+  };
 }
 
 /** Disc-union test for the pearl-bed placeholder. */
