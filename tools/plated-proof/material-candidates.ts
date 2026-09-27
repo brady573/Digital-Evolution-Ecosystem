@@ -114,7 +114,7 @@ const html = `<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Plated material round 2 — accepted geometry + refined material</title>
+<title>Plated material round 6 — Specular-Refined candidate</title>
 <style>
 body{background:#070c11;color:#cfe0d8;font:14px/1.4 system-ui,sans-serif;margin:0 auto;max-width:1400px;padding:24px}
 h1,h2{color:#eafff3} .note{color:#8fa8a0;font-size:.82rem}
@@ -126,21 +126,22 @@ canvas{image-rendering:pixelated;background:#060b0f;border:1px solid #1d2f3a}
 </style>
 </head>
 <body>
-<h1>Plated material round 2 — accepted packed-cluster geometry + refined material</h1>
-<p class="note">Round 2 of the material stage (round 1 verdict: promising but
-not accepted; specular carried forward as the base). Same accepted geometry
-(GEOMETRY_SEED = 7000, 11 plates), same silhouette — material only: whole
-compartment interiors (coarser 4×2 Voronoi, per-cell lighting, physical-pixel
-wall band, no per-pixel mottle), stronger dome lighting with darker overlap
-creases and brighter rim
-whitening, cool-only plate palette (blue/cyan/restrained violet; warmth only
-in beads and tips), spherical warm beads nested in the gap recesses, and
-pearly warm-white tip caps — all emission still scaling with M. The rendered
-mask is asserted equal to the §15 gate raster at every LOD and for every
-variant (validate.ts group 4b, 12 pairs, IoU 1.000). Review questions: (1)
-does the refined material belong to the approved Plated family? (2) which
-direction becomes the baseline? (3) is it strong enough to resume full
-M0–M4 visual tuning?</p>
+<h1>Plated material round 6 — cobalt cellular shells around a recessed bead core</h1>
+<p class="note">Round 6 answers the round-5 review (cells not polygonal
+enough, beads too large/exposed, violet dominant, tips too cream, soft
+bloom). Same accepted geometry (GEOMETRY_SEED = 7000, 11 plates), same
+silhouette, 3×2 budget, metabolism-as-emission — material only,
+Specular-Refined: closed cyan wall loops (highlights skip walls; walls
+cyan at M2, pearl-white only at high M), quantized dome bands + binary
+tiny specular (no radial bloom), violet ~1% of lit cells (beads + shadow
+tint carry it), small-dark bead coupling, large beads confined to major
+cavities, stronger top-silhouette margin, ~50% deep-occluded beads,
+distal tip caps ≈6% of spine. Emission still scaling with M. The
+rendered mask is asserted equal to the §15 gate raster at every LOD and
+for every variant (validate.ts group 4b, 12 pairs, IoU 1.000).
+Acceptance question: at first glance, does M2 read as cobalt cellular
+shell plates surrounding a recessed mixed-color bead core with the §16
+visual economy?</p>
 <h2>Reference vs candidate at 3x (M2, Specular-Refined)</h2>
 <div class="row"><figure class="ref"><img src="reference-crop.png" alt="approved Plated reference"><figcaption>approved reference</figcaption></figure><span id="big" style="display:contents"></span></div>
 <h2>Hero at native 128px</h2>
