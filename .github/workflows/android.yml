@@ -92,22 +92,14 @@ jobs:
           target: google_apis
           arch: x86_64
           disable-animations: true
+          # NOTE: this action executes the script line-by-line (each line
+          # via its own sh), so every command below must be a single line —
+          # no multi-line for/if blocks (proven by a real CI failure).
           script: |
             adb install /tmp/apk/app-debug.apk
-            # Scope crash detection to this launch: clear the device log
-            # first so a fatal exception from an unrelated system process
-            # can never fail this smoke test, then read back only our PID.
             adb logcat -c
             adb shell am start -n com.digitalevolution.explorer/.MainActivity
-            for i in $(seq 1 30); do
-              if adb shell pidof com.digitalevolution.explorer >/dev/null; then break; fi
-              sleep 2
-            done
-            APP_PID=$(adb shell pidof com.digitalevolution.explorer | tr -d '\r')
-            if [ -z "$APP_PID" ]; then echo "Android runtime smoke FAILED: app did not stay alive"; exit 1; fi
-            if adb logcat -d --pid="$APP_PID" | grep -q "FATAL EXCEPTION"; then
-              echo "Android runtime smoke FAILED: fatal exception after launch"
-              adb logcat -d --pid="$APP_PID" | grep -A8 "FATAL EXCEPTION" | head -40
-              exit 1
-            fi
+            for i in $(seq 1 30); do if adb shell pidof com.digitalevolution.explorer >/dev/null; then break; fi; sleep 2; done
+            APP_PID=$(adb shell pidof com.digitalevolution.explorer | tr -d '\r'); if [ -z "$APP_PID" ]; then echo "Android runtime smoke FAILED: app did not stay alive"; exit 1; fi
+            if adb logcat -d --pid="$APP_PID" | grep -q "FATAL EXCEPTION"; then echo "Android runtime smoke FAILED: fatal exception after launch"; adb logcat -d --pid="$APP_PID" | grep -A8 "FATAL EXCEPTION" | head -40; exit 1; fi
             echo "Android runtime smoke: MainActivity alive, no fatal exceptions"
