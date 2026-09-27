@@ -74,9 +74,11 @@
     },
     {
       "id": "organism-sprite",
-      "role": "living organism marker (procedural voxel cluster)",
+      "role": "living organism marker — CURRENT/LEGACY RENDERER ONLY, not target phenotype art",
       "path": "apps/explorer/src/App.tsx (organism draw pass)",
-      "status": "approved",
+      "status": "provisional",
+      "superseded_by": "accepted phenotype direction (inherited recognizable body families, expressive naturalist/alien forms, organic silhouette variation)",
+      "scope_note": "Recorded only so a reviewer can tell an environmental constraint from an incidental property of today's code. This entry is NOT art-direction authority for organisms and must not be read as approving voxel morphology. The accepted phenotype direction replaces it. Requirements that survive that replacement — legibility at true scale, dormant-vs-active distinction, selection affordance, and ecological analysis that does not read morphology — are environmental requirements owned by assets/art-direction-brief.md, not morphological ones.",
       "technical": {
         "dimensions": "2-4 px cells, span scaled by stored energy, on-screen unit = 2.2 x world scale",
         "alpha": true,
@@ -85,11 +87,10 @@
         "filtering": "n/a"
       },
       "visual_locks": [
-        "silhouette priority over substrate (hard-edged blocks)",
-        "dormant = hollow outline, active = filled",
-        "texture is a deterministic function of organism id, stable per frame",
-        "diet/role colour families",
-        "phenotype semantics are NOT owned by this lane"
+        "provisional: current voxel construction is incidental, not a durable lock",
+        "durable: life stays readable against every substrate value",
+        "durable: dormant and active are distinguishable without relying on hue",
+        "durable: ecological analysis must not be inferred from morphology"
       ],
       "source": {
         "kind": "authored-in-code",
@@ -104,12 +105,12 @@
         "native_scale_reviewed": true,
         "in_engine_reviewed": true,
         "technical_checks_passed": true,
-        "approved_by": "pending Owner design review (PR #40)"
+        "approved_by": "not applicable — provisional current-renderer record, superseded by the phenotype direction"
       }
     },
     {
       "id": "selection-marker",
-      "role": "focus indicator for the selected organism (procedural)",
+      "role": "focus indicator for the selected organism (interaction affordance, not morphology)",
       "path": "apps/explorer/src/App.tsx (selection pass)",
       "status": "approved",
       "technical": {
