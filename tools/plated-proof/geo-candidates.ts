@@ -10,6 +10,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { platedSweep } from "./fixtures.ts";
 import {
+  BEDS,
   geometryBoundaries,
   geometrySilhouette,
   layoutPlates,
@@ -21,9 +22,11 @@ mkdirSync(OUT, { recursive: true });
 
 const toB64 = (rgb: Uint8Array): string => Buffer.from(rgb).toString("base64");
 const SIZE = 128;
-// Two flat values only: front-half plates light, back-half plates mid.
+// Flat neutral fill: back layer mid, mid/front layers light, plus the dark
+// pearl-bed placeholder showing through gaps. No texture or shading.
 const FRONT = { r: 200, g: 214, b: 226 };
 const BACK = { r: 130, g: 148, b: 172 };
+const BED = { r: 46, g: 58, b: 72 };
 
 interface Shot {
   label: string;
@@ -36,13 +39,17 @@ const bounds: Shot[] = [];
 
 for (const c of [0, 1, 2]) {
   const plates = layoutPlates(c, 7000);
-  const g = rasterizeGeometry(plates, SIZE);
+  const bed = BEDS[c]!;
+  const g = rasterizeGeometry(plates, SIZE, bed);
+  const byIndex = new Map(plates.map((p) => [p.index, p]));
   const rgb = new Uint8Array(SIZE * SIZE * 3);
-  const half = Math.ceil(plates.length / 2);
   for (let i = 0; i < SIZE * SIZE; i++) {
     const id = g.plateId[i]!;
     if (id === -1) continue;
-    const col = id >= plates.length - half ? FRONT : BACK;
+    // Two flat values alternating by paint order: overlapping neighbors
+    // usually contrast, so plate separation reads in the fill (not only in
+    // the boundary overlay). Still exactly two neutral values + bed.
+    const col = id === -2 ? BED : byIndex.get(id)!.index % 2 === 0 ? BACK : FRONT;
     rgb[i * 3] = col.r;
     rgb[i * 3 + 1] = col.g;
     rgb[i * 3 + 2] = col.b;
@@ -51,7 +58,11 @@ for (const c of [0, 1, 2]) {
   const sil = geometrySilhouette(g);
   const silRgb = new Uint8Array(SIZE * SIZE * 3);
   for (let i = 0; i < sil.length; i++) {
-    if (sil[i] === 1) {
+    if (g.plateId[i] === -2) {
+      silRgb[i * 3] = 120;
+      silRgb[i * 3 + 1] = 140;
+      silRgb[i * 3 + 2] = 160;
+    } else if (sil[i] === 1) {
       silRgb[i * 3] = 230;
       silRgb[i * 3 + 1] = 236;
       silRgb[i * 3 + 2] = 242;
@@ -61,7 +72,9 @@ for (const c of [0, 1, 2]) {
   const bnd = geometryBoundaries(g);
   const bndRgb = new Uint8Array(SIZE * SIZE * 3);
   for (let i = 0; i < bnd.length; i++) {
-    const v = bnd[i] === 1 ? 240 : sil[i] === 1 ? 70 : 0;
+    const id = g.plateId[i]!;
+    const base = id === -2 ? 45 : 70;
+    const v = bnd[i] === 1 ? 240 : id === -1 ? 0 : base;
     bndRgb[i * 3] = v;
     bndRgb[i * 3 + 1] = v + 8 > 255 ? 255 : v + 8;
     bndRgb[i * 3 + 2] = Math.min(255, v + 20);
@@ -91,7 +104,9 @@ canvas{image-rendering:pixelated;background:#060b0f;border:1px solid #1d2f3a}
 <body>
 <h1>Plated geometry candidates — M2, geometry only</h1>
 <p class="note">Same phenotype inputs (M2, lineage 4242, seed 7000) for all three.
-Flat neutral fill only: no texture, specular, metabolism, glow, or pearls.
+Flat neutral fill only: two greys alternating by paint order (overlap
+neighbors contrast) plus dark pearl-bed placeholder discs in bays.
+No texture, specular, metabolism, or glow.
 Question: silhouette family? teardrop plates? imbricated (not tiered) overlap?</p>
 <h2>Reference vs candidates at 3x</h2>
 <div class="row"><figure class="ref"><img src="reference-crop.png" alt="approved Plated reference"><figcaption>approved reference</figcaption></figure><span id="big" style="display:contents"></span></div>
