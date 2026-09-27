@@ -1,29 +1,25 @@
 /**
- * Plated metabolism proof — procedural renderer, revision 2 (isolated prototype).
+ * Plated metabolism proof — procedural renderer, revision 3 (isolated prototype).
  *
- * Design Partner review (DESIGN TENSION) found revision 1 too flat/graphic:
- * opaque plates, blocky cell-noise, stacked disks, symbolic star highlights,
- * and value/coverage doing the work of biological activity. This revision
- * reworks the material grammar around the approved dark-sapphire reference:
+ * Design review found revision 2 still too graphic: rectangular cell grid
+ * (brickwork read), stacked bands instead of individual shells, placed (not
+ * embedded) pearls, opaque material. This revision restructures the base
+ * rendering model (metabolism mapping is unchanged in spirit):
  *
- * a. curved overlapping shell/teardrop plate masks (tapered tops);
- * b. dark interstitial recesses between plates;
- * c. cyan/pearl rim and ridge lighting following plate curvature;
- * d. cellular detail as dark-walled cells with modulated interiors, clipped
- *    to plate interiors (never blocky filled squares);
- * e. round shaded bead/pearl inclusions concentrated in seams and
- *    interstices (never crosses/stars);
- * f. metabolism-driven seam continuity, subsurface glow, inclusion density;
- * g. no symbolic highlights anywhere;
- * h. highlight clusters as ridge arcs, never scattered symbols;
- * i. LOD simplification that drops detail in order: speckle, then cells,
- *    then pearls — plates, rims, and seams survive to 16px.
- *
- * Kept from revision 1: structure derives only from family + non-metabolism
- * quantized inputs + seed (metabolism cannot move plates); activity channels
- * use seeded per-element thresholds (lit iff M > t: monotonic, stable,
- * deterministic). Plate BASE brightness is near-constant across M — higher
- * metabolism reads as more activity WITHIN the same material, not recolor.
+ * - Individually parameterized shell/teardrop plates: own center, radii,
+ *   top taper, horizontal lean, and light angle. Painted strictly
+ *   back-to-front (strong overlap occlusion).
+ * - Per-plate curvature lighting: surface normals from finite differences of
+ *   the mask function; ridge response follows real curvature, not arcs.
+ * - Irregular cellular interiors: per-plate Voronoi diagrams from seeded
+ *   points (no rectangular grid anywhere). Dark walls where nearest and
+ *   second-nearest seeds nearly tie; interiors shaded per Voronoi cell.
+ * - Gap-derived pearls: candidate slots sampled from actual inter-plate gap
+ *   pixels (inside mound, outside all plates), clustered, round and shaded.
+ * - Metabolism as interior emission: cell-interior brightness, seam
+ *   continuity, subsurface lift. Plate base brightness is constant in M.
+ * - Three material variants over one renderer: translucent / specular /
+ *   dark-bio. Same inputs, same masks, same silhouette — material differs.
  *
  * Reads PR 29 phenotype meaning (ResolvedPhenotype) without duplicating it.
  * No sim-core / sim-runtime imports (asserted in validation). No sim RNG.
@@ -44,15 +40,15 @@ export function activityOf(m: number): number {
 
 /** Deterministic 0..1 hash from integers (presentation-side only). */
 export function hash01(...ns: number[]): number {
-  let x = 0x811c9dc5;
+  let a = 0x811c9dc5;
   for (const n of ns) {
-    x ^= (n | 0) + 0x9e3779b9 + (x << 6) + (x >>> 2);
-    x = Math.imul(x, 0x01000193) >>> 0;
+    a ^= (n | 0) + 0x9e3779b9 + (a << 6) + (a >>> 2);
+    a = Math.imul(a, 0x01000193) >>> 0;
   }
-  x ^= x >>> 13;
-  x = Math.imul(x, 0x5bd1e995) >>> 0;
-  x ^= x >>> 15;
-  return (x >>> 0) / 4294967296;
+  a ^= a >>> 13;
+  a = Math.imul(a, 0x5bd1e995) >>> 0;
+  a ^= a >>> 15;
+  return (a >>> 0) / 4294967296;
 }
 
 export interface RGB {
@@ -68,7 +64,7 @@ export const PLATED_PALETTE = {
   plateDeep: { r: 20, g: 44, b: 104 },
   plateMid: { r: 34, g: 78, b: 156 },
   plateHi: { r: 88, g: 140, b: 208 },
-  wall: { r: 14, g: 30, b: 70 },
+  wall: { r: 13, g: 28, b: 66 },
   pearl: { r: 226, g: 208, b: 172 },
   amber: { r: 232, g: 168, b: 104 },
   seam: { r: 104, g: 214, b: 238 },
@@ -76,47 +72,96 @@ export const PLATED_PALETTE = {
   subsurface: { r: 52, g: 120, b: 200 },
 };
 
-interface Plate {
+export type MaterialVariant = "translucent" | "specular" | "darkbio";
+
+export interface MaterialParams {
+  /** Base plate brightness multiplier. */
+  base: number;
+  /** Top-light gradient strength. */
+  topLight: number;
+  /** Ridge/specular response strength. */
+  specular: number;
+  /** Wall darkness (1 = full wall color). */
+  wallStrength: number;
+  /** Emission (interior brightness from M). */
+  emission: number;
+  /** Seam brightness multiplier. */
+  seamBoost: number;
+  /** Subsurface lift strength. */
+  subsurface: number;
+  /** Pearl brightness multiplier. */
+  pearlBoost: number;
+}
+
+export const MATERIALS: Record<MaterialVariant, MaterialParams> = {
+  // Softer translucent plates: lighter base, gentler walls, strong subsurface.
+  translucent: { base: 1.12, topLight: 0.22, specular: 0.7, wallStrength: 0.7, emission: 0.9, seamBoost: 0.9, subsurface: 1.3, pearlBoost: 0.95 },
+  // Stronger pearlescent/specular plates: bright ridges, crisp walls.
+  specular: { base: 1.0, topLight: 0.34, specular: 1.4, wallStrength: 1.0, emission: 1.0, seamBoost: 1.1, subsurface: 0.8, pearlBoost: 1.15 },
+  // Darker biological plates with brighter interstitial glow.
+  darkbio: { base: 0.8, topLight: 0.26, specular: 0.9, wallStrength: 1.1, emission: 1.2, seamBoost: 1.5, subsurface: 1.5, pearlBoost: 1.0 },
+};
+
+export interface ShellPlate {
   cx: number;
   cy: number;
   rx: number;
   ry: number;
+  /** Top taper <1 (shell/teardrop); bottom stays round. */
+  taper: number;
+  /** Horizontal skew of the shell. */
+  lean: number;
+  /** Light direction angle for curvature response. */
+  lightAng: number;
   depth: number;
 }
 
 /**
- * Fixed shell/teardrop plate layout. Inputs EXCLUDE metabolism and seed
- * position jitter: identical quantized inputs always produce identical plate
- * geometry. Tops taper (shell-like); bottoms stay full and round.
+ * Fixed shell layout. Inputs EXCLUDE metabolism and seed position jitter:
+ * identical quantized inputs always produce identical plate geometry.
  */
-export function plateLayout(res: ResolvedPhenotype, _seed: number): Plate[] {
+export function plateLayout(res: ResolvedPhenotype, _seed: number): ShellPlate[] {
   const q = res.quantized;
   const wide = 1 + q.elongation * 0.1;
   const tall = 1 + q.bulk * 0.08;
-  const lean = (q.asymmetry - 0.5) * 0.08;
-  const base: Array<[number, number, number, number]> = [
-    [0.5 + lean * 0.3, 0.64, 0.35 * wide, 0.2 * tall],
-    [0.3 + lean * 0.2, 0.52, 0.23 * wide, 0.17 * tall],
-    [0.7 + lean * 0.2, 0.52, 0.23 * wide, 0.17 * tall],
-    [0.5, 0.4, 0.26 * wide, 0.18 * tall],
-    [0.37, 0.25, 0.17 * wide, 0.13 * tall],
-    [0.63, 0.25, 0.17 * wide, 0.13 * tall],
+  const leanBase = (q.asymmetry - 0.5) * 0.08;
+  const defs: Array<[number, number, number, number, number, number, number]> = [
+    // cx, cy, rx, ry, taper, lean, lightAng
+    [0.5 + leanBase * 0.3, 0.64, 0.35 * wide, 0.2 * tall, 0.62, 0.0, 2.4],
+    [0.3 + leanBase * 0.2, 0.52, 0.23 * wide, 0.17 * tall, 0.55, -0.12, 2.2],
+    [0.7 + leanBase * 0.2, 0.52, 0.23 * wide, 0.17 * tall, 0.55, 0.12, 2.6],
+    [0.5, 0.4, 0.26 * wide, 0.18 * tall, 0.5, 0.0, 2.4],
+    [0.37, 0.25, 0.17 * wide, 0.13 * tall, 0.45, -0.08, 2.1],
+    [0.63, 0.25, 0.17 * wide, 0.13 * tall, 0.45, 0.08, 2.7],
   ];
-  return base.map(([cx, cy, rx, ry], i) => ({ cx, cy, rx, ry, depth: i }));
+  return defs.map(([cx, cy, rx, ry, taper, lean, lightAng], i) => ({ cx, cy, rx, ry, taper, lean, lightAng, depth: i }));
 }
 
-/** Teardrop mask: 1 inside, rim band, angle; 0 outside. Tapered tops. */
-function shellMask(
-  nx: number, ny: number, pl: Plate,
-): { inside: boolean; d: number; upperLeft: boolean } {
-  const dx = (nx - pl.cx) / pl.rx;
-  let dy = (ny - pl.cy) / pl.ry;
-  if (dy < 0) dy /= 0.55;
-  const d = dx * dx + dy * dy;
-  if (d > 1) return { inside: false, d, upperLeft: false };
-  const ang = Math.atan2(dy, dx);
-  const upperLeft = ang > Math.PI * 0.55 && ang < Math.PI * 1.15;
-  return { inside: true, d, upperLeft };
+/** Shell mask with taper + lean; returns inside flag, depth value, normal. */
+function shellField(
+  nx: number, ny: number, pl: ShellPlate,
+): { inside: boolean; d: number; nx: number; ny: number } {
+  const sx = nx - pl.cx - pl.lean * (ny - pl.cy);
+  let sy = (ny - pl.cy) / pl.ry;
+  const ryEff = sy < 0 ? pl.ry * (0.55 + 0.45 * pl.taper) : pl.ry;
+  sy = (ny - pl.cy) / ryEff;
+  const dx = sx / pl.rx;
+  const d = dx * dx + sy * sy;
+  if (d > 1) return { inside: false, d, nx: 0, ny: 0 };
+  // Surface normal via finite differences of the field.
+  const e = 0.004;
+  const fx = (px: number, py: number): number => {
+    const qx = (px - pl.cx - pl.lean * (py - pl.cy)) / pl.rx;
+    let qy = (py - pl.cy) / pl.ry;
+    if (qy < 0) qy /= 0.55 + 0.45 * pl.taper;
+    return qx * qx + qy * qy;
+  };
+  let gx = (fx(nx + e, ny) - fx(nx - e, ny)) / (2 * e);
+  let gy = (fx(nx, ny + e) - fx(nx, ny - e)) / (2 * e);
+  const len = Math.hypot(gx, gy) || 1;
+  gx /= len;
+  gy /= len;
+  return { inside: true, d, nx: gx, ny: gy };
 }
 
 export interface PlatedPixels {
@@ -151,19 +196,50 @@ export function lodBudget(size: number): LodBudget {
   return { cells: true, pearls: 26, speckle: true, seams: true };
 }
 
+interface Voronoi {
+  px: number[];
+  py: number[];
+  tone: number[];
+}
+
+/** Seeded Voronoi sites in normalized plate-local coords (fixed count). */
+function voronoiSites(seed: number, pi: number, count: number): Voronoi {
+  const px: number[] = [];
+  const py: number[] = [];
+  const tone: number[] = [];
+  const grid = Math.ceil(Math.sqrt(count));
+  let i = 0;
+  for (let gy = 0; gy < grid && i < count; gy++) {
+    for (let gx = 0; gx < grid && i < count; gx++) {
+      px.push((gx + 0.15 + 0.7 * hash01(seed, pi, 500 + i)) / grid * 2 - 1);
+      py.push((gy + 0.15 + 0.7 * hash01(seed, pi, 600 + i)) / grid * 2 - 1);
+      tone.push(0.85 + 0.3 * hash01(seed, pi, 700 + i));
+      i++;
+    }
+  }
+  return { px, py, tone };
+}
+
 /**
  * Render one Plated organism. res supplies family/structure/seed; m is raw
- * normalized metabolism (0.10..0.90); size is the LOD output (128/64/32/16).
+ * normalized metabolism (0.10..0.90); size is the LOD output; variant selects
+ * the material parameter set (same inputs, same silhouette).
  */
-export function renderPlated(res: ResolvedPhenotype, m: number, size: number): PlatedPixels {
+export function renderPlated(
+  res: ResolvedPhenotype,
+  m: number,
+  size: number,
+  variant: MaterialVariant = "translucent",
+): PlatedPixels {
   if (res.family !== "plated") throw new Error(`plated renderer got family ${res.family}`);
   const a = activityOf(m);
+  const mat = MATERIALS[variant];
   const seed = res.cosmeticSeed >>> 0;
   const budget = lodBudget(size);
   const kind = new Uint8Array(size * size);
   const rgb = new Uint8Array(size * size * 3);
   const plates = plateLayout(res, seed);
-  const cellScale = 0.24;
+  const vorSites = plates.map((_, pi) => voronoiSites(seed, pi, 26));
 
   const paint = (x: number, y: number, k: number, c: RGB): void => {
     if (x < 0 || y < 0 || x >= size || y >= size) return;
@@ -186,12 +262,25 @@ export function renderPlated(res: ResolvedPhenotype, m: number, size: number): P
     }
   }
 
-  // Plates back-to-front.
+  // Gap map: pixels inside the mound but outside every plate (pearl beds).
+  const gapAt = (nx: number, ny: number): boolean => {
+    if (!mound(nx * size - 0.5, ny * size - 0.5)) return false;
+    for (const pl of plates) {
+      if (shellField(nx, ny, pl).inside) return false;
+    }
+    return true;
+  };
+
+  // Plates back-to-front (strong overlap occlusion by paint order).
   plates.forEach((pl, pi) => {
     const shade = 0.78 + (pi / plates.length) * 0.3;
+    const lx = Math.cos(pl.lightAng);
+    const ly = Math.sin(pl.lightAng);
+    const sites = vorSites[pi]!;
     // Overlap shadow halo: narrow dark-sapphire band so each shell reads as
-    // overlapping the shell behind it.
-    const halo = 1.5 / size;
+    // overlapping the shell behind it. Halo narrows at small LODs: a fixed
+    // 1.5px band would bury back-plate rims (and their seams) entirely.
+    const halo = (size >= 64 ? 1.5 : 0.75) / size;
     for (let y = 0; y < size; y++) {
       for (let x = 0; x < size; x++) {
         const nx = (x + 0.5) / size;
@@ -209,67 +298,95 @@ export function renderPlated(res: ResolvedPhenotype, m: number, size: number): P
       for (let x = 0; x < size; x++) {
         const nx = (x + 0.5) / size;
         const ny = (y + 0.5) / size;
-        const s = shellMask(nx, ny, pl);
+        const s = shellField(nx, ny, pl);
         if (!s.inside) continue;
-        // Base shell: top-light gradient, near-constant across M (tension 5:
-        // metabolism adds activity WITHIN the material, not recolor).
-        const light = 0.84 + 0.3 * (1 - ny) + 0.04 * a;
-        const r = Math.min(255, Math.round(PLATED_PALETTE.plateDeep.r * shade * light + 8));
-        const g = Math.min(255, Math.round(PLATED_PALETTE.plateDeep.g * shade * light + 10));
-        const b = Math.min(255, Math.round(PLATED_PALETTE.plateDeep.b * shade * light + 14));
-        paint(x, y, K_PLATE, { r, g, b });
-        // Ridge lighting: pearl-cyan arc on the upper-left curvature.
-        if (s.d > 0.62 && s.upperLeft) {
-          const rb = 0.55 + 0.3 * a;
-          paint(x, y, K_RIDGE, {
-            r: Math.round(PLATED_PALETTE.ridge.r * rb),
-            g: Math.round(PLATED_PALETTE.ridge.g * rb),
-            b: Math.round(PLATED_PALETTE.ridge.b * rb),
-          });
+        // Base shell: top-light gradient, CONSTANT in M (metabolism reads as
+        // interior activity, never recolor).
+        const light = (0.84 + mat.topLight * (1 - ny)) * mat.base;
+        paint(x, y, K_PLATE, {
+          r: Math.min(255, Math.round(PLATED_PALETTE.plateDeep.r * shade * light + 8)),
+          g: Math.min(255, Math.round(PLATED_PALETTE.plateDeep.g * shade * light + 10)),
+          b: Math.min(255, Math.round(PLATED_PALETTE.plateDeep.b * shade * light + 14)),
+        });
+        // Ridge response from real surface curvature vs the plate light dir.
+        const facing = Math.max(0, -(s.nx * lx + s.ny * ly));
+        if (s.d > 0.55 && facing > 0.45) {
+          const rb = facing * mat.specular * (0.5 + 0.3 * a);
+          const cur = kind[y * size + x];
+          if (cur === K_PLATE) {
+            paint(x, y, K_RIDGE, {
+              r: Math.min(255, Math.round(PLATED_PALETTE.ridge.r * rb)),
+              g: Math.min(255, Math.round(PLATED_PALETTE.ridge.g * rb)),
+              b: Math.min(255, Math.round(PLATED_PALETTE.ridge.b * rb)),
+            });
+          }
         }
         // Seam rim: continuity + brightness grow with M. Evaluated before
-        // the cells gate so seams survive at small LODs (tension: 16px must
-        // still order M0..M4).
+        // the cells gate so seams survive at small LODs (16px ordering).
         if (budget.seams && s.d > 0.8 && s.d <= 1) {
           const order = hash01(seed, pi, x, y);
           if (order < 0.25 + 0.7 * a) {
-            const sb = 0.35 + 0.65 * a;
+            const sb = (0.35 + 0.65 * a) * mat.seamBoost;
             paint(x, y, K_SEAM, {
-              r: Math.round(PLATED_PALETTE.seam.r * sb),
-              g: Math.round(PLATED_PALETTE.seam.g * sb),
-              b: Math.round(PLATED_PALETTE.seam.b * sb),
+              r: Math.min(255, Math.round(PLATED_PALETTE.seam.r * sb)),
+              g: Math.min(255, Math.round(PLATED_PALETTE.seam.g * sb)),
+              b: Math.min(255, Math.round(PLATED_PALETTE.seam.b * sb)),
             });
           }
         }
         if (!budget.cells) continue;
-        // Cellular detail: dark walls + modulated interiors, clipped inside.
-        const gx = nx * size * cellScale + (Math.floor(ny * size * cellScale) % 2) * 0.5;
-        const gy = ny * size * cellScale;
-        const fx = gx - Math.floor(gx);
-        const fy = gy - Math.floor(gy);
-        const wallDist = Math.min(fx, 1 - fx, fy, 1 - fy);
-        if (wallDist < 0.16 && s.d < 0.9) {
-          paint(x, y, K_WALL, PLATED_PALETTE.wall);
+        // Voronoi interior: nearest/second-nearest seeded sites in plate space.
+        const lx0 = ((nx - (pl.cx - pl.rx)) / (2 * pl.rx)) * 2 - 1;
+        const ly0 = ((ny - (pl.cy - pl.ry)) / (2 * pl.ry)) * 2 - 1;
+        let best = Infinity;
+        let second = Infinity;
+        let bestTone = 1;
+        for (let vi = 0; vi < sites.px.length; vi++) {
+          const ddx = lx0 - sites.px[vi]!;
+          const ddy = ly0 - sites.py[vi]!;
+          const dd = ddx * ddx + ddy * ddy;
+          if (dd < best) {
+            second = best;
+            best = dd;
+            bestTone = sites.tone[vi]!;
+          } else if (dd < second) {
+            second = dd;
+          }
+        }
+        // Dark walls where two cells nearly tie.
+        if (second - best < 0.02 && s.d < 0.92) {
+          const w = PLATED_PALETTE.wall;
+          const ws = mat.wallStrength;
+          paint(x, y, K_WALL, {
+            r: Math.min(255, Math.round(w.r * ws + 6)),
+            g: Math.min(255, Math.round(w.g * ws + 6)),
+            b: Math.min(255, Math.round(w.b * ws + 8)),
+          });
           continue;
         }
-        const t = hash01(seed, pi, Math.floor(gx), Math.floor(gy));
-        const interior = 0.9 + 0.2 * hash01(seed, pi, Math.floor(gx) + 999, Math.floor(gy));
-        const litAt = 0.92 - 0.78 * a;
+        // Cell interior: per-cell tone + metabolism emission.
+        const t = hash01(seed, pi, Math.floor(best * 997));
+        const litAt = 0.9 - 0.75 * a;
         if (t > litAt && s.d < 0.86) {
-          const glow = 0.55 + 0.45 * a;
+          const glow = (0.5 + 0.5 * a) * bestTone;
           paint(x, y, K_CELL, {
-            r: Math.round(PLATED_PALETTE.plateHi.r * glow * interior),
-            g: Math.round(PLATED_PALETTE.plateHi.g * glow * interior),
-            b: Math.round(PLATED_PALETTE.plateHi.b * glow * interior),
+            r: Math.min(255, Math.round(PLATED_PALETTE.plateHi.r * glow)),
+            g: Math.min(255, Math.round(PLATED_PALETTE.plateHi.g * glow)),
+            b: Math.min(255, Math.round(PLATED_PALETTE.plateHi.b * glow)),
           });
-          // Subsurface lift on already-dark neighbors (soft, restrained).
           if (t > litAt + 0.05 && a > 0.3) {
             const jx = x + (hash01(seed, pi, x, y) > 0.5 ? 1 : -1);
             const jy = y + (hash01(seed, pi, y, x) > 0.5 ? 1 : -1);
             if (jx >= 0 && jy >= 0 && jx < size && jy < size) {
               const j = jy * size + jx;
               if (kind[j] === K_PLATE) {
-                paint(jx, jy, K_SUB, PLATED_PALETTE.subsurface);
+                const sm = PLATED_PALETTE.subsurface;
+                const ss = mat.subsurface;
+                paint(jx, jy, K_SUB, {
+                  r: Math.min(255, Math.round(sm.r * ss)),
+                  g: Math.min(255, Math.round(sm.g * ss)),
+                  b: Math.min(255, Math.round(sm.b * ss)),
+                });
               }
             }
           }
@@ -278,37 +395,38 @@ export function renderPlated(res: ResolvedPhenotype, m: number, size: number): P
     }
   });
 
-  // Interstitial bead pearls: round shaded beads in seam/interstice zones.
-  // Slots are ordered once by seeded key and filled as a PREFIX of length
-  // pearlCount(a): higher metabolism adds pearls without moving or removing
-  // existing ones, so sets nest across M (monotonic by construction).
-  const slots: Array<{ order: number; s: number }> = [];
-  for (let s = 0; s < 26; s++) slots.push({ order: hash01(seed, 779, s), s });
-  slots.sort((p, q) => p.order - q.order);
-  const take = Math.min(budget.pearls, slots.filter((sl) => sl.order <= 0.12 + 0.8 * a).length);
-  for (let k = 0; k < take; k++) {
-    const s = slots[k]!.s;
-    const px = hash01(seed, 777, s);
-    const py = hash01(seed, 778, s);
-    const cx = Math.floor(px * size);
-    const cy = Math.floor((0.3 + py * 0.55) * size);
-    const r = Math.max(1, Math.round(size / 64) + (s % 2));
-    const amber = hash01(seed, 780, s) > 0.45;
+  // Gap-derived pearl clusters: seeded points sampled from actual gap pixels.
+  const gapPts: Array<[number, number]> = [];
+  {
+    let guard = 0;
+    while (gapPts.length < 40 && guard++ < 4000) {
+      const gx = hash01(seed, 9000 + guard);
+      const gy = 0.3 + hash01(seed, 9100 + guard) * 0.55;
+      if (gapAt(gx, gy)) gapPts.push([Math.floor(gx * size), Math.floor(gy * size)]);
+    }
+  }
+  gapPts.sort((p, q) => hash01(seed, p[0], p[1]) - hash01(seed, q[0], q[1]));
+  const takePearls = Math.min(budget.pearls, gapPts.length);
+  const wantPearls = Math.min(takePearls, Math.round(2 + 20 * a));
+  for (let k = 0; k < wantPearls; k++) {
+    const [cx, cy] = gapPts[k]!;
+    const r = Math.max(1, Math.round(size / 64) + (k % 2));
+    const amber = hash01(seed, 780, k) > 0.45;
     const col = amber ? PLATED_PALETTE.amber : PLATED_PALETTE.pearl;
+    const pb = mat.pearlBoost;
     for (let dy = -r; dy <= r; dy++) {
       for (let dx = -r; dx <= r; dx++) {
         if (dx * dx + dy * dy > r * r) continue;
         if (cx + dx < 0 || cy + dy < 0 || cx + dx >= size || cy + dy >= size) continue;
         const i = (cy + dy) * size + (cx + dx);
         if (kind[i] === K_BG) continue;
-        // Round bead shading: bright upper-left dot, warm body.
         const edge = dx * dx + dy * dy >= (r - 0.5) * (r - 0.5);
         const hi = dx <= 0 && dy <= 0 && !edge;
         const cc = hi
           ? { r: 244, g: 238, b: 222 }
           : edge
             ? { r: Math.round(col.r * 0.55), g: Math.round(col.g * 0.55), b: Math.round(col.b * 0.6) }
-            : col;
+            : { r: Math.min(255, Math.round(col.r * pb)), g: Math.min(255, Math.round(col.g * pb)), b: Math.min(255, Math.round(col.b * pb)) };
         paint(cx + dx, cy + dy, K_PEARL, cc);
       }
     }

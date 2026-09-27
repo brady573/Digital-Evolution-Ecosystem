@@ -130,7 +130,29 @@ for (const s of samples) {
 }
 console.log("input ranges: PASS (metabolism raw inside [0.04, 0.5]; M values are handoff samples)");
 
-// 8. Simulation isolation: no sim-core/sim-runtime imports; no RNG consumption.
+// 8. Material variants share inputs and silhouette (round-3 acceptance shape).
+{
+  const m2 = samples.find((s) => s.label === "M2")!;
+  const renders = (["translucent", "specular", "darkbio"] as const).map((v) => ({
+    v,
+    p: renderPlated(m2.res, m2.m, 128, v),
+  }));
+  for (const { v, p } of renders) {
+    const again = renderPlated(m2.res, m2.m, 128, v);
+    assert.deepEqual([...again.rgb], [...p.rgb], `variant ${v} deterministic`);
+  }
+  const sils = renders.map(({ p }) => silhouette(p));
+  for (let i = 1; i < sils.length; i++) {
+    assert.equal(silhouetteIoU(sils[0]!, sils[i]!), 1, `variant ${renders[i]!.v} shares silhouette exactly`);
+  }
+  const b64 = (p: { rgb: Uint8Array }) => Buffer.from(p.rgb).toString("base64");
+  assert.ok(
+    b64(renders[0]!.p) !== b64(renders[1]!.p) && b64(renders[1]!.p) !== b64(renders[2]!.p),
+    "variants differ materially (not relabels of one render)",
+  );
+  console.log("material variants: PASS (identical inputs+s silhouette, three distinct materials)");
+}
+// 9. Simulation isolation: no sim-core/sim-runtime imports; no RNG consumption.
 {
   const dir = dirname(fileURLToPath(import.meta.url));
   for (const f of readdirSync(dir).filter((x) => x.endsWith(".ts"))) {
