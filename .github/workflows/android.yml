@@ -169,39 +169,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      # Resolve the SDK root in a step, because the cache path needs it and
-      # `${{ env.ANDROID_HOME }}` does NOT work: ANDROID_HOME is a variable of
-      # the runner's *shell environment*, not part of the Actions `env` context,
-      # so it resolves to the empty string there. The first version of this cache
-      # silently resolved its path to `/system-images`, which restored nothing and
-      # saved nothing -- a miss that looked like a cold cache and never populated.
-      # The shell fallback is kept so a runner with a different layout still works.
-      - name: Resolve Android SDK path
-        id: sdk
-        run: echo "root=${ANDROID_HOME:-/usr/local/lib/android/sdk}" >> "$GITHUB_OUTPUT"
-      # The system image is the emulator action's largest download and is spent
-      # BEFORE the emulator starts, so it is a distinct cost in the log: 62s of a
-      # 636s job on main, 51s on the miss run.
-      #
-      # This caches the image directory, deliberately, and not the SDK root. The
-      # whole-SDK cache was tried and cannot work: the SDK root contains special
-      # files that tar cannot recreate with correct ownership, so every restore
-      # failed with "Cannot utime: Operation not permitted" and the cache was
-      # never populated -- a 152s-per-run cost behind a fallback that already
-      # worked. `system-images/` is ordinary files, so it is a different failure
-      # mode rather than a narrower version of the same one. See #50.
-      #
-      # Advisory: a miss costs one download, never correctness. The key includes
-      # the image identifier, so changing api-level, target, or arch invalidates
-      # it instead of restoring a mismatched image.
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ${{ steps.sdk.outputs.root }}/system-images
-          # Separator-free on purpose: actions/cache keys end up in internal
-          # paths and header values, and the canonical image identifier contains
-          # semicolons. android34-google_apis-x86_64 is the same identity, safely.
-          key: android-system-images-${{ runner.os }}-android${{ env.ANDROID_API_LEVEL }}-${{ env.ANDROID_TARGET }}-${{ env.ANDROID_ARCH }}
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: digital-evolution-debug-apk
           path: /tmp/apk
@@ -281,14 +248,29 @@ jobs:
             if [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" != "1" ]; then echo "infrastructure" > /tmp/dee-phase; echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) PHASE-1 infrastructure FAILED boot-not-completed" >> /tmp/dee-phases; echo "PHASE 1 FAILED (infrastructure): emulator did not finish booting. The device was not usable, so no application claim was made."; exit 1; fi
             echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) PHASE-1 infrastructure PASS" >> /tmp/dee-phases
             echo "Android infrastructure phase: PASS (adb device, boot completed)"
-            echo "application" > /tmp/dee-phase
             echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) PHASE-START-2 application" >> /tmp/dee-phases
-            adb install /tmp/apk/app-debug.apk
+            # The marker starts as `unknown`, not `application`. It used to be written
+            # `application` BEFORE any app interaction, so a device that had already died
+            # -- or an adb daemon that could not start -- still produced "the emulator
+            # was usable and the application phase failed. This red is a product or
+            # runtime failure." That run had ZERO output from `adb install` and from
+            # `am start`, and an `Unable to connect to adb daemon on port: 5037` 18
+            # minutes earlier. The emulator booted so slowly (1150s of a 1200s budget)
+            # that the device was not usable when the app phase began: the red was
+            # infrastructure wearing a product label, which is the one attribution
+            # error this lane exists to prevent. The marker is promoted to `application`
+            # only once the device is confirmed alive, and demoted to `infrastructure`
+            # if it dies mid-phase.
+            if [ "$(adb get-state 2>/dev/null)" != "device" ]; then echo "infrastructure" > /tmp/dee-phase; echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) PHASE-2 infrastructure FAILED device-gone-before-install" >> /tmp/dee-phases; echo "PHASE 2 FAILED (infrastructure): the emulator answered during the infrastructure phase but adb was no longer usable when the application phase began, so nothing about the application was tested."; exit 1; fi
+            echo "application" > /tmp/dee-phase
+            if ! adb install -r /tmp/apk/app-debug.apk 2>&1 | tee -a /tmp/dee-phases; then echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) PHASE-2 application FAILED install-failed" >> /tmp/dee-phases; echo "PHASE 2 FAILED (application): the device was alive but the debug APK did not install."; exit 1; fi
             adb logcat -c
             adb shell am start -n com.digitalevolution.explorer/.MainActivity
             for i in $(seq 1 30); do if adb shell pidof com.digitalevolution.explorer >/dev/null; then break; fi; sleep 2; done
-            APP_PID=$(adb shell pidof com.digitalevolution.explorer | tr -d '\r'); if [ -z "$APP_PID" ]; then echo "PHASE 2 FAILED (application): the emulator was usable but the app did not stay alive after MainActivity started."; exit 1; fi
-            if adb logcat -d --pid="$APP_PID" | grep -q "FATAL EXCEPTION"; then echo "PHASE 2 FAILED (application): the app threw a FATAL EXCEPTION after launch."; adb logcat -d --pid="$APP_PID" | grep -A8 "FATAL EXCEPTION" | head -40; exit 1; fi
+            APP_PID=$(adb shell pidof com.digitalevolution.explorer | tr -d '\r')
+            if [ -z "$APP_PID" ] && [ "$(adb get-state 2>/dev/null)" != "device" ]; then echo "infrastructure" > /tmp/dee-phase; echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) PHASE-2 infrastructure FAILED device-died-during-launch" >> /tmp/dee-phases; echo "PHASE 2 FAILED (infrastructure): the app never appeared and adb is no longer usable, so the device died rather than the app failing."; exit 1; fi
+            if [ -z "$APP_PID" ]; then echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) PHASE-2 application FAILED app-not-alive" >> /tmp/dee-phases; echo "PHASE 2 FAILED (application): the device stayed alive but the app did not stay alive after MainActivity started."; exit 1; fi
+            echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) PHASE-2 application FAILED fatal-exception" >> /tmp/dee-phases; adb logcat -d --pid="$APP_PID" | grep -A8 "FATAL EXCEPTION" | head -40 | tee -a /tmp/dee-phases; echo "PHASE 2 FAILED (application): the app threw a FATAL EXCEPTION after launch."; exit 1; fi
             echo ok > /tmp/dee-phase
             echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) PHASE-2 application PASS" >> /tmp/dee-phases
             echo "Android application phase: PASS (MainActivity alive, no fatal exceptions)"
