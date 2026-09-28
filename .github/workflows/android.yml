@@ -251,10 +251,28 @@ jobs:
           # it is absent, and absent is treated as infrastructure).
           script: |
             echo "unknown" > /tmp/dee-phase
-            if [ "$(adb get-state 2>/dev/null)" != "device" ]; then echo "infrastructure" > /tmp/dee-phase; echo "PHASE 1 FAILED (infrastructure): adb never reached device state (got '$(adb get-state 2>&1 | head -1)'). The emulator was not usable, so no application claim was made."; exit 1; fi
-            if [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" != "1" ]; then echo "infrastructure" > /tmp/dee-phase; echo "PHASE 1 FAILED (infrastructure): emulator did not finish booting. The device was not usable, so no application claim was made."; exit 1; fi
+          # MEASURE FROM THIS FILE, NOT FROM THE LOG.
+          #
+          # This action echoes every line of the script before running it, so
+          # every string below appears in the log at least twice: once as source
+          # and once as output. Grepping the log for a phase marker cannot tell
+          # them apart, and has twice produced a plausible-looking wrong number
+          # here -- one of them a *negative* duration, caught only because a
+          # negative is impossible. Timestamps do not rescue it either: the whole
+          # script is printed up front, so "this line ran" is timestamped at
+          # action start regardless of when it actually executed.
+          #
+          # So each phase appends a record here, written at the moment it runs.
+          # Parse this file. Treat the log as prose for humans only.
+          # The file is uploaded as an artifact so the timing evidence is durable
+          # instead of reconstructed by whoever reads the log next.
+            echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) PHASE-START-1 infrastructure" >> /tmp/dee-phases
+            if [ "$(adb get-state 2>/dev/null)" != "device" ]; then echo "infrastructure" > /tmp/dee-phase; echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) PHASE-1 infrastructure FAILED adb-not-device" >> /tmp/dee-phases; echo "PHASE 1 FAILED (infrastructure): adb never reached device state (got '$(adb get-state 2>&1 | head -1)'). The emulator was not usable, so no application claim was made."; exit 1; fi
+            if [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" != "1" ]; then echo "infrastructure" > /tmp/dee-phase; echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) PHASE-1 infrastructure FAILED boot-not-completed" >> /tmp/dee-phases; echo "PHASE 1 FAILED (infrastructure): emulator did not finish booting. The device was not usable, so no application claim was made."; exit 1; fi
+            echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) PHASE-1 infrastructure PASS" >> /tmp/dee-phases
             echo "Android infrastructure phase: PASS (adb device, boot completed)"
             echo "application" > /tmp/dee-phase
+            echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) PHASE-START-2 application" >> /tmp/dee-phases
             adb install /tmp/apk/app-debug.apk
             adb logcat -c
             adb shell am start -n com.digitalevolution.explorer/.MainActivity
@@ -262,7 +280,20 @@ jobs:
             APP_PID=$(adb shell pidof com.digitalevolution.explorer | tr -d '\r'); if [ -z "$APP_PID" ]; then echo "PHASE 2 FAILED (application): the emulator was usable but the app did not stay alive after MainActivity started."; exit 1; fi
             if adb logcat -d --pid="$APP_PID" | grep -q "FATAL EXCEPTION"; then echo "PHASE 2 FAILED (application): the app threw a FATAL EXCEPTION after launch."; adb logcat -d --pid="$APP_PID" | grep -A8 "FATAL EXCEPTION" | head -40; exit 1; fi
             echo ok > /tmp/dee-phase
+            echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) PHASE-2 application PASS" >> /tmp/dee-phases
             echo "Android application phase: PASS (MainActivity alive, no fatal exceptions)"
+
+      # The phase record, as an artifact. Without it the timing evidence exists
+      # only inside a log that cannot be parsed reliably, and the next person
+      # reconstructs it by hand from echoed script text.
+      - name: Upload Android phase record
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: android-phase-record
+          path: /tmp/dee-phases
+          if-no-files-found: ignore
+          retention-days: 30
 
       # Turns whatever happened above into exactly one classification. This step
       # exists so that a red on this job is never ambiguous: it either means the
