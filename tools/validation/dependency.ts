@@ -386,8 +386,13 @@ function testTradeoffHolds() {
   // Slice requirement: strong C-processing must cost enough that universal
   // maximal C use is not trivially optimal. Mechanism: BUC maintenance
   // (.010*bu^2 per active tick) against C yield 9 below primary yields.
-  // Guards the cost term against accidental removal; threshold has ~35%
-  // headroom over the highest surveyed maximum (0.73, abundant).
+  // Guards the cost term against accidental removal; threshold has 30%
+  // headroom over the highest surveyed maximum (0.7683, abundant). Measured
+  // on the current engine across 4 seeds x 4 regimes in
+  // testdata/provenance-0.22.0.json, which supersedes an earlier survey that
+  // put it at 0.73 with ~35% headroom: the threshold still holds, but the
+  // margin is thinner than that figure claimed, so the number is corrected
+  // rather than the assertion.
   const cases: Array<[string, EngineConfig]> = [
     ["balanced", fixtureConfig(FIXTURE_SEED)],
     ["abundant", { ...fixtureConfig(821947219), start: 2.01, prod: 3.76 }],
