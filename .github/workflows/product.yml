@@ -141,10 +141,19 @@ jobs:
       - name: Start one preview server for the whole browser lane
         run: |
           pnpm --filter @digital-evolution/explorer exec vite preview --host 127.0.0.1 --port 4173 >/tmp/digital-evolution-vite.log 2>&1 &
+          ready=0
           for i in {1..30}; do
-            if curl -fsS http://127.0.0.1:4173 >/dev/null; then break; fi
+            if curl -fsS http://127.0.0.1:4173 >/dev/null; then ready=1; break; fi
             sleep 1
           done
+          # Without this the lane would continue and fail deep inside the browser
+          # checks with ERR_CONNECTION_REFUSED, which reads like a product fault
+          # rather than the preview server never having started.
+          if [ "$ready" -ne 1 ]; then
+            echo "::error::vite preview did not become ready on 127.0.0.1:4173"
+            cat /tmp/digital-evolution-vite.log
+            exit 1
+          fi
       - name: ci-browser
         run: pnpm ci:group ci-browser
         env:
