@@ -49,12 +49,31 @@ jobs:
       # from a revision whose blocking product validation passed.
       - name: Require a passing product run for this commit
         id: product
+        env:
+          # The runner ships `gh` but does not authenticate it. Without this the
+          # lookup fails instantly and, under `set -e`, the gate dies before it
+          # has checked anything.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
+          lookup_failures=0
           for attempt in $(seq 1 90); do
-            found=$(gh run list --workflow product.yml --commit "$GITHUB_SHA" \
-                      --limit 5 --json databaseId,conclusion,status \
-                      --jq 'sort_by(.databaseId) | reverse | map(select(.status == "completed")) | .[0] // empty')
+            # A failed lookup is not the same as "no run yet": the run may not
+            # have started. Retry a few times, then stop, rather than either
+            # dying on a transient error or polling for half an hour behind a
+            # real permissions problem.
+            if ! found=$(gh run list --workflow product.yml --commit "$GITHUB_SHA" \
+                           --limit 5 --json databaseId,conclusion,status \
+                           --jq 'sort_by(.databaseId) | reverse | map(select(.status == "completed")) | .[0] // empty' 2>&1); then
+              lookup_failures=$((lookup_failures + 1))
+              echo "attempt $attempt: could not list product runs: $found"
+              if [ "$lookup_failures" -ge 5 ]; then
+                echo "::error::repeatedly failed to query workflow runs; check that the job's token has 'actions: read'."
+                exit 1
+              fi
+              sleep 20
+              continue
+            fi
             if [ -n "$found" ]; then
               run_id=$(echo "$found" | jq -r .databaseId)
               conclusion=$(echo "$found" | jq -r .conclusion)
