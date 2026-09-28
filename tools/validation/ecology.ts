@@ -77,6 +77,8 @@ for(const regime of ["balanced","patchwork","harsh"] as Regime[]){
       metaboliteCProduced:final.metrics.metabolite_c.produced,
       metaboliteCConsumed:final.metrics.metabolite_c.consumed,
       analysisRecords:(final.analysis.records as any[]).length,
+      nichePersistentPartitioning:final.metrics.niche_structure.persistent_partitioning,
+      nicheEffectiveNiches:final.metrics.niche_structure.effective_niches,
     });
   }
 }
@@ -93,6 +95,41 @@ assert.ok(
 );
 assert.ok(rows.some(r=>r.analysisRecords>0),"ecological interpretation must fire in the survey");
 assert.ok(new Set(rows.map(r=>r.finalPopulation)).size>1,"Survey must not collapse to one fixed population outcome");
+
+// Rare outcomes are valid, not failures. A run that goes extinct, or that never
+// partitions into persistent niches, must still be a COMPLETE record: it
+// reaches the horizon, every measured field is finite, and it is retained in
+// the rows so the evidence shows the outcome happened rather than hiding it.
+// Extinction was previously reported in the summary but never asserted, so a
+// survey that dropped or corrupted extinct runs would still have passed, and a
+// non-emergence outcome was indistinguishable from a broken measurement.
+for (const r of rows) {
+  const label = `${r.regime}/${r.seed}`;
+  for (const [key, value] of Object.entries(r)) {
+    if (typeof value === "number") {
+      assert.ok(Number.isFinite(value), `${label}: ${key} must be finite (rare outcome must stay measurable)`);
+    }
+  }
+  // A run that ended extinct must say so consistently, and must not be able to
+  // report a live population afterwards.
+  if (r.extinct) assert.equal(r.finalPopulation, 0, `${label}: an extinct run must report no final population`);
+}
+// Non-emergence is a recorded outcome, never a gate failure. These counts are
+// reported so the closure matrix can quote how often each feature did NOT
+// appear, rather than only the worlds where it did.
+const rareOutcomes = {
+  extinct: rows.filter((r: any) => r.extinct).length,
+  withoutPersistentPartitioning: rows.filter((r: any) => !r.nichePersistentPartitioning).length,
+  withoutDormancy: rows.filter((r: any) => !(r.maxDormantFraction > 0)).length,
+  withoutCrossfeeding: rows.filter((r: any) => !(r.maxCrossfeederFraction >= 0.04 || r.maxCEnergyShare >= 0.035)).length,
+  of: rows.length,
+};
+console.log(
+  `rare outcomes (valid, recorded, not failed): ${rareOutcomes.extinct} extinct, ` +
+  `${rareOutcomes.withoutPersistentPartitioning} without persistent partitioning, ` +
+  `${rareOutcomes.withoutDormancy} without dormancy, ` +
+  `${rareOutcomes.withoutCrossfeeding} without cross-feeding, of ${rareOutcomes.of}`,
+);
 
 const assay=new UniverseSession();
 assay.create(config(912367481,"harsh"));

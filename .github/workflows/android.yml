@@ -1,47 +1,69 @@
 name: android
 
+# Called from product.yml as a job (`uses: ./.github/workflows/android.yml`) so
+# that Android inherits the caller's DAG, artifact, and commit association.
+# `workflow_dispatch` is kept so the platform evidence can be re-proven on its
+# own without touching the product gates.
+#
+# The earlier version of this workflow ran independently and located the
+# product run for its own commit before packaging. That required inferring a
+# SHA, authenticating the `gh` CLI, and polling another workflow -- and it
+# failed three different ways in review (unauthenticated gh, `gh run list`
+# defaulting to the default branch, and GITHUB_SHA being the pull_request merge
+# commit while the run index is keyed by the branch head). Being called removes
+# the whole mechanism: `needs:` in the caller is the contract, and `explorer-dist`
+# is an artifact of the same workflow invocation.
 on:
-  pull_request:
-  push:
-    branches: [main]
+  workflow_call:
   workflow_dispatch:
 
+# The caller already scopes this to contents: read. Declared here so a manual
+# dispatch is not more privileged than a called run. No `actions: read` is
+# needed: the bundle comes from the same run, not from a looked-up one.
 permissions:
   contents: read
 
-# A new push cancels stale runs on the same ref: only the latest state
-# consumes runners.
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+# This workflow proves platform facts. It does not re-prove that the repository
+# is sound: the product gates it is called after have already done that for this
+# commit, and the caller only invokes it once they pass. The previous version
+# ran `pnpm verify` here as well, which cost 1158s of a 1451s job to assemble an
+# APK that takes 39s.
+#
+# The evidence ladder stays explicit and unchanged:
+#
+#   1. explorer-dist is the bundle the browser lane passed against
+#   2. the checked-in android/ project matches it            (android-sync)
+#   3. a debug APK is produced                              (android-assemble)
+#   4. Android's own static analysis passes                 (android-lint)
+#   5. it installs, launches, stays alive, does not crash    (android-install-launch)
+#
+# Nothing beyond launch is claimed. Native filesystem, share, and device
+# integration remain unvalidated, as before.
 
 jobs:
   apk:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: "24"
-          package-manager-cache: false
+      - uses: ./.github/actions/setup-project
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: "temurin"
           java-version: "21"
-      - run: corepack enable
-      - run: corepack prepare pnpm@12.5.1 --activate
-      - name: Pnpm store path
-        run: echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_ENV"
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+
+      # validation-unit: android-sync
+      # Same workflow invocation, so no run id and no token: this is the exact
+      # bundle the browser lane validated, not a rebuild of it.
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          path: ${{ env.STORE_PATH }}
-          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: pnpm-store-${{ runner.os }}-
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm verify
-      - run: pnpm --filter @digital-evolution/explorer exec cap sync android
+          name: explorer-dist
+          path: apps/explorer/dist
+
+      - name: Capacitor sync against the validated bundle
+        run: pnpm --filter @digital-evolution/explorer exec cap sync android
       - name: Detect Capacitor drift (checked-in android/ is authoritative)
         run: git diff --exit-code -- apps/explorer/android
+
       - name: Resolve Android SDK path (single variable for cache + sdkmanager)
         run: echo "ANDROID_SDK_ROOT=${ANDROID_HOME:-/usr/local/lib/android/sdk}" >> "$GITHUB_ENV"
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
@@ -52,16 +74,23 @@ jobs:
         run: |
           yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null
           "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0"
+      # Gradle-aware caching. The key includes the wrapper properties, so a
+      # toolchain change invalidates the cache rather than reusing build state
+      # produced by a different Gradle. Caches are advisory: a miss costs time,
+      # never correctness.
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('apps/explorer/android/**/*.gradle*', 'apps/explorer/android/gradle/wrapper/*') }}
+          key: gradle-${{ runner.os }}-${{ hashFiles('apps/explorer/android/gradle/wrapper/gradle-wrapper.properties', 'apps/explorer/android/**/*.gradle*') }}
           restore-keys: gradle-${{ runner.os }}-
+
+      # validation-unit: android-assemble
       - name: Assemble debug APK (packaging evidence only)
         working-directory: apps/explorer/android
         run: ./gradlew assembleDebug --no-daemon
+      # validation-unit: android-lint
       - name: Android lint (debug)
         working-directory: apps/explorer/android
         run: ./gradlew lintDebug --no-daemon
@@ -85,6 +114,7 @@ jobs:
         with:
           name: digital-evolution-debug-apk
           path: /tmp/apk
+      # validation-unit: android-install-launch
       - name: Emulator smoke (install + launch MainActivity)
         uses: reactivecircus/android-emulator-runner@4c44018e59b437e86cdfc41da381398f93ed8808 # v2
         with:

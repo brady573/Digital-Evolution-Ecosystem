@@ -447,9 +447,26 @@ function testSurveyArtifact() {
     assert.fail("niche survey artifact missing or unreadable: run pnpm test:niche-survey (manual, resume-safe) to retain testdata/niche-survey-0.22.json");
   }
   assert.equal(artifact.engine, ENGINE_VERSION, "artifact matches current engine");
-  assert.ok(Array.isArray(artifact.rows) && artifact.rows.length >= 15, "survey covers 5 seeds x 3 configs");
-  const configs = new Set(artifact.rows.map((r: any) => r.config));
-  for (const c of ["patchwork", "balanced", "harsh"]) assert.ok(configs.has(c), `survey covers ${c}`);
+  // Coverage is 8 seeds x 3 configs = 24 retained rows. The previous check was
+  // `rows.length >= 15` labelled "5 seeds x 3 configs", which both
+  // under-counted real coverage and would have passed with two thirds of the
+  // survey lost. Coverage is now proven per config, so a missing seed fails.
+  assert.ok(Array.isArray(artifact.rows), "survey rows are an array");
+  const SURVEY_CONFIGS = ["patchwork", "balanced", "harsh"] as const;
+  const seeds = [...new Set(artifact.rows.map((r: any) => r.seed))].sort((a: number, b: number) => a - b);
+  assert.ok(seeds.length >= 8, `survey covers 8 seeds (got ${seeds.length})`);
+  for (const c of SURVEY_CONFIGS) {
+    assert.equal(
+      artifact.rows.filter((r: any) => r.config === c).length,
+      seeds.length,
+      `${c}: every surveyed seed must be represented`,
+    );
+  }
+  assert.equal(
+    artifact.rows.length,
+    seeds.length * SURVEY_CONFIGS.length,
+    "survey has no partial or duplicated rows",
+  );
   const responses = new Set(artifact.rows.map((r: any) => r.response));
   assert.ok(responses.has("established"), "survey retains at least one establishment");
   assert.ok([...responses].some((r) => r !== "established"), "survey retains non-establishment");

@@ -45,21 +45,44 @@ While proot is flaky, a `pnpm install` can leave `tsc` reporting **phantom** `TS
 
 ## Commands
 
+Validation is defined in exactly one place: `tools/validation/manifest.ts`. Every command below is either a thin wrapper over that manifest or a deliberate single-unit escape hatch. The list in this file describes the interface; the manifest holds the meaning, and `pnpm validation:check` fails the build if the two disagree.
+
 | Task | Command |
 |---|---|
 | Install dependencies | `pnpm install --frozen-lockfile` |
-| Typecheck all packages | `pnpm typecheck` |
-| Deterministic parity gates | `pnpm test:migration` |
-| Ecological validation | `pnpm test:ecology` |
-| Multi-seed survey (CI-scale) | `pnpm test:survey -- --ticks=250000` (manual; results artifact, not part of `verify`) |
-| Production build | `pnpm build` |
-| Sync web assets to Android | `pnpm --filter @digital-evolution/explorer cap:sync` (after `build`) |
-| Full verification | `pnpm verify` (typecheck + migration + ecology + build) |
-| Browser smoke (needs Playwright Chromium) | `pnpm test:browser` against a `vite preview` server (see `.github/workflows/product.yml`) |
+| **Blocking repository contract** | `pnpm verify` |
+| Fast invariant gate only | `pnpm verify:fast` |
+| Deterministic product behaviour only | `pnpm verify:simulation` |
+| Presentation and build only | `pnpm verify:presentation` |
+| Browser behaviour (needs a `vite preview` server) | `pnpm verify:browser` |
+| Human-review evidence (needs a `vite preview` server) | `pnpm verify:evidence` |
+| Scientific characterisation (manual, long) | `pnpm verify:survey` |
 | Dev server | `pnpm dev` |
-| Landscape visual captures (needs Playwright Chromium + preview) | `pnpm test:visual` (manual; also runs in CI as non-gating evidence, PNGs uploaded as the `landscape-visual-evidence` artifact) |
+| Sync web assets to Android | `pnpm --filter @digital-evolution/explorer cap:sync` (after `pnpm build`) |
 
-**Before considering any change complete, run `pnpm verify`.** CI runs the same command plus the browser smoke (currently non-blocking, see issue #5).
+Single-unit escape hatches exist for iterating on one check (`pnpm test:ecology`, `pnpm test:browser`, `pnpm test:migration`, and the rest in `package.json`). They are not the completion contract: running one proves one claim, and `pnpm verify` proves the set.
+
+To see what CI will run, and what each check costs, use `pnpm validation:plan`. To see what a diff requires, use `pnpm validation:check` for the architecture gate and `pnpm ci:group <shard> --dry-run` to list a shard.
+
+### What `pnpm verify` does and does not include
+
+`pnpm verify` is the blocking **repository** contract: every claim provable in Node at full strength. It is not the whole of CI, by design. The evidence classes are distinct and each needs its own environment:
+
+| Class | Question | Runs in | Gates merges? |
+|---|---|---|---|
+| A `invariant` | Is the repository structurally sound? | `pnpm verify:fast` | yes |
+| B `deterministic` | Is exact supported behaviour still exact? | `pnpm verify:simulation` | yes |
+| C `presentation` | Does the product build, and do presentation contracts hold? | `pnpm verify:presentation` | yes |
+| D `browser` | Does it work in a real browser? | `pnpm verify:browser`, CI | yes |
+| E `platform` | Does the Android packaging integrate? | CI `android` workflow | yes |
+| F `scientific` | What actually happens across seeds and horizons? | `pnpm verify:survey` | no — manual |
+| G `evidence` | Can a human inspect it? | `pnpm verify:evidence`, CI | no — evidence only |
+
+The classes are not interchangeable. A Node run cannot prove browser correctness, a single seed cannot prove emergence, and an APK assembling says nothing about behaviour. A check is only ever moved between classes when the claim it proves changes, and that is a design decision rather than a refactor.
+
+Groups, unlike classes, are defined by *when* rather than *what*: `fast` is whatever a developer waits for before getting an answer, so it carries `decisions` (Class B) because 74 seconds of decision-policy checking is worth having early. `pnpm validation:check` asserts the CI fast shard runs exactly the same set, so "the fast gate" cannot mean two different things depending on which file someone edited.
+
+**Before considering any change complete, run `pnpm verify`.** Browser, platform, and evidence classes are gated separately by CI; scientific characterisation is manual by design.
 
 ### Prefer GitHub Actions over the device for validation
 
@@ -72,12 +95,12 @@ destroyed multi-minute `verify`, survey, and capture runs mid-flight.
 
 | Check | Where it should run |
 |---|---|
-| `pnpm typecheck` | Local. Fast enough (~1 min) to be worth the immediate answer. |
+| `pnpm verify:fast` | Local. ~1–2 min, and it answers most "is this structurally broken" questions. |
 | A single validation suite (`test:migration`, `test:niche`, `test:landscape`, `test:flows`) | Local, while iterating. |
-| Full `pnpm verify` | Either, but prefer **CI** once a change is more than a line or two. `quick` alone is ~1–2 min and gives most of the signal. |
-| `pnpm test:browser`, `pnpm test:visual` | **CI.** Both need Playwright Chromium plus a preview server, and the visual capture only reaches a meaningful world depth on CI hardware. |
-| `pnpm test:survey`, `test:niche-survey` | **CI or a machine that will not be interrupted.** Both are resume-safe; if one dies, re-run and it continues from the retained artifact. |
-| Android `apk` | **CI only.** ~22 minutes locally is not viable. |
+| Full `pnpm verify` | Either, but prefer **CI** once a change is more than a line or two. The CI `quick` shard runs the fast gate first, so a structural failure surfaces in about a minute. |
+| `pnpm verify:browser`, `pnpm verify:evidence` | **CI.** Both need Playwright Chromium plus a preview server, and the visual capture only reaches a meaningful world depth on CI hardware. |
+| `pnpm verify:survey` | **CI or a machine that will not be interrupted.** The surveys are resume-safe; if one dies, re-run and it continues from the retained artifact. |
+| Android packaging | **CI only.** Gradle and the emulator are not viable on the device. |
 
 Practical consequences:
 
@@ -90,9 +113,40 @@ Practical consequences:
 - Retrieve CI evidence artifacts instead of regenerating locally:
   `gh run download <run-id> -n landscape-visual-evidence -D <dir>`. Reading
   the captured PNGs caught two real rendering defects that every
-  statistical canvas assertion had passed.
+  statistical canvas assertion had passed. The `validation-summary` artifact
+  gives the per-unit cost and skip reason for a run.
 - When a local run dies from a restart, resume the resume-safe runner rather
   than restarting it; the retained artifact is the expensive part.
+
+### Adding or changing a check
+
+Validation knowledge is machine-readable in `tools/validation/manifest.ts`, and
+the CI workflows only choose which runner each shard lands on. To add a check:
+
+1. Add a `package.json` script for it.
+2. Add a unit to `UNITS` in the manifest: its `id`, `script`, evidence `cls`,
+   `enforcement` (blocking / evidence / manual), the `domains` whose change
+   forces it, and the `claim` it proves.
+3. Put it in a group. Blocking units go in exactly one `ci-*` shard and in
+   exactly one of `fast` / `simulation` / `presentation`, so `verify` and CI
+   cannot diverge.
+4. Run `pnpm validation:check`.
+
+That last step is the point. It fails if the unit is in no shard, in two shards,
+missing from `verify`, absent from `package.json`, or if a workflow has started
+running validation outside the manifest. Do not add a check by editing a
+workflow or by appending to a command chain — both are how the Android job came
+to re-run the whole repository contract for 19 minutes.
+
+Two conventions worth keeping:
+
+- **Shard by measured cost.** `baselineSeconds` in the manifest comes from real
+  CI runs, not estimates. A shard that is much longer than its siblings is the
+  critical path, and the fix is to move or split units, not to add runners.
+- **Splitting a suite must be provably lossless.** When `test:dependency` was
+  split across three shards, `test:validation-arch` was extended to assert that
+  the shards' `--only` lists union to exactly the suite's full test set. If you
+  split a suite, add the equivalent assertion.
 
 ## Architecture rules (enforced by review, not tooling)
 

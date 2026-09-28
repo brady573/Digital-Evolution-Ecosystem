@@ -1,5 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { chromium } from "playwright";
+import { ENGINE_VERSION } from "../../packages/sim-core/src/index.ts";
 
 /**
  * Issue #30 Slice 2 visual evidence: deterministic captures of the ordinary
@@ -279,7 +280,7 @@ async function main(){
     await decisionShell.close();
 
     writeFileSync(`${OUT_DIR}/MANIFEST.json`,JSON.stringify({
-      seed:SEED,engine:"0.22.0",preset:"Patchwork",
+      seed:SEED,engine:ENGINE_VERSION,preset:"Patchwork",
       captureTick:await readTick().catch(()=>null),
       wasteCellCoverage:+(load*100).toFixed(2),
       captures:written,

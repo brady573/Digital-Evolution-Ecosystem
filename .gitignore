@@ -20,3 +20,5 @@ apps/explorer/android/captain-hook.log
 # Local tooling
 .playwright/
 testdata/pixi-spike/
+# Validation run telemetry: a run byproduct, never committed evidence.
+validation-telemetry/

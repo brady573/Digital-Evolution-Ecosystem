@@ -16,7 +16,7 @@ import type { RenderResourceField, RenderWasteField } from "@digital-evolution/c
  *   (nutrient source geometry, patch gradients, organism-made waste), never
  *   from invented categorical terrain or an implied elevation/water model;
  * - no visual difference is carried by hue alone: luminance, saturation and
- *   a deterministic micro-pattern density all co-vary (see `hatchDensity`).
+ *   a deterministic micro-pattern density all co-vary (see `microTexture`).
  */
 
 /**
