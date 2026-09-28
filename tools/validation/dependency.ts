@@ -14,6 +14,57 @@ import { CHECKPOINT_SCHEMA_VERSION } from "../../packages/sim-runtime/src/sessio
 const FAST = process.argv.includes("--fast");
 
 /**
+ * The live-integration phase, as a name-to-function map.
+ *
+ * These five are the long deterministic runs: together they account for
+ * essentially all of this suite's cost, and the CI shards that cover them
+ * partition this map. They are grouped by name so `tools/validation/run.ts` can
+ * run a subset on a different runner while still executing every one of them
+ * across the DAG.
+ *
+ * `--list` prints the names, and `tools/validation/validation-arch.ts` asserts
+ * that the union of the shards' `--only` lists equals exactly this key set. That
+ * is what makes sharding this suite evidence-preserving rather than merely
+ * convenient: a dropped or duplicated test name fails the architecture gate.
+ */
+const LONG_TESTS = {
+  arc: testFixtureArc,
+  checkpoint: testWashoutCheckpoint,
+  possibility: testMultiSeedPossibility,
+  tradeoff: testTradeoffHolds,
+  washout: testWashoutReliance,
+} as const;
+
+type LongTestName = keyof typeof LONG_TESTS;
+
+if (process.argv.includes("--list")) {
+  for (const name of Object.keys(LONG_TESTS) as LongTestName[]) console.log(name);
+  process.exit(0);
+}
+
+/** `--only=a,b` restricts the live phase; default is all of it. */
+const onlyArg = process.argv.find((a) => a.startsWith("--only="));
+const selected: LongTestName[] = onlyArg
+  ? (onlyArg.slice("--only=".length).split(",") as LongTestName[])
+  : (Object.keys(LONG_TESTS) as LongTestName[]);
+
+/**
+ * `--skip-policy` omits the fast phase, so a long-phase shard does not
+ * re-execute policy invariants that another shard already proved. Every long
+ * test is independent of the policy arcs, so the union of the shards is the
+ * whole suite with nothing executed twice.
+ */
+const SKIP_POLICY = process.argv.includes("--skip-policy");
+
+for (const name of selected) {
+  if (!(name in LONG_TESTS)) {
+    console.error(`unknown dependency long test: ${name} (known: ${Object.keys(LONG_TESTS).join(", ")})`);
+    process.exit(2);
+  }
+}
+
+
+/**
  * Issue #30 Phase C1: C-dependency guild arcs. The guild is role-defined
  * (byproduct scavengers) and lineage-identified (top C-energy consumer):
  * lineage-level C commitment never exceeds ~15% energy share in surveyed
@@ -271,17 +322,19 @@ function testZeroPopulationSafe() {
   console.log("dependency extinction safety: PASS");
 }
 
-testFormAndEstablish();
-testFormAborted();
-testEstablishedRidesNoise();
-testDisruption();
-testProductionIsContextNotTripwire();
-testRecoverySameLineage();
-testRecoveryReplacement();
-testRecoveryNeedsFreshPersistence();
-testTopConsumerRanksAbsolute();
-testDiffuseGuildNamesNobody();
-testZeroPopulationSafe();
+if (!SKIP_POLICY) {
+  testFormAndEstablish();
+  testFormAborted();
+  testEstablishedRidesNoise();
+  testDisruption();
+  testProductionIsContextNotTripwire();
+  testRecoverySameLineage();
+  testRecoveryReplacement();
+  testRecoveryNeedsFreshPersistence();
+  testTopConsumerRanksAbsolute();
+  testDiffuseGuildNamesNobody();
+  testZeroPopulationSafe();
+}
 
 // --- Integration: full arc on one deterministic run --------------------------
 // Balanced seed 24681357 on current biology: drought_b @~60k delays the
@@ -479,12 +532,13 @@ function testWashoutCheckpoint() {
 }
 
 if (!FAST) {
-  testFixtureArc();
-  testWashoutCheckpoint();
-  testMultiSeedPossibility();
-  testTradeoffHolds();
-  testWashoutReliance();
-  console.log(`dependency validation: PASS (engine ${ENGINE_VERSION})`);
-} else {
+  for (const name of selected) {
+    LONG_TESTS[name]();
+  }
+  const scope = selected.length === Object.keys(LONG_TESTS).length
+    ? ""
+    : ` [long: ${selected.join(", ")}]`;
+  console.log(`dependency validation: PASS${scope} (engine ${ENGINE_VERSION})`);
+} else if (!SKIP_POLICY) {
   console.log(`dependency validation (fast): PASS (engine ${ENGINE_VERSION})`);
 }

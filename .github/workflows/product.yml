@@ -15,119 +15,119 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-jobs:
-  quick:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: "24"
-          package-manager-cache: false
-      - run: corepack enable
-      - run: corepack prepare pnpm@12.5.1 --activate
-      - name: Pnpm store path
-        run: echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_ENV"
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: pnpm-store-${{ runner.os }}-
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm typecheck
-      - run: pnpm test:migration
-      - run: pnpm test:decisions
-      - run: pnpm test:pixi-spike
+# Every job below is a thin wrapper: it bootstraps with the shared composite
+# action, then runs one shard from the canonical manifest. Which checks exist,
+# which class they belong to, and whether they block are all defined in
+# `tools/validation/manifest.ts` — never here. Adding a check to the repository
+# is a manifest edit; this file only says which runner it lands on.
+#
+# `tools/validation/validation-arch.ts` (in the `quick` shard) fails the build if
+# a manifest unit is not executed somewhere in CI, if a shard executes a unit
+# twice, or if this file starts running validation outside the manifest.
 
-  sim-a:
+jobs:
+  # Class A. First actionable failure: structural breakage surfaces here, in
+  # about a minute, without waiting behind a long simulation.
+  quick:
+    name: fast gate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: ./.github/actions/setup-project
+      - name: ci-fast
+        run: pnpm ci:group ci-fast
+      - name: Upload validation summary
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          node-version: "24"
-          package-manager-cache: false
-      - run: corepack enable
-      - run: corepack prepare pnpm@12.5.1 --activate
-      - name: Pnpm store path
-        run: echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_ENV"
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+          name: validation-summary-${{ github.job }}
+          path: validation-telemetry/summary.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # Class B. Shards are partitioned by measured cost, not by intuition. The
+  # dependency suite used to be one 647s command that was the entire critical
+  # path; its live-integration phase is now split three ways, and
+  # `validation-arch.ts` proves the three shards union back to the whole suite.
+  sim-a:
+    name: deterministic suites A
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ./.github/actions/setup-project
+      - run: pnpm ci:group ci-sim-a
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
         with:
-          path: ${{ env.STORE_PATH }}
-          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: pnpm-store-${{ runner.os }}-
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm test:catalysts
-      - run: pnpm test:flows
-      - run: pnpm test:ecology
-      - run: pnpm test:niche
-      - run: pnpm test:landscape
-      - run: pnpm test:time-controls
+          name: validation-summary-${{ github.job }}
+          path: validation-telemetry/summary.json
+          if-no-files-found: ignore
+          retention-days: 14
 
   sim-b:
+    name: deterministic suites B (dependency arc)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: ./.github/actions/setup-project
+      - run: pnpm ci:group ci-sim-b
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
         with:
-          node-version: "24"
-          package-manager-cache: false
-      - run: corepack enable
-      - run: corepack prepare pnpm@12.5.1 --activate
-      - name: Pnpm store path
-        run: echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_ENV"
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: pnpm-store-${{ runner.os }}-
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm test:dependency
+          name: validation-summary-${{ github.job }}
+          path: validation-telemetry/summary.json
+          if-no-files-found: ignore
+          retention-days: 14
 
-  build:
+  sim-c:
+    name: deterministic suites C (cross-feeding)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: ./.github/actions/setup-project
+      - run: pnpm ci:group ci-sim-c
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
         with:
-          node-version: "24"
-          package-manager-cache: false
-      - run: corepack enable
-      - run: corepack prepare pnpm@12.5.1 --activate
-      - name: Pnpm store path
-        run: echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_ENV"
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+          name: validation-summary-${{ github.job }}
+          path: validation-telemetry/summary.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+  sim-d:
+    name: deterministic suites D (washout)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ./.github/actions/setup-project
+      - run: pnpm ci:group ci-sim-d
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
         with:
-          path: ${{ env.STORE_PATH }}
-          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: pnpm-store-${{ runner.os }}-
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @digital-evolution/explorer build
+          name: validation-summary-${{ github.job }}
+          path: validation-telemetry/summary.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # Class C. Built once. Everything downstream tests this exact bundle rather
+  # than rebuilding it, so the APK and the browser lanes cannot disagree about
+  # what "the product" is.
+  build:
+    name: production build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ./.github/actions/setup-project
+      - run: pnpm ci:group ci-build
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: explorer-dist
           path: apps/explorer/dist
-          retention-days: 1
+          retention-days: 7
 
+  # Class D, plus the Class G landscape captures on the same browser
+  # environment. One Chromium install and one preview server serve all three:
+  # splitting them would mean paying that setup again for no additional claim.
   smoke:
+    name: browser, mobile UI, landscape captures
     runs-on: ubuntu-latest
     needs: build
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: "24"
-          package-manager-cache: false
-      - run: corepack enable
-      - run: corepack prepare pnpm@12.5.1 --activate
-      - name: Pnpm store path
-        run: echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_ENV"
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: pnpm-store-${{ runner.os }}-
-      - run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/setup-project
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: explorer-dist
@@ -138,25 +138,17 @@ jobs:
           key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: playwright-${{ runner.os }}-
       - run: pnpm exec playwright install --with-deps chromium
-      - name: Browser smoke
+      - name: Start one preview server for the whole browser lane
         run: |
           pnpm --filter @digital-evolution/explorer exec vite preview --host 127.0.0.1 --port 4173 >/tmp/digital-evolution-vite.log 2>&1 &
           for i in {1..30}; do
             if curl -fsS http://127.0.0.1:4173 >/dev/null; then break; fi
             sleep 1
           done
-          DEE_BASE_URL=http://127.0.0.1:4173 pnpm test:browser
-      - name: Mobile UI validation (phone/tablet/desktop layout evidence)
-        run: DEE_BASE_URL=http://127.0.0.1:4173 pnpm test:mobile-ui
-      # Evidence generation, deliberately NOT a merge gate: the capture run is
-      # timing-dependent (it advances a world until waste is measurably
-      # present), so a slow or flaky run must not block a PR whose code is
-      # verified. The artifact is uploaded either way, so a failed capture is
-      # visible rather than silent.
-      - name: Visual evidence captures
-        continue-on-error: true
-        run: |
-          DEE_BASE_URL=http://127.0.0.1:4173 pnpm test:visual
+      - name: ci-browser
+        run: pnpm ci:group ci-browser
+        env:
+          DEE_BASE_URL: http://127.0.0.1:4173
       - name: Report capture coverage
         if: always()
         run: cat testdata/visual/MANIFEST.json
@@ -166,64 +158,78 @@ jobs:
           name: landscape-visual-evidence
           path: testdata/visual
           retention-days: 14
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: validation-summary-${{ github.job }}
+          path: validation-telemetry/summary.json
+          if-no-files-found: ignore
+          retention-days: 14
 
+  # Class C remainder: presentation contracts that do not need the built bundle.
   presentation:
+    name: presentation contracts
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: ./.github/actions/setup-project
+      - run: pnpm ci:group ci-presentation
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
         with:
-          node-version: "24"
-          package-manager-cache: false
-      - run: corepack enable
-      - run: corepack prepare pnpm@12.5.1 --activate
-      - name: Pnpm store path
-        run: echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_ENV"
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: pnpm-store-${{ runner.os }}-
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm test:phenotype
-      - run: pnpm test:art-review
-      - run: pnpm test:plated
+          name: validation-summary-${{ github.job }}
+          path: validation-telemetry/summary.json
+          if-no-files-found: ignore
+          retention-days: 14
 
-  # Pixi spike browser evidence. Deliberately NOT a merge gate (same
-  # rationale as the visual captures above): GPU-dependent timing and
-  # software-GL flakiness must not block a PR whose code is verified.
-  # The validation itself (pnpm test:pixi-spike, Node-only) gates in
-  # `quick`. The manifest + captures upload either way.
+  # Class G. Kept on its own runner on purpose. Folding it into `smoke` would
+  # lengthen the browser lane's critical path to buy nothing, because this job
+  # costs ~67s of wall clock in parallel and roughly one runner-minute. It needs
+  # its own preview server on a different port and its own capture harness, so
+  # the two lanes stay isolated and a software-GL failure here cannot fail the
+  # blocking browser lane.
   pixi-spike:
+    name: pixi spike evidence
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: "24"
-          package-manager-cache: false
-      - run: corepack enable
-      - run: corepack prepare pnpm@12.5.1 --activate
-      - name: Pnpm store path
-        run: echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_ENV"
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: pnpm-store-${{ runner.os }}-
-      - run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/setup-project
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: playwright-${{ runner.os }}-
       - run: pnpm exec playwright install --with-deps chromium
-      - name: Pixi spike browser evidence
-        continue-on-error: true
-        run: pnpm spike:capture
+      - run: pnpm ci:group ci-pixi
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: pixi-spike-evidence
           path: testdata/pixi-spike
+          retention-days: 14
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: validation-summary-${{ github.job }}
+          path: validation-telemetry/summary.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # Collects every runner's summary into one machine-readable file so "what ran,
+  # what was skipped, and what did it cost" is answerable from a single artifact.
+  telemetry:
+    name: validation telemetry
+    runs-on: ubuntu-latest
+    needs: [quick, sim-a, sim-b, sim-c, sim-d, build, smoke, presentation, pixi-spike]
+    if: always()
+    steps:
+      - uses: ./.github/actions/setup-project
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: validation-summary-*
+          path: /tmp/validation
+      - run: pnpm validation:merge /tmp/validation
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: validation-summary
+          path: validation-telemetry/summary.json
+          if-no-files-found: error
           retention-days: 14
