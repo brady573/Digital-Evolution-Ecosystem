@@ -842,23 +842,96 @@ async function runLandscapeChecks(context:import("playwright").BrowserContext){
   assert.ok(organisms&&organisms>40,
     `organisms remain readable above the landscape (bright px ${organisms})`);
 
-  // Smoothing is presentation-only and must not leak between worlds: after a
-  // universe switch the landscape must not render through the old world's
-  // inertia (checked by the reset path being reachable, not by pixel diffing
-  // two different biological states).
-  // Temporal smoothing must not leak between worlds. Switching universes is
-  // the reset trigger, so the check switches seed AND recreates the universe,
-  // then requires the landscape to render from a clean inertia state.
-  const before=await ink(world);
-  await page.getByRole("button",{name:"World settings"}).click();
-  await page.getByRole("button",{name:"New random seed"}).click();
-  await page.getByRole("button",{name:"Create universe"}).click();
-  await page.waitForTimeout(500);
-  const after=await ink(world);
-  assert.ok(before&&after,
-    "landscape renders before and after a universe switch (smoothing reset path exercised)");
-  assert.ok(after!.sd>3,
-    `landscape keeps structure after a universe switch (sd ${after?.sd.toFixed(2)})`);
+  // --- Reset contract: entering B after A must equal entering B cleanly ----
+  //
+  // Temporal smoothing is presentation-only state and must not leak between
+  // worlds. The previous check here could not test that: it created the second
+  // universe with `New random seed` (Math.random in App.tsx) and then asserted
+  // `sd > 3`. That asserts "this particular random world has some contrast",
+  // which is not the same claim -- a smoothing leak would satisfy it too -- and
+  // it flaked, measuring 2.97 against a floor of 3.
+  //
+  // The claim becomes testable once the seed is fixed and the two entry paths
+  // are made comparable. `landscape.ts` has no Math.random, no Date.now, and no
+  // performance.now, so the renderer is deterministic: if the smoother's inertia
+  // is genuinely cleared, the A -> B frame and a clean B frame at the same seed,
+  // config, and tick must agree. If they blend, the A -> B frame carries A's
+  // structure into B and the comparison catches it.
+  //
+  // So: build real A-derived smoothing state, switch to B, and require that
+  // frame to match the frame a fresh page produces for B on its own.
+  const SEED_A=11111111;
+  const SEED_B=22222222;
+  // Tolerances between the two entry paths, calibrated from run 36428453965 on
+  // this exact revision:
+  //
+  //   A sd=3.37 | A->B sd=3.01 mean=134.89 | clean B sd=3.01 mean=134.89
+  //   deltas sd=0.000 mean=0.00
+  //
+  // The two frames are identical, so these are not guesses -- they are slack for
+  // rasteriser-level variation that carries no state, set an order of magnitude
+  // tighter than the placeholders this replaced. The tolerances remain non-zero
+  // because a future renderer that legitimately varies per frame must not fail a
+  // *state* check over a presentation difference.
+  //
+  // For scale: the two worlds differ by 0.36 sd (3.37 vs 3.01), so a leak
+  // carrying even a tenth of A's structure into B moves sd by ~0.036. These
+  // tolerances sit well below any leak that could plausibly hide.
+  const RESET_SD_TOLERANCE=0.1;
+  const RESET_MEAN_TOLERANCE=0.5;
+  const RESET_LIT_TOLERANCE=0.001;
+  // "Structurally non-flat, not a uniform fill" -- a flat field has sd ~ 0.
+  // Seed B measures 3.01 (deterministic, printed below), so 2.0 leaves margin for
+  // legitimate presentation changes while still catching a uniform fill. The
+  // floor this replaces was 3, against a measured 3.01: a 0.3% margin, which is
+  // how a randomly seeded world came to fail at 2.97.
+  const SEED_B_MIN_SD=2;
+
+  const switchToSeed=async(p:Page,seed:number)=>{
+    await p.getByRole("button",{name:"World settings"}).click();
+    await p.getByRole("dialog",{name:"World settings"}).waitFor();
+    await p.getByLabel("World seed").fill(String(seed));
+    await p.getByRole("button",{name:"Create universe"}).click();
+    await p.getByRole("button",{name:"Landscape"}).click();
+    await p.waitForTimeout(500);
+    return p.getByLabel("Evolution world");
+  };
+
+  // World A, with enough rendered history for the smoother to hold real
+  // A-derived inertia rather than starting from nothing.
+  const canvasA=await switchToSeed(page,SEED_A);
+  await page.waitForTimeout(700);
+  const inkA=await ink(canvasA);
+
+  // Path 1: A -> B on the page that has been rendering A.
+  const canvasB=await switchToSeed(page,SEED_B);
+  const switched=await ink(canvasB);
+
+  // Path 2: a fresh page that has only ever seen B.
+  const cleanPage=await context.newPage();
+  await cleanPage.goto(`${baseUrl}?deeTest=1`,{waitUntil:"networkidle"});
+  await cleanPage.getByLabel("Evolution world").waitFor();
+  const cleanCanvas=await switchToSeed(cleanPage,SEED_B);
+  const clean=await ink(cleanCanvas);
+  await cleanPage.close();
+
+  assert.ok(inkA&&switched&&clean,
+    `both entry paths render a landscape (A ${!!inkA}, A->B ${!!switched}, clean B ${!!clean})`);
+  const sdDelta=Math.abs(switched!.sd-clean!.sd);
+  const meanDelta=Math.abs(switched!.mean-clean!.mean);
+  const litDelta=Math.abs(switched!.lit-clean!.lit);
+  console.log(
+    `universe reset: A sd=${inkA!.sd.toFixed(2)} | A->B sd=${switched!.sd.toFixed(2)} `+
+    `mean=${switched!.mean.toFixed(2)} lit=${switched!.lit.toFixed(4)} | `+
+    `clean B sd=${clean!.sd.toFixed(2)} mean=${clean!.mean.toFixed(2)} lit=${clean!.lit.toFixed(4)} | `+
+    `deltas sd=${sdDelta.toFixed(3)} mean=${meanDelta.toFixed(2)} lit=${litDelta.toFixed(4)}`);
+  assert.ok(
+    sdDelta<=RESET_SD_TOLERANCE&&meanDelta<=RESET_MEAN_TOLERANCE&&litDelta<=RESET_LIT_TOLERANCE,
+    `entering B after A must match entering B cleanly -- smoothing state leaked between worlds `+
+    `(sd delta ${sdDelta.toFixed(3)} > ${RESET_SD_TOLERANCE}, mean delta ${meanDelta.toFixed(2)} > ${RESET_MEAN_TOLERANCE}, `+
+    `lit delta ${litDelta.toFixed(4)} > ${RESET_LIT_TOLERANCE})`);
+  assert.ok(clean!.sd>SEED_B_MIN_SD,
+    `seed B renders a structured field rather than a flat fill (sd ${clean!.sd.toFixed(2)})`);
 
   // Phone viewport: the landscape must still dominate and stay readable.
   const mobile=await context.newPage();
