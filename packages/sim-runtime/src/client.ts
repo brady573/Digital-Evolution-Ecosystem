@@ -15,6 +15,10 @@ export interface RuntimeClient {
   requestExport(): Promise<unknown>;
   /** Resolves the pending opportunity; rejects on validation failure. */
   resolveEventDecision(opportunityId: string, choiceId: string): Promise<RenderSnapshot>;
+  /** Acknowledges the aftermath impact state, moving it to observation so the
+   *  sheet can collapse. Not a resume: playback is the app's business and may
+   *  already be running. Never advances a tick. */
+  acknowledgeAftermath(): Promise<RenderSnapshot>;
   destroy(): void;
 }
 
@@ -40,6 +44,9 @@ export class WorkerRuntimeClient implements RuntimeClient {
   createControlFork(){this.command({type:"CREATE_CONTROL_FORK"})}
   resolveEventDecision(opportunityId:string,choiceId:string){
     return this.#request<RenderSnapshot>("RESOLVE_EVENT_DECISION",{opportunityId,choiceId});
+  }
+  acknowledgeAftermath(){
+    return this.#request<RenderSnapshot>("ACKNOWLEDGE_AFTERMATH",{});
   }
   loadCheckpoint(checkpoint:SupportedUniverseCheckpoint){
     // Acknowledged restore: resolves only after the worker has restored the
@@ -96,7 +103,7 @@ export class WorkerRuntimeClient implements RuntimeClient {
     if(pending){clearTimeout(pending.timer);pending.reject(reason)}
   }
 
-  #request<T>(type:"REQUEST_CHECKPOINT"|"REQUEST_EXPORT"|"RESOLVE_EVENT_DECISION",extra:Record<string,unknown>={}):Promise<T>{
+  #request<T>(type:"REQUEST_CHECKPOINT"|"REQUEST_EXPORT"|"RESOLVE_EVENT_DECISION"|"ACKNOWLEDGE_AFTERMATH",extra:Record<string,unknown>={}):Promise<T>{
     const requestId=`r-${++this.#seq}`;
     return new Promise<T>((resolve,reject)=>{
       this.#pending.set(requestId,{resolve,reject});
@@ -111,7 +118,7 @@ export class WorkerRuntimeClient implements RuntimeClient {
       for(const listener of this.#listeners)listener(response.snapshot);
       return;
     }
-    if(response.type==="DECISION_RESOLVED"){
+    if(response.type==="DECISION_RESOLVED"||response.type==="AFTERMATH_ACKNOWLEDGED"){
       const pending=this.#pending.get(response.requestId);
       if(!pending)return;
       this.#pending.delete(response.requestId);

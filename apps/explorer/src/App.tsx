@@ -11,6 +11,7 @@ import {
   LandscapeSmoother, fillWaste, fracArray, landscapeCell, landscapeTileLayout,
   microTexture, nutrientOverlayCell, wasteOverlayCell,
 } from "./landscape";
+import { AftermathPanel } from "./AftermathPanel";
 import { drawPhenotypeOrganism, phenotypeCache, tierForZoom } from "./phenotype";
 import { familyArtwork } from "./familyArt";
 
@@ -481,6 +482,15 @@ export function App(){
   const [snapshot,setSnapshot]=useState<RenderSnapshot|null>(null);
   const [surface,setSurface]=useState<Surface>("world");
   const [running,setRunning]=useState(false);
+  // Play intent across a decision gate (AC22). The decision pause must not
+  // silently turn "was playing" into "paused", or the world would stay stopped
+  // after a choice the player never asked to stop for. Refs mirror the state so
+  // the worker subscription can read them without stale closures.
+  const [wasPlaying,setWasPlaying]=useState(false);
+  const runningRef=useRef(false);
+  const wasPlayingRef=useRef(false);
+  runningRef.current=running;
+  wasPlayingRef.current=wasPlaying;
   const [speed,setSpeed]=useState(100);
   const [status,setStatus]=useState("Creating universe…");
   const [settings,setSettings]=useState(DEFAULT_SETTINGS);
@@ -523,7 +533,21 @@ export function App(){
       advanceDebt.current=false;setSnapshot(s);setStatus("");
       // A pending decision is a visible pause: the player must choose before
       // time moves again (A13). Runtime enforces the same gate independently.
-      if(s.pendingDecision)setRunning(false);
+      //
+      // The player's intent is REMEMBERED rather than discarded (AC22): clearing
+      // running outright loses the difference between "was playing" and "was
+      // deliberately paused", and only the former should resume by itself once
+      // the choice resolves.
+      if(s.pendingDecision){
+        setWasPlaying(w=>w||runningRef.current);
+        setRunning(false);
+      }else if(s.aftermath&&wasPlayingRef.current){
+        // Playback resumes automatically at the prior bounded speed. The impact
+        // sheet overlays a running world from here, and its evidence is pinned
+        // to the resolution tick, so this cannot invalidate what it shows.
+        setRunning(true);
+        setWasPlaying(false);
+      }
     });
     runtime.create(configFromSettings(DEFAULT_SETTINGS));
     return()=>{unsub();runtime.destroy()};
@@ -554,6 +578,23 @@ export function App(){
     return()=>cancelAnimationFrame(raf);
   },[running,speed,runtime]);
 
+  // Test-only runtime hook. AC21 removes "Next meaningful change" from the
+  // product, but the suites still need a deterministic way to reach a decision
+  // without a DOM control to click. This is deliberately NOT a UI element - it
+  // is invisible to a player and carries no affordance - and it is gated behind
+  // an explicit URL flag so an ordinary session can never reach it.
+  useEffect(()=>{
+    if(typeof window==="undefined")return;
+    if(!new URLSearchParams(window.location.search).has("deeTest"))return;
+    const hook={
+      runToNextEvent:()=>runtime.runToNextEvent(),
+      acknowledgeAftermath:()=>runtime.acknowledgeAftermath(),
+      resolve:(opportunityId:string,choiceId:string)=>runtime.resolveEventDecision(opportunityId,choiceId),
+    };
+    (window as any).__DEE_TEST__=hook;
+    return()=>{delete (window as any).__DEE_TEST__};
+  },[runtime]);
+
   const updateSettings=(patch:Partial<WorldSettings>)=>{
     setSettings(v=>({...v,...patch}));setPreset("Custom");
   };
@@ -578,6 +619,23 @@ export function App(){
   };
   // While a decision is pending these must not advance time; they focus it.
   const blockWhilePending=()=>{if(!snapshot?.pendingDecision)return false;setStatus("A decision is waiting — choose how to respond.");return true};
+  // M3 aftermath impact state. Playback is NOT gated on the sheet (AC22):
+  // resolving a choice restores whatever the player had going, so the sheet
+  // usually overlays a world that is already running. All the affordance does
+  // is release the presentation slot.
+  const [acknowledging,setAcknowledging]=useState(false);
+  const acknowledgeAftermath=async()=>{
+    if(!snapshot?.aftermath)return;
+    setAcknowledging(true);
+    try{
+      await runtime.acknowledgeAftermath();
+      setStatus("Aftermath observed. Watching the world.");
+    }catch(error){
+      setStatus(`Could not continue: ${error instanceof Error?error.message:String(error)}`);
+    }finally{
+      setAcknowledging(false);
+    }
+  };
   const newUniverse=()=>{
     setRunning(false);setSelectedId(null);
     phenotypeCache.clearStaged();
@@ -645,6 +703,10 @@ export function App(){
   if(!snapshot)return <main className="loading">{status}</main>;
   const m=snapshot.metrics;
   const pending=snapshot.pendingDecision;
+  // A pending decision outranks an aftermath (AC15); the aftermath yields the
+  // slot without being discarded, so it returns after the decision resolves.
+  const showDecision=!!pending;
+  const showAftermath=!pending&&!!snapshot.aftermath&&snapshot.aftermath.phase==="impact";
   const records=(snapshot.analysis.records as any[])||[];
   const clades=m.clades?.top||[];
   const selected=snapshot.organisms.find(o=>o.id===selectedId)??null;
@@ -697,19 +759,33 @@ export function App(){
               <button aria-label="Reset view" onClick={()=>{setZoom(1);setCam({x:300,y:300})}}>⌂</button>
             </div>
           </div>}
-          {pending&&<section className="decision-sheet" role="dialog" aria-modal="false" aria-label={pending.source==="world_catalyst"?"World catalyst":"Event decision"} data-testid="decision-sheet" data-source={pending.source}>
-            <span className="eyebrow">{pending.source==="world_catalyst"?"World catalyst — your move":"A decision is waiting"}</span>
-            <h2>{pending.prompt}</h2>
-            <p className="decision-context">{pending.context}</p>
-            <p className="decision-tick">World paused at tick {pending.createdTick.toLocaleString()}</p>
-            <div className="decision-choices">
-              {pending.choices.map(choice=><button key={choice.choiceId} data-choice={choice.choiceId}
-                onClick={()=>resolveDecision(choice.choiceId)}>
-                <strong>{choice.title}</strong>
-                <span>{choice.directEffectDescription}</span>
-              </button>)}
-            </div>
-            <p className="decision-foot">Time stays paused until you choose. Leaving an intervention out changes nothing.</p>
+          {/* One sheet slot, two contents. The section is the same DOM node in
+              both states, so resolving a decision morphs the sheet in place
+              rather than closing one and opening another (AC1). The decision
+              CONTENT carries the decision-sheet testid, so it still detaches on
+              resolution - the slot outliving it is exactly what proves the morph
+              is continuous. A pending decision always outranks an aftermath
+              (AC15): it takes the slot and the aftermath record survives
+              underneath, to be shown again once this decision resolves. */}
+          {(showDecision||showAftermath)&&<section className="decision-sheet" role="dialog" aria-modal="false"
+            aria-label={showDecision?(pending!.source==="world_catalyst"?"World catalyst":"Event decision"):"Aftermath"}
+            data-testid="sheet-slot" data-mode={showDecision?"decision":"aftermath"}>
+            {showDecision
+              ? <div data-testid="decision-sheet" data-source={pending!.source}>
+                  <span className="eyebrow">{pending!.source==="world_catalyst"?"World catalyst — your move":"A decision is waiting"}</span>
+                  <h2>{pending!.prompt}</h2>
+                  <p className="decision-context">{pending!.context}</p>
+                  <p className="decision-tick">World paused at tick {pending!.createdTick.toLocaleString()}</p>
+                  <div className="decision-choices">
+                    {pending!.choices.map(choice=><button key={choice.choiceId} data-choice={choice.choiceId}
+                      onClick={()=>resolveDecision(choice.choiceId)}>
+                      <strong>{choice.title}</strong>
+                      <span>{choice.directEffectDescription}</span>
+                    </button>)}
+                  </div>
+                  <p className="decision-foot">Time stays paused until you choose. Leaving an intervention out changes nothing.</p>
+                </div>
+              : <AftermathPanel snapshot={snapshot} onAcknowledge={acknowledgeAftermath} busy={acknowledging}/>}
           </section>}
         </div>
       </section>
@@ -787,8 +863,12 @@ export function App(){
           control bar is unchanged. */}
       <span className="control-row control-row-primary">
         <button onClick={()=>{if(blockWhilePending())return;setRunning(v=>!v)}}>{running?"Pause":"Play"}</button>
-        <select aria-label="Simulation speed" value={speed} onChange={e=>setSpeed(Number(e.target.value))}><option value={1}>1×</option><option value={10}>10×</option><option value={100}>100×</option><option value={500}>Max</option></select>
-        <button onClick={()=>{if(blockWhilePending())return;setRunning(false);runtime.runToNextEvent()}}>Next meaningful change</button>
+        {/* AC21: bounded speeds only. Max is gone from the product - it was a
+            throughput ceiling the player could not read, not a speed, and its
+            ratio assertion was the flaky part of #46. The internal
+            RUN_TO_NEXT_EVENT command still exists for tooling and tests; it is
+            simply not a player control any more. */}
+        <select aria-label="Simulation speed" value={speed} onChange={e=>setSpeed(Number(e.target.value))}><option value={1}>1×</option><option value={10}>10×</option><option value={100}>100×</option></select>
         {/* Secondary actions are an explicit menu on the phone and nothing at
             all on desktop, where they sit inline as before. Nothing is
             removed: the buttons are always in the DOM. */}

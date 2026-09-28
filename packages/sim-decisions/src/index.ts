@@ -132,9 +132,9 @@ export function buildDecisionOpportunity(
   };
 }
 
-/** Engine modes this runtime can actually apply today. c_washout is
- * validation-internal (never offered, no button); support here only lets
- * assays apply it through the same recorded path. */
+/** Engine modes this runtime can actually apply today. c_washout is now an
+ * offered catalyst as well as an assay path, but the mode set is unchanged: it
+ * still names existing engine behaviour, so no engine version bump is implied. */
 export const SUPPORTED_INTERVENTION_MODES: ReadonlySet<string> = new Set([
   "global_crash",
   "drought_a",
@@ -194,6 +194,9 @@ export const mappedPolicyKeys = (): readonly string[] => Object.keys(REGISTRY).s
  * ------------------------------------------------------------------ */
 
 /** Catalyst catalog version. Evolves independently of the event policy. */
+// UNCHANGED from before the washout work. The washout is a test-only offer, so
+// the production catalog is byte-identical to the 1.0.0 catalog and a restored
+// pending window means exactly what it meant before.
 export const CATALYST_POLICY_VERSION = "m3-catalysts-1.0.0";
 
 /**
@@ -251,17 +254,48 @@ const CATALYST_SPECS: readonly CatalystSpec[] = [
   },
 ];
 
-/** Test/inspection helper: the v1 catalyst ids in offer order. */
-export const catalystIds = (): readonly CatalystId[] => CATALYST_SPECS.map((s) => s.id);
+/**
+ * Metabolite C washout: a DISTINCT PERTURBATION used to exercise catalyst,
+ * aftermath, comparison and evidence flows end to end.
+ *
+ * Owner ruling: it is a valid CANDIDATE for the product, but it must not become
+ * a production catalyst as part of this PR. So it is gated OFF by default and
+ * reachable only through an explicit opt-in, which keeps "candidate for the
+ * product" honest without quietly shipping the promotion. It uses the already
+ * supported c_washout intervention path, so enabling it adds an OFFER, never new
+ * biology and never a new engine effect.
+ */
+const TEST_CATALYST_SPECS: readonly CatalystSpec[] = [
+  {
+    id: "c-washout",
+    title: "Metabolite C washout",
+    effect: "Clear environmental Metabolite C stock and suppress its regeneration.",
+    intervention: { schemaVersion: 1, kind: "nutrient_disturbance", mode: "c_washout" },
+    choiceId: "c-washout",
+  },
+];
+
+/** Opt-in that exposes test-only catalyst offers. Off unless asked for. */
+export interface CatalystCatalogOptions {
+  /** Include dev/test-only offers such as the C washout. Never set in product. */
+  readonly includeTestCatalysts?: boolean;
+}
+
+const catalogFor = (options?: CatalystCatalogOptions): readonly CatalystSpec[] =>
+  options?.includeTestCatalysts ? [...CATALYST_SPECS, ...TEST_CATALYST_SPECS] : CATALYST_SPECS;
+
+/** Test/inspection helper: the catalyst ids in offer order. */
+export const catalystIds = (options?: CatalystCatalogOptions): readonly CatalystId[] =>
+  catalogFor(options).map((s) => s.id);
 
 type CatalystRequirement = (context: CatalystContext) => string | null;
 
 const noDroughtActive: CatalystRequirement = (c) =>
   c.droughtActive ? "a drought is currently active" : null;
 
-function minEnergyShare(which: "A" | "B"): CatalystRequirement {
+function minEnergyShare(which: "A" | "B" | "C"): CatalystRequirement {
   return (c) => {
-    const share = which === "A" ? c.energyShareA : c.energyShareB;
+    const share = which === "A" ? c.energyShareA : which === "B" ? c.energyShareB : c.energyShareC;
     return share >= CATALYST_MIN_ENERGY_SHARE
       ? null
       : `Nutrient ${which} contributes ${(share * 100).toFixed(1)}% of realized energy (needs ${(CATALYST_MIN_ENERGY_SHARE * 100).toFixed(0)}%)`;
@@ -280,6 +314,12 @@ function minStockFraction(which: "A" | "B"): CatalystRequirement {
 const CATALYST_REQUIREMENTS: Readonly<Record<CatalystId, readonly CatalystRequirement[]>> = {
   "drought-a": [noDroughtActive, minEnergyShare("A"), minStockFraction("A")],
   "drought-b": [noDroughtActive, minEnergyShare("B"), minStockFraction("B")],
+  // C is a biologically produced metabolite rather than an abiotic nutrient, so
+  // only the energy-share floor applies: there is no modeled C field capacity to
+  // measure stock against, and inventing one would be a fabricated eligibility
+  // signal. Same requirement shape as the drought pair, same existing constant,
+  // so no threshold is retuned to accommodate it.
+  "c-washout": [noDroughtActive, minEnergyShare("C")],
   "global-crash": [
     noDroughtActive,
     (c) =>
@@ -301,8 +341,9 @@ const CATALYST_REQUIREMENTS: Readonly<Record<CatalystId, readonly CatalystRequir
 export function diagnoseCatalysts(
   context: CatalystContext,
   majorCooldownClear: boolean,
+  options?: CatalystCatalogOptions,
 ): readonly CatalystDiagnosis[] {
-  return CATALYST_SPECS.map((spec) => {
+  return catalogFor(options).map((spec) => {
     const reasons: string[] = [];
     for (const requirement of CATALYST_REQUIREMENTS[spec.id]) {
       const failure = requirement(context);
@@ -319,6 +360,8 @@ export interface CatalystWindowInput {
   readonly lastMajorCatalystTick: number | null;
   readonly context: CatalystContext;
   readonly policyVersion?: string;
+  /** Include dev/test-only offers. Off unless a test explicitly asks. */
+  readonly includeTestCatalysts?: boolean;
 }
 
 /**
@@ -331,7 +374,7 @@ export function selectCatalystWindow(input: CatalystWindowInput): CatalystOpport
   const policyVersion = input.policyVersion ?? CATALYST_POLICY_VERSION;
   if (input.tick - input.lastDecisionTick < CATALYST_QUIET_TICKS) return null;
   const cooldownClear = isMajorCooldownClear(input.tick, input.lastMajorCatalystTick);
-  const diagnoses = diagnoseCatalysts(input.context, cooldownClear);
+  const diagnoses = diagnoseCatalysts(input.context, cooldownClear, input);
   const eligible = diagnoses.filter((d) => d.eligible).map((d) => d.catalystId);
   if (eligible.length === 0) return null;
   const choices: DecisionChoice[] = [

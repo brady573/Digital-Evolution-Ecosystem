@@ -221,31 +221,124 @@ export type Rgb = readonly [number, number, number];
 
 const clamp255 = (v: number) => (v < 0 ? 0 : v > 255 ? 255 : v | 0);
 const sat = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
-// Ash: a near-neutral warm grey, deliberately low-chroma, and deliberately
-// PALER than both fertile and barren ground. Waste must visibly alter the
-// local character (a stated acceptance criterion), so the ash target sits
-// above the fertility lift: a loaded cell reads bleached rather than merely
-// subdued. It stays low-chroma and warm so the character survives without
-// hue, and it never darkens, because dark degradation reads as a hole in the
-// world and hides the organisms standing in it.
-const ASH_R = 116, ASH_G = 107, ASH_B = 96;
+// Ash: a near-neutral warm bone, deliberately low-chroma, and deliberately
+// PALER than bare ground, than resource-rich ground, and than any fouled cell.
+//
+// Waste must visibly alter the local character, so ash has to sit ABOVE the
+// brightest thing it can be laid over. It therefore had to be re-seated twice:
+// once when bare substrate was raised (which collapsed the fouled-vs-bare gap
+// from about 43 to about 15 and made waste nearly invisible), and again when the
+// resource-material lift was strengthened, which lifted the richest cell above
+// the old ash. Without that second move, fouling a RICH patch darkened it - and
+// darkening is the damage vocabulary the design rule forbids, so a waste effect
+// would have quietly reintroduced it.
+//
+// It never darkens, for the same reason: dark degradation reads as a hole in
+// the world, hides the organisms standing in it, and implies injury the model
+// does not simulate.
+const ASH_R = 216, ASH_G = 210, ASH_B = 198;
+export const ASH_RGB: Rgb = [ASH_R, ASH_G, ASH_B];
+
 
 /**
- * Semantic compositing: one coherent ecological character per cell.
+ * Bare substrate: exposed, pale, neutral ground.
  *
- * - fertile A / fertile B: the two abiotic nutrient sources carry
- *   *distinguishable* characters (verdant vs olive) so the world's real patch
- *   geometry stays perceptible without switching to an analytical view;
- * - altered: biologically produced Metabolite C shifts toward a warm
- *   high-chroma tint (biologically altered substrate);
- * - degraded: metabolic waste reads as spent, ashen ground — it desaturates
- *   and warms and darkens only gently. It must never crush to near-black:
- *   dark patches read as rendering holes, not as heavy pollution, and a
- *   player must still be able to see organisms standing in them.
+ * PALER than resource material, deliberately. This polarity is the whole point.
+ * An earlier version carried presence as a BRIGHTENING lift on darker ground,
+ * which meant removing material necessarily darkened the world - measured at a
+ * 17.8-point luma drop across a real depletion - and a darker patch reads as
+ * wounded ground. That is the damage vocabulary the Owner rule forbids without
+ * simulation evidence of damage.
  *
- * Values are bounded, monotonic in each input, and touch neither organisms
- * nor analysis. No categorical biome boundaries are implied: the result is
- * continuous, so a cell's character is read as a level, not a class.
+ * Inverting the polarity fixes it at the source: depleting a region now makes it
+ * LIGHTER, reading as pale exposed soil, while the green and olive of surviving
+ * material stays put and so reads as the refugium. Presence is carried by hue
+ * and saturation rather than by brightness.
+ *
+ * Light ground also serves the standing constraint that ground must never crush
+ * to near-black, because dark degradation hides the organisms standing in it.
+ */
+const BARE_R = 178, BARE_G = 173, BARE_B = 162;
+/** The bare-substrate reference, exported for the same reason: validation that
+ *  hardcodes its own copy of a palette value silently inverts the moment the
+ *  palette is retuned. A stale bare reference made a real depletion read as
+ *  material GAINED, because under the current polarity material sits closer to
+ *  the old dark reference than bare ground does. */
+export const BARE_RGB: Rgb = [BARE_R, BARE_G, BARE_B];
+
+/**
+ * Fraction of full presence below which no resource material reads at all.
+ *
+ * This is what turns a tint into a PRESENCE language. A linear ramp can never
+ * let material disappear, so a shrinking patch only ever looks uniformly
+ * dimmer - the patch does not read as shrinking. With a floor, stock falling
+ * erodes a patch from its thin edges inward: it thins, holes appear, it
+ * fragments, and only then does it go. That is the depletion read the design
+ * asks for, and it is driven purely by the authoritative stock fraction.
+ */
+const PRESENCE_FLOOR = 0.05;
+
+/**
+ * Stock fraction that reads as FULL resource presence.
+ *
+ * Calibrated against the authoritative field, not chosen by eye. Measured
+ * per-cell stock/capacity for the abiotic nutrients is remarkably stable
+ * across world age: p25 ~0.05, p50 ~0.105, p90 ~0.20, p99 ~0.28, max ~0.31,
+ * sampled independently at the first decision opportunity and later in a run.
+ *
+ * An earlier value of 0.8 - inherited from the previous tint - was far above
+ * anything the field reaches. It put even the richest cell at roughly 17%
+ * presence, and combined with a floor it rendered the entire world as bare
+ * substrate, which is precisely the failure this work exists to fix. The
+ * reference is a PRESENTATION mapping (question 3), not a biological threshold:
+ * it asserts nothing about the simulation, and no ecological constant is
+ * retuned by it.
+ */
+const PRESENCE_FULL = 0.28;
+
+/**
+ * Resource material presence in [0,1]: zero at or below the scarcity floor,
+ * rising smoothly to one at full stock. Smoothstep is used deliberately - it has
+ * zero slope at the floor, so material fades out instead of ending on a visible
+ * seam. Monotonic in the input, bounded, and a pure function of the fraction.
+ */
+function resourcePresence(fraction: number): number {
+  const t = sat((fraction - PRESENCE_FLOOR) / (PRESENCE_FULL - PRESENCE_FLOOR));
+  return t * t * (3 - 2 * t);
+}
+
+/**
+ * Simulation-backed resource presence in the NORMAL World. No lens required.
+ *
+ * Traceability, answering the five required questions:
+ *
+ * 1. Authoritative field: the per-cell resource stock fractions, `stock/capacity`
+ *    for each substance, as retained on the render snapshot's resource field.
+ * 2. Authoritative resolution: the 60x60 resource grid - one value per grid
+ *    cell. The buffer is rendered at that resolution and scaled to the canvas,
+ *    so nothing finer is claimed; `imageSmoothingEnabled` interpolation between
+ *    cells is smoothing of authoritative samples, not invented detail.
+ * 3. Presentation mapping: stock fraction -> resourcePresence() -> a material
+ *    lift toward a per-substance hue. Nutrient A is verdant, B is olive and
+ *    drier, C is a warm high-chroma metabolite tint, so the two abiotic
+ *    nutrients stay distinguishable and the world's real patch geometry is
+ *    legible in the default view.
+ * 4. Interpolation / artistic amplification ONLY: the presence curve, the
+ *    smoothstep easing, the choice of hues, the strength of each lift, and the
+ *    deterministic micro-pattern. None of these add ecological facts; they only
+ *    make an existing difference easier to see. A cell's material density is a
+ *    function of its stock and nothing else.
+ * 5. Misleading inference prevented: absence of material is NEVER rendered as
+ *    damage. No cracking, charring, scorch, desiccation, sick colouring or
+ *    darkening vocabulary is introduced at low stock, because the model does not
+ *    simulate soil condition, moisture, toxin or habitat damage. A naturally
+ *    poor region reads as SPARSE, not as INJURED. Equally, nothing here implies
+ *    that richness is healthy or that scarcity is harmful: it states how much
+ *    resource material is present, and stops there.
+ *
+ * Values are bounded and monotonic in each input, and this function touches
+ * neither organisms nor analysis. No categorical biome boundaries are implied:
+ * the result is continuous, so a cell reads as a level, not a class.
  */
 export function landscapeCell(
   a: number,
@@ -254,28 +347,32 @@ export function landscapeCell(
   waste: number,
   texture: number,
 ): Rgb {
-  const fertileA = sat(a / 0.8);
-  const fertileB = sat(b / 0.8);
+  const fertileA = resourcePresence(a);
+  const fertileB = resourcePresence(b);
   const altered = sat(c * 1.2);
   const degraded = sat(waste * 1.5);
 
-  // Base substrate: mid-dark ground, never a void. A wide gap between
-  // unlit and fertile ground is what makes poor soil read as a hole in the
-  // world, so the floor is high and the fertile lift is deliberately modest:
-  // the landscape carries tonal range, but no region looks absent.
-  let r = 58;
-  let g = 66;
-  let bl = 61;
+  // Bare substrate: exposed, neutral ground. The floor is a real mid-tone
+  // because the empty end of a presence language must read as ground, not as a
+  // hole and not as damage.
+  let r = BARE_R;
+  let g = BARE_G;
+  let bl = BARE_B;
 
-  // Fertile A: verdant, cooler green. Fertile B: olive, warmer and drier.
-  r += 8 * fertileA + 30 * fertileB;
-  g += 30 * fertileA + 28 * fertileB;
-  bl += 12 * fertileA + 9 * fertileB;
+  // Resource material. Deliberately DARKER and far more chromatic than bare
+  // ground, so presence reads as living material on pale soil and its loss reads
+  // as lightening - never as darkening, which is the damage reading. The colour
+  // swing is large where the luminance swing is small, which is what keeps a
+  // depleted region legible while satisfying the neutral-absence rule.
+  // Fertile A: verdant green. Fertile B: olive, warmer and drier.
+  r += -60 * fertileA - 12 * fertileB;
+  g += -5 * fertileA - 15 * fertileB;
+  bl += -50 * fertileA - 58 * fertileB;
 
   // Altered substrate: biologically produced metabolite, warm violet-pink.
-  r += 34 * altered;
-  g += 8 * altered;
-  bl += 30 * altered;
+  r += 18 * altered;
+  g += -23 * altered;
+  bl += 6 * altered;
 
   // Degraded: ash. Rather than darkening, waste blends the ground toward a
   // near-neutral warm grey. That single move is doing three jobs at once —

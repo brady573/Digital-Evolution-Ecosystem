@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { chromium, type Locator, type Page } from "playwright";
 import { ENGINE_VERSION } from "../../packages/sim-core/src/index.ts";
+import { BARE_RGB } from "../../apps/explorer/src/landscape.ts";
 
 const baseUrl=process.env.DEE_BASE_URL||"http://127.0.0.1:4173";
 
@@ -27,7 +28,10 @@ async function main(){
   try{
     const context=await browser.newContext({viewport:{width:1280,height:900}});
     const page=await context.newPage();
-    await page.goto(baseUrl,{waitUntil:"networkidle"});
+    // deeTest enables the URL-gated runtime hook. Used by the throughput loop to
+    // acknowledge the aftermath without racing the DOM (see the guarded branch
+    // below). Not a product control (AC21).
+    await page.goto(`${baseUrl}?deeTest=1`,{waitUntil:"networkidle"});
     await page.getByLabel("Evolution world").waitFor();
     assert.equal(await tick(page),0,"fresh world starts at tick 0");
 
@@ -36,6 +40,143 @@ async function main(){
     await page.getByRole("button",{name:"Pause"}).click();
     const advanced=await tick(page);
     assert.ok(advanced>0,"worker-owned simulation advances");
+
+    // M3 aftermath impact state, on its own world, deliberately placed BEFORE
+    // the throughput section: that section's ratio assertion is device-sensitive
+    // (#46) and must not be able to hide unrelated evidence by failing first.
+  await (async()=>{
+  const deltaPage=await context.newPage();
+  // Test hook, not a product control (AC21): the UI has no "Next meaningful change".
+  await deltaPage.goto(`${baseUrl}?deeTest=1`,{waitUntil:"networkidle"});
+  await deltaPage.getByLabel("Evolution world").waitFor();
+  const deltaSheet=deltaPage.getByTestId("decision-sheet");
+  for(let i=0;i<25&&!(await deltaSheet.isVisible().catch(()=>false));i++){
+    await deltaPage.evaluate(()=>(window as any).__DEE_TEST__.runToNextEvent());
+    await deltaPage.waitForTimeout(400);
+  }
+  await deltaSheet.waitFor({timeout:180_000});
+  const slot=deltaPage.getByTestId("sheet-slot");
+  assert.equal(await slot.getAttribute("data-mode"),"decision","the slot holds the decision to begin with");
+  // Tag the live slot DOM node. If the morph is genuine continuity, this exact
+  // element survives the transition; a close-and-reopen would destroy it. This
+  // is the difference between "a sheet appeared" and "one sheet became another",
+  // which is what AC1 actually requires.
+  await slot.evaluate((el:HTMLElement)=>{el.dataset.morphWitness="intact"});
+  const decisionTick=await tick(deltaPage);
+  // The primary acceptance case, measured in the NORMAL World.
+  //
+  // The World canvas renders the LIVE field, so "before" must be sampled before
+  // the intervention resolves - flipping the sheet's comparison mode would only
+  // change the small field canvas inside the sheet, not the world. The world is
+  // paused here, so this comparison spans exactly the intervention and ZERO
+  // additional ticks, which is the claim the whole slice turns on.
+  // Measured as a per-pixel CHANGE, not against an absolute threshold.
+  //
+  // An absolute "distance from bare" test saturates: the field's own natural
+  // spread, plus organisms, put nearly every pixel beyond any fixed cutoff, so
+  // it reported 100% before AND after and could not discriminate at all. The
+  // claim being tested is directional - material DIMINISHED - so measure exactly
+  // that: for each pixel, did it move toward bare (material lost) or away from
+  // it (material gained)?
+  //
+  // Sampling a coarse grid rather than every pixel, because the substrate is a
+  // 60x60 field scaled up with smoothing; a dense sample would just re-read the
+  // same interpolated cells. Zero ticks separate the two captures, so organisms
+  // have not moved and any difference is the field itself.
+  const GRID = 40;
+  const sampleWorld=async()=>await deltaPage.getByLabel("Evolution world").evaluate((el:HTMLCanvasElement,g:number)=>{
+    const d=el.getContext("2d")!.getImageData(0,0,el.width,el.height).data;
+    const out:number[]=[];
+    for(let gy=0;gy<g;gy++){
+      for(let gx=0;gx<g;gx++){
+        const px=Math.floor((gx+0.5)*el.width/g),py=Math.floor((gy+0.5)*el.height/g);
+        const i=(py*el.width+px)*4;
+        out.push(d[i]!,d[i+1]!,d[i+2]!);
+      }
+    }
+    return out;
+  },GRID);
+  const meanLuma=async()=>await deltaPage.getByLabel("Evolution world").evaluate((el:HTMLCanvasElement)=>{
+    const d=el.getContext("2d")!.getImageData(0,0,el.width,el.height).data;
+    let sum=0;for(let i=0;i<d.length;i+=4)sum+=0.2126*d[i]!+0.7152*d[i+1]!+0.0722*d[i+2]!;
+    return sum/(d.length/4);
+  });
+  const lensBefore=await deltaPage.locator(".lens-active").innerText().catch(()=>"(default)");
+  const pixelsBefore=await sampleWorld();
+  const lumaBefore=await meanLuma();
+  // A real intervention, so the retained baseline and "Now" genuinely differ.
+  // Chosen by intent rather than index, so a catalog reordering cannot silently
+  // turn this into a no-intervention resolution.
+  const intervening=deltaSheet.locator(".decision-choices button").filter({hasNotText:"Keep watching"}).first();
+  await intervening.click();
+  const deltaImpact=deltaPage.getByTestId("aftermath-impact");
+  await deltaImpact.waitFor({timeout:15_000});
+  // Still zero ticks: the world has not advanced past the resolution, so every
+  // pixel difference below is the intervention and nothing else.
+  assert.equal(await tick(deltaPage),decisionTick,"the world is still at the resolution tick while the sheet is open");
+  // Wait for the renderer to actually repaint before sampling. The substrate is
+  // rebuilt into an offscreen buffer and blitted in an effect after the snapshot
+  // lands, so the canvas can still be showing the previous field at this instant.
+  // Sampling immediately produced two byte-identical captures on one run and a
+  // correct reading on another - a race in the test, not in the renderer. Polling
+  // for the change is honest about what is being waited for; sleeping a fixed
+  // number of milliseconds would only hide it.
+  let pixelsAfter=await sampleWorld();
+  const changed=()=>pixelsAfter.some((v,i)=>v!==pixelsBefore[i]);
+  for(let i=0;i<40&&!changed();i++){
+    await deltaPage.waitForTimeout(100);
+    pixelsAfter=await sampleWorld();
+  }
+  assert.ok(changed(),"the normal World repaints with the new field after the intervention");
+  const lumaAfter=await meanLuma();
+  // Directional tally against the bare-substrate reference.
+  // The bare reference comes from the module, never from a literal here. A stale
+  // hardcoded copy inverted this whole measurement once already.
+  const [bareR,bareG,bareB]=BARE_RGB;
+  let lost=0, gained=0, totalShift=0;
+  for(let i=0;i<pixelsBefore.length;i+=3){
+    const db=Math.hypot(pixelsBefore[i]!-bareR,pixelsBefore[i+1]!-bareG,pixelsBefore[i+2]!-bareB);
+    const da=Math.hypot(pixelsAfter[i]!-bareR,pixelsAfter[i+1]!-bareG,pixelsAfter[i+2]!-bareB);
+    if(da<db-6){lost++;totalShift+=db-da;}
+    else if(da>db+6){gained++;totalShift-=da-db;}
+  }
+  const samples=pixelsBefore.length/3;
+  assert.ok(lost>0,
+    `resource material visibly diminishes in the NORMAL World (${lost}/${samples} samples moved toward bare, ${gained} away)`);
+  assert.ok(lost>gained*3,
+    `loss dominates the change rather than being a wash (${lost} lost vs ${gained} gained)`);
+  assert.ok(lost/samples>0.25,
+    `the affected area is substantial, not a few cells (${(lost/samples*100).toFixed(0)}% of samples)`);
+  // No lens was required to see it, and none was silently changed for the player.
+  const lensAfter=await deltaPage.locator(".lens-active").innerText().catch(()=>"(default)");
+  assert.equal(lensAfter,lensBefore,"the lens was never switched in order to perceive the consequence");
+  // Scarcity must not read as damage. Damage vocabulary in practice means a
+  // darker, wounded frame; the design rule forbids it without sim evidence, and
+  // depleting material must not smuggle it in.
+  assert.ok(lumaAfter>=lumaBefore-3,
+    `depletion removes material without darkening the world (${lumaBefore.toFixed(1)} -> ${lumaAfter.toFixed(1)}), because darkening reads as damage`);
+
+  // AC2: the one causal claim the sheet makes is the direct mechanical effect.
+  // Read while the sheet is still up - previously this was read after the
+  // acknowledge, by which point the sheet had detached and the element was gone.
+  const effectText=await deltaPage.getByTestId("aftermath-direct-effect").innerText().catch(()=>"");
+  assert.ok(effectText.trim().length>0,"the direct effect is stated on the open sheet");
+  // Logged, not only asserted on failure: the margin is the evidence for this
+  // slice, so a passing run must still produce it.
+  console.log(`world consequence at zero ticks: ${lost}/${samples} samples lost material, ${gained} gained, luma ${lumaBefore.toFixed(1)}->${lumaAfter.toFixed(1)}`);
+  // The affordance collapses the sheet; it is not a prerequisite for time.
+  await deltaPage.getByTestId("aftermath-acknowledge").click();
+  await deltaImpact.waitFor({state:"detached",timeout:15_000});
+  // The slot is released once the sheet is acknowledged. That the evidence never
+  // drifted is asserted above, by measuring the World across the intervention at
+  // zero ticks, and separately in the runtime suite, which advances the world
+  // 4,000 ticks and requires the retained states to be unchanged.
+  const stillPinned=await deltaPage.getByTestId("sheet-slot").count();
+  assert.equal(stillPinned,0,"the slot is released once the sheet is acknowledged");
+
+  await deltaPage.close();
+  console.log("aftermath impact sheet: PASS");
+  })();
 
     await page.getByRole("button",{name:"History"}).click();
     await page.getByRole("heading",{name:"History"}).waitFor();
@@ -114,7 +255,7 @@ async function main(){
     // restart that window fresh (up to 3 attempts per speed).
     const speedSelect=page.getByLabel("Simulation speed");
     const deltas:Record<string,number>={};
-    for(const v of ["1","10","100","500"]){
+    for(const v of ["1","10","100"]){
       await speedSelect.selectOption(v);
       let done=false;
       for(let attempt=0;attempt<3&&!done;attempt++){
@@ -133,6 +274,25 @@ async function main(){
         if(gated){
           await page.getByTestId("decision-sheet").getByText("Keep watching").click();
           await page.getByTestId("decision-sheet").waitFor({state:"detached",timeout:15_000});
+          // Resolving opens the aftermath impact sheet. It does not gate time
+          // (AC22) - playback auto-resumes here, because the world WAS playing -
+          // so the sheet has NO guaranteed lifetime: a new pending decision
+          // outranks it (AC15), takes the slot, and the sheet legitimately
+          // disappears. That is correct product behaviour and it invalidates
+          // this measurement window, so restart the window instead of assuming
+          // the button stays put.
+          //
+          // Acknowledged through the runtime hook rather than a click: a click
+          // races a node another sheet is entitled to remove. The real button
+          // is still exercised by click in the dedicated aftermath block, where
+          // the world is paused and preemption cannot occur.
+          if(await page.getByTestId("aftermath-impact").isVisible().catch(()=>false)){
+            await page.evaluate(()=>(window as any).__DEE_TEST__.acknowledgeAftermath());
+            await page.waitForTimeout(150);
+          }
+          // Whichever sheet now owns the slot, the window is void either way.
+          if(await page.getByTestId("decision-sheet").isVisible().catch(()=>false))continue;
+          await page.getByRole("button",{name:"Pause"}).click().catch(()=>{});
           continue;
         }
         await page.getByRole("button",{name:"Pause"}).click();
@@ -147,7 +307,11 @@ async function main(){
     // at high slice sizes, so both saturate toward the same worker ceiling
     // (that plateau IS the throughput limit Max is defined by).
     assert.ok(deltas["100"]!>(deltas["10"]!*1.5),`100x materially faster than 10x (${deltas["100"]} vs ${deltas["10"]})`);
-    assert.ok(deltas["500"]!>(deltas["100"]!*0.7),`Max at least matches 100x (${deltas["500"]} vs ${deltas["100"]})`);
+    // The 500x/Max ratio assertion is retired with design approval (AC21):
+    // Max is no longer a player-reachable mode, so the ratio no longer tested
+    // anything a player can select, and it was the flaky half of #46. The
+    // internal Max path still exists for tooling; only the product option and
+    // this assertion are gone.
     await speedSelect.selectOption("100");
     // Family artwork: clicking an organism opens the details card with its
     // 128x128 base family portrait. World is paused, so a bounded grid search
@@ -191,6 +355,13 @@ async function main(){
     if(await decisionSheetOnMain.count()){
       await decisionSheetOnMain.getByText("Keep watching").click();
       await decisionSheetOnMain.waitFor({state:"detached",timeout:15_000});
+    }
+    // Collapse any aftermath sheet the clearance above opened, so the
+    // world-chrome assertions below are not measured through an overlay.
+    const leftoverImpact=page.getByTestId("aftermath-impact");
+    if(await leftoverImpact.isVisible().catch(()=>false)){
+      await page.getByTestId("aftermath-acknowledge").click();
+      await leftoverImpact.waitFor({state:"detached",timeout:15_000});
     }
     await page.getByLabel("World minimap").waitFor();
     const minimap=page.getByTestId("world-minimap");
@@ -323,7 +494,8 @@ async function main(){
     // decision, Play cannot bypass it, resolving records the choice with no hidden
     // tick, and time only resumes on an explicit Play.
     const decisionPage=await context.newPage();
-    await decisionPage.goto(baseUrl,{waitUntil:"networkidle"});
+    // Test hook, not a product control (AC21).
+    await decisionPage.goto(`${baseUrl}?deeTest=1`,{waitUntil:"networkidle"});
     await decisionPage.getByLabel("Evolution world").waitFor();
     await decisionPage.getByRole("button",{name:"World settings"}).click();
     // Balanced with this seed reaches a mapped formation event earliest of
@@ -343,7 +515,7 @@ async function main(){
     await decisionPage.getByRole("button",{name:"Close"}).click();
     const sheet=decisionPage.getByTestId("decision-sheet");
     for(let i=0;i<20&&!(await sheet.isVisible().catch(()=>false));i++){
-      await decisionPage.getByRole("button",{name:"Next meaningful change"}).click();
+      await decisionPage.evaluate(()=>(window as any).__DEE_TEST__.runToNextEvent());
       await decisionPage.waitForTimeout(1000);
     }
     await sheet.waitFor({timeout:180_000});
@@ -362,12 +534,39 @@ async function main(){
     await sheet.getByText("Keep watching").click();
     await sheet.waitFor({state:"detached",timeout:15_000});
     assert.equal(await tick(decisionPage),decisionTick,"resolution advances zero ticks (A7)");
-    // A14: world stays paused until an explicit resume.
-    await decisionPage.waitForTimeout(600);
-    assert.equal(await tick(decisionPage),decisionTick,"world stays paused after resolution (A14)");
+    // A14 + AC1/AC2: the aftermath impact state opens in the SAME sheet slot and
+    // is itself a hard pause at the resolution tick.
+    const impact=decisionPage.getByTestId("aftermath-impact");
+    await impact.waitFor({timeout:15_000});
+    assert.equal(await decisionPage.getByTestId("sheet-slot").getAttribute("data-mode"),"aftermath",
+      "the sheet slot persists across the morph and switches mode, rather than one sheet closing and another opening");
+    // AC3: Difference leads when a comparable baseline exists.
+    const compareButtons=impact.locator(".compare-option");
+    assert.equal(await compareButtons.count(),3,"all three comparison modes are offered when a baseline was retained");
+    assert.deepEqual(await compareButtons.allTextContents(),["Difference","Now","Before"],
+      "the comparison control is ordered Difference | Now | Before");
+    assert.equal(await impact.locator(".compare-option.active").getAttribute("data-compare"),"difference",
+      "Difference is the default, because the player's immediate question is 'what changed?'");
+    // This resolution applied nothing, so the honest report is that nothing
+    // measurable changed. Silence must not read as a broken or empty state.
+    await decisionPage.getByTestId("aftermath-quiet").waitFor({timeout:10_000});
+    await decisionPage.getByText(/not an outcome: no biological/i).waitFor(),
+      "the sheet states that no biological response exists yet, so the effect cannot be read as an outcome";
+    // Switching modes must change the evidence actually shown.
+    await compareButtons.nth(1).click();
+    await decisionPage.getByTestId("aftermath-single").waitFor({timeout:10_000});
+    await compareButtons.nth(2).click();
+    await decisionPage.getByText(/moment the intervention was applied/i).waitFor(),
+      "Before is labelled as the instant the intervention was applied, not an invented earlier moment";
+    await compareButtons.nth(0).click();
+    await decisionPage.getByTestId("aftermath-quiet").waitFor({timeout:10_000});
+    assert.equal(await tick(decisionPage),decisionTick,"world stays at the resolution tick (A14)");
+    // The affordance collapses the sheet. It is not what releases time.
+    await decisionPage.getByTestId("aftermath-acknowledge").click();
+    await impact.waitFor({state:"detached",timeout:15_000});
     await decisionPage.getByRole("button",{name:"Play"}).click();
     await decisionPage.waitForTimeout(900);
-    assert.ok(await tick(decisionPage)>decisionTick,"explicit Play resumes time (A14)");
+    assert.ok(await tick(decisionPage)>decisionTick,"explicit play still resumes time (A14)");
     // History retains the event and the player's action, without claiming cause.
     await decisionPage.getByRole("button",{name:"Pause"}).click();
     await decisionPage.getByRole("button",{name:"History"}).click();
@@ -381,7 +580,7 @@ async function main(){
     await decisionPage.getByRole("button",{name:"World",exact:true}).click();
     const catalystSheet=decisionPage.getByTestId("decision-sheet");
     for(let i=0;i<10&&!(await catalystSheet.isVisible().catch(()=>false));i++){
-      await decisionPage.getByRole("button",{name:"Next meaningful change"}).click();
+      await decisionPage.evaluate(()=>(window as any).__DEE_TEST__.runToNextEvent());
       await decisionPage.waitForTimeout(1000);
     }
     await catalystSheet.waitFor({timeout:180_000});
@@ -399,9 +598,15 @@ async function main(){
     await catalystSheet.getByText("Keep watching").click();
     await catalystSheet.waitFor({state:"detached",timeout:15_000});
     assert.equal(await tick(decisionPage),catalystTick,"catalyst resolution advances zero ticks");
+    // Same contract as an event decision: the sheet collapses via its
+    // affordance, and time is not gated on that.
+    const catalystImpact=decisionPage.getByTestId("aftermath-impact");
+    await catalystImpact.waitFor({timeout:15_000});
+    await decisionPage.getByTestId("aftermath-acknowledge").click();
+    await catalystImpact.waitFor({state:"detached",timeout:15_000});
     await decisionPage.getByRole("button",{name:"Play"}).click();
     await decisionPage.waitForTimeout(900);
-    assert.ok(await tick(decisionPage)>catalystTick,"explicit Play resumes after a catalyst choice");
+    assert.ok(await tick(decisionPage)>catalystTick,"explicit play resumes after a catalyst choice");
     await decisionPage.getByRole("button",{name:"Pause"}).click();
     await decisionPage.getByRole("button",{name:"History"}).click();
     await decisionPage.getByText(/World catalyst offered at tick/).waitFor();
@@ -627,6 +832,7 @@ async function runLandscapeChecks(context:import("playwright").BrowserContext){
   assert.ok(mWaste&&mWaste.lit>=0,"waste overlay renders on the phone viewport");
   await mobile.close();
   await page.close();
+
 }
 
 main().catch(error=>{

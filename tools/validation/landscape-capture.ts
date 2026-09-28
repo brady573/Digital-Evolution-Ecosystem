@@ -29,7 +29,8 @@ async function main(){
   try{
     const context=await browser.newContext({viewport:{width:1280,height:900},deviceScaleFactor:1});
     const page=await context.newPage();
-    await page.goto(baseUrl,{waitUntil:"networkidle"});
+    // URL-gated test hook, not a product control (AC21).
+    await page.goto(`${baseUrl}?deeTest=1`,{waitUntil:"networkidle"});
     await page.getByLabel("Evolution world").waitFor();
 
     // A fixed Patchwork world (the Slice 2 calibration config) on a fixed
@@ -41,11 +42,12 @@ async function main(){
     await page.getByRole("button",{name:"Create universe"}).click();
     await page.waitForTimeout(600);
     // Max speed: the capture needs a world that has actually been modified
-    // by its organisms, not a young one. At max speed the UI re-renders
-    // continuously, so the run toggle is driven through the DOM (Playwright's
-    // actionability check would never settle) and progress is read from the
-    // tick readout rather than from button labels.
-    await page.getByLabel("Simulation speed").selectOption("500");
+    // by its organisms, not a young one. At the top bounded speed the UI
+    // re-renders continuously, so the run toggle is driven through the DOM
+    // (Playwright's actionability check would never settle) and progress is read
+    // from the tick readout rather than from button labels. AC21: Max is no
+    // longer a product option, so captures use 100x.
+    await page.getByLabel("Simulation speed").selectOption("100");
     const pressRun=async(on:boolean)=>await page.evaluate((want:boolean)=>{
       const btn=[...document.querySelectorAll("button")]
         .find(b=>b.textContent?.trim()===(want?"Play":"Pause")) as HTMLButtonElement|undefined;
@@ -265,7 +267,8 @@ async function main(){
     await decisionShell.getByRole("button",{name:"Create universe"}).click();
     await decisionShell.getByRole("dialog",{name:"World settings"}).waitFor({state:"detached"});
     for(let i=0;i<25&&!(await decisionShell.getByTestId("decision-sheet").count());i++){
-      await decisionShell.getByRole("button",{name:"Next meaningful change"}).click();
+      // AC21: no such product control; the suite uses the URL-gated test hook.
+      await decisionShell.evaluate(() => (window as any).__DEE_TEST__.runToNextEvent());
       await decisionShell.waitForTimeout(500);
     }
     if(await decisionShell.getByTestId("decision-sheet").count()){

@@ -153,6 +153,115 @@ export interface DecisionContext {
 }
 
 /* ------------------------------------------------------------------ *
+ * M3 aftermath: the impact of one resolved intervention.
+ *
+ * Aftermath state is EVIDENCE, not biology. It is a retained read model of
+ * what the world looked like at the resolution tick, captured by sim-runtime
+ * from the same authorities that feed analysis, so the comparison the player
+ * sees cannot disagree with the simulation. Nothing here mutates or predicts
+ * anything, and no field in it is ever written back.
+ *
+ * Resolution advances zero ticks, so the baseline tick IS the resolution
+ * tick. There is no "before the intervention" instant that is not also "the
+ * moment it was applied", and this contract must not imply one exists.
+ * ------------------------------------------------------------------ */
+
+/** Which retained view the player is comparing. */
+export type AftermathComparison = "difference" | "now" | "before";
+
+/**
+ * The scalar measures an aftermath may compare, with the meaning the player
+ * is entitled to read off them. Declared once, here, so the runtime cannot
+ * retain a scalar the UI cannot label and the UI cannot label a scalar the
+ * runtime never retained. Fractions are 0..1 and labelled as such; a
+ * difference on a fraction is a change in proportion, never a population
+ * change, and the UI says so.
+ */
+export interface AftermathComparableDescriptor {
+  readonly key: string;
+  readonly label: string;
+  /** Suffix shown after the value. "" for a plain count. */
+  readonly unit: string;
+  /** True when the value is a 0..1 proportion, so relative change must not
+   *  be phrased as a count. */
+  readonly fraction: boolean;
+}
+
+export const AFTERMATH_COMPARABLES: readonly AftermathComparableDescriptor[] = [
+  { key: "population", label: "Living population", unit: "", fraction: false },
+  { key: "active_population", label: "Active", unit: "", fraction: false },
+  { key: "dormant_population", label: "Dormant", unit: "", fraction: false },
+  { key: "dormant_fraction", label: "Dormant share", unit: "%", fraction: true },
+  { key: "c_energy_share", label: "C-energy share", unit: "%", fraction: true },
+  { key: "crossfeeder_fraction", label: "Crossfeeders", unit: "%", fraction: true },
+  { key: "waste_fraction", label: "Waste load", unit: "%", fraction: true },
+  { key: "waste_exposed_share", label: "In burden-relevant cells", unit: "%", fraction: true },
+  { key: "tolerance_mean", label: "Mean tolerance", unit: "", fraction: false },
+  { key: "cleanup_mean", label: "Mean cleanup", unit: "", fraction: false },
+] as const;
+
+/** A retained field snapshot at the resolution tick, at full grid resolution.
+ *  Never downsampled: a coarser grid would be a resolution the evidence does
+ *  not have, and a spatial claim needs the resolution it was measured at.
+ *
+ *  `stock` is KIND-MAJOR and FLAT, matching the engine's own layout: the outer
+ *  index is the substance kind (0 = nutrient A, 1 = B, 2 = C) and each entry is
+ *  a flat run of gridSize*gridSize cells in row-major order. It is NOT an array
+ *  of grid rows - reading it that way compares the wrong cells. */
+export interface AftermathFieldSnapshot {
+  readonly gridSize: number;
+  readonly stock: readonly (readonly number[])[];
+}
+
+/**
+ * Everything retained to compare an outcome against the moment of the
+ * intervention. `scalars` holds exactly the keys declared in
+ * AFTERMATH_COMPARABLES; nothing else is retained, so the comparison surface
+ * cannot quietly grow.
+ */
+export interface AftermathBaseline {
+  readonly tick: number;
+  readonly resources: AftermathFieldSnapshot;
+  readonly waste: AftermathFieldSnapshot;
+  readonly scalars: Readonly<Record<string, number>>;
+}
+
+/**
+ * One resolved intervention under observation. `phase` names the presentation
+ * state; the runtime owns the transition, the UI only renders it. Every phase
+ * after "impact" is presentation over evidence the runtime already holds.
+ */
+export interface AftermathState {
+  readonly schemaVersion: 1;
+  readonly opportunityId: string;
+  readonly commandId: string;
+  /** The tick the intervention was applied at. Resolution advanced zero ticks
+   *  to get here, and the impact state must not advance any. */
+  readonly resolutionTick: number;
+  readonly phase: AftermathPhase;
+  /** Copy as offered and applied, so the aftermath never re-derives or
+   *  re-words what was actually chosen. */
+  readonly choiceTitle: string;
+  /** The mechanical effect the command contract proves. This is the only
+   *  causal claim the aftermath may ever make. */
+  readonly directEffectDescription: string;
+  readonly intervention: InterventionSpec | null;
+  readonly source: "event_decision" | "world_catalyst";
+  /** Retained state from immediately BEFORE the effect was applied. */
+  readonly baseline: AftermathBaseline;
+  /** Retained state from immediately AFTER the effect was applied, same tick.
+   *  Both sides are retained rather than one side being read live, because
+   *  playback resumes automatically after resolution (AC22) and a live "Now"
+   *  would move while the player reads the comparison (AC23). Difference is
+   *  therefore exactly the mechanical effect, measured across one tick. */
+  readonly resolved: AftermathBaseline;
+}
+
+/** Presentation states of an aftermath. "impact" is entered at resolution and
+ *  is the only phase that requires the world to be paused. */
+export type AftermathPhase = "impact" | "observation" | "development" | "settlement";
+
+/* ------------------------------------------------------------------ *
  * M3 world catalysts: quiet-period environmental intervention windows.
  *
  * A catalyst window is NOT an observed biological event and must never be
@@ -162,7 +271,7 @@ export interface DecisionContext {
  * ------------------------------------------------------------------ */
 
 /** Stable catalyst identifiers, M3 v1 catalog. */
-export type CatalystId = "drought-a" | "drought-b" | "global-crash";
+export type CatalystId = "drought-a" | "drought-b" | "global-crash" | "c-washout";
 
 /** Read-only world state a catalyst eligibility check may consult. */
 export interface CatalystContext {
@@ -180,6 +289,11 @@ export interface CatalystContext {
   readonly stockFractionB: number;
   /** Total abiotic stock as a share of modeled abiotic capacity (0..1). */
   readonly abioticStockFraction: number;
+  /** Share of realized cumulative resource energy from Metabolite C (0..1).
+   *  Exposed so a C-targeting catalyst can be judged by the same kind of
+   *  read-only context the A and B catalysts use, rather than by a rule invented
+   *  for it. Derived from the same realized energy totals as energyShareA/B. */
+  readonly energyShareC: number;
 }
 
 /** Per-catalyst diagnostic: why it was or was not offered. */
@@ -391,6 +505,12 @@ export interface RenderSnapshot {
   readonly pendingDecision: PendingDecision | null;
   /** Immutable history of what the player actually chose (action, not cause). */
   readonly resolvedDecisions: readonly DecisionResolution[];
+  /** Aftermath of the most recent resolution, while it is still being
+   *  presented. Evidence, not biology: it carries a retained read model of the
+   *  resolution tick and never mutates simulation state. Null when no aftermath
+   *  is active. Presentation reads it from here rather than owning it, so the
+   *  application never holds mutable aftermath state. */
+  readonly aftermath: AftermathState | null;
   readonly control: {
     readonly tick: number;
     readonly population: number;
@@ -476,6 +596,7 @@ export type RuntimeCommand =
       readonly choiceId: string;
       readonly requestId?: string;
     }
+  | { readonly type: "ACKNOWLEDGE_AFTERMATH"; readonly requestId?: string }
   | { readonly type: "LOAD_CHECKPOINT"; readonly checkpoint: SupportedUniverseCheckpoint }
   | { readonly type: "REQUEST_CHECKPOINT"; readonly requestId: string }
   | { readonly type: "REQUEST_EXPORT"; readonly requestId: string };
@@ -485,4 +606,8 @@ export type RuntimeResponse =
   | { readonly type: "CHECKPOINT"; readonly requestId: string; readonly checkpoint: UniverseCheckpoint }
   | { readonly type: "EXPORT"; readonly requestId: string; readonly data: unknown }
   | { readonly type: "DECISION_RESOLVED"; readonly requestId: string; readonly snapshot: RenderSnapshot }
+  /** Acknowledgement reply for ACKNOWLEDGE_AFTERMATH. Distinct from a bare
+   *  SNAPSHOT so the awaiting caller can settle: a snapshot alone only notifies
+   *  subscribers and would leave the request pending forever. */
+  | { readonly type: "AFTERMATH_ACKNOWLEDGED"; readonly requestId: string; readonly snapshot: RenderSnapshot }
   | { readonly type: "ERROR"; readonly message: string; readonly requestId?: string };

@@ -373,8 +373,11 @@ function testMultiSeedPossibility() {
 }
 
 function testWashoutReliance() {
-  // Washout is validation-internal: applicable through the recorded path but
-  // never offered in windows and without an Experiments button.
+  // The washout is a dev/test-only offer. It is a valid CANDIDATE for the
+  // product, but promoting it is explicitly not part of this PR, so the property
+  // guarded here is ISOLATION: absent from the default catalog, reachable only
+  // through the opt-in, and still applying through the ordinary recorded
+  // deterministic path rather than a special one.
   assert.equal(
     engineCatalystModeFor({ schemaVersion: 1, kind: "nutrient_disturbance", mode: "c_washout" }),
     "cWashout",
@@ -384,8 +387,13 @@ function testWashoutReliance() {
     isSupportedIntervention({ schemaVersion: 1, kind: "nutrient_disturbance", mode: "c_washout" }),
     "washout applies through the recorded path",
   );
-  assert.ok(!catalystIds().some((id) => String(id).includes("washout")), "washout never offered");
-  assert.equal(catalystIds().length, 3, "window catalog unchanged");
+  assert.ok(!catalystIds().some((id) => String(id) === "c-washout"),
+    "the washout is absent from the production catalog");
+  assert.equal(catalystIds().length, 3, "the production catalog is unchanged in size");
+  assert.ok(catalystIds({ includeTestCatalysts: true }).includes("c-washout"),
+    "the washout is reachable through the explicit test opt-in");
+  assert.equal(catalystIds({ includeTestCatalysts: true }).filter((id) => String(id) === "c-washout").length, 1,
+    "and appears exactly once, with no duplicate offer");
   // Stage 2 Level-3: matched C-availability perturbation. An established
   // guild (20% scavengers) faces a recorded environmental C sink on the live
   // branch while the exact control twin runs untouched. The guild collapses
