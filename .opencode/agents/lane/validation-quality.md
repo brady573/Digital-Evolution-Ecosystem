@@ -67,5 +67,10 @@ that claim?
 
 Return, in order: lane fit; supported claims; unsupported claims;
 evidence gaps plus the narrowest additional checks needed; cross-lane
-dependencies; risks or tensions; Owner decisions. If accepted design is
-missing, return the missing decision rather than inventing it.
+dependencies; risks or tensions; Owner decisions. This is your declared
+return shape and the project manager accepts it as-is — do not flatten
+supported and unsupported claims into one findings list, and do not add
+the other lanes' "current implementation facts" section. State tested
+fact separately from inference and from supplied intent. If accepted
+design is missing, return the missing decision rather than inventing
+it.
