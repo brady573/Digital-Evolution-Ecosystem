@@ -212,14 +212,14 @@ jobs:
         env:
           DEE_IMPACT_BASE: ${{ env.impact_base }}
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        if: steps.plan.outputs.ci-browser_has_work == 'true'
+        if: steps.plan.outputs.ci_browser_has_work == 'true'
         with:
           name: explorer-dist
           path: apps/explorer/dist
       - run: pnpm exec playwright install --with-deps chromium
-        if: steps.plan.outputs.ci-browser_has_work == 'true'
+        if: steps.plan.outputs.ci_browser_has_work == 'true'
       - name: Start one preview server for the whole browser lane
-        if: steps.plan.outputs.ci-browser_has_work == 'true'
+        if: steps.plan.outputs.ci_browser_has_work == 'true'
         run: |
           pnpm --filter @digital-evolution/explorer exec vite preview --host 127.0.0.1 --port 4173 >/tmp/digital-evolution-vite.log 2>&1 &
           ready=0
@@ -338,9 +338,14 @@ jobs:
   # Decides whether the Android lane is relevant to this change at all. A
   # separate job because a reusable-workflow caller cannot use `env` set by a
   # previous step of the same job, and `if` on the caller needs the answer.
-  android-plan:
+  android_plan:
     runs-on: ubuntu-latest
     needs: [quick, build]
+    # A job's `if` cannot read another job's step outputs, and workflow `env` is
+    # not shared between jobs. The answer has to travel as a job output.
+    outputs:
+      android_apk_has_work: ${{ steps.plan.outputs.android_apk_has_work }}
+      android_runtime_has_work: ${{ steps.plan.outputs.android_runtime_has_work }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -353,7 +358,7 @@ jobs:
         run: pnpm ci:plan android-apk android-runtime
       # Reported so a skipped lane is visible rather than merely absent.
       - name: Android lane skipped by impact routing
-        if: steps.plan.outputs.android-apk_has_work != 'true'
+        if: steps.plan.outputs.android_apk_has_work != 'true'
         run: echo "::notice title=Android lane skipped::No changed file can affect the packaged application, Android integration, or the platform contract, so no APK was assembled and no emulator was started. Required checks are unaffected."
 
   android:
@@ -367,6 +372,7 @@ jobs:
       - build
       - smoke
       - presentation
+      - android_plan
     uses: ./.github/workflows/android.yml
     # Gated on impact, not on whether the gates above happened to pass. Android
     # packaging costs ~4m55s and the runtime smoke ~16m, and neither is relevant
@@ -376,7 +382,7 @@ jobs:
     #
     # Not a required check, and not on any required check's critical path, so
     # skipping it cannot weaken a merge gate.
-    if: ${{ needs.build.result == 'success' && needs.smoke.result == 'success' && env.android_has_work == 'true' }}
+    if: ${{ needs.build.result == 'success' && needs.smoke.result == 'success' && needs.android_plan.outputs.android_apk_has_work == 'true' }}
 
   # Collects every runner's summary into one machine-readable file so "what ran,
   # what was skipped, and what did it cost" is answerable from a single artifact.

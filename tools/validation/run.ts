@@ -559,8 +559,13 @@ const main = (): number => {
         const hasWork = String(decision.run.length > 0);
         console.log(`${groupId}: ${hasWork === "true" ? "has work" : "nothing to execute"}${decision.broadened ? " (fallback broad)" : ""}`);
         if (process.env.GITHUB_OUTPUT) {
+          // The key must be addressable as `steps.<id>.outputs.<key>`, and dot
+          // notation cannot contain a hyphen. Shard ids like `ci-browser` would
+          // otherwise force bracket syntax in every consumer, and a single missed
+          // bracket is a workflow file error that fails every job in the run.
+          const key = `${groupId}_has_work`.replace(/-/g, "_");
           const { appendFileSync } = require("node:fs") as typeof import("node:fs");
-          appendFileSync(process.env.GITHUB_OUTPUT, `${groupId}_has_work=${hasWork}\n`);
+          appendFileSync(process.env.GITHUB_OUTPUT, `${key}=${hasWork}\n`);
         }
       }
       return 0;

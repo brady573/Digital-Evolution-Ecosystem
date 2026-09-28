@@ -46,6 +46,11 @@ jobs:
   # so a manual dispatch of this workflow still reports the plan.
   plan:
     runs-on: ubuntu-latest
+    # The packaging and runtime jobs gate on this, and a job's `if` can only read
+    # another job's *outputs*, never its step outputs.
+    outputs:
+      android_apk_has_work: ${{ steps.plan.outputs.android_apk_has_work }}
+      android_runtime_has_work: ${{ steps.plan.outputs.android_runtime_has_work }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -68,7 +73,7 @@ jobs:
   apk:
     runs-on: ubuntu-latest
     needs: [plan]
-    if: needs.plan.outputs.android-apk_has_work == 'true'
+    if: needs.plan.outputs.android_apk_has_work == 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -94,7 +99,7 @@ jobs:
           path: apps/explorer/dist
 
       - name: Capacitor sync against the validated bundle
-        if: needs.plan.outputs.android-apk_has_work == 'true'
+        if: needs.plan.outputs.android_apk_has_work == 'true'
         run: pnpm --filter @digital-evolution/explorer exec cap sync android
       - name: Detect Capacitor drift (checked-in android/ is authoritative)
         run: git diff --exit-code -- apps/explorer/android
@@ -148,7 +153,7 @@ jobs:
     needs: [plan, apk]
     # Non-gating by policy, and the single most expensive step in CI. Impact
     # routing keeps it off runs that cannot reach the packaged application.
-    if: needs.plan.outputs.android-runtime_has_work == 'true'
+    if: needs.plan.outputs.android_runtime_has_work == 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4

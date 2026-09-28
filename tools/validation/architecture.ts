@@ -240,6 +240,31 @@ export function checkArchitecture(): CheckResult {
     }
   }
 
+  // --- GitHub expression references must be addressable ------------------
+  // A hyphen cannot appear in a `steps.<id>.outputs.<key>` or `needs.<id>`
+  // dot-notation path. GitHub rejects the workflow file for it, and the symptom
+  // is the whole run failing with zero jobs and a bare "likely failed because of
+  // a workflow file issue" -- which does not name the offending line. Two of
+  // these shipped in one attempt before a run caught it, so the check exists to
+  // make the failure local and legible.
+  for (const workflow of workflows) {
+    for (const match of workflow.body.matchAll(/\b(steps|needs)\.([A-Za-z0-9_-]+)(\.outputs\.[A-Za-z0-9_.-]+)?/g)) {
+      const [, kind, segment, tail] = match;
+      if (segment.includes("-")) {
+        const line = workflow.body.slice(0, match.index).split("\n").length;
+        failures.push(
+          `${workflow.name}:${line} references ${kind}.${segment}, whose hyphen cannot be addressed in dot notation; rename the id or use bracket syntax`,
+        );
+      }
+      if (tail?.includes("-")) {
+        const line = workflow.body.slice(0, match.index).split("\n").length;
+        failures.push(
+          `${workflow.name}:${line} output key ${tail.slice(".outputs.".length)} contains a hyphen and cannot be read as ${tail}`,
+        );
+      }
+    }
+  }
+
   // --- Platform evidence is a called workflow, not a cross-run lookup -----
   // Android used to trigger independently and locate the product run for its own
   // commit before packaging. That needed SHA inference, an authenticated `gh`,
