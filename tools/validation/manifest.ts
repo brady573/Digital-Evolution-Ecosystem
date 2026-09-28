@@ -283,6 +283,20 @@ export const UNITS: readonly ValidationUnit[] = [
     claim:
       "An impact pause retains both sides of the effect at one tick and auto-resume never loses them.",
   },
+  // --- Dependency shards ----------------------------------------------------
+  // `pnpm test:dependency` was 647s on CI and, as a single shard, the entire
+  // product critical path. The 647s was almost entirely the live-integration
+  // phase: the policy arcs run in ~1s. So the suite is partitioned here, with
+  // the policy phase as its own unit and the five live tests split three ways.
+  //
+  // These four units have no `baselineSeconds` yet, and the plan output says so
+  // rather than implying they are free. Their real cost arrives with the first
+  // CI run's `validation-summary` artifact, which is the point of recording
+  // telemetry: the split should be re-balanced from measured shards rather than
+  // from a guess made on a laptop.
+  //
+  // Provisional device figures (proot/aarch64, slower than CI, for reference
+  // only -- not baselines): arc 44s, checkpoint 49s, possibility 107s.
   {
     id: "dependency-policy",
     title: "Dependency policy (fast invariants)",
