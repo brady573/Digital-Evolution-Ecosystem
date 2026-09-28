@@ -388,6 +388,19 @@ async function main(){
     // The minimap resource field must cover the whole world, not a fraction.
     // Real stocks exist in every cell, so all four quadrants are inked; a
     // top-left-only regression drops the others to near-background.
+    //
+    // The comparison is RELATIVE, and deliberately so. The speed-control checks
+    // above advance the world by a wall-clock-derived number of ticks (measured
+    // at +141/+947/+2272 on one run and +153/+1389/+2794 on another), so how
+    // much material is on the field when this assertion runs varies between
+    // runs. An absolute ink floor therefore fails on total ink rather than on
+    // coverage: a run that happened to advance less stock landed on 354 against
+    // a 400 floor, which says nothing about the minimap being wrong.
+    //
+    // Ratio to the densest quadrant expresses the actual claim, and catches
+    // every regression this check exists for: a top-left-only paint gives
+    // [n,0,0,0] and a half-painted minimap gives [n,n,0,0], both of which fail,
+    // while an entirely blank minimap gives [0,0,0,0] and also fails.
     const quadrantInk=await page.evaluate(`(()=>{
       const c=document.querySelector('canvas[aria-label="World minimap"]');
       const ctx=c.getContext('2d');
@@ -397,7 +410,10 @@ async function main(){
       const w=c.width,h=c.height,q=Math.floor(w*0.3);
       return[ink(0,0,q,q),ink(w-q,0,q,q),ink(0,h-q,q,q),ink(w-q,h-q,q,q)];
     })()`);
-    assert.ok(Math.min(...quadrantInk)>400,`minimap field covers the whole world (quadrants ${quadrantInk.join("/")})`);
+    const densest=Math.max(...quadrantInk);
+    assert.ok(
+      Math.min(...quadrantInk)>densest/4,
+      `minimap field covers the whole world (quadrants ${quadrantInk.join("/")}, sparsest must exceed a quarter of ${densest})`);
 
     // Panning across the torus must keep the camera normalized: drag well past
     // one world width and the center stays inside [0,600).
