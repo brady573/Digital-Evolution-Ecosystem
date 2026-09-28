@@ -261,12 +261,26 @@ jobs:
   # Collects every runner's summary into one machine-readable file so "what ran,
   # what was skipped, and what did it cost" is answerable from a single artifact.
   #
-  # `android` is included: it is part of this invocation, and a summary that
-  # omits the platform lane would understate the run. It is `if: always()` so a
-  # failed or skipped platform lane still produces a summary rather than none.
+  # `android` is deliberately NOT a dependency, even though it runs in this same
+  # invocation.
+  #
+  # It was, briefly, and that put the emulator on the critical path of a gating
+  # check. The Android runtime smoke is classified as non-gating platform
+  # evidence: its boot consumes 80-90% of its 1200s budget and it has failed on
+  # `adb: device offline` with a healthy APK. Making a required check wait for
+  # that meant an 18-minute emulator boot could hold up a summary that says
+  # nothing about Android -- non-gating evidence gating a gate.
+  #
+  # The platform lane is still summarised whenever it succeeds; it just is not
+  # waited for. If whole-run telemetry is wanted later, the shape is a second
+  # `if: always()` job that merges Android's contribution after the fact, rather
+  # than a required check that blocks on it.
+  #
+  # `if: always()` keeps the summary produced even when a product lane failed,
+  # which is when a skip reason is most worth reading.
   telemetry:
     runs-on: ubuntu-latest
-    needs: [quick, sim-a, sim-b, sim-c, sim-d, build, smoke, presentation, pixi-spike, android]
+    needs: [quick, sim-a, sim-b, sim-c, sim-d, build, smoke, presentation, pixi-spike]
     if: always()
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
