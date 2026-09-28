@@ -240,6 +240,26 @@ export function checkArchitecture(): CheckResult {
     }
   }
 
+  // --- A workflow may only invoke scripts that exist --------------------
+  // A workflow step calling `pnpm <script>` that is not in package.json fails at
+  // run time with ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL, which names neither the
+  // missing script nor the step. It shipped once already: `ci:plan` was wired
+  // into two workflows before the script existed, and every local check was
+  // green because nothing runs the workflow locally.
+  // pnpm's own subcommands are not package.json scripts.
+  const pnpmBuiltins = new Set(["exec", "install", "i", "dlx", "add", "run", "why", "list", "ls", "audit", "approve-builds", "config", "store", "outdated"]);
+  for (const workflow of workflows) {
+    for (const match of workflow.body.matchAll(/\brun:[^\n]*?\bpnpm\s+([a-z][a-z0-9:-]*)/g)) {
+      const script = match[1];
+      if (!pnpmBuiltins.has(script) && !scripts.has(script)) {
+        const line = workflow.body.slice(0, match.index).split("\n").length;
+        failures.push(
+          `${workflow.name}:${line} runs \`pnpm ${script}\`, which is not a package.json script`,
+        );
+      }
+    }
+  }
+
   // --- GitHub expression references must be addressable ------------------
   // A hyphen cannot appear in a `steps.<id>.outputs.<key>` or `needs.<id>`
   // dot-notation path. GitHub rejects the workflow file for it, and the symptom

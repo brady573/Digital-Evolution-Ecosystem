@@ -479,7 +479,8 @@ const usage = (): void => {
       "  run.ts verify              run the blocking repository contract",
       "  run.ts group <id> [...]    run one or more validation groups (--dry-run to list)",
       "  run.ts ci <shard>          run a CI shard under impact routing",
-      "  run.ts plan <shard>        report whether a shard has work, for conditional inputs",
+      "  run.ts plan [--json]       print the derived validation plan",
+      "  run.ts shard-plan <shard>  report whether a shard has work, for conditional inputs",
       "  run.ts check               drift and invariant gate",
       "  run.ts plan [--json]       print the derived validation plan",
       "  run.ts merge <dir>         combine per-runner summaries into one",
@@ -544,7 +545,7 @@ const main = (): number => {
       }
       return mergeSummaries(args[0]!);
     }
-    case "plan": {
+    case "shard-plan": {
       // Whether a shard has any work, as a step output, so a job whose inputs are
       // conditional (the browser and Android lanes both download the artifact the
       // build job produces) can skip those inputs when routing left it nothing to
