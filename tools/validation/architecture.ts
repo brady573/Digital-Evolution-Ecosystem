@@ -75,8 +75,13 @@ export const requiredCiUnits = (): string[] =>
  * evidence-class substitution dressed up as convenience.
  */
 export const verifyFromManifest = (): string[] => {
-  const excluded = new Set(["android", "survey", "browser", "evidence"]);
-  return GROUPS.filter((g) => !g.ci && !excluded.has(g.id)).flatMap((g) => [...g.unitIds]);
+  const excluded = new Set(["survey", "browser", "evidence"]);
+  // Platform groups are excluded by prefix rather than by exact name. Android
+  // now has several routing groups (`android`, `android-apk`, `android-runtime`)
+  // and an exact-name list would silently start folding platform units back into
+  // `verify` the next time one is added.
+  return GROUPS.filter((g) => !g.ci && !excluded.has(g.id) && !g.id.startsWith("android"))
+    .flatMap((g) => [...g.unitIds]);
 };
 
 export function checkArchitecture(): CheckResult {
