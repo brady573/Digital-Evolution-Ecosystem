@@ -240,6 +240,26 @@ export function checkArchitecture(): CheckResult {
     }
   }
 
+  // --- Block scalar indentation: NOT checked, deliberately --------------
+  // A `key: |` block ends at the first non-empty line indented less than its
+  // first content line, so a comment written at the *surrounding* indentation
+  // silently ends the block and everything after it is parsed as YAML. That is
+  // not hypothetical: an explanatory comment inside android.yml's `script:`
+  // block was indented to match the step rather than the block body, and the
+  // whole product run produced zero jobs while every local check passed. A
+  // reusable workflow with this defect also takes its caller down.
+  //
+  // An earlier attempt here flagged "a comment at the block's own indentation",
+  // which is legal YAML and fires on valid files -- including this repository's
+  // own preview-server block. A check that reports a defect where there is none
+  // is worse than no check, because it trains people to ignore the gate. The
+  // reliable detection needs a real YAML parse, and there is no YAML parser
+  // available in this repository without adding a dependency to a repo that
+  // deliberately has none for offline-first reasons.
+  //
+  // The rule is therefore documented where it matters -- in the script block
+  // itself -- rather than enforced with a check that cannot be trusted.
+
   // --- A workflow may only invoke scripts that exist --------------------
   // A workflow step calling `pnpm <script>` that is not in package.json fails at
   // run time with ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL, which names neither the
