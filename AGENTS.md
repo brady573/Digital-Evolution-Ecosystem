@@ -143,6 +143,10 @@ Two conventions worth keeping:
 - **Shard by measured cost.** `baselineSeconds` in the manifest comes from real
   CI runs, not estimates. A shard that is much longer than its siblings is the
   critical path, and the fix is to move or split units, not to add runners.
+- **Route on impact, but keep the check.** A shard a change does not affect
+  still runs and still reports success, with its units recorded as
+  `skipped_impact`. Branch protection requires these checks by name, so a check
+  that vanishes is worse than one that says "nothing to do".
 - **Splitting a suite must be provably lossless.** When `test:dependency` was
   split across three shards, `test:validation-arch` was extended to assert that
   the shards' `--only` lists union to exactly the suite's full test set. If you
