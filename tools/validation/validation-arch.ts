@@ -109,7 +109,7 @@ const testBiologicalAuthorityReachesEcologicalEvidence = (): void => {
 const testContractsAreBroadest = (): void => {
   const contracts = impactUnits(["packages/contracts/src/index.ts"]).ids;
   for (const unit of UNITS) {
-    if (unit.enforcement === "manual") continue;
+    if (unit.enforcement === "manual" || unit.paused) continue;
     assert.ok(contracts.has(unit.id), `a contracts change must require ${unit.id}`);
   }
 
@@ -158,7 +158,7 @@ const testValidationInfrastructureIsConservative = (): void => {
   ]) {
     const { ids } = impactUnits([path]);
     for (const unit of UNITS) {
-      if (unit.enforcement === "manual") continue;
+      if (unit.enforcement === "manual" || unit.paused) continue;
       assert.ok(ids.has(unit.id), `${path} must require ${unit.id}`);
     }
   }
@@ -201,18 +201,19 @@ const testGeneratedOutputRequiresNothing = (): void => {
   assert.equal(ids.size, 0, "generated output alone must require no validation");
 };
 
-/** The safety rule: unknown means more validation, never less. */
+/** The safety rule: unknown means more validation, never less. Paused units stay paused. */
 const testUnknownPathsRunEverything = (): void => {
+  const runnable = UNITS.filter((u) => !u.paused);
   for (const path of ["mystery/file.ts", "scripts/deploy.sh", "some/other/place.rs"]) {
     const { ids, unknown } = impactUnits([path]);
     assert.ok(unknown, `${path} must be unclassified`);
-    for (const unit of UNITS) assert.ok(ids.has(unit.id), `${path} must force ${unit.id}`);
+    for (const unit of runnable) assert.ok(ids.has(unit.id), `${path} must force ${unit.id}`);
   }
 
-  // A recognised path mixed with an unrecognised one still runs everything.
+  // A recognised path mixed with an unrecognised one still runs everything runnable.
   const mixed = impactUnits(["apps/explorer/src/App.tsx", "mystery/file.ts"]);
   assert.ok(mixed.unknown);
-  assert.equal(mixed.ids.size, UNITS.length);
+  assert.equal(mixed.ids.size, runnable.length);
 };
 
 /** Monotonicity: adding a path can only add validation, never remove it. */
@@ -308,8 +309,15 @@ const testEveryUnitIsClassifiedAndReachable = (): void => {
     assert.ok(["invariant", "deterministic", "presentation", "browser", "platform", "scientific", "evidence"].includes(unit.cls));
   }
   for (const group of GROUPS) {
+    if (group.id === "android-runtime") continue; // exempted below: empty by pause, not by omission
     assert.ok(group.unitIds.length > 0, `group ${group.id} is empty`);
   }
+  // The one empty group is the pause, and the exemption is itself asserted:
+  // an empty group without a paused unit behind it is still a defect.
+  const runtime = GROUP_BY_ID.get("android-runtime");
+  assert.ok(runtime && runtime.unitIds.length === 0, "android-runtime must be empty while paused");
+  const paused = UNITS.filter((u) => u.paused);
+  assert.ok(paused.some((u) => u.id === "android-install-launch"), "the pause must name android-install-launch, or the empty group is unexplained");
 };
 
 const tests: Array<[string, () => void]> = [
@@ -376,7 +384,8 @@ const testUnknownRunsEverything = (): void => {
   // Missing changed files must behave the same way, not as "nothing required".
   const broadened = planBroad("no base available");
   assert.ok(broadened.unknown, "a missing base must be unknown");
-  assert.equal(broadened.unitIds.length, UNITS.length, "a missing base must run every unit");
+  const runnable = UNITS.filter((u) => !u.paused).length;
+  assert.equal(broadened.unitIds.length, runnable, "a missing base must run every runnable unit");
   for (const shard of [...GROUP_BY_ID.values()].filter((g) => g.ci)) {
     assert.equal(decideShard(shard.id, broadened).skipped.length, 0, `missing base skipped units in ${shard.id}`);
   }
@@ -387,7 +396,7 @@ const testContractsTriggerBroadValidation = (): void => {
   const { plan } = planForChange(["packages/contracts/src/index.ts"]);
   assert.ok(!plan.unknown);
   for (const unit of UNITS) {
-    if (unit.enforcement === "manual") continue;
+    if (unit.enforcement === "manual" || unit.paused) continue;
     assert.ok(plan.unitIds.includes(unit.id), `a contracts change must require ${unit.id}`);
   }
 };
@@ -424,7 +433,7 @@ const testValidationInfrastructureCannotValidateItselfAway = (): void => {
         `${path} is validation infrastructure and must not skip anything in ${shard.groupId}`,
       );
     }
-    assert.equal(plan.unitIds.length, UNITS.length, `${path} must route to the full unit set`);
+    assert.equal(plan.unitIds.length, UNITS.filter((u) => !u.paused).length, `${path} must route to the full runnable unit set`);
   }
 };
 
@@ -479,7 +488,7 @@ const testDocsTakesMinimumSafePath = (): void => {
   }
 };
 
-/** Android-relevant changes still reach the Android lane. */
+/** Android-relevant changes still reach the Android lane -- packaging only, while the runtime is paused. */
 const testAndroidChangesTriggerTheAndroidLane = (): void => {
   for (const path of [
     "apps/explorer/android/app/build.gradle",
@@ -488,9 +497,12 @@ const testAndroidChangesTriggerTheAndroidLane = (): void => {
     "packages/contracts/src/index.ts",
   ]) {
     const { plan, shards } = planForChange([path]);
-    for (const required of ["android-sync", "android-assemble", "android-lint", "android-install-launch"]) {
+    for (const required of ["android-sync", "android-assemble", "android-lint"]) {
       assert.ok(plan.unitIds.includes(required), `${path} must require ${required}`);
     }
+    // The pause is unconditional: even a change that reaches the packaged
+    // application must not require the runtime smoke.
+    assert.ok(!plan.unitIds.includes("android-install-launch"), `${path} must not require the paused android-install-launch`);
     const build = shards.find((s) => s.groupId === "ci-build");
     assert.ok(build && build.run.some((u) => u.id === "build"), `${path} must build, or the Android lane has no artifact`);
   }

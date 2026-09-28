@@ -345,7 +345,6 @@ jobs:
     # not shared between jobs. The answer has to travel as a job output.
     outputs:
       android_apk_has_work: ${{ steps.plan.outputs.android_apk_has_work }}
-      android_runtime_has_work: ${{ steps.plan.outputs.android_runtime_has_work }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -375,10 +374,15 @@ jobs:
       - android_plan
     uses: ./.github/workflows/android.yml
     # Gated on impact, not on whether the gates above happened to pass. Android
-    # packaging costs ~4m55s and the runtime smoke ~16m, and neither is relevant
-    # to a change that cannot reach the packaged application. `if` is evaluated
-    # after `needs`, so the gate still runs first -- the change must be validated
-    # before we spend a minute deciding it does not need packaging.
+    # packaging costs ~4m55s and is irrelevant to a change that cannot reach the
+    # packaged application. `if` is evaluated after `needs`, so the gate still
+    # runs first -- the change must be validated before we spend a minute
+    # deciding it does not need packaging.
+    #
+    # The emulator runtime is paused, unconditionally: `android.yml` no longer
+    # contains an `emulator-smoke` job, so there is nothing for the caller to
+    # gate. Re-entry criteria live in `android.yml`. The `workflow_dispatch`
+    # question stays with #50 and is not decided here.
     #
     # Not a required check, and not on any required check's critical path, so
     # skipping it cannot weaken a merge gate.

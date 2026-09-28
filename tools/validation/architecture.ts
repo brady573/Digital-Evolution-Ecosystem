@@ -65,7 +65,9 @@ const readWorkflows = (): Array<{ name: string; body: string }> =>
 
 /** Units a CI run must execute: everything that is not manual-only science. */
 export const requiredCiUnits = (): string[] =>
-  UNITS.filter((u) => u.enforcement !== "manual").map((u) => u.id);
+  // Paused units are not required of any run. They keep their enforcement so
+  // re-entry restores the gate without re-grading the claim.
+  UNITS.filter((u) => u.enforcement !== "manual" && !u.paused).map((u) => u.id);
 
 /**
  * The local completion contract, derived from the non-shard groups.
