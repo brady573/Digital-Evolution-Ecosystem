@@ -862,17 +862,29 @@ async function runLandscapeChecks(context:import("playwright").BrowserContext){
   // frame to match the frame a fresh page produces for B on its own.
   const SEED_A=11111111;
   const SEED_B=22222222;
-  // Presentation-only tolerance between the two entry paths: tight enough that
-  // a blended frame cannot pass, loose enough for rasteriser-level differences
-  // that carry no state. Measured deltas are printed, so drift is visible
-  // rather than inferred.
-  const RESET_SD_TOLERANCE=0.5;
-  const RESET_MEAN_TOLERANCE=3;
-  const RESET_LIT_TOLERANCE=0.02;
-  // "Structurally non-flat, not a uniform fill" -- a flat field has sd ~ 0. The
-  // value is deterministic for this fixed seed and is printed below. The claim
-  // being made is deliberately the weaker one, because the stronger "sd > 3" was
-  // never justified and was previously satisfied only by luck.
+  // Tolerances between the two entry paths, calibrated from run 36428453965 on
+  // this exact revision:
+  //
+  //   A sd=3.37 | A->B sd=3.01 mean=134.89 | clean B sd=3.01 mean=134.89
+  //   deltas sd=0.000 mean=0.00
+  //
+  // The two frames are identical, so these are not guesses -- they are slack for
+  // rasteriser-level variation that carries no state, set an order of magnitude
+  // tighter than the placeholders this replaced. The tolerances remain non-zero
+  // because a future renderer that legitimately varies per frame must not fail a
+  // *state* check over a presentation difference.
+  //
+  // For scale: the two worlds differ by 0.36 sd (3.37 vs 3.01), so a leak
+  // carrying even a tenth of A's structure into B moves sd by ~0.036. These
+  // tolerances sit well below any leak that could plausibly hide.
+  const RESET_SD_TOLERANCE=0.1;
+  const RESET_MEAN_TOLERANCE=0.5;
+  const RESET_LIT_TOLERANCE=0.001;
+  // "Structurally non-flat, not a uniform fill" -- a flat field has sd ~ 0.
+  // Seed B measures 3.01 (deterministic, printed below), so 2.0 leaves margin for
+  // legitimate presentation changes while still catching a uniform fill. The
+  // floor this replaces was 3, against a measured 3.01: a 0.3% margin, which is
+  // how a randomly seeded world came to fail at 2.97.
   const SEED_B_MIN_SD=2;
 
   const switchToSeed=async(p:Page,seed:number)=>{
