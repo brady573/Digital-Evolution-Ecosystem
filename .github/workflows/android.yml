@@ -66,10 +66,13 @@ jobs:
 
       - name: Resolve Android SDK path (single variable for cache + sdkmanager)
         run: echo "ANDROID_SDK_ROOT=${ANDROID_HOME:-/usr/local/lib/android/sdk}" >> "$GITHUB_ENV"
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ${{ env.ANDROID_SDK_ROOT }}
-          key: android-sdk-36-${{ runner.os }}-v2
+      # The SDK root is deliberately NOT cached. Caching it was tried and cannot
+      # work: the image contains special files that tar cannot recreate with
+      # correct ownership, so every restore failed with
+      #   "Cannot utime: Operation not permitted" / "Cannot change mode"
+      # and the cache was therefore never populated. The sdkmanager step below
+      # was the real fallback all along, so the cache bought nothing and cost a
+      # ~152s re-download per run. See #50.
       - name: Install Android SDK packages
         run: |
           yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null
@@ -115,7 +118,29 @@ jobs:
           name: digital-evolution-debug-apk
           path: /tmp/apk
       # validation-unit: android-install-launch
+      #
+      # Two phases, and a red must say which one failed:
+      #
+      #   phase 1, infrastructure -- the emulator is usable (adb is in `device`
+      #     state and boot completed). Until that holds, nothing is known about
+      #     the application.
+      #   phase 2, application -- install, launch, aliveness, crash check. Only
+      #     reached once phase 1 passed.
+      #
+      # The phases stay in one job deliberately. Splitting them into two jobs
+      # would boot the emulator twice, and boot is ~15 of this job's ~17
+      # minutes, so job-level separation would roughly double a lane that is
+      # already the slowest thing in CI. The classification is therefore carried
+      # explicitly: each phase records which one failed, and the step below turns
+      # that into a single titled annotation. See #50 -- the acceptance criterion
+      # is that a red reliably distinguishes the two.
+      #
+      # `continue-on-error` is required for that, because the action's own boot
+      # wait fails *before* the script runs, so a script-only phase marker would
+      # never be written in exactly the case that needs it most.
       - name: Emulator smoke (install + launch MainActivity)
+        id: emulator
+        continue-on-error: true
         uses: reactivecircus/android-emulator-runner@4c44018e59b437e86cdfc41da381398f93ed8808 # v2
         with:
           # API 34: smallest image that still satisfies minSdk 24 with headroom
@@ -134,11 +159,43 @@ jobs:
           # NOTE: this action executes the script line-by-line (each line
           # via its own sh), so every command below must be a single line —
           # no multi-line for/if blocks (proven by a real CI failure).
+          #
+          # /tmp/dee-phase is read by the classification step after this action
+          # returns. It is written on every terminal path, including the ones
+          # where the action's own boot wait has already given up (in which case
+          # it is absent, and absent is treated as infrastructure).
           script: |
+            echo "unknown" > /tmp/dee-phase
+            if [ "$(adb get-state 2>/dev/null)" != "device" ]; then echo "infrastructure" > /tmp/dee-phase; echo "::error title=Android infrastructure failure::adb never reached device state (got '$(adb get-state 2>&1 | head -1)'). The emulator was not usable, so no application claim was made."; exit 1; fi
+            if [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" != "1" ]; then echo "infrastructure" > /tmp/dee-phase; echo "::error title=Android infrastructure failure::emulator did not finish booting. The device was not usable, so no application claim was made."; exit 1; fi
+            echo "Android infrastructure phase: PASS (adb device, boot completed)"
+            echo "application" > /tmp/dee-phase
             adb install /tmp/apk/app-debug.apk
             adb logcat -c
             adb shell am start -n com.digitalevolution.explorer/.MainActivity
             for i in $(seq 1 30); do if adb shell pidof com.digitalevolution.explorer >/dev/null; then break; fi; sleep 2; done
-            APP_PID=$(adb shell pidof com.digitalevolution.explorer | tr -d '\r'); if [ -z "$APP_PID" ]; then echo "Android runtime smoke FAILED: app did not stay alive"; exit 1; fi
-            if adb logcat -d --pid="$APP_PID" | grep -q "FATAL EXCEPTION"; then echo "Android runtime smoke FAILED: fatal exception after launch"; adb logcat -d --pid="$APP_PID" | grep -A8 "FATAL EXCEPTION" | head -40; exit 1; fi
-            echo "Android runtime smoke: MainActivity alive, no fatal exceptions"
+            APP_PID=$(adb shell pidof com.digitalevolution.explorer | tr -d '\r'); if [ -z "$APP_PID" ]; then echo "::error title=Android application failure::the emulator was usable but the app did not stay alive after MainActivity started. This is a product or runtime failure."; exit 1; fi
+            if adb logcat -d --pid="$APP_PID" | grep -q "FATAL EXCEPTION"; then echo "::error title=Android application failure::the app threw a FATAL EXCEPTION after launch. This is a product or runtime failure."; adb logcat -d --pid="$APP_PID" | grep -A8 "FATAL EXCEPTION" | head -40; exit 1; fi
+            echo ok > /tmp/dee-phase
+            echo "Android application phase: PASS (MainActivity alive, no fatal exceptions)"
+
+      # Turns whatever happened above into exactly one classification. This step
+      # exists so that a red on this job is never ambiguous: it either means the
+      # emulator was unusable (infrastructure) or the app failed (application),
+      # and says which in a titled annotation rather than leaving it to be
+      # inferred from a timeout.
+      - name: Classify Android runtime outcome
+        if: always()
+        run: |
+          set -uo pipefail
+          phase=$(cat /tmp/dee-phase 2>/dev/null || echo unknown)
+          if [ "${{ steps.emulator.outcome }}" = "success" ]; then
+            echo "Android runtime: infrastructure and application phases both passed"
+            exit 0
+          fi
+          if [ "$phase" = "application" ]; then
+            echo "::error title=Android application failure::The emulator was usable and the application phase failed. This red is a product or runtime failure."
+            exit 1
+          fi
+          echo "::error title=Android infrastructure failure::The emulator never became usable (phase: $phase), so the application was never tested and no product claim can be drawn from this run. This red is a runner or image problem, not a product failure."
+          exit 1
