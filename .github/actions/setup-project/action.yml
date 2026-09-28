@@ -19,6 +19,12 @@ description: >-
 # optimise a step that is already free and would trade that for a real risk of
 # accepting a tree that does not match the lockfile.
 
+# Every job must run `actions/checkout` before this action. A local action is
+# resolved from the workspace on disk, and before a checkout there is no
+# workspace, so the job fails immediately with "Can't find 'action.yml'".
+# Checkout is therefore deliberately not a step in here: a job that wants only
+# the pnpm store should not be forced to take a repository it does not read.
+
 inputs:
   node-version:
     description: Node version, from .nvmrc conventions.
@@ -45,8 +51,6 @@ runs:
       id: start
       shell: bash
       run: echo "epoch=$(date +%s)" >> "$GITHUB_OUTPUT"
-
-    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
     - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
       with:
