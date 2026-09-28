@@ -49,7 +49,10 @@
     "spike:capture": "tsx tools/pixi-spike/capture.ts",
     "spike:dev": "pnpm --filter @digital-evolution/explorer exec vite ../../tools/pixi-spike --port 5193 --strictPort --host 127.0.0.1",
     "test:dependency:possibility": "tsx tools/validation/dependency.ts -- --skip-policy --only=possibility",
-    "test:dependency:tradeoff": "tsx tools/validation/dependency.ts -- --skip-policy --only=tradeoff"
+    "test:dependency:tradeoff": "tsx tools/validation/dependency.ts -- --skip-policy --only=tradeoff",
+    "validation:graph": "tsx tools/validation/run.ts graph",
+    "ci:shard": "tsx tools/validation/run.ts ci",
+    "ci:plan": "tsx tools/validation/run.ts shard-plan"
   },
   "devDependencies": {
     "@types/node": "26.6.2",
