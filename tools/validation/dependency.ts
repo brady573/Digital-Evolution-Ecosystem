@@ -338,7 +338,7 @@ if (!SKIP_POLICY) {
 
 // --- Integration: full arc on one deterministic run --------------------------
 // Balanced seed 24681357 on current biology: drought_b @~60k delays the
-// guild (suppression during the shock), which then establishes @92117 with a
+// guild (suppression during the shock), which then establishes @91615 with a
 // diffuse consumer base. Disruption/recovery do NOT occur here: established
 // guilds ride out shocks on 0.22 as under drought_a on 0.21. The full arc
 // machinery stays unit-covered (and 0.21-pinned historically); integration
@@ -377,7 +377,7 @@ function testFixtureArc() {
   const records = (session.analysis as any).records.filter((r: any) => r.kind === "cuse");
   assert.equal(records.length, 1, "one establishment record (no disruption on this run)");
   assert.equal(records[0].phase, "established", "record establishes");
-  assert.equal(records[0].tick, 92117, "establishment is deterministic");
+  assert.equal(records[0].tick, 91615, "establishment is deterministic under the current catalyst policy");
   assert.deepEqual(records[0].entity_refs, [], "diffuse founding names nobody");
   console.log("dependency fixture arc: PASS");
 }

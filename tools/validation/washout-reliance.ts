@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { UniverseSession } from "../../packages/sim-runtime/src/session.ts";
 import type { EngineConfig } from "../../packages/contracts/src/index.ts";
 import { ENGINE_VERSION } from "../../packages/sim-core/src/index.ts";
+import { CATALYST_POLICY_VERSION } from "../../packages/sim-decisions/src/index.ts";
 
 /**
  * Issue #30 Stage 2 Level-3 multi-seed evidence: matched C-washout assays
@@ -126,6 +127,7 @@ function ladderFromArc(pre: any[], post: any[], liveScavengerShare: number) {
 const result: any = {
   engine: ENGINE_VERSION,
   captureVersion: CAPTURE_VERSION,
+  policyVersion: CATALYST_POLICY_VERSION,
   config: "balanced",
   settleTicks: SETTLE_TICKS,
   assayTicks: ASSAY_TICKS,
@@ -134,7 +136,19 @@ const result: any = {
 };
 try {
   const prior = JSON.parse(readFileSync(OUT, "utf8"));
-  if (prior.engine === result.engine && prior.captureVersion === CAPTURE_VERSION && Array.isArray(prior.rows)) {
+  // Resume only when the artifact was produced by the SAME engine, capture
+  // shape AND catalyst policy. Policy is part of the key because eligibility
+  // changes the deterministic command stream: removing the universal stock
+  // floor (Issue #30 §21.1) moved the balanced fixture's establishment by 502
+  // ticks, so an artifact retained under an older policy records timing the
+  // current product would never produce. Keying on engine alone would let it be
+  // accepted as done forever.
+  if (
+    prior.engine === result.engine &&
+    prior.captureVersion === CAPTURE_VERSION &&
+    prior.policyVersion === result.policyVersion &&
+    Array.isArray(prior.rows)
+  ) {
     result.rows = prior.rows;
     console.log(`resuming: ${result.rows.length} rows already retained`);
   } else {
