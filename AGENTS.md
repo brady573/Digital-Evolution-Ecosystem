@@ -19,6 +19,43 @@ tools/validation       Parity, ecology, and browser validation tooling
 
 See `README.md` for product direction and `docs/architecture/MIGRATION.md` for module boundaries.
 
+## Agent roles
+
+Repository automation uses a two-tier topology defined in `.opencode/agents/`. Every agent in it opens by reading this file, so this section is what tells an agent where it sits.
+
+```text
+Owner  ->  project-manager  ->  five lane specialists   (read-only analysis)
+              |
+              +-- bounded handoff -->  digital-evolution  ->  source changes
+```
+
+| Agent | Mode | Responsibility |
+|---|---|---|
+| `project-manager` | primary, default | Coordinates lanes and writes bounded handoffs. Read-only: no source edits, and no shell beyond a read-only `git status`. |
+| `digital-evolution` | primary | The Coding Agent. Implements an accepted handoff. Source changes happen here. |
+| `lane/simulation-ecology` | subagent | L1 — what can evolve, and why the world behaves this way. |
+| `lane/product-experience` | subagent | L2 — what the player does, notices, understands, and investigates. |
+| `lane/visual-systems` | subagent | L3 — what evolution looks and feels like, while staying truthful to simulation state. |
+| `lane/platform-delivery` | subagent | L4 — can the product reliably run, preserve, resume, and ship evolving worlds. |
+| `lane/validation-quality` | subagent | L5 — what is actually known to work, and on what evidence. |
+
+`.opencode/opencode.json` sets `default_agent`, so a new session starts as the coordinator. A session stores its selected agent separately, so changing that file does not retarget a session that already exists.
+
+### Dispatching a lane
+
+A lane starts with no conversation history: it sees only its own instructions and the prompt it was given, and it cannot ask a follow-up question. Every lane prompt therefore has to carry the objective, the **accepted design text verbatim**, the scope boundary, the specific question, and the shared return shape. A dispatch that omits the design text makes the lane correctly report the design as missing and return nothing else — that is a dispatch defect, not a lane defect, and retrying the same prompt fails the same way.
+
+Lanes return a shared seven-field shape: lane fit, current implementation facts, accepted-design implications, cross-lane dependencies, risks or tensions, acceptance/evidence needs, and Owner decisions. `lane/validation-quality` returns a declared variant that separates supported from unsupported claims; that separation is the point of an evidence lane and must not be flattened to satisfy the common shape.
+
+Two rules the coordinator is held to:
+
+- An empty search result is never evidence that something is absent. Confirm a negative a second way before reporting it, and keep "this search did not find it" distinct from "it does not exist".
+- Never resolve a material product or simulation design conflict by agent vote or majority. Surface it to the Owner.
+
+### Coverage gap
+
+No unit in `tools/validation/manifest.ts` reads `.opencode/`, so `pnpm verify` cannot exercise any of these agent definitions and a regression in them is invisible to every gate. This is deliberate for now — a gate that merely asserts these files parse would prove little — but it should be read as a known blind spot rather than as coverage. A documentation-only change routes to `validation-arch` alone; adding or editing an agent is not covered by any check.
+
 ## Toolchain
 
 - **Node** >= 24 (see `.nvmrc`), **pnpm** 12.5.1 via corepack (`packageManager` field pins it).
