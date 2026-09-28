@@ -29,7 +29,6 @@ jobs:
   # Class A. First actionable failure: structural breakage surfaces here, in
   # about a minute, without waiting behind a long simulation.
   quick:
-    name: fast gate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -50,7 +49,6 @@ jobs:
   # path; its live-integration phase is now split three ways, and
   # `validation-arch.ts` proves the three shards union back to the whole suite.
   sim-a:
-    name: deterministic suites A
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -65,7 +63,6 @@ jobs:
           retention-days: 14
 
   sim-b:
-    name: deterministic suites B (dependency arc)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -80,7 +77,6 @@ jobs:
           retention-days: 14
 
   sim-c:
-    name: deterministic suites C (cross-feeding)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -95,7 +91,6 @@ jobs:
           retention-days: 14
 
   sim-d:
-    name: deterministic suites D (washout)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -113,7 +108,6 @@ jobs:
   # than rebuilding it, so the APK and the browser lanes cannot disagree about
   # what "the product" is.
   build:
-    name: production build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -140,7 +134,6 @@ jobs:
   # environment. One Chromium install and one preview server serve all three:
   # splitting them would mean paying that setup again for no additional claim.
   smoke:
-    name: browser, mobile UI, landscape captures
     runs-on: ubuntu-latest
     needs: build
     steps:
@@ -195,7 +188,6 @@ jobs:
 
   # Class C remainder: presentation contracts that do not need the built bundle.
   presentation:
-    name: presentation contracts
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -216,7 +208,6 @@ jobs:
   # the two lanes stay isolated and a software-GL failure here cannot fail the
   # blocking browser lane.
   pixi-spike:
-    name: pixi spike evidence
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -245,7 +236,6 @@ jobs:
   # Collects every runner's summary into one machine-readable file so "what ran,
   # what was skipped, and what did it cost" is answerable from a single artifact.
   telemetry:
-    name: validation telemetry
     runs-on: ubuntu-latest
     needs: [quick, sim-a, sim-b, sim-c, sim-d, build, smoke, presentation, pixi-spike]
     if: always()
