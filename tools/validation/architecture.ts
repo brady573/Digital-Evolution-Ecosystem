@@ -240,6 +240,41 @@ export function checkArchitecture(): CheckResult {
     }
   }
 
+  // --- Every terminal path must say which phase it died in ----------------
+  // The emulator script cannot use multi-line blocks, so each failure is one long
+  // `... ; exit 1; fi` line. It is therefore cheap and reliable to assert that
+  // each such line ALSO writes the phase marker and appends the phase record.
+  //
+  // This is not a style rule. A terminal path that exits without recording
+  // leaves the phase artifact ending at PHASE-START with nothing after it, and
+  // the run can then only be explained from a log this action renders
+  // unparseably. That is exactly what happened: phase 2 failed, wrote no record,
+  // and the only way to classify the red was to fall back on which marker file
+  // happened to exist -- which was written before any app interaction, so a dead
+  // device was reported as a product failure.
+  for (const workflow of workflows) {
+    for (const [index, line] of workflow.body.split("\n").entries()) {
+      if (!line.includes("exit 1; fi")) continue;
+      const phase = /PHASE-\d+/.exec(line)?.[0];
+      if (phase === undefined) {
+        failures.push(
+          `${workflow.name}:${index + 1} exits without naming a phase; a failure nobody can attribute is a red nobody can act on`,
+        );
+        continue;
+      }
+      if (!line.includes("/tmp/dee-phase")) {
+        failures.push(
+          `${workflow.name}:${index + 1} names ${phase} but never writes /tmp/dee-phase, so the classifier cannot see it`,
+        );
+      }
+      if (!line.includes("/tmp/dee-phases")) {
+        failures.push(
+          `${workflow.name}:${index + 1} names ${phase} but never appends to /tmp/dee-phases, so the phase record ends before it and the run cannot be explained`,
+        );
+      }
+    }
+  }
+
   // --- A workflow may only invoke scripts that exist --------------------
   // A workflow step calling `pnpm <script>` that is not in package.json fails at
   // run time with ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL, which names neither the
