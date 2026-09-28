@@ -216,18 +216,34 @@ jobs:
           # it is absent, and absent is treated as infrastructure).
           script: |
             echo "unknown" > /tmp/dee-phase
-            if [ "$(adb get-state 2>/dev/null)" != "device" ]; then echo "infrastructure" > /tmp/dee-phase; echo "PHASE 1 FAILED (infrastructure): adb never reached device state (got '$(adb get-state 2>&1 | head -1)'). The emulator was not usable, so no application claim was made."; exit 1; fi
-            if [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" != "1" ]; then echo "infrastructure" > /tmp/dee-phase; echo "PHASE 1 FAILED (infrastructure): emulator did not finish booting. The device was not usable, so no application claim was made."; exit 1; fi
+            echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) PHASE-START-1 infrastructure" >> /tmp/dee-phases
+            if [ "$(adb get-state 2>/dev/null)" != "device" ]; then echo "infrastructure" > /tmp/dee-phase; echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) PHASE-1 infrastructure FAILED adb-not-device" >> /tmp/dee-phases; echo "PHASE 1 FAILED (infrastructure): adb never reached device state (got '$(adb get-state 2>&1 | head -1)'). The emulator was not usable, so no application claim was made."; exit 1; fi
+            if [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" != "1" ]; then echo "infrastructure" > /tmp/dee-phase; echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) PHASE-1 infrastructure FAILED boot-not-completed" >> /tmp/dee-phases; echo "PHASE 1 FAILED (infrastructure): emulator did not finish booting. The device was not usable, so no application claim was made."; exit 1; fi
+            echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) PHASE-1 infrastructure PASS" >> /tmp/dee-phases
             echo "Android infrastructure phase: PASS (adb device, boot completed)"
+            echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) PHASE-START-2 application" >> /tmp/dee-phases
+            if [ "$(adb get-state 2>/dev/null)" != "device" ]; then echo "infrastructure" > /tmp/dee-phase; echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) PHASE-2 infrastructure FAILED device-gone-before-install" >> /tmp/dee-phases; echo "PHASE 2 FAILED (infrastructure): the emulator answered during the infrastructure phase but adb was no longer usable when the application phase began, so nothing about the application was tested."; exit 1; fi
             echo "application" > /tmp/dee-phase
-            adb install /tmp/apk/app-debug.apk
+            if ! adb install -r /tmp/apk/app-debug.apk 2>&1 | tee -a /tmp/dee-phases; then echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) PHASE-2 application FAILED install-failed" >> /tmp/dee-phases; echo "PHASE 2 FAILED (application): the device was alive but the debug APK did not install."; exit 1; fi
             adb logcat -c
             adb shell am start -n com.digitalevolution.explorer/.MainActivity
             for i in $(seq 1 30); do if adb shell pidof com.digitalevolution.explorer >/dev/null; then break; fi; sleep 2; done
-            APP_PID=$(adb shell pidof com.digitalevolution.explorer | tr -d '\r'); if [ -z "$APP_PID" ]; then echo "PHASE 2 FAILED (application): the emulator was usable but the app did not stay alive after MainActivity started."; exit 1; fi
-            if adb logcat -d --pid="$APP_PID" | grep -q "FATAL EXCEPTION"; then echo "PHASE 2 FAILED (application): the app threw a FATAL EXCEPTION after launch."; adb logcat -d --pid="$APP_PID" | grep -A8 "FATAL EXCEPTION" | head -40; exit 1; fi
+            APP_PID=$(adb shell pidof com.digitalevolution.explorer | tr -d '\r')
+            if [ -z "$APP_PID" ] && [ "$(adb get-state 2>/dev/null)" != "device" ]; then echo "infrastructure" > /tmp/dee-phase; echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) PHASE-2 infrastructure FAILED device-died-during-launch" >> /tmp/dee-phases; echo "PHASE 2 FAILED (infrastructure): the app never appeared and adb is no longer usable, so the device died rather than the app failing."; exit 1; fi
+            if [ -z "$APP_PID" ]; then echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) PHASE-2 application FAILED app-not-alive" >> /tmp/dee-phases; echo "PHASE 2 FAILED (application): the device stayed alive but the app did not stay alive after MainActivity started."; exit 1; fi
+            if adb logcat -d --pid="$APP_PID" | grep -q "FATAL EXCEPTION"; then echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) PHASE-2 application FAILED fatal-exception" >> /tmp/dee-phases; adb logcat -d --pid="$APP_PID" | grep -A8 "FATAL EXCEPTION" | head -40 | tee -a /tmp/dee-phases; echo "PHASE 2 FAILED (application): the app threw a FATAL EXCEPTION after launch."; exit 1; fi
             echo ok > /tmp/dee-phase
+            echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) PHASE-2 application PASS" >> /tmp/dee-phases
             echo "Android application phase: PASS (MainActivity alive, no fatal exceptions)"
+
+      - name: Upload Android phase record
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: android-phase-record
+          path: /tmp/dee-phases
+          if-no-files-found: ignore
+          retention-days: 30
 
       # Turns whatever happened above into exactly one classification. This step
       # exists so that a red on this job is never ambiguous: it either means the
