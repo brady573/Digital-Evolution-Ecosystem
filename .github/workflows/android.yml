@@ -58,15 +58,20 @@ jobs:
           set -uo pipefail
           lookup_failures=0
           for attempt in $(seq 1 90); do
+            # Query the API by head_sha rather than using `gh run list`.
+            # `gh run list` defaults to the DEFAULT BRANCH, so combined with
+            # --commit on a pull_request merge SHA it looks for runs that can
+            # never appear and polls to its timeout. head_sha is exact for both
+            # the pull_request and push triggers.
+            #
             # A failed lookup is not the same as "no run yet": the run may not
             # have started. Retry a few times, then stop, rather than either
             # dying on a transient error or polling for half an hour behind a
             # real permissions problem.
-            if ! found=$(gh run list --workflow product.yml --commit "$GITHUB_SHA" \
-                           --limit 5 --json databaseId,conclusion,status \
-                           --jq 'sort_by(.databaseId) | reverse | map(select(.status == "completed")) | .[0] // empty' 2>&1); then
+            if ! found=$(gh api "repos/{owner}/{repo}/actions/workflows/product.yml/runs?head_sha=$GITHUB_SHA&per_page=20" \
+                           --jq '[.workflow_runs[] | select(.status == "completed")] | sort_by(.run_number) | reverse | .[0] // empty | {id, conclusion}' 2>&1); then
               lookup_failures=$((lookup_failures + 1))
-              echo "attempt $attempt: could not list product runs: $found"
+              echo "attempt $attempt: could not query workflow runs: $found"
               if [ "$lookup_failures" -ge 5 ]; then
                 echo "::error::repeatedly failed to query workflow runs; check that the job's token has 'actions: read'."
                 exit 1
@@ -74,8 +79,8 @@ jobs:
               sleep 20
               continue
             fi
-            if [ -n "$found" ]; then
-              run_id=$(echo "$found" | jq -r .databaseId)
+            if [ -n "$found" ] && [ "$found" != "null" ]; then
+              run_id=$(echo "$found" | jq -r .id)
               conclusion=$(echo "$found" | jq -r .conclusion)
               if [ "$conclusion" != "success" ]; then
                 echo "::error::product workflow run $run_id concluded '$conclusion' for $GITHUB_SHA; refusing to package unvalidated source."
