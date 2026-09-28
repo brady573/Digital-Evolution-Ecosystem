@@ -131,9 +131,16 @@ jobs:
       # would boot the emulator twice, and boot is ~15 of this job's ~17
       # minutes, so job-level separation would roughly double a lane that is
       # already the slowest thing in CI. The classification is therefore carried
-      # explicitly: each phase records which one failed, and the step below turns
-      # that into a single titled annotation. See #50 -- the acceptance criterion
-      # is that a red reliably distinguishes the two.
+      # explicitly. See #50 -- the acceptance criterion is that a red reliably
+      # distinguishes the two.
+      #
+      # The single title lives in exactly one place, on purpose. Each phase writes
+      # which one failed to /tmp/dee-phase and prints a plain
+      # `PHASE n FAILED (...)` diagnostic with the exact cause; only the final
+      # `Classify Android runtime outcome` step emits a titled `::error`. Having
+      # the script raise a title too meant every red produced two, each phrased
+      # as though it were the authoritative verdict. The step log keeps the
+      # detail, the classifier owns the one classification.
       #
       # `continue-on-error` is required for that, because the action's own boot
       # wait fails *before* the script runs, so a script-only phase marker would
@@ -166,16 +173,16 @@ jobs:
           # it is absent, and absent is treated as infrastructure).
           script: |
             echo "unknown" > /tmp/dee-phase
-            if [ "$(adb get-state 2>/dev/null)" != "device" ]; then echo "infrastructure" > /tmp/dee-phase; echo "::error title=Android infrastructure failure::adb never reached device state (got '$(adb get-state 2>&1 | head -1)'). The emulator was not usable, so no application claim was made."; exit 1; fi
-            if [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" != "1" ]; then echo "infrastructure" > /tmp/dee-phase; echo "::error title=Android infrastructure failure::emulator did not finish booting. The device was not usable, so no application claim was made."; exit 1; fi
+            if [ "$(adb get-state 2>/dev/null)" != "device" ]; then echo "infrastructure" > /tmp/dee-phase; echo "PHASE 1 FAILED (infrastructure): adb never reached device state (got '$(adb get-state 2>&1 | head -1)'). The emulator was not usable, so no application claim was made."; exit 1; fi
+            if [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" != "1" ]; then echo "infrastructure" > /tmp/dee-phase; echo "PHASE 1 FAILED (infrastructure): emulator did not finish booting. The device was not usable, so no application claim was made."; exit 1; fi
             echo "Android infrastructure phase: PASS (adb device, boot completed)"
             echo "application" > /tmp/dee-phase
             adb install /tmp/apk/app-debug.apk
             adb logcat -c
             adb shell am start -n com.digitalevolution.explorer/.MainActivity
             for i in $(seq 1 30); do if adb shell pidof com.digitalevolution.explorer >/dev/null; then break; fi; sleep 2; done
-            APP_PID=$(adb shell pidof com.digitalevolution.explorer | tr -d '\r'); if [ -z "$APP_PID" ]; then echo "::error title=Android application failure::the emulator was usable but the app did not stay alive after MainActivity started. This is a product or runtime failure."; exit 1; fi
-            if adb logcat -d --pid="$APP_PID" | grep -q "FATAL EXCEPTION"; then echo "::error title=Android application failure::the app threw a FATAL EXCEPTION after launch. This is a product or runtime failure."; adb logcat -d --pid="$APP_PID" | grep -A8 "FATAL EXCEPTION" | head -40; exit 1; fi
+            APP_PID=$(adb shell pidof com.digitalevolution.explorer | tr -d '\r'); if [ -z "$APP_PID" ]; then echo "PHASE 2 FAILED (application): the emulator was usable but the app did not stay alive after MainActivity started."; exit 1; fi
+            if adb logcat -d --pid="$APP_PID" | grep -q "FATAL EXCEPTION"; then echo "PHASE 2 FAILED (application): the app threw a FATAL EXCEPTION after launch."; adb logcat -d --pid="$APP_PID" | grep -A8 "FATAL EXCEPTION" | head -40; exit 1; fi
             echo ok > /tmp/dee-phase
             echo "Android application phase: PASS (MainActivity alive, no fatal exceptions)"
 
