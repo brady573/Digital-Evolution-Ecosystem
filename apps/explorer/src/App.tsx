@@ -11,6 +11,7 @@ import {
   LandscapeSmoother, fillWaste, fracArray, landscapeCell, landscapeTileLayout,
   microTexture, nutrientOverlayCell, wasteOverlayCell,
 } from "./landscape";
+import { cladeColor, dormantChannel, organismColor, type OrganismLens } from "./organismEncoding";
 import { AftermathPanel } from "./AftermathPanel";
 import { drawPhenotypeOrganism, phenotypeCache, tierForZoom } from "./phenotype";
 import { familyArtwork } from "./familyArt";
@@ -158,14 +159,9 @@ type Camera={x:number;y:number};
 const wrapDelta=(a:number,b:number)=>{let d=(a-b)%WORLD_EXTENT;if(d>WORLD_EXTENT/2)d-=WORLD_EXTENT;else if(d<-WORLD_EXTENT/2)d+=WORLD_EXTENT;return d};
 const wrapCoord=(v:number)=>((v%WORLD_EXTENT)+WORLD_EXTENT)%WORLD_EXTENT;
 
-function cladeColor(id:number){  const hue=(id*137.508)%360;
-  return `hsl(${hue} 58% 63%)`;
-}
-function traitColor(value:number,[lo,hi]:[number,number]){
-  const t=Math.max(0,Math.min(1,(value-lo)/(hi-lo)));
-  const hue=210-170*t;
-  return `hsl(${hue} 68% 62%)`;
-}
+// Organism colour and the dormancy channel live in ./organismEncoding, which
+// tools/validation/landscape.ts asserts directly (§21.2). Keeping them out of
+// the component is what makes the analytical-lens guarantee testable.
 
 /** Presentation-only landscape smoothing state. Lives for the canvas's
  * lifetime, holds no simulation meaning, and re-primes from the current
@@ -307,21 +303,20 @@ function WorldCanvas({
     for(const o of snapshot.organisms){
       const px=toX(o.x),py=toY(o.y);
       if(px<-24||py<-24||px>w+24||py>h+24)continue;
-      let color="#d8f0df";
-      if(o.activity==="dormant")color="#7f9189";
-      else if(lens==="clades")color=cladeColor(o.cladeId);
-      else if(lens==="traits")color=traitColor(o[traitView] as number,[traitRange[0],traitRange[1]]);
-      else if(o.byproductUse>.55)color="#e7b36a";
-      else if(o.diet<-.25)color="#7bd3c4";
-      else if(o.diet>.25)color="#b79de4";
+      // §21.2: the lens encoding wins, including for dormant organisms, so
+      // Clades and Traits always encode what they claim. Dormancy rides the
+      // separate alpha/hollow channel below and never replaces the encoding.
+      const color=organismColor(o as never,lens as OrganismLens,traitView,[traitRange[0],traitRange[1]]);
+      // Dormancy is its own channel (§21.2), so it never displaces the lens
+      // colour. One source of truth for alpha/hollow, asserted in validation.
+      const chan=dormantChannel(o as never);
 
       if(lens==="normal"&&pheno){
         // Phenotype morphology: grid shape encodes family/traits/dormancy,
         // lens color and dormancy dimming stay exactly as before.
         const res=pheno.get(o.id);
-        const dormant=o.activity==="dormant";
         ctx.fillStyle=color;
-        ctx.globalAlpha=dormant?0.55:1;
+        ctx.globalAlpha=chan.alpha;
         if(res)drawPhenotypeOrganism(ctx,o,res,phenotypeCache,phenoTier,px,py,unit);
         ctx.globalAlpha=1;
       }else{
@@ -329,12 +324,11 @@ function WorldCanvas({
       // texture is a deterministic function of organism id (stable per frame),
       // and density follows diet family. Positions are untouched, so
       // click-selection mapping is unchanged.
-      const energyClass=o.activity==="dormant"?0:(o.energy>120?2:o.energy>60?1:0);
+      const energyClass=chan.dormant?0:(o.energy>120?2:o.energy>60?1:0);
       const span=2+energyClass;
       let hsh=Math.imul(o.id,2654435761)^0x9e3779b9;hsh^=hsh>>>15;hsh=Math.imul(hsh,0x85ebca6b)>>>0;
-      const dormant=o.activity==="dormant";
       ctx.fillStyle=color;ctx.strokeStyle=color;ctx.lineWidth=1;
-      ctx.globalAlpha=dormant?0.55:1;
+      ctx.globalAlpha=chan.alpha;
       for(let gy=0;gy<span;gy++)for(let gx=0;gx<span;gx++){
         const edge=gx===0||gy===0||gx===span-1||gy===span-1;
         let solid=true;
@@ -345,7 +339,7 @@ function WorldCanvas({
         }
         if(!solid)continue;
         const bx=px+(gx-span/2)*unit,by=py+(gy-span/2)*unit;
-        if(dormant)ctx.strokeRect(bx,by,unit,unit);else ctx.fillRect(bx,by,unit,unit);
+        if(chan.dormant)ctx.strokeRect(bx,by,unit,unit);else ctx.fillRect(bx,by,unit,unit);
       }
       ctx.globalAlpha=1;
       }
