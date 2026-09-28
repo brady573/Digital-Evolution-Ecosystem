@@ -5,6 +5,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      spike:
+        description: 'Also run the one-off emulator snapshot measurement (evidence only, ~40 min).'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -374,6 +379,11 @@ jobs:
       - presentation
       - android_plan
     uses: ./.github/workflows/android.yml
+    with:
+      # Only ever true on an explicit dispatch. `inputs.spike` is unset on
+      # pull_request and push, so the `|| false` keeps those paths off -- a
+      # three-boot measurement must never ride along on a normal PR.
+      spike: ${{ inputs.spike || false }}
     # Gated on impact, not on whether the gates above happened to pass. Android
     # packaging costs ~4m55s and the runtime smoke ~16m, and neither is relevant
     # to a change that cannot reach the packaged application. `if` is evaluated
