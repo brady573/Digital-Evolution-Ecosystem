@@ -23,6 +23,17 @@ on:
 permissions:
   contents: read
 
+# The emulator image, defined once.
+#
+# The action's inputs and the system-image cache key are both built from these,
+# because a cache key that can drift from the configuration it caches is a cache
+# that silently restores the wrong image. Hardcoding the identifier in both places
+# is how that happens.
+env:
+  ANDROID_API_LEVEL: "34"
+  ANDROID_TARGET: google_apis
+  ANDROID_ARCH: x86_64
+
 # This workflow proves platform facts. It does not re-prove that the repository
 # is sound: the product gates it is called after have already done that for this
 # commit, and the caller only invokes it once they pass. The previous version
@@ -156,6 +167,30 @@ jobs:
     if: needs.plan.outputs.android_runtime_has_work == 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      # The system image is the emulator action's largest download and is spent
+      # BEFORE the emulator starts, so it is visible as a distinct cost in the
+      # log: 62s of a 636s job on main.
+      #
+      # This caches the image directory, deliberately, and not the SDK root. The
+      # whole-SDK cache was tried and cannot work: the SDK root contains special
+      # files that tar cannot recreate with correct ownership, so every restore
+      # failed with "Cannot utime: Operation not permitted" and the cache was
+      # never populated -- a 152s-per-run cost behind a fallback that already
+      # worked. `system-images/` is ordinary files, so it is a different failure
+      # mode rather than a narrower version of the same one. See #50.
+      #
+      # Advisory: a miss costs one download, never correctness. The key includes
+      # the image identifier, so changing api-level, target, or arch invalidates
+      # it instead of restoring a mismatched image.
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ env.ANDROID_HOME }}/system-images
+          # Separator-free on purpose: actions/cache keys end up in internal
+          # paths and header values, and the canonical image identifier contains
+          # semicolons. android34-google_apis-x86_64 is the same identity, safely.
+          key: android-system-images-${{ runner.os }}-android${{ env.ANDROID_API_LEVEL }}-${{ env.ANDROID_TARGET }}-${{ env.ANDROID_ARCH }}
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: digital-evolution-debug-apk
@@ -198,9 +233,9 @@ jobs:
           # or broke adbd twice (see PR #51 CI history) — boot cost dominates
           # this job, so image size matters more than API recency for an
           # install+launch smoke.
-          api-level: 34
-          target: google_apis
-          arch: x86_64
+          api-level: ${{ env.ANDROID_API_LEVEL }}
+          target: ${{ env.ANDROID_TARGET }}
+          arch: ${{ env.ANDROID_ARCH }}
           disable-animations: true
           # Fast-boot flags for headless runners; boot timeout raised to
           # match observed ~10-minute cold boots with margin.
