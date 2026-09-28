@@ -338,7 +338,13 @@ const printPlan = (asJson: boolean): void => {
   console.log("CI shards (measured baseline seconds):");
   for (const group of GROUPS) {
     if (!group.ci) continue;
-    console.log(`  ${group.id.padEnd(16)} ${String(groupBaselineSeconds(group.id)).padStart(5)}s  ${group.unitIds.join(", ")}`);
+    // A shard with unmeasured units must not read as a cheap shard. Showing the
+    // count of unknowns is the difference between "this is fast" and "we have
+    // not measured this yet".
+    const unmeasured = group.unitIds.filter((id) => UNIT_BY_ID.get(id)?.baselineSeconds === undefined).length;
+    const measured = `${groupBaselineSeconds(group.id)}s`;
+    const pending = unmeasured > 0 ? ` +${unmeasured} unmeasured` : "";
+    console.log(`  ${group.id.padEnd(16)} ${measured.padStart(9)}${pending}  ${group.unitIds.join(", ")}`);
   }
 };
 

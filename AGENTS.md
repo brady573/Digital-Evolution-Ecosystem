@@ -80,6 +80,8 @@ To see what CI will run, and what each check costs, use `pnpm validation:plan`. 
 
 The classes are not interchangeable. A Node run cannot prove browser correctness, a single seed cannot prove emergence, and an APK assembling says nothing about behaviour. A check is only ever moved between classes when the claim it proves changes, and that is a design decision rather than a refactor.
 
+Groups, unlike classes, are defined by *when* rather than *what*: `fast` is whatever a developer waits for before getting an answer, so it carries `decisions` (Class B) because 74 seconds of decision-policy checking is worth having early. `pnpm validation:check` asserts the CI fast shard runs exactly the same set, so "the fast gate" cannot mean two different things depending on which file someone edited.
+
 **Before considering any change complete, run `pnpm verify`.** Browser, platform, and evidence classes are gated separately by CI; scientific characterisation is manual by design.
 
 ### Prefer GitHub Actions over the device for validation

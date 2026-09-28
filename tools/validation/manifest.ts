@@ -574,15 +574,22 @@ export const GROUPS: readonly ValidationGroup[] = [
   // Class groupings: these are the user-facing entry points.
   {
     id: "fast",
-    title: "Fast invariant gate",
-    unitIds: ["typecheck", "migration", "validation-arch"],
+    title: "Fast gate",
+    // Latency-defined, not class-defined: this is what a developer waits for
+    // before they get an answer. `decisions` is Class B, but at ~74s it is the
+    // highest-signal behavioural check there is, and leaving it out of CI's fast
+    // gate while including it in `verify:fast` (or the reverse) is precisely the
+    // local-versus-CI drift this manifest exists to prevent. `ci-fast` is
+    // asserted to hold exactly this set.
+    unitIds: ["typecheck", "migration", "validation-arch", "decisions"],
     ci: false,
   },
   {
     id: "simulation",
     title: "Deterministic product behaviour",
+    // `decisions` is deliberately absent: the fast gate owns it. A unit may
+    // appear in exactly one group, so that `verify` executes it once.
     unitIds: [
-      "decisions",
       "catalysts",
       "flows",
       "time-controls",

@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { GROUPS, GROUP_BY_ID, UNITS, UNIT_BY_ID, type ValidationUnit } from "./manifest.ts";
+import { GROUPS, GROUP_BY_ID, UNITS, UNIT_BY_ID } from "./manifest.ts";
 
 export const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const WORKFLOWS_DIR = join(REPO_ROOT, ".github/workflows");
@@ -136,17 +136,25 @@ export function checkArchitecture(): CheckResult {
   }
 
   // Exactly-once: a unit in two shards is the second execution that proves
-  // nothing new. This is the mechanical form of the design's core rule.
-  const membership = new Map<string, string[]>();
-  for (const group of GROUPS) {
-    if (!group.ci) continue;
-    for (const id of group.unitIds) {
-      membership.set(id, [...(membership.get(id) ?? []), group.id]);
+  // nothing new. This is the mechanical form of the design's core rule. It
+  // applies to the groups `verify` composes as well as to the CI shards, because
+  // `verify` runs its groups in sequence on one machine and a unit listed twice
+  // would be executed twice for the same claim.
+  const nonShardGroups = GROUPS.filter((g) => !g.ci);
+  for (const [label, groups] of [
+    ["CI shard", GROUPS.filter((g) => g.ci)],
+    ["group", nonShardGroups],
+  ] as const) {
+    const seen = new Map<string, string[]>();
+    for (const group of groups) {
+      for (const id of group.unitIds) {
+        seen.set(id, [...(seen.get(id) ?? []), group.id]);
+      }
     }
-  }
-  for (const [id, shards] of membership) {
-    if (shards.length > 1) {
-      failures.push(`unit ${id} is in multiple CI shards (${shards.join(", ")}); it would execute more than once`);
+    for (const [id, owners] of seen) {
+      if (owners.length > 1) {
+        failures.push(`unit ${id} is in multiple ${label}s (${owners.join(", ")}); it would execute more than once`);
+      }
     }
   }
 
@@ -182,6 +190,25 @@ export function checkArchitecture(): CheckResult {
     }
   }
 
+  // --- The fast gate means the same thing locally and in CI ----------------
+  // `verify:fast` and the CI `quick` job are the same promise to two audiences:
+  // "you will know quickly whether this is broken". If the CI shard quietly
+  // carried a check the local gate did not, one of the two would be lying, and
+  // which one would depend on which file someone edited.
+  const localFast = GROUPS.find((g) => g.id === "fast");
+  const ciFast = GROUPS.find((g) => g.id === "ci-fast");
+  if (!localFast || !ciFast) {
+    failures.push("the manifest must define both a `fast` group and a `ci-fast` shard");
+  } else {
+    const local = new Set(localFast.unitIds);
+    for (const id of ciFast.unitIds) {
+      if (!local.has(id)) failures.push(`CI fast shard runs ${id}, which \`verify:fast\` does not`);
+    }
+    for (const id of local) {
+      if (!ciFast.unitIds.includes(id)) failures.push(`\`verify:fast\` runs ${id}, which the CI fast shard does not`);
+    }
+  }
+
   // --- Declared needs must name real units --------------------------------
   for (const unit of UNITS) {
     for (const need of unit.needs) {
@@ -191,13 +218,3 @@ export function checkArchitecture(): CheckResult {
 
   return { failures, notes };
 }
-
-/** Shard-level baseline, used to report balance rather than assert it. */
-export const shardBaselines = (): Array<{ id: string; seconds: number; units: readonly string[] }> =>
-  GROUPS.filter((g): g is typeof g & { ci: true } => g.ci).map((g) => ({
-    id: g.id,
-    seconds: g.unitIds.reduce((sum, id) => sum + (UNIT_BY_ID.get(id)?.baselineSeconds ?? 0), 0),
-    units: g.unitIds,
-  }));
-
-export type { ValidationUnit };
