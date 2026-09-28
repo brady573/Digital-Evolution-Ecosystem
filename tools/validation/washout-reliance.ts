@@ -11,11 +11,22 @@ import { ENGINE_VERSION } from "../../packages/sim-core/src/index.ts";
  * evidence; nothing here asserts a target frequency. Deterministic:
  * re-running reproduces every row bit-for-bit.
  *
+ * Post-assay C-use arc capture: the assay previously read `cuse` records only
+ * BEFORE the washout, so it could not evidence any rung above establishment —
+ * the arc was structurally unobservable, not merely absent. The ladder is now
+ * judged from what the arc actually emits after the intervention, on the live
+ * branch. Nothing is tuned to manufacture a rung.
+ *
  * Usage: pnpm exec tsx tools/validation/washout-reliance.ts
- * Retains to testdata/washout-reliance-0.20.json (resume-safe).
+ * Retains to testdata/washout-reliance-0.21.json (resume-safe).
+ *
+ * CAPTURE_VERSION invalidates rows retained before post-assay capture existed.
+ * Without it, a resume would accept those rows as done and the arc would stay
+ * unobserved forever while the artifact looked complete.
  */
 
 const OUT = "testdata/washout-reliance-0.21.json";
+const CAPTURE_VERSION = 2;
 const SEEDS = [821947219, 2088626459, 3543950664, 2121676508, 111111111, 222222222, 333333333, 444444444];
 const SETTLE_TICKS = 60000;
 const EXTENDED_TICKS = 120000;
@@ -40,8 +51,48 @@ function settle(session: UniverseSession, target: number): void {
   if (leftover) session.resolveEventDecision(leftover.opportunityId, "keep-watching");
 }
 
+/**
+ * The C-use guild arc, in tick order, as emitted by sim-analysis. Ladder rungs
+ * above establishment are DERIVED from the observed phase sequence; the
+ * succession classification compares the leading lineage identity carried in
+ * entityRefs across records rather than matching summary text, so it stays
+ * factual if the wording changes.
+ */
+function cuseArc(session: UniverseSession, fromTick: number) {
+  return (((session.analysis as any).records as any[])
+    .filter((r: any) => r.kind === "cuse" && r.tick >= fromTick)
+    .map((r: any) => ({
+      tick: r.tick,
+      phase: r.phase,
+      leadingLineage: (r.entityRefs && r.entityRefs[0]) ?? null,
+      evidence: r.evidence,
+    })));
+}
+
+/**
+ * Which C-ladder rungs the observed arc actually reached after the assay.
+ * Reported as evidence, never as a pass/fail: a rung that did not fire is a
+ * finding about current biology, not a defect in the assay.
+ */
+function ladderFromArc(pre: any[], post: any[]) {
+  const phases = post.map((r) => r.phase);
+  const establishedLead = [...pre].reverse().find((r) => r.phase === "established")?.leadingLineage ?? null;
+  const recovery = post.filter((r) => r.phase === "recovered");
+  return {
+    postPhases: phases,
+    // Disruption and recovery are read straight off the arc.
+    disrupted: phases.includes("disrupted"),
+    recovered: recovery.length > 0,
+    // Reorganization/replacement: recovery led by a different lineage than the
+    // one that led at establishment. Same-lineage recovery is not replacement.
+    replacement: recovery.some((r) => r.leadingLineage !== null && r.leadingLineage !== establishedLead),
+    establishedLeadLineage: establishedLead,
+  };
+}
+
 const result: any = {
   engine: ENGINE_VERSION,
+  captureVersion: CAPTURE_VERSION,
   config: "balanced",
   settleTicks: SETTLE_TICKS,
   assayTicks: ASSAY_TICKS,
@@ -50,12 +101,19 @@ const result: any = {
 };
 try {
   const prior = JSON.parse(readFileSync(OUT, "utf8"));
-  if (prior.engine === result.engine && Array.isArray(prior.rows)) {
+  if (prior.engine === result.engine && prior.captureVersion === CAPTURE_VERSION && Array.isArray(prior.rows)) {
     result.rows = prior.rows;
     console.log(`resuming: ${result.rows.length} rows already retained`);
+  } else {
+    console.log(`prior artifact does not match capture v${CAPTURE_VERSION}; re-running every seed`);
   }
 } catch { /* fresh run */ }
-const done = new Set(result.rows.filter((r: any) => r.applicable || r.extended).map((r: any) => r.seed));
+// A row counts as done only if it carries the post-assay capture. Otherwise a
+// pre-capture row would be accepted as complete and the arc would stay
+// unobserved while the artifact looked finished.
+const done = new Set(
+  result.rows.filter((r: any) => (r.applicable || r.extended) && r.cuseArcPost !== undefined).map((r: any) => r.seed),
+);
 
 for (const seed of SEEDS) {
   if (done.has(seed)) {
@@ -70,11 +128,21 @@ for (const seed of SEEDS) {
   const established = ((session.analysis as any).records as any[]).filter(
     (r: any) => r.kind === "cuse" && r.phase === "established",
   );
+  // Baseline arc, read at the fork point: everything the C-use guild did
+  // before the intervention.
+  const cusePre = cuseArc(session, 0);
   const entry: any = { seed, horizon };
   if (established.length === 0) {
     entry.applicable = false;
     entry.extended = horizon >= EXTENDED_TICKS;
     entry.reason = `no C-use guild established by ${horizon / 1000}k`;
+    // No intervention is applied on a non-establishment row, so there is no
+    // post-assay arc. The pre-assay arc is still retained: it is the negative
+    // evidence for why the seed is not applicable.
+    entry.interventionApplied = false;
+    entry.cuseArcPre = cusePre;
+    entry.cuseArcPost = [];
+    entry.ladder = { postPhases: [], disrupted: false, recovered: false, replacement: false };
     const prior = result.rows.findIndex((r: any) => r.seed === seed);
     if (prior >= 0) result.rows.splice(prior, 1);
     result.rows.push(entry);
@@ -97,6 +165,11 @@ for (const seed of SEEDS) {
     assert.ok(liveRemovals.every((e: any) => e.type === "cWashout"), `${seed}: C-only removals`);
     const stale = result.rows.findIndex((r: any) => r.seed === seed);
     if (stale >= 0) result.rows.splice(stale, 1);
+    // POST-assay capture: the arc is read again now that the assay has run.
+    // This is the observation the tool previously could not make, so rungs
+    // above establishment were unevidenced by construction.
+    const cusePost = cuseArc(session, washTick);
+    const ladder = ladderFromArc(cusePre, cusePost);
     result.rows.push({
       seed, horizon, applicable: true, forkTick, washTick,
       establishedTick: established[0].tick,
@@ -104,6 +177,10 @@ for (const seed of SEEDS) {
       liveScavengerShare: liveShare, controlScavengerShare: controlShare,
       liveCStock: live.metabolite_c.stock, controlCStock: control.metabolite_c.stock,
       materialResponse: liveShare < controlShare / 2,
+      interventionApplied: true,
+      cuseArcPre: cusePre,
+      cuseArcPost: cusePost,
+      ladder,
     });
   }
   writeFileSync(OUT, JSON.stringify(result, null, 2));
@@ -111,7 +188,7 @@ for (const seed of SEEDS) {
   assert.equal(row.seed, seed, "just-written row belongs to this seed");
   console.log(
     row.applicable
-      ? `${seed}: live ${(row.liveScavengerShare * 100).toFixed(1)}% vs control ${(row.controlScavengerShare * 100).toFixed(1)}% material=${row.materialResponse}`
+      ? `${seed}: live ${(row.liveScavengerShare * 100).toFixed(1)}% vs control ${(row.controlScavengerShare * 100).toFixed(1)}% material=${row.materialResponse} arc=[${(row.ladder?.postPhases || []).join(",") || "none"}]`
       : `${seed}: not applicable (${row.reason})`,
   );
 }
@@ -120,8 +197,16 @@ const applicable = result.rows.filter((r: any) => r.applicable);
 for (const seed of SEEDS) {
   assert.ok(result.rows.some((r: any) => r.seed === seed), `missing row for seed ${seed}`);
 }
+// Ladder census, reported as what the observed arcs actually contained. No
+// target frequency is asserted and nothing here is tuned to fill a rung.
+const ladder = {
+  disrupted: applicable.filter((r: any) => r.ladder?.disrupted).length,
+  recovered: applicable.filter((r: any) => r.ladder?.recovered).length,
+  replacement: applicable.filter((r: any) => r.ladder?.replacement).length,
+};
 console.log(
   `washout reliance survey: DONE -> ${OUT} ` +
   `(${applicable.length}/${result.rows.length} applicable, ` +
-  `material=${applicable.filter((r: any) => r.materialResponse).length})`,
+  `material=${applicable.filter((r: any) => r.materialResponse).length}, ` +
+  `post-assay arc: disrupted=${ladder.disrupted} recovered=${ladder.recovered} replacement=${ladder.replacement})`,
 );
