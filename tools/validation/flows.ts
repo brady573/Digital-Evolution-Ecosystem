@@ -312,6 +312,65 @@ function testWasteAccounting() {
   console.log("waste accounting: PASS");
 }
 
+function testCleanupExecution() {
+  // §5.1 closure: the waste_cleanup process must demonstrably execute, remove
+  // waste biologically, and have its execution attribution reconcile with
+  // authoritative field accounting. Process accounting (interval counters),
+  // lineage attribution, and the waste field's own bioRemoved counter are
+  // three separate code paths, so this is a real reconciliation, not a
+  // tautology. Before this, cleanup_exec and biological removal were
+  // recorded by the engine but asserted nowhere in the repository.
+  const session = new UniverseSession();
+  session.create(config(FIXTURE_SEED));
+  const sim = session.simulation as any;
+  let attributedRemoved = 0;
+  let attributedExec = 0;
+  let processRemoved = 0;
+  let processExec = 0;
+  let strides = 0;
+  let lastTick = -1;
+  // A pending decision pauses advancement, so only count a stride once and
+  // only when the tick actually landed on a stride boundary.
+  for (let i = 0; i < 600 && session.snapshot().tick < 60000; i++) {
+    const snapshot = session.advance(251);
+    if (snapshot.pendingDecision) session.resolveEventDecision(snapshot.pendingDecision.opportunityId, "keep-watching");
+    const tick = session.snapshot().tick;
+    if (tick === lastTick || tick % 251 !== 0) continue;
+    lastTick = tick;
+    const facts = sim.lastLineageFlows;
+    if (!facts) continue;
+    strides++;
+    attributedRemoved += facts.totals.wasteRemoved;
+    attributedExec += facts.totals.cleanupExec;
+    processRemoved += sim.last.removed_w || 0;
+    processExec += sim.last.cleanup_exec || 0;
+  }
+  const waste = sim.resources.waste;
+  assert.ok(strides > 100, `sampled ${strides} strides`);
+  // 1. Cleanup executes as a process, in a real run, and removes real mass.
+  assert.ok(processExec > 0, `cleanup process executed (${processExec} executions)`);
+  assert.ok(waste.bioRemoved > 0, `cleanup removed waste biologically (${waste.bioRemoved})`);
+  assert.ok(attributedExec > 0, `execution attributed to lineages (${attributedExec})`);
+  // 2. Biological removal is mass taken out of the field, bounded by what
+  // primary metabolism put in — not a counter that can drift upward freely.
+  assert.ok(
+    waste.bioRemoved <= waste.produced + 1e-9,
+    `removal bounded by production (${waste.bioRemoved} <= ${waste.produced})`,
+  );
+  // 3. Attribution reconciles with the authoritative field accounting.
+  close(attributedRemoved, waste.bioRemoved, "lineage-attributed removal reconciles to field bioRemoved");
+  close(processRemoved, waste.bioRemoved, "process accounting removal reconciles to field bioRemoved");
+  // 4. Process-bound execution attribution agrees exactly with lineage
+  // attribution: both increment only when waste was actually removed.
+  assert.equal(attributedExec, processExec, "lineage execution count equals process accounting");
+  // Counted executions must correspond to real mass movement. (The count and
+  // the mass are different units, so the invariant is positivity, not order.)
+  assert.ok(processRemoved > 0, "counted executions moved real mass");
+  console.log(
+    `cleanup execution: PASS (${processExec} executions, ${waste.bioRemoved.toFixed(3)} removed across ${strides} strides)`,
+  );
+}
+
 function testWasteDeterminism() {
   const run = () => {
     const session = new UniverseSession();
@@ -354,6 +413,7 @@ function testWasteCheckpoint() {
 testFlowDeterminism();
 testProcessActivations();
 testWasteAccounting();
+testCleanupExecution();
 testWasteDeterminism();
 testWasteCheckpoint();
 testIntervalDeterminism();
