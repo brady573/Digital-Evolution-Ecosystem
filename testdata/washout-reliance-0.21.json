@@ -1,5 +1,7 @@
 {
-  "engine": "0.21.0",
+  "engine": "0.22.0",
+  "captureVersion": 4,
+  "policyVersion": "m3-catalysts-1.1.0",
   "config": "balanced",
   "settleTicks": 60000,
   "assayTicks": 15000,
@@ -10,100 +12,386 @@
   },
   "rows": [
     {
-      "seed": 3543950664,
-      "horizon": 60000,
-      "applicable": true,
-      "forkTick": 60670,
-      "washTick": 60670,
-      "establishedTick": 42670,
-      "livePopulation": 439,
-      "controlPopulation": 460,
-      "liveScavengerShare": 0.04100227790432802,
-      "controlScavengerShare": 0.09565217391304348,
-      "liveCStock": 10.758091921770133,
-      "controlCStock": 24.98229912971843,
-      "materialResponse": true
-    },
-    {
       "seed": 821947219,
       "horizon": 120000,
       "applicable": true,
-      "forkTick": 120101,
-      "washTick": 120101,
-      "establishedTick": 88101,
-      "livePopulation": 352,
-      "controlPopulation": 373,
-      "liveScavengerShare": 0.03125,
-      "controlScavengerShare": 0.22788203753351208,
-      "liveCStock": 10.75372532607529,
-      "controlCStock": 26.053279273418163,
-      "materialResponse": true
+      "forkTick": 120723,
+      "washTick": 120723,
+      "establishedTick": 108683,
+      "livePopulation": 326,
+      "controlPopulation": 331,
+      "liveScavengerShare": 0.024539877300613498,
+      "controlScavengerShare": 0.2054380664652568,
+      "liveCStock": 15.678272945420511,
+      "controlCStock": 24.783192424408494,
+      "materialResponse": true,
+      "interventionApplied": true,
+      "cuseArcPre": [
+        {
+          "tick": 108683,
+          "phase": "established",
+          "leadingLineage": null,
+          "scavengerShare": 0.06422018348623854,
+          "evidence": {
+            "tick": 108683,
+            "population": 327,
+            "starting_population": 30,
+            "active_population": 163,
+            "dormant_population": 164,
+            "dormant_fraction": 0.5015290519877675,
+            "c_energy_share": 0.09751412388822366,
+            "crossfeeder_fraction": 0.06422018348623854,
+            "partitioned": false,
+            "dominant_role": "mixed_primary",
+            "wake_events": 0,
+            "waste_fraction": 0.0033475734734245274,
+            "waste_exposed_share": 0,
+            "tolerance_mean": 0.10326644070443826,
+            "cleanup_mean": 0.23798576322358628
+          }
+        }
+      ],
+      "cuseArcPost": [],
+      "ladder": {
+        "postPhases": [],
+        "disrupted": false,
+        "recovered": false,
+        "replacement": false,
+        "establishedLeadLineage": null,
+        "establishedScavengerShare": 0.06422018348623854,
+        "collapseTripwire": 0.02119266055045872,
+        "liveScavengerShareAfterAssay": 0.024539877300613498,
+        "retainedShare": 0.38212094653812445,
+        "belowCollapseTripwire": false
+      }
     },
     {
       "seed": 2088626459,
       "horizon": 120000,
       "applicable": false,
       "extended": true,
-      "reason": "no C-use guild established by 120k"
+      "reason": "no C-use guild established by 120k",
+      "interventionApplied": false,
+      "cuseArcPre": [],
+      "cuseArcPost": [],
+      "ladder": {
+        "postPhases": [],
+        "disrupted": false,
+        "recovered": false,
+        "replacement": false
+      }
+    },
+    {
+      "seed": 3543950664,
+      "horizon": 60000,
+      "applicable": true,
+      "forkTick": 60973,
+      "washTick": 60973,
+      "establishedTick": 55973,
+      "livePopulation": 395,
+      "controlPopulation": 420,
+      "liveScavengerShare": 0.030379746835443037,
+      "controlScavengerShare": 0.2857142857142857,
+      "liveCStock": 13.531533429680515,
+      "controlCStock": 25.929020470081344,
+      "materialResponse": true,
+      "interventionApplied": true,
+      "cuseArcPre": [
+        {
+          "tick": 55973,
+          "phase": "established",
+          "leadingLineage": null,
+          "scavengerShare": 0.09490740740740741,
+          "evidence": {
+            "tick": 55973,
+            "population": 432,
+            "starting_population": 30,
+            "active_population": 191,
+            "dormant_population": 241,
+            "dormant_fraction": 0.5578703703703703,
+            "c_energy_share": 0.09189718693268929,
+            "crossfeeder_fraction": 0.09490740740740741,
+            "partitioned": false,
+            "dominant_role": "mixed_primary",
+            "wake_events": 0,
+            "waste_fraction": 0.002873639139713282,
+            "waste_exposed_share": 0,
+            "tolerance_mean": 0.23212011063042814,
+            "cleanup_mean": 0.25437628270936374
+          }
+        }
+      ],
+      "cuseArcPost": [],
+      "ladder": {
+        "postPhases": [],
+        "disrupted": false,
+        "recovered": false,
+        "replacement": false,
+        "establishedLeadLineage": null,
+        "establishedScavengerShare": 0.09490740740740741,
+        "collapseTripwire": 0.03131944444444445,
+        "liveScavengerShareAfterAssay": 0.030379746835443037,
+        "retainedShare": 0.32009879592466806,
+        "belowCollapseTripwire": true
+      }
     },
     {
       "seed": 2121676508,
       "horizon": 120000,
-      "applicable": false,
-      "extended": true,
-      "reason": "no C-use guild established by 120k"
+      "applicable": true,
+      "forkTick": 120966,
+      "washTick": 120966,
+      "establishedTick": 106926,
+      "livePopulation": 352,
+      "controlPopulation": 369,
+      "liveScavengerShare": 0.045454545454545456,
+      "controlScavengerShare": 0.14092140921409213,
+      "liveCStock": 15.249023910898922,
+      "controlCStock": 29.420425581886917,
+      "materialResponse": true,
+      "interventionApplied": true,
+      "cuseArcPre": [
+        {
+          "tick": 106926,
+          "phase": "established",
+          "leadingLineage": null,
+          "scavengerShare": 0.06267806267806268,
+          "evidence": {
+            "tick": 106926,
+            "population": 351,
+            "starting_population": 30,
+            "active_population": 178,
+            "dormant_population": 173,
+            "dormant_fraction": 0.4928774928774929,
+            "c_energy_share": 0.07377239068037983,
+            "crossfeeder_fraction": 0.06267806267806268,
+            "partitioned": false,
+            "dominant_role": "mixed_primary",
+            "wake_events": 0,
+            "waste_fraction": 0.0032929220785358716,
+            "waste_exposed_share": 0,
+            "tolerance_mean": 0.2735710204821733,
+            "cleanup_mean": 0.22995362356439117
+          }
+        }
+      ],
+      "cuseArcPost": [],
+      "ladder": {
+        "postPhases": [],
+        "disrupted": false,
+        "recovered": false,
+        "replacement": false,
+        "establishedLeadLineage": null,
+        "establishedScavengerShare": 0.06267806267806268,
+        "collapseTripwire": 0.020683760683760686,
+        "liveScavengerShareAfterAssay": 0.045454545454545456,
+        "retainedShare": 0.7252066115702479,
+        "belowCollapseTripwire": false
+      }
     },
     {
       "seed": 111111111,
       "horizon": 120000,
-      "applicable": true,
-      "forkTick": 120049,
-      "washTick": 120049,
-      "establishedTick": 68523,
-      "livePopulation": 373,
-      "controlPopulation": 358,
-      "liveScavengerShare": 0.064343163538874,
-      "controlScavengerShare": 0.1564245810055866,
-      "liveCStock": 10.965759440562092,
-      "controlCStock": 26.470937767941802,
-      "materialResponse": true
+      "applicable": false,
+      "extended": true,
+      "reason": "no C-use guild established by 120k",
+      "interventionApplied": false,
+      "cuseArcPre": [],
+      "cuseArcPost": [],
+      "ladder": {
+        "postPhases": [],
+        "disrupted": false,
+        "recovered": false,
+        "replacement": false
+      }
     },
     {
       "seed": 222222222,
       "horizon": 120000,
-      "applicable": false,
-      "extended": true,
-      "reason": "no C-use guild established by 120k"
+      "applicable": true,
+      "forkTick": 120727,
+      "washTick": 120727,
+      "establishedTick": 92117,
+      "livePopulation": 310,
+      "controlPopulation": 313,
+      "liveScavengerShare": 0.17096774193548386,
+      "controlScavengerShare": 0.5303514376996805,
+      "liveCStock": 30.781924254978534,
+      "controlCStock": 28.072030583025576,
+      "materialResponse": true,
+      "interventionApplied": true,
+      "cuseArcPre": [
+        {
+          "tick": 92117,
+          "phase": "established",
+          "leadingLineage": null,
+          "scavengerShare": 0.06287425149700598,
+          "evidence": {
+            "tick": 92117,
+            "population": 334,
+            "starting_population": 30,
+            "active_population": 160,
+            "dormant_population": 174,
+            "dormant_fraction": 0.5209580838323353,
+            "c_energy_share": 0.06109504822052743,
+            "crossfeeder_fraction": 0.06287425149700598,
+            "partitioned": false,
+            "dominant_role": "mixed_primary",
+            "wake_events": 0,
+            "waste_fraction": 0.005054865817794153,
+            "waste_exposed_share": 0,
+            "tolerance_mean": 0.29009935822768784,
+            "cleanup_mean": 0.15138415458515553
+          }
+        }
+      ],
+      "cuseArcPost": [],
+      "ladder": {
+        "postPhases": [],
+        "disrupted": false,
+        "recovered": false,
+        "replacement": false,
+        "establishedLeadLineage": null,
+        "establishedScavengerShare": 0.06287425149700598,
+        "collapseTripwire": 0.020748502994011975,
+        "liveScavengerShareAfterAssay": 0.17096774193548386,
+        "retainedShare": 2.7192012288786485,
+        "belowCollapseTripwire": false
+      }
     },
     {
       "seed": 333333333,
       "horizon": 120000,
       "applicable": true,
-      "forkTick": 120121,
-      "washTick": 120121,
-      "establishedTick": 93121,
-      "livePopulation": 392,
-      "controlPopulation": 360,
-      "liveScavengerShare": 0.015306122448979591,
-      "controlScavengerShare": 0.06666666666666667,
-      "liveCStock": 11.979194259102318,
-      "controlCStock": 27.18762449548974,
-      "materialResponse": true
+      "forkTick": 120225,
+      "washTick": 120225,
+      "establishedTick": 69025,
+      "livePopulation": 358,
+      "controlPopulation": 385,
+      "liveScavengerShare": 0.036312849162011177,
+      "controlScavengerShare": 0.2077922077922078,
+      "liveCStock": 16.44607198965735,
+      "controlCStock": 30.41824352022019,
+      "materialResponse": true,
+      "interventionApplied": true,
+      "cuseArcPre": [
+        {
+          "tick": 69025,
+          "phase": "established",
+          "leadingLineage": null,
+          "scavengerShare": 0.061046511627906974,
+          "evidence": {
+            "tick": 69025,
+            "population": 344,
+            "starting_population": 30,
+            "active_population": 160,
+            "dormant_population": 184,
+            "dormant_fraction": 0.5348837209302325,
+            "c_energy_share": 0.09658097759987386,
+            "crossfeeder_fraction": 0.061046511627906974,
+            "partitioned": false,
+            "dominant_role": "mixed_primary",
+            "wake_events": 0,
+            "waste_fraction": 0.007262520184114645,
+            "waste_exposed_share": 0,
+            "tolerance_mean": 0.08882844274417513,
+            "cleanup_mean": 0.11631375406372023
+          }
+        }
+      ],
+      "cuseArcPost": [],
+      "ladder": {
+        "postPhases": [],
+        "disrupted": false,
+        "recovered": false,
+        "replacement": false,
+        "establishedLeadLineage": null,
+        "establishedScavengerShare": 0.061046511627906974,
+        "collapseTripwire": 0.020145348837209302,
+        "liveScavengerShareAfterAssay": 0.036312849162011177,
+        "retainedShare": 0.5948390529396117,
+        "belowCollapseTripwire": false
+      }
     },
     {
       "seed": 444444444,
       "horizon": 120000,
       "applicable": true,
-      "forkTick": 120189,
-      "washTick": 120189,
-      "establishedTick": 110189,
-      "livePopulation": 396,
-      "controlPopulation": 426,
-      "liveScavengerShare": 0.06060606060606061,
-      "controlScavengerShare": 0.08450704225352113,
-      "liveCStock": 28.81365594445521,
-      "controlCStock": 23.159762400351624,
-      "materialResponse": false
+      "forkTick": 120456,
+      "washTick": 120456,
+      "establishedTick": 74547,
+      "livePopulation": 359,
+      "controlPopulation": 357,
+      "liveScavengerShare": 0.016713091922005572,
+      "controlScavengerShare": 0.12885154061624648,
+      "liveCStock": 18.352149376538,
+      "controlCStock": 27.558240439530184,
+      "materialResponse": true,
+      "interventionApplied": true,
+      "cuseArcPre": [
+        {
+          "tick": 74547,
+          "phase": "established",
+          "leadingLineage": null,
+          "scavengerShare": 0.07859078590785908,
+          "evidence": {
+            "tick": 74547,
+            "population": 369,
+            "starting_population": 30,
+            "active_population": 163,
+            "dormant_population": 206,
+            "dormant_fraction": 0.5582655826558266,
+            "c_energy_share": 0.103018903240399,
+            "crossfeeder_fraction": 0.07859078590785908,
+            "partitioned": false,
+            "dominant_role": "primary_a",
+            "wake_events": 0,
+            "waste_fraction": 0.0034883787434926983,
+            "waste_exposed_share": 0,
+            "tolerance_mean": 0.21611717173608067,
+            "cleanup_mean": 0.27221176494909904
+          }
+        }
+      ],
+      "cuseArcPost": [
+        {
+          "tick": 132277,
+          "phase": "disrupted",
+          "leadingLineage": null,
+          "scavengerShare": 0.019498607242339833,
+          "evidence": {
+            "tick": 132277,
+            "population": 359,
+            "starting_population": 30,
+            "active_population": 169,
+            "dormant_population": 190,
+            "dormant_fraction": 0.5292479108635098,
+            "c_energy_share": 0.11416722560895927,
+            "crossfeeder_fraction": 0.019498607242339833,
+            "partitioned": false,
+            "dominant_role": "primary_a",
+            "wake_events": 0,
+            "waste_fraction": 0.0033818959346077764,
+            "waste_exposed_share": 0,
+            "tolerance_mean": 0.21640339727692992,
+            "cleanup_mean": 0.2658745121902455
+          }
+        }
+      ],
+      "ladder": {
+        "postPhases": [
+          "disrupted"
+        ],
+        "disrupted": true,
+        "recovered": false,
+        "replacement": false,
+        "establishedLeadLineage": null,
+        "establishedScavengerShare": 0.07859078590785908,
+        "collapseTripwire": 0.025934959349593497,
+        "liveScavengerShareAfterAssay": 0.016713091922005572,
+        "retainedShare": 0.2126596868696571,
+        "belowCollapseTripwire": true
+      }
     }
   ]
 }

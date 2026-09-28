@@ -3,6 +3,9 @@ import {
   ASH_RGB, LandscapeSmoother, cellFractions, landscapeCell, landscapeTileLayout, microTexture,
   nutrientOverlayCell, wasteOverlayCell,
 } from "../../apps/explorer/src/landscape.ts";
+import {
+  DORMANT_ALPHA, analyticalLens, dormantChannel, organismColor,
+} from "../../apps/explorer/src/organismEncoding.ts";
 import type { RenderResourceField, RenderWasteField } from "../../packages/contracts/src/index.ts";
 
 /**
@@ -357,6 +360,76 @@ function testWasteStillReadsAsResidueNotInjury() {
   assert.ok(luma(fouled) > 40, "and a fouled cell still shows organisms standing in it");
 }
 
+/**
+ * §21.2 / R1: an analytical lens must encode the quantity it claims even for
+ * dormant organisms. Dormancy previously won the colour chain outright, so the
+ * lens labelled "Clades" did not encode clades for the dormant subpopulation and
+ * "Traits" did not encode the selected trait. Dormancy now rides a separate,
+ * non-conflicting channel instead of replacing the lens encoding.
+ */
+function testAnalyticalLensesOutrankDormancy() {
+  const base = { cladeId: 7, byproductUse: 0, diet: 0, energy: 90, activity: "active" } as const;
+  const dormant = { ...base, activity: "dormant" } as const;
+  const range: [number, number] = [0, 1];
+
+  // Dormancy does not replace clade identity.
+  assert.equal(
+    organismColor({ ...base } as never, "clades", "speed", range),
+    organismColor({ ...dormant } as never, "clades", "speed", range),
+    "a dormant organism keeps its clade encoding in the Clades lens",
+  );
+  // Dormancy does not replace trait value.
+  for (const view of ["speed", "habitat", "byproduct_use"] as const) {
+    assert.equal(
+      organismColor({ ...base, [view]: 0.8 } as never, "traits", view, range),
+      organismColor({ ...dormant, [view]: 0.8 } as never, "traits", view, range),
+      `a dormant organism keeps its ${view} encoding in the Traits lens`,
+    );
+  }
+  // The encoding still discriminates. Otherwise the equalities above would be
+  // satisfied by a lens that encodes nothing at all.
+  assert.notEqual(
+    organismColor({ ...base, cladeId: 7 } as never, "clades", "speed", range),
+    organismColor({ ...base, cladeId: 8 } as never, "clades", "speed", range),
+    "the Clades lens still distinguishes clades",
+  );
+  assert.notEqual(
+    organismColor({ ...base, speed: 0.1 } as never, "traits", "speed", range),
+    organismColor({ ...base, speed: 0.9 } as never, "traits", "speed", range),
+    "the Traits lens still distinguishes trait values",
+  );
+
+  // Dormancy stays independently legible, on a channel that is not the colour.
+  assert.equal(dormantChannel({ ...dormant } as never).dormant, true, "dormancy is signalled on its own channel");
+  assert.equal(dormantChannel({ ...base } as never).dormant, false, "an active organism is not dimmed");
+  assert.equal(dormantChannel({ ...dormant } as never).alpha, DORMANT_ALPHA, "dormancy dims via alpha");
+  assert.equal(dormantChannel({ ...dormant } as never).hollow, true, "dormancy is drawn hollow, not solid");
+  assert.ok(DORMANT_ALPHA < 1, "the dormancy alpha actually reduces opacity");
+  assert.notEqual(
+    dormantChannel({ ...dormant } as never).hollow,
+    dormantChannel({ ...base } as never).hollow,
+    "the dormancy channel differs between the two states, so it carries signal",
+  );
+
+  // The Normal world keeps its own dormancy treatment: this fix is analytical
+  // lenses only and must not restyle the default view.
+  assert.equal(
+    organismColor({ ...dormant } as never, "normal", "speed", range),
+    organismColor({ ...base, activity: "dormant" } as never, "normal", "speed", range),
+    "Normal-world dormancy colouring is unchanged for the dormant state",
+  );
+  assert.notEqual(
+    organismColor({ ...dormant } as never, "normal", "speed", range),
+    organismColor({ ...base } as never, "normal", "speed", range),
+    "the Normal world still shows dormancy in its own colour",
+  );
+
+  assert.equal(analyticalLens("clades"), true, "Clades is an analytical lens");
+  assert.equal(analyticalLens("traits"), true, "Traits is an analytical lens");
+  assert.equal(analyticalLens("normal"), false, "Normal is not analytical");
+  console.log("analytical lenses outrank dormancy (§21.2): PASS");
+}
+
 async function main(){
   testPrimesFromRealFields();
   testUniverseIsolation();
@@ -370,6 +443,7 @@ async function main(){
   testPresenceIsMonotonicAndContinuous();
   testPartialDepletionLeavesRefugiaVisible();
   testWasteStillReadsAsResidueNotInjury();
+  testAnalyticalLensesOutrankDormancy();
   // Logged so a silent skip is distinguishable from a pass.
   console.log("landscape resource presence (scarcity != damage): PASS");
   await testCellInspection();

@@ -92,8 +92,15 @@ function testEligibilityBoundaries() {
   assert.deepEqual(catalystIds({ includeTestCatalysts: true }),
     ["drought-a", "drought-b", "global-crash", "c-washout"],
     "the washout is appended only behind the explicit test opt-in, in deterministic order");
-  assert.equal(CATALYST_POLICY_VERSION, "m3-catalysts-1.0.0",
-    "the production catalog version is unchanged, because the production catalog is unchanged");
+  // The CATALOG is unchanged: the same three production catalysts, and the
+  // washout still only behind the explicit opt-in. ELIGIBILITY does change
+  // (§21.1 removes the stock floor), so the policy version is bumped: a
+  // restored pending window must remain interpretable under the policy that
+  // produced it.
+  assert.notEqual(CATALYST_POLICY_VERSION, "m3-catalysts-1.0.0",
+    "production catalyst eligibility changed, so the policy version is bumped");
+  assert.equal(CATALYST_POLICY_VERSION, "m3-catalysts-1.1.0",
+    "the policy version is the agreed successor to m3-catalysts-1.0.0");
   assert.deepEqual(eligibleIds(healthyContext()), ["drought-a", "drought-b", "global-crash"], "healthy world offers all three");
 
   // Energy share boundary: exactly 15% is coherent, a hair below is not.
@@ -104,9 +111,59 @@ function testEligibilityBoundaries() {
   // A failing A-side never affects the B-side (independent predicates).
   assert.ok(eligibleIds(healthyContext({ energyShareA: 0 })).includes("drought-b"), "B eligibility is independent of A");
 
-  // Stock boundary: exactly 8% coherent, below not.
-  assert.ok(eligibleIds(healthyContext({ stockFractionA: 0.08 })).includes("drought-a"), "A stock at exactly 8% is eligible");
-  assert.ok(!eligibleIds(healthyContext({ stockFractionA: 0.0799 })).includes("drought-a"), "A stock below 8% is not");
+  // §21.1: the universal stock-fraction floor is removed from the drought pair.
+  // The retained measurement (testdata/provenance-0.22.0.json) spans roughly
+  // 0.0010-0.2712 across the named configurations, so a single 8% floor sat
+  // above the ENTIRE measured Abundant range. Drought eligibility now follows
+  // realized energy share, which is what the intervention actually acts on.
+  for (const [label, fraction] of [
+    ["abundant p05", 0.0011],
+    ["abundant p50", 0.0103],
+    ["abundant max", 0.0156],
+    ["balanced p50", 0.0583],
+    ["harsh p50", 0.1079],
+  ] as const) {
+    assert.ok(
+      eligibleIds(healthyContext({ stockFractionA: fraction })).includes("drought-a"),
+      `drought-a eligible at ${label} stock fraction (${fraction})`,
+    );
+  }
+  assert.ok(
+    eligibleIds(healthyContext({ stockFractionA: 0 })).includes("drought-a"),
+    "drought-a is no longer gated on A field stock at any value",
+  );
+  assert.ok(
+    eligibleIds(healthyContext({ stockFractionB: 0 })).includes("drought-b"),
+    "drought-b is no longer gated on B field stock at any value",
+  );
+
+  // Removing the stock gate must NOT weaken the gates that remain. Energy
+  // share carries the product intent, and cooldown still gates majors.
+  assert.ok(
+    !eligibleIds(healthyContext({ energyShareA: 0, stockFractionA: 0 })).includes("drought-a"),
+    "energy-share still blocks drought-a when A stock is also empty",
+  );
+  assert.ok(
+    !eligibleIds(healthyContext({ energyShareA: 0.1499, stockFractionA: 0 })).includes("drought-a"),
+    "the 15% energy-share boundary is unchanged with no stock floor in the way",
+  );
+  assert.deepEqual(
+    eligibleIds(healthyContext({ stockFractionA: 0, stockFractionB: 0 }), false),
+    [],
+    "cooldown still blocks every major with no stock floor",
+  );
+  assert.ok(
+    !eligibleIds(healthyContext({ stockFractionA: 0, energyShareA: 0, droughtActive: true })).includes("drought-a"),
+    "noDroughtActive still blocks when stock is also empty",
+  );
+
+  // Same catalyst context + same policy state is deterministic.
+  const measured = healthyContext({ stockFractionA: 0.0011, stockFractionB: 0.0014, energyShareA: 0.16, energyShareB: 0.16 });
+  assert.deepEqual(
+    diagnoseCatalysts(measured, true),
+    diagnoseCatalysts(measured, true),
+    "the same catalyst context yields a bit-identical diagnosis",
+  );
 
   // Abiotic + population boundaries for the global crash.
   assert.ok(eligibleIds(healthyContext({ abioticStockFraction: 0.1 })).includes("global-crash"), "abiotic at exactly 10% is eligible");
@@ -470,9 +527,53 @@ function testInterveneBlockedWhilePending() {
   console.log("experiments blocked while pending: PASS");
 }
 
+/**
+ * §21.3 / R11: the test-only c-washout offer must actually be RESOLVABLE through
+ * the explicit opt-in. It previously fell through: eligibility was computed from
+ * the ACTIVE catalog (which includes the test spec), but the choice was then
+ * looked up in the PRODUCTION catalog alone, so the spec was undefined and the
+ * window threw instead of offering the choice. Asserted in both directions: the
+ * opt-in path works, and the production path still cannot offer it.
+ */
+function testTestOnlyCatalystIsResolvable() {
+  // C needs a real energy share to be eligible; c-washout has no stock floor.
+  const context = healthyContext({ energyShareC: 0.4 });
+
+  const withTest = selectCatalystWindow({
+    tick: 20_000, lastDecisionTick: 0, lastMajorCatalystTick: null, context, includeTestCatalysts: true,
+  }) as { choices: readonly { catalystId: string | null; intervention: unknown; directEffectDescription: string }[] } | null;
+  assert.ok(withTest, "a catalyst window opens with the explicit test opt-in");
+  const offered = withTest!.choices.map((c) => c.catalystId);
+  assert.ok(offered.includes("c-washout"),
+    `the opted-in washout is actually offered, not merely diagnosed (offered: ${offered.join(",")})`);
+
+  const production = selectCatalystWindow({
+    tick: 20_000, lastDecisionTick: 0, lastMajorCatalystTick: null, context,
+  }) as { choices: readonly { catalystId: string | null }[] } | null;
+  assert.ok(production, "a catalyst window opens in production mode too");
+  const prodOffered = production!.choices.map((c) => c.catalystId);
+  assert.ok(!prodOffered.includes("c-washout"),
+    "the washout is never offered in normal production catalog mode");
+  assert.deepEqual([...catalystIds()], ["drought-a", "drought-b", "global-crash"],
+    "the production catalog is still exactly the three abiotic catalysts");
+
+  // Resolving against the active catalog must not change production behaviour:
+  // enabling the opt-in adds exactly one offer and disturbs no other eligibility.
+  assert.deepEqual(offered.filter((id) => id !== "c-washout"), prodOffered,
+    "enabling the test opt-in adds exactly one offer and changes no other eligibility");
+
+  // The choice carries a real, resolvable intervention rather than a stub.
+  const washout = withTest!.choices.find((c) => c.catalystId === "c-washout");
+  assert.ok(washout, "the washout choice is present");
+  assert.ok(washout!.intervention, "the washout choice carries its intervention");
+  assert.ok(washout!.directEffectDescription.length > 0, "the washout choice describes its effect");
+  console.log("test-only catalyst resolves through explicit opt-in (§21.3): PASS");
+}
+
 testEligibilityBoundaries();
 testQuietAndCooldown();
 if (!FAST) {
+  testTestOnlyCatalystIsResolvable();
   testFirstWindow();
   testSameTickPriority();
   testCatalystGateAndChoices();

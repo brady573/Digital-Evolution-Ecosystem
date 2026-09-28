@@ -81,31 +81,174 @@ const MUTATION_NAMES:Record<string,string>={speed:'movement',sensing:'nutrient-s
 const friendlyMutation=(a:string[]):string=>!a||!a.length?'founder':a.map(v=>MUTATION_NAMES[v]||v).join(' + ');
 
 const metabolicRole=(o:Organism):string=>{let total=(o.ga||0)+(o.gb||0)+(o.gc||0);if(total<REALIZED_MIN_GAIN)return'unresolved';let cs=(o.gc||0)/total;if(cs>=.15&&C_ACCESS(o.bu||0)>=.35)return'byproduct_scavenger';let p=(o.ga||0)+(o.gb||0);if(p<=0)return'unresolved';let a=(o.ga||0)/p;return a>=REALIZED_CUT?'primary_a':a<=1-REALIZED_CUT?'primary_b':'mixed_primary'};
+/** A nutrient substrate index. C (2) is the biogenic byproduct; it is still a nutrient field. */
+type NutrientSubstance=0|1|2;
+type ProcessId='primary_a'|'primary_b'|'c_scavenge'|'waste_cleanup';
+/** Fixed substrate order, so substrate loops stay typed as NutrientSubstance. */
+const NUTRIENT_SUBSTANCES:readonly NutrientSubstance[]=[0,1,2];
+/** What a nutrient process execution transformed and produced. */
+interface NutrientExecution{substance:NutrientSubstance;amount:number;gain:number;produced:number;wasteProduced:number}
+/** What a waste process execution removed, and the active energy it cost. */
+interface WasteExecution{removed:number;activeCost:number}
+
 /**
- * Stage 2 (issue #30) process foundation: the three supported metabolisms as
- * explicit engine-owned processes. Identity, environmental input (field
- * kind), capability/expression factor (access), byproduct output, and
- * execution attribution route through these descriptors; consume() executes
- * them without re-deriving the math. Capability rule: access derives ONLY
- * from inherited organism state (AE/HP/C_ACCESS); analysis never activates,
- * suppresses, or modifies it. Energy yields stay authoritative in the RS
- * field definitions and are read through processYield, so no number here
- * can drift from the fields.
+ * Identity and capability, shared by every supported metabolism. Capability
+ * rule: `access` derives ONLY from inherited organism state (AE/HP/C_ACCESS);
+ * analysis never activates, suppresses, or modifies it.
  */
-interface BioProcess{id:'primary_a'|'primary_b'|'c_scavenge'|'waste_cleanup';kind:0|1|2|3;access:(o:Organism)=>number;producesByproduct:boolean}
-const PROCESSES:Record<number,BioProcess>={
- 0:{id:'primary_a',kind:0,access:(o)=>AE(o.di,0)*HP(o.ha,0),producesByproduct:true},
- 1:{id:'primary_b',kind:1,access:(o)=>AE(o.di,1)*HP(o.ha,1),producesByproduct:true},
- 2:{id:'c_scavenge',kind:2,access:(o)=>C_ACCESS(o.bu||0),producesByproduct:false},
- // Slice 2 cleanup is the fourth supported metabolism: capability derives
- // ONLY from the inherited cleanup trait (like C_ACCESS derives from bu),
- // while opportunity (local waste present) is checked at execution. Rate
- // and activity cost stay module constants next to the process, the same
- // way energy yields stay authoritative in the RS field definitions.
- 3:{id:'waste_cleanup',kind:3,access:(o)=>Q(o.cu||0,0,1.5)/1.5,producesByproduct:false},
+interface ProcessIdentity{id:ProcessId;access:(o:Organism)=>number}
+
+/**
+ * A process that draws energy from a nutrient substrate. Environmental
+ * binding is `substance`. This variant has no waste member, so the cleanup
+ * process is not addressable as a nutrient and nutrient-only members such as
+ * `yieldOf` cannot be handed one.
+ */
+interface NutrientProcess extends ProcessIdentity{
+ medium:'nutrient';
+ substance:NutrientSubstance;
+ producesByproduct:boolean;
+ /** Only the two abiotic primaries leave a metabolic waste burden. */
+ leavesWaste:boolean;
+ /** Energy per unit taken, read from the field defs so no number drifts. */
+ yieldOf:(defs:FieldDef[])=>number;
+ /** Digestion-yield factor. Frozen asymmetry (parity-protected): habitat
+  * preference shapes food discovery (access) but not digestion yield.
+  * Do not 'fix' without an engine-version change. */
+ yieldFactor:(o:Organism)=>number;
+ /** Substrate mass available at the organism's cell. */
+ available:(rs:RS,o:Organism)=>number;
+ /** Output transform: realized energy plus byproduct and waste deposition. */
+ transform:(rs:RS,o:Organism,amount:number,interval:Interval|null)=>{gain:number;produced:number;wasteProduced:number};
+ /** Deterministic interval consumption/execution accounting, bound to this process identity. */
+ account:(interval:Interval|null,amount:number)=>void;
+ execute:(rs:RS,o:Organism,interval:Interval|null)=>NutrientExecution|null;
+}
+
+/**
+ * The waste medium. Cleanup is a transformation of a non-energetic burden,
+ * not a feeding process: it binds no nutrient substrate, and its only energy
+ * term is the active execution cost of the waste it actually removed. Rate
+ * and cost stay module constants referenced by the process, the same way
+ * nutrient yields stay authoritative in the RS field definitions.
+ *
+ * Exposure burden, tolerance, the standing cleanup-trait cost, pressure
+ * scaling and final energy application are organism physiology, not process
+ * execution, and stay in the organism loop.
+ */
+interface WasteProcess extends ProcessIdentity{
+ medium:'waste';
+ /** Local burden available to transform. */
+ rate:number;
+ /** Active execution energy per unit of waste removed. */
+ activeCostPerUnit:number;
+ available:(rs:RS,o:Organism)=>number;
+ transform:(rs:RS,o:Organism,capability:number,interval:Interval|null)=>number;
+ account:(interval:Interval|null,removed:number)=>void;
+ execute:(rs:RS,o:Organism,interval:Interval|null)=>WasteExecution;
+}
+
+type BioProcess=NutrientProcess|WasteProcess;
+
+const SUBSTANCE_PROCESS_ID:Record<NutrientSubstance,ProcessId>={0:'primary_a',1:'primary_b',2:'c_scavenge'};
+
+/**
+ * Stage 2 (issue #30) process foundation: the four supported metabolisms as
+ * engine-owned processes behind one contract — identity, environmental
+ * binding, capability, execution/dispatch, transformation/output, energy
+ * term, and deterministic accounting. The contract is a discriminated union
+ * on `medium`, so the cleanup process cannot be indexed as a nutrient:
+ * `processYield(defs, waste_cleanup)` was once a reachable no-op and is now
+ * unrepresentable. consume() and execCleanup() are specialised dispatchers
+ * that delegate semantics here instead of re-deriving them.
+ */
+const nutrientProcess=(substance:NutrientSubstance,access:(o:Organism)=>number,producesByproduct:boolean,account:(interval:Interval|null,amount:number)=>void):NutrientProcess=>{
+ const p:NutrientProcess={
+  id:SUBSTANCE_PROCESS_ID[substance],
+  medium:'nutrient',
+  substance,
+  access,
+  producesByproduct,
+  leavesWaste:substance<2,
+  yieldOf:(defs)=>defs[substance]!.energy_yield,
+  // Frozen asymmetry (parity-protected): habitat preference shapes food
+  // discovery (access) but not digestion yield (AE-only gain).
+  // Do not 'fix' without an engine-version change.
+  yieldFactor:(o)=>substance===2?C_ACCESS(o.bu||0):AE(o.di,substance),
+  available:(rs,o)=>rs.stock[substance]![rs.idx(o.x,o.y)]!,
+  transform:(rs,o,amount,interval)=>{
+   let made=0,wmade=0;
+   if(p.leavesWaste&&rs.enabledWaste)wmade=rs.waste.deposit(o.x,o.y,amount*WASTE_YIELD,interval);
+   if(rs.enabledByproduct&&p.producesByproduct){made=rs.deposit(2,o.x,o.y,amount*C_BYPRODUCT_YIELD,'primary metabolism',interval);o.pc=(o.pc||0)+made}
+   return{gain:amount*p.yieldOf(rs.defs)*p.yieldFactor(o),produced:made,wasteProduced:wmade};
+  },
+  account,
+  execute:(rs,o,interval)=>{
+   let i=rs.idx(o.x,o.y),cap=rs.cap[substance]![i]!,conc=cap>1e-9?rs.stock[substance]![i]!/cap:0;
+   let take=Math.min(rs.stock[substance]![i]!,rs.uptake*(.55+.45*Q(conc,0,1)));
+   if(take<=1e-6)return null;
+   let before=rs.stock[substance]![i]!;
+   rs.stock[substance]![i]!-=take;
+   rs.totalStock[substance]!+=rs.stock[substance]![i]!-before;
+   rs.consumed[substance]!+=take;
+   p.account(interval,take);
+   let out=p.transform(rs,o,take,interval);
+   return{substance,amount:take,gain:out.gain,produced:out.produced,wasteProduced:out.wasteProduced};
+  },
+ };
+ return p;
 };
-function processFor(kind:number):BioProcess{return PROCESSES[kind]!}
-function processYield(defs:FieldDef[],kind:number):number{return defs[kind]!.energy_yield}
+
+const NUTRIENT_PROCESSES:Record<NutrientSubstance,NutrientProcess>={
+ 0:nutrientProcess(0,(o)=>AE(o.di,0)*HP(o.ha,0),true,(interval,amount)=>{
+  if(!interval)return;
+  interval.resources_consumed+=amount;interval.consumed_a+=amount;interval.proc_exec_a=(interval.proc_exec_a||0)+1;
+ }),
+ 1:nutrientProcess(1,(o)=>AE(o.di,1)*HP(o.ha,1),true,(interval,amount)=>{
+  if(!interval)return;
+  interval.resources_consumed+=amount;interval.consumed_b+=amount;interval.proc_exec_b=(interval.proc_exec_b||0)+1;
+ }),
+ 2:nutrientProcess(2,(o)=>C_ACCESS(o.bu||0),false,(interval,amount)=>{
+  if(!interval)return;
+  interval.resources_consumed+=amount;interval.consumed_c+=amount;interval.proc_exec_c=(interval.proc_exec_c||0)+1;
+ }),
+};
+
+// Slice 2 cleanup is the fourth supported metabolism. It dispatches through
+// the shared process contract, not by borrowing `access` from a table.
+const WASTE_PROCESS:WasteProcess=(():WasteProcess=>{
+ const p:WasteProcess={
+  // Capability derives ONLY from the inherited cleanup trait, the same way
+  // C_ACCESS derives from bu for scavenging. Opportunity (local waste
+  // present) is checked at execution.
+  id:'waste_cleanup',
+  medium:'waste',
+  access:(o)=>Q(o.cu||0,0,1.5)/1.5,
+  rate:CU_RATE,
+  activeCostPerUnit:CU_ACTIVE,
+  available:(rs,o)=>rs.waste.amountAt(o.x,o.y),
+  transform:(rs,o,capability,interval)=>rs.waste.removeAt(o.x,o.y,p.rate*capability,interval),
+  account:(interval,removed)=>{if(removed>0&&interval)interval.cleanup_exec=(interval.cleanup_exec||0)+1},
+  execute:(rs,o,interval)=>{
+   if(!rs.enabledWaste)return{removed:0,activeCost:0};
+   let capability=p.access(o);
+   if(capability<=0)return{removed:0,activeCost:0};
+   if(p.available(rs,o)<=1e-9)return{removed:0,activeCost:0};
+   let removed=p.transform(rs,o,capability,interval);
+   p.account(interval,removed);
+   return{removed,activeCost:p.activeCostPerUnit*removed};
+  },
+ };
+ return p;
+})();
+
+const PROCESSES:Record<ProcessId,BioProcess>={
+ primary_a:NUTRIENT_PROCESSES[0],
+ primary_b:NUTRIENT_PROCESSES[1],
+ c_scavenge:NUTRIENT_PROCESSES[2],
+ waste_cleanup:WASTE_PROCESS,
+};
+function processFor(id:ProcessId):BioProcess{return PROCESSES[id]}
 /** Empty interval facts for pre-first-stride and pre-counter restores. Never mutated. */
 const EMPTY_INTERVAL_FLOWS:IntervalFlowFacts={tick:0,strideTicks:EVENT_STRIDE,lineages:[],totals:{netMembers:0,consumedA:0,consumedB:0,consumedC:0,energyA:0,energyB:0,energyC:0,producedC:0,births:0,deaths:0,wasteProduced:0,wasteRemoved:0,burdenEnergy:0,cleanupEnergy:0,cleanupExec:0}};
 /**
@@ -186,7 +329,7 @@ class RS{
  idx(x:number,y:number):number{let ix=Math.floor((((x%600)+600)%600)/this.cell)%this.n,iy=Math.floor((((y%600)+600)%600)/this.cell)%this.n;return iy*this.n+ix}
  fractionAt(kind:number,x:number,y:number):number{let i=this.idx(x,y),c=this.cap[kind]![i]!;return c>1e-9?this.stock[kind]![i]!/c:0}
  amountAt(kind:number,x:number,y:number):number{return this.stock[kind]![this.idx(x,y)]!}
- access(o:Organism,k:number):number{return processFor(k).access(o)}
+ access(o:Organism,substance:NutrientSubstance):number{return NUTRIENT_PROCESSES[substance].access(o)}
  /**
   * Slice 2 cleanup as an explicit opportunity-dependent biological process.
   * Capability comes from the waste_cleanup process descriptor (inherited
@@ -196,25 +339,13 @@ class RS{
   * energy application and lineage credit stay with the caller in S.step,
   * mirroring how consume() returns gains for the caller to apply.
   */
- execCleanup(o:Organism,interval:Interval|null):{removed:number;activeCost:number}{
-  if(!this.enabledWaste)return{removed:0,activeCost:0};
-  let capability=processFor(3).access(o);
-  if(capability<=0)return{removed:0,activeCost:0};
-  if(this.waste.amountAt(o.x,o.y)<=1e-9)return{removed:0,activeCost:0};
-  let removed=this.waste.removeAt(o.x,o.y,CU_RATE*capability,interval);
-  if(removed>0&&interval)interval.cleanup_exec=(interval.cleanup_exec||0)+1;
-  return{removed,activeCost:CU_ACTIVE*removed};
- }
- scoreIndex(o:Organism,i:number):{score:number;kind:number}{let best=-1,bestKind=0,limit=this.enabledByproduct?3:2;for(let k=0;k<limit;k++){let amt=this.stock[k]![i]!,c=this.cap[k]![i]!;if(c<=1e-9||amt<=1e-9)continue;let score=amt*this.access(o,k);if(score>best){best=score;bestKind=k}}return{score:Math.max(0,best),kind:bestKind}}
- scoreAt(o:Organism,x:number,y:number):{score:number;kind:number}{return this.scoreIndex(o,this.idx(x,y))}
- opportunity(o:Organism):number{let i=this.idx(o.x,o.y),best=0,limit=this.enabledByproduct?3:2;for(let k=0;k<limit;k++){let c=this.cap[k]![i]!,f=c>1e-9?this.stock[k]![i]!/c:0;best=Math.max(best,f*this.access(o,k))}return best}
- sense(o:Organism){let best={score:0,kind:0,angle:o.h},ds=[Q(o.se*.45,15,75),Q(o.se,25,150)];for(const d of ds)for(let j=0;j<8;j++){let a=o.h+j*Math.PI/4,x=(o.x+Math.cos(a)*d+600)%600,y=(o.y+Math.sin(a)*d+600)%600,q=this.scoreIndex(o,this.idx(x,y));if(q.score>best.score){best={...q,angle:a}}}let local=this.scoreIndex(o,this.idx(o.x,o.y));if(local.score>best.score*1.12)best={...local,angle:o.h};return best}
+ execCleanup(o:Organism,interval:Interval|null):WasteExecution{return WASTE_PROCESS.execute(this,o,interval)}
+ scoreIndex(o:Organism,i:number):{score:number;substance:NutrientSubstance}{let best=-1,bestSub:NutrientSubstance=0,limit=this.enabledByproduct?3:2;for(let ki=0;ki<limit;ki++){let k=NUTRIENT_SUBSTANCES[ki]!;let amt=this.stock[k]![i]!,c=this.cap[k]![i]!;if(c<=1e-9||amt<=1e-9)continue;let score=amt*this.access(o,k);if(score>best){best=score;bestSub=k}}return{score:Math.max(0,best),substance:bestSub}}
+ scoreAt(o:Organism,x:number,y:number):{score:number;substance:NutrientSubstance}{return this.scoreIndex(o,this.idx(x,y))}
+ opportunity(o:Organism):number{let i=this.idx(o.x,o.y),best=0,limit=this.enabledByproduct?3:2;for(let ki=0;ki<limit;ki++){let k=NUTRIENT_SUBSTANCES[ki]!;let c=this.cap[k]![i]!,f=c>1e-9?this.stock[k]![i]!/c:0;best=Math.max(best,f*this.access(o,k))}return best}
+ sense(o:Organism){let best={score:0,substance:0 as NutrientSubstance,angle:o.h},ds=[Q(o.se*.45,15,75),Q(o.se,25,150)];for(const d of ds)for(let j=0;j<8;j++){let a=o.h+j*Math.PI/4,x=(o.x+Math.cos(a)*d+600)%600,y=(o.y+Math.sin(a)*d+600)%600,q=this.scoreIndex(o,this.idx(x,y));if(q.score>best.score){best={...q,angle:a}}}let local=this.scoreIndex(o,this.idx(o.x,o.y));if(local.score>best.score*1.12)best={...local,angle:o.h};return best}
  deposit(kind:number,x:number,y:number,amount:number,cause:string|null=null,interval:Interval|null=null):number{if(amount<=0||kind<0||kind>=this.stock.length)return 0;let i=this.idx(x,y),st=this.stock[kind]!,cp=this.cap[kind]!,room=Math.max(0,cp[i]!-st[i]!),add=Math.min(room,amount);if(add<=0)return 0;st[i]!+=add;this.totalStock[kind]!+=add;this.biologicalProduction[kind]!+=add;if(interval&&kind===2)interval.produced_c+=add;return add}
- consume(o:Organism,interval:Interval){let i=this.idx(o.x,o.y),best=-1,kind=0,limit=this.enabledByproduct?3:2;for(let k=0;k<limit;k++){let amt=this.stock[k]![i]!;if(amt<=1e-9)continue;let score=amt*this.access(o,k);if(score>best){best=score;kind=k}}if(best<=0)return null;let cap=this.cap[kind]![i]!,conc=cap>1e-9?this.stock[kind]![i]!/cap:0,take=Math.min(this.stock[kind]![i]!,this.uptake*(.55+.45*Q(conc,0,1)));if(take<=1e-6)return null;let before=this.stock[kind]![i]!;this.stock[kind]![i]!-=take;this.totalStock[kind]!+=this.stock[kind]![i]!-before;this.consumed[kind]!+=take;if(interval){interval.resources_consumed+=take;if(kind===0){interval.consumed_a+=take;interval.proc_exec_a=(interval.proc_exec_a||0)+1}else if(kind===1){interval.consumed_b+=take;interval.proc_exec_b=(interval.proc_exec_b||0)+1}else{interval.consumed_c+=take;interval.proc_exec_c=(interval.proc_exec_c||0)+1}}/* Frozen asymmetry (parity-protected): habitat preference shapes food
-   discovery (selection access) but not digestion yield (AE-only gain).
-   Do not 'fix' without an engine-version change. */
-   let gain=take*processYield(this.defs,kind)*(kind===2?C_ACCESS(o.bu||0):AE(o.di,kind));let made=0,wmade=0;if(kind<2&&this.enabledWaste){wmade=this.waste.deposit(o.x,o.y,take*WASTE_YIELD,interval)}
-if(this.enabledByproduct&&processFor(kind).producesByproduct){made=this.deposit(2,o.x,o.y,take*C_BYPRODUCT_YIELD,'primary metabolism',interval);o.pc=(o.pc||0)+made}return{kind,amount:take,gain,produced:made,wasteProduced:wmade}}
+ consume(o:Organism,interval:Interval):NutrientExecution|null{let i=this.idx(o.x,o.y),best=-1,sub:NutrientSubstance=0,limit=this.enabledByproduct?3:2;for(let ki=0;ki<limit;ki++){let k=NUTRIENT_SUBSTANCES[ki]!;let amt=this.stock[k]![i]!;if(amt<=1e-9)continue;let score=amt*this.access(o,k);if(score>best){best=score;sub=k}}if(best<=0)return null;return NUTRIENT_PROCESSES[sub].execute(this,o,interval)}
  diffuse(k:number):void{let st=this.stock[k]!,cp=this.cap[k]!,d=this.delta[k]!,right=this.right,down=this.down,mr=this.minCapRight[k]!,md=this.minCapDown[k]!,rate=this.diffusionRate[k]!;d.fill(0);for(let i=0;i<this.size;i++){let ci=cp[i]!>1e-9?st[i]!/cp[i]!:0,j=right[i]!,cj=cp[j]!>1e-9?st[j]!/cp[j]!:0,flux=rate*(ci-cj)*mr[i]!;d[i]!-=flux;d[j]!+=flux;j=down[i]!;cj=cp[j]!>1e-9?st[j]!/cp[j]!:0;flux=rate*(ci-cj)*md[i]!;d[i]!-=flux;d[j]!+=flux}let adj=0;for(let i=0;i<this.size;i++){let before=st[i]!,raw=before+d[i]!,next=Q(raw,0,cp[i]!);st[i]=next;adj+=next-before}this.totalStock[k]!+=adj;this.diffusionAdjustment[k]!+=adj}
  step(t:number,drought:DroughtState|null,interval:Interval):void{let added=[0,0,0],phase=t%this.updateStride,bucket=this.regenBuckets[phase]!,elapsed=new Int32Array(bucket.length);for(let j=0;j<bucket.length;j++){let i=bucket[j]!;elapsed[j]=Math.max(1,t-this.regenLast[i]!)}for(let k=0;k<2;k++){let factor=drought&&t<drought.end&&k===drought.kind?(1-drought.suppression):1,st=this.stock[k]!,cp=this.cap[k]!,boost=this.sourceBoost[k]!;for(let j=0;j<bucket.length;j++){let i=bucket[j]!,gap=cp[i]!-st[i]!;if(gap<=1e-9)continue;let inc=gap*(1-Math.exp(-this.regenRate*boost[i]!*factor*elapsed[j]!));if(inc>0){let before=st[i]!;st[i]!+=inc;this.totalStock[k]!+=st[i]!-before;added[k]!+=inc}}this.input[k]!+=added[k]!}
   if(this.enabledByproduct){let st=this.stock[2]!,dec=0,decayRate=(this.cSink&&t<this.cSink.end)?C_DECAY_RATE*this.cSink.factor:C_DECAY_RATE;for(let j=0;j<bucket.length;j++){let i=bucket[j]!,e=elapsed[j]!,before=st[i]!,next=before*Math.exp(-decayRate*e),loss=before-next;if(loss>0){st[i]=next;dec+=loss}}this.totalStock[2]!-=dec;this.decayed[2]!+=dec;if(interval)interval.decayed_c+=dec}
@@ -381,11 +512,13 @@ class S{
    let mv=MV(o.sp);o.x=(o.x+Math.cos(o.h)*mv+600)%600;o.y=(o.y+Math.sin(o.h)*mv+600)%600;o.en-=(PC(o.me)+MC(o.sp)+DC(o.di)+SC(o.en)+(this.c.enable_byproduct?BUC(o.bu||0):0))*this.c.press;
    // Waste economy (Slice 2): gated by the resource system's internal switch
    // (validation assays may disable it on a fork; production always runs
-   // the full economy). Cleanup executes as the waste_cleanup BioProcess —
-   // inherited capability via the descriptor, opportunity via local waste.
-   // Burden and standing costs are passive trait economics, not process
-   // executions. Dormant organisms skip this block via the continue above:
-   // shutdown means shutdown.
+   // the full economy). Cleanup is the waste_cleanup process: inherited
+   // capability, local-waste opportunity, the transformation and its active
+   // execution cost all dispatch through that process. Exposure burden,
+   // tolerance, the standing cleanup-trait cost, pressure scaling and the
+   // final energy subtraction are organism physiology, not process execution,
+   // so they stay here. Dormant organisms skip this block via the continue
+   // above: shutdown means shutdown.
    if(this.resources.enabledWaste){let wf=this.resources.waste.fractionAt(o.x,o.y),to=Q(o.to||0,0,1.5),cu=Q(o.cu||0,0,1.5);
    if(wf>0||to>0||cu>0){
     let exposure=wf/(wf+WASTE_HALF_SAT);
@@ -403,7 +536,7 @@ class S{
    not mass. Only read by lineage flow attribution, which labels them as
    counts. Interval deltas carry true mass. Do not 'fix' without an
    engine-version change. */
-   if(eat.kind===0){o.ma++;o.ga+=eat.gain;o.ra+=eat.gain;this.cur.energy_a+=eat.gain;this.lineageCredit(o.l,{consumedA:eat.amount,energyA:eat.gain,producedC:eat.produced,wasteProduced:eat.wasteProduced})}else if(eat.kind===1){o.mb++;o.gb+=eat.gain;o.rb+=eat.gain;this.cur.energy_b+=eat.gain;this.lineageCredit(o.l,{consumedB:eat.amount,energyB:eat.gain,producedC:eat.produced,wasteProduced:eat.wasteProduced})}else{o.mc=(o.mc||0)+1;o.gc=(o.gc||0)+eat.gain;o.rc=(o.rc||0)+eat.gain;this.cur.energy_c+=eat.gain;this.lineageCredit(o.l,{consumedC:eat.amount,energyC:eat.gain})}this.totalUse[eat.kind]!+=eat.amount;this.totalEnergy[eat.kind]!+=eat.gain}
+   if(eat.substance===0){o.ma++;o.ga+=eat.gain;o.ra+=eat.gain;this.cur.energy_a+=eat.gain;this.lineageCredit(o.l,{consumedA:eat.amount,energyA:eat.gain,producedC:eat.produced,wasteProduced:eat.wasteProduced})}else if(eat.substance===1){o.mb++;o.gb+=eat.gain;o.rb+=eat.gain;this.cur.energy_b+=eat.gain;this.lineageCredit(o.l,{consumedB:eat.amount,energyB:eat.gain,producedC:eat.produced,wasteProduced:eat.wasteProduced})}else{o.mc=(o.mc||0)+1;o.gc=(o.gc||0)+eat.gain;o.rc=(o.rc||0)+eat.gain;this.cur.energy_c+=eat.gain;this.lineageCredit(o.l,{consumedC:eat.amount,energyC:eat.gain})}this.totalUse[eat.substance]!+=eat.amount;this.totalEnergy[eat.substance]!+=eat.gain}
    if(this.t>=(o.matureAt||0)&&this.t>=(o.readyAt||0)&&o.en>=o.rp){let support=this.reproSupport(o);this.totalReproSupport[support]!++;if(support===0)this.cur.repro_supported_a++;else if(support===1)this.cur.repro_supported_b++;else if(support===3)this.cur.repro_supported_c++;else this.cur.repro_supported_mixed++;o.ra=0;o.rb=0;o.rc=0;o.en*=.52;o.readyAt=this.t+REPRO_COOLDOWN;let baby=this.child(o);born.push(baby);this.cur.births++;this.lineageCredit(baby.l,{births:1})}if(o.en>0)live.push(o);else{this.cur.deaths++;this.lineageCredit(o.l,{deaths:1})}
   }
   this.o=live.concat(born);if(this.o.length>this.peakPopulation){this.peakPopulation=this.o.length;this.peakPopulationTick=this.t}

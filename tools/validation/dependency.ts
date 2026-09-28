@@ -338,7 +338,7 @@ if (!SKIP_POLICY) {
 
 // --- Integration: full arc on one deterministic run --------------------------
 // Balanced seed 24681357 on current biology: drought_b @~60k delays the
-// guild (suppression during the shock), which then establishes @92117 with a
+// guild (suppression during the shock), which then establishes @91615 with a
 // diffuse consumer base. Disruption/recovery do NOT occur here: established
 // guilds ride out shocks on 0.22 as under drought_a on 0.21. The full arc
 // machinery stays unit-covered (and 0.21-pinned historically); integration
@@ -365,6 +365,29 @@ function settle(session: UniverseSession, target: number): void {
   assert.equal(session.snapshot().tick >= target, true, `must reach tick ${target}`);
 }
 
+/**
+ * Advance to EXACTLY `target`, never past it, resolving no-op pending decisions
+ * on the way. `settle` above deliberately only guarantees `>= target`, because
+ * the fixtures that pin establishment ticks were recorded with that overshoot.
+ *
+ * A matched assay needs a fixed AGE, not a fixed absolute tick. If the
+ * intervention lands mid-segment — a catalyst decision window opening earlier
+ * shifts where the fork falls — then sampling at an absolute tick measures a
+ * different assay length each time, and a duration-sensitive ratio moves for
+ * reasons that have nothing to do with the biology under test.
+ */
+function settleExactly(session: UniverseSession, target: number): void {
+  for (let i = 0; i < 5000 && session.snapshot().tick < target; i++) {
+    const remaining = target - session.snapshot().tick;
+    const snapshot = session.advance(Math.max(1, Math.min(1000, remaining)));
+    const pending = snapshot.pendingDecision;
+    if (pending) session.resolveEventDecision(pending.opportunityId, "keep-watching");
+  }
+  const leftover = session.snapshot().pendingDecision;
+  if (leftover) session.resolveEventDecision(leftover.opportunityId, "keep-watching");
+  assert.equal(session.snapshot().tick, target, `must land exactly on tick ${target}`);
+}
+
 function testFixtureArc() {
   const session = new UniverseSession();
   session.create(fixtureConfig(FIXTURE_SEED));
@@ -377,7 +400,7 @@ function testFixtureArc() {
   const records = (session.analysis as any).records.filter((r: any) => r.kind === "cuse");
   assert.equal(records.length, 1, "one establishment record (no disruption on this run)");
   assert.equal(records[0].phase, "established", "record establishes");
-  assert.equal(records[0].tick, 92117, "establishment is deterministic");
+  assert.equal(records[0].tick, 91615, "establishment is deterministic under the current catalyst policy");
   assert.deepEqual(records[0].entity_refs, [], "diffuse founding names nobody");
   console.log("dependency fixture arc: PASS");
 }
@@ -466,7 +489,13 @@ function testWashoutReliance() {
     { schemaVersion: 1, kind: "nutrient_disturbance", mode: "c_washout" },
     "reliance assay",
   );
-  settle(session, 75000);
+  // The assay has a fixed AGE, not a fixed absolute sample tick. The sink
+  // starts at whatever tick the fork actually landed on, so measuring at an
+  // absolute tick would compare different-length assays whenever pre-assay
+  // decision timing shifts. C is a fast-cycling pool, so its residual is
+  // sensitive to exactly that.
+  const washTick = session.snapshot().tick;
+  settleExactly(session, washTick + 15000);
   const snap = session.snapshot();
   const live = snap.metrics as any;
   const control = snap.control!.metrics as any;
