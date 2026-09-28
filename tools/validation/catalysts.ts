@@ -527,9 +527,53 @@ function testInterveneBlockedWhilePending() {
   console.log("experiments blocked while pending: PASS");
 }
 
+/**
+ * §21.3 / R11: the test-only c-washout offer must actually be RESOLVABLE through
+ * the explicit opt-in. It previously fell through: eligibility was computed from
+ * the ACTIVE catalog (which includes the test spec), but the choice was then
+ * looked up in the PRODUCTION catalog alone, so the spec was undefined and the
+ * window threw instead of offering the choice. Asserted in both directions: the
+ * opt-in path works, and the production path still cannot offer it.
+ */
+function testTestOnlyCatalystIsResolvable() {
+  // C needs a real energy share to be eligible; c-washout has no stock floor.
+  const context = healthyContext({ energyShareC: 0.4 });
+
+  const withTest = selectCatalystWindow({
+    tick: 20_000, lastDecisionTick: 0, lastMajorCatalystTick: null, context, includeTestCatalysts: true,
+  }) as { choices: readonly { catalystId: string | null; intervention: unknown; directEffectDescription: string }[] } | null;
+  assert.ok(withTest, "a catalyst window opens with the explicit test opt-in");
+  const offered = withTest!.choices.map((c) => c.catalystId);
+  assert.ok(offered.includes("c-washout"),
+    `the opted-in washout is actually offered, not merely diagnosed (offered: ${offered.join(",")})`);
+
+  const production = selectCatalystWindow({
+    tick: 20_000, lastDecisionTick: 0, lastMajorCatalystTick: null, context,
+  }) as { choices: readonly { catalystId: string | null }[] } | null;
+  assert.ok(production, "a catalyst window opens in production mode too");
+  const prodOffered = production!.choices.map((c) => c.catalystId);
+  assert.ok(!prodOffered.includes("c-washout"),
+    "the washout is never offered in normal production catalog mode");
+  assert.deepEqual([...catalystIds()], ["drought-a", "drought-b", "global-crash"],
+    "the production catalog is still exactly the three abiotic catalysts");
+
+  // Resolving against the active catalog must not change production behaviour:
+  // enabling the opt-in adds exactly one offer and disturbs no other eligibility.
+  assert.deepEqual(offered.filter((id) => id !== "c-washout"), prodOffered,
+    "enabling the test opt-in adds exactly one offer and changes no other eligibility");
+
+  // The choice carries a real, resolvable intervention rather than a stub.
+  const washout = withTest!.choices.find((c) => c.catalystId === "c-washout");
+  assert.ok(washout, "the washout choice is present");
+  assert.ok(washout!.intervention, "the washout choice carries its intervention");
+  assert.ok(washout!.directEffectDescription.length > 0, "the washout choice describes its effect");
+  console.log("test-only catalyst resolves through explicit opt-in (§21.3): PASS");
+}
+
 testEligibilityBoundaries();
 testQuietAndCooldown();
 if (!FAST) {
+  testTestOnlyCatalystIsResolvable();
   testFirstWindow();
   testSameTickPriority();
   testCatalystGateAndChoices();

@@ -390,7 +390,12 @@ export function selectCatalystWindow(input: CatalystWindowInput): CatalystOpport
     },
   ];
   for (const id of eligible) {
-    const spec = CATALYST_SPECS.find((s) => s.id === id)!;
+    // Resolve against the SAME catalog the diagnosis came from (§21.3/R11).
+    // Reading CATALYST_SPECS directly made every opted-in test-only offer
+    // unresolvable: eligibility said yes, the spec lookup returned undefined,
+    // and the window threw instead of offering the choice. The two lists can
+    // only disagree by omission now, so the non-null assertion holds.
+    const spec = catalogFor(input).find((s) => s.id === id)!;
     choices.push({
       choiceId: spec.choiceId,
       title: spec.title,
