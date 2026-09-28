@@ -2,8 +2,6 @@ name: android
 
 # Called from product.yml as a job (`uses: ./.github/workflows/android.yml`) so
 # that Android inherits the caller's DAG, artifact, and commit association.
-# `workflow_dispatch` is kept so the platform evidence can be re-proven on its
-# own without touching the product gates.
 #
 # The earlier version of this workflow ran independently and located the
 # product run for its own commit before packaging. That required inferring a
@@ -13,13 +11,26 @@ name: android
 # commit while the run index is keyed by the branch head). Being called removes
 # the whole mechanism: `needs:` in the caller is the contract, and `explorer-dist`
 # is an artifact of the same workflow invocation.
+#
+# `workflow_dispatch` was carried on the theory that platform evidence should be
+# re-provable in isolation. It is deliberately NOT here, because it cannot work:
+# `apk` consumes `explorer-dist`, which only exists on the caller's boundary, so
+# a standalone dispatch died in packaging on a missing artifact. The obvious fix
+# -- build the web assets inside this workflow -- was rejected. The ladder's
+# strongest property is that Android tests *the exact bundle the browser lane
+# validated, not a rebuild of it*. A dispatch that rebuilt would emit the same
+# confidence language about a different bundle, which is worse than no path at
+# all.
+#
+# To re-prove the platform on its own, dispatch the PRODUCT workflow; impact
+# routing already skips the lanes an Android-only change cannot affect, so the
+# narrow case is covered without a second, weaker entry point.
 on:
   workflow_call:
-  workflow_dispatch:
 
-# The caller already scopes this to contents: read. Declared here so a manual
-# dispatch is not more privileged than a called run. No `actions: read` is
-# needed: the bundle comes from the same run, not from a looked-up one.
+# The caller already scopes this to contents: read. Declared here so a called run
+# never has implicit permissions of its own. No `actions: read` is needed: the
+# bundle comes from the same run, not from a looked-up one.
 permissions:
   contents: read
 
