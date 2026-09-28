@@ -21,9 +21,10 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
-import { GROUPS, UNITS, UNIT_BY_ID, groupBaselineSeconds, unitsOf } from "./manifest.ts";
+import { GROUPS, GROUP_BY_ID, UNITS, UNIT_BY_ID, groupBaselineSeconds, unitsOf } from "./manifest.ts";
 import { REPO_ROOT, checkArchitecture } from "./architecture.ts";
 import { planImpact } from "./impact.ts";
+import { UNROUTED_CLASSES, decideShard, planBroad, planForChange, planForPaths } from "./routing.ts";
 
 /**
  * Telemetry lives outside `testdata/`, which holds committed scientific evidence
@@ -44,6 +45,14 @@ export interface UnitRecord {
   readonly durationMs: number;
   readonly baselineSeconds?: number;
   readonly skipReason?: string;
+  /**
+   * Why this unit did or did not run. `always` for an unrouted group, `impact`
+   * when the classifier selected it, `skipped_impact` when the classifier
+   * positively cleared it, `fallback_broad` when the change could not be
+   * classified. This is the field that answers "did this shard run, was it
+   * routed away, or did it fall back to broad execution".
+   */
+  readonly routing?: string;
 }
 
 export interface RunSummary {
@@ -291,6 +300,121 @@ const mergeSummaries = (dir: string): number => {
   return 0;
 };
 
+
+// --- Impact routing -----------------------------------------------------------
+
+/**
+ * The files this change touches, or `undefined` when that cannot be determined.
+ *
+ * Returning `undefined` is the safe direction: the caller widens to the full
+ * validation set. An empty list would be catastrophic here, because "no domains
+ * matched" reads as "nothing is required".
+ */
+const changedFiles = (): string[] | undefined => {
+  const base = process.env.DEE_IMPACT_BASE;
+  if (!base) return undefined;
+  if (/^0+$/.test(base.trim())) return undefined; // first push on a branch
+  const result = spawnSync("git", ["diff", "--name-only", `${base.trim()}...HEAD`], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+  });
+  if (result.status !== 0) return undefined;
+  const files = result.stdout.split("\n").map((f) => f.trim()).filter(Boolean);
+  return files.length > 0 ? files : undefined;
+};
+
+/**
+ * Execute one shard under impact routing.
+ *
+ * The shard always reports. If routing selects nothing, the job succeeds with
+ * every unit recorded as `skipped_impact`, because branch protection requires
+ * this check by name and a check that vanishes is worse than a check that says
+ * "nothing to do".
+ */
+export const runShard = (groupId: string): number => {
+  const files = changedFiles();
+  const plan = files
+    ? planForPaths(files)
+    : planBroad("could not determine the changed files for this run");
+  const decision = decideShard(groupId, plan);
+
+  console.log(`\n=== validation shard: ${groupId} ===`);
+  if (plan.unknown) {
+    console.log(`impact routing: FALLBACK BROAD -- ${plan.reasons.join("; ")}`);
+  } else {
+    console.log(`impact routing: domains ${plan.domains.join(", ") || "(none)"}`);
+  }
+  if (decision.broadened) {
+    console.log(`  every unit runs: the change could not be classified`);
+  }
+  for (const { unit, reason } of decision.skipped) {
+    console.log(`  skip ${unit.id} (${reason})`);
+  }
+  if (decision.run.length === 0) {
+    console.log(`  nothing to execute in this shard for this change`);
+  }
+
+  const records: UnitRecord[] = [];
+
+  for (const { unit } of decision.skipped) {
+    records.push({
+      id: unit.id,
+      cls: unit.cls,
+      enforcement: unit.enforcement,
+      group: groupId,
+      executed: false,
+      status: "skipped",
+      durationMs: 0,
+      baselineSeconds: unit.baselineSeconds,
+      skipReason: "not affected by this change",
+      routing: "skipped_impact",
+    });
+  }
+
+  for (const unit of decision.run) {
+    if (unit.script === null) {
+      records.push({
+        id: unit.id,
+        cls: unit.cls,
+        enforcement: unit.enforcement,
+        group: groupId,
+        executed: false,
+        status: "skipped",
+        durationMs: 0,
+        baselineSeconds: unit.baselineSeconds,
+        skipReason: "platform unit: requires a configured Android environment",
+        routing: decision.broadened ? "fallback_broad" : UNROUTED_CLASSES.has(unit.cls) ? "always" : "impact",
+      });
+      continue;
+    }
+    console.log(`\n- ${unit.id}: ${unit.title}`);
+    const { ok, durationMs } = runCommand(unit.script);
+    records.push({
+      id: unit.id,
+      cls: unit.cls,
+      enforcement: unit.enforcement,
+      group: groupId,
+      executed: true,
+      status: ok ? "pass" : "fail",
+      durationMs: Math.round(durationMs),
+      baselineSeconds: unit.baselineSeconds,
+      routing: decision.broadened ? "fallback_broad" : UNROUTED_CLASSES.has(unit.cls) ? "always" : "impact",
+    });
+    const baseline = unit.baselineSeconds ? `, baseline ${unit.baselineSeconds}s` : "";
+    console.log(`  ${ok ? "pass" : "FAIL"} in ${(durationMs / 1000).toFixed(1)}s${baseline}`);
+    if (!ok) {
+      if (unit.enforcement === "blocking") {
+        writeTelemetry(records);
+        return 1;
+      }
+      console.log(`  note: ${unit.id} is non-blocking evidence; continuing.`);
+    }
+  }
+
+  writeTelemetry(records);
+  return 0;
+};
+
 // --- Reporting ---------------------------------------------------------------
 
 const printPlan = (asJson: boolean): void => {
@@ -354,10 +478,13 @@ const usage = (): void => {
       "usage:",
       "  run.ts verify              run the blocking repository contract",
       "  run.ts group <id> [...]    run one or more validation groups (--dry-run to list)",
+      "  run.ts ci <shard>          run a CI shard under impact routing",
+      "  run.ts plan <shard>        report whether a shard has work, for conditional inputs",
       "  run.ts check               drift and invariant gate",
       "  run.ts plan [--json]       print the derived validation plan",
       "  run.ts merge <dir>         combine per-runner summaries into one",
       "  run.ts impact <path> ...   print what a diff requires",
+      "  run.ts graph <path> ...    show which shards a change class would run",
     ].join("\n"),
   );
 };
@@ -373,6 +500,16 @@ const main = (): number => {
       // cheapest structural failures surface first.
       for (const groupId of ["fast", "simulation", "presentation"]) {
         if (runGroup(groupId, dryRun) !== 0) return 1;
+      }
+      return 0;
+    }
+    case "ci": {
+      if (args.length === 0) {
+        usage();
+        return 2;
+      }
+      for (const groupId of args) {
+        if (runShard(groupId) !== 0) return 1;
       }
       return 0;
     }
@@ -406,6 +543,53 @@ const main = (): number => {
         return 2;
       }
       return mergeSummaries(args[0]!);
+    }
+    case "plan": {
+      // Whether a shard has any work, as a step output, so a job whose inputs are
+      // conditional (the browser and Android lanes both download the artifact the
+      // build job produces) can skip those inputs when routing left it nothing to
+      // do. The shard still runs and still resolves; only its optional
+      // prerequisites are skipped.
+      const files = changedFiles();
+      const plan = files
+        ? planForPaths(files)
+        : planBroad("could not determine the changed files for this run");
+      for (const groupId of args) {
+        const decision = decideShard(groupId, plan);
+        const hasWork = String(decision.run.length > 0);
+        console.log(`${groupId}: ${hasWork === "true" ? "has work" : "nothing to execute"}${decision.broadened ? " (fallback broad)" : ""}`);
+        if (process.env.GITHUB_OUTPUT) {
+          const { appendFileSync } = require("node:fs") as typeof import("node:fs");
+          appendFileSync(process.env.GITHUB_OUTPUT, `${groupId}_has_work=${hasWork}\n`);
+        }
+      }
+      return 0;
+    }
+    case "graph": {
+      // Which shards would run, and which would resolve empty, for a set of
+      // changed paths. This is the reporting surface for impact routing: it
+      // answers "what does this change class actually cost" without a CI run.
+      const { plan, shards } = planForChange(args);
+      console.log(`domains: ${plan.domains.join(", ") || "(none)"}   unknown: ${plan.unknown}`);
+      for (const reason of plan.reasons) console.log(`  ${reason}`);
+      console.log("");
+      let executed = 0;
+      let empty = 0;
+      for (const shard of shards) {
+        const ids = shard.run.map((u) => u.id);
+        executed += ids.length;
+        if (ids.length === 0) empty += 1;
+        // A shard whose units are largely unmeasured must not read as cheap.
+        const unmeasured = shard.run.filter((u) => u.baselineSeconds === undefined).length;
+        const cost = shard.run.reduce((sum, u) => sum + (u.baselineSeconds ?? 0), 0);
+        const costLabel = unmeasured > 0 ? `~${cost}s +${unmeasured}?` : `~${cost}s`;
+        console.log(
+          `  ${shard.groupId.padEnd(15)} ${String(ids.length).padStart(2)} unit(s)  ${costLabel.padStart(14)}  ` +
+          (ids.length ? ids.join(", ") : "-- nothing to execute; the check still resolves --"),
+        );
+      }
+      console.log(`\n  ${executed} unit(s) execute; ${empty} shard(s) resolve with no work.`);
+      return 0;
     }
     case "impact": {
       const plan = planImpact({ units: UNITS, paths: args });

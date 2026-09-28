@@ -45,6 +45,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Impact routing diffs this change against the base revision, so both
+          # revisions must be present. Depth 1 would make every change
+          # unresolvable, which routes to full validation -- safe, but it would
+          # silently disable the whole feature.
+          fetch-depth: 0
       - uses: ./.github/actions/setup-project
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:

@@ -25,6 +25,15 @@ concurrency:
 # a manifest unit is not executed somewhere in CI, if a shard executes a unit
 # twice, or if this file starts running validation outside the manifest.
 
+# The revision this change is measured against, for impact routing.
+#
+# pull_request: the base branch tip, so the diff is exactly what the PR proposes.
+# push: the previous head. A first push on a branch has no previous head, and
+# that all-zeroes value is treated as "unknown", which routes to the full
+# validation set -- the safe direction.
+env:
+  impact_base: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+
 jobs:
   # Class A. First actionable failure: structural breakage surfaces here, in
   # about a minute, without waiting behind a long simulation.
@@ -32,9 +41,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Impact routing diffs this change against the base revision, so both
+          # revisions must be present. Depth 1 would make every change
+          # unresolvable, which routes to full validation -- safe, but it would
+          # silently disable the whole feature.
+          fetch-depth: 0
       - uses: ./.github/actions/setup-project
       - name: ci-fast
-        run: pnpm ci:group ci-fast
+        run: pnpm ci:shard ci-fast
+        env:
+          DEE_IMPACT_BASE: ${{ env.impact_base }}
       - name: Upload validation summary
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -52,8 +69,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Impact routing diffs this change against the base revision, so both
+          # revisions must be present. Depth 1 would make every change
+          # unresolvable, which routes to full validation -- safe, but it would
+          # silently disable the whole feature.
+          fetch-depth: 0
       - uses: ./.github/actions/setup-project
-      - run: pnpm ci:group ci-sim-a
+      - run: pnpm ci:shard ci-sim-a
+        env:
+          DEE_IMPACT_BASE: ${{ env.impact_base }}
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
@@ -66,8 +91,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Impact routing diffs this change against the base revision, so both
+          # revisions must be present. Depth 1 would make every change
+          # unresolvable, which routes to full validation -- safe, but it would
+          # silently disable the whole feature.
+          fetch-depth: 0
       - uses: ./.github/actions/setup-project
-      - run: pnpm ci:group ci-sim-b
+      - run: pnpm ci:shard ci-sim-b
+        env:
+          DEE_IMPACT_BASE: ${{ env.impact_base }}
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
@@ -80,8 +113,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Impact routing diffs this change against the base revision, so both
+          # revisions must be present. Depth 1 would make every change
+          # unresolvable, which routes to full validation -- safe, but it would
+          # silently disable the whole feature.
+          fetch-depth: 0
       - uses: ./.github/actions/setup-project
-      - run: pnpm ci:group ci-sim-c
+      - run: pnpm ci:shard ci-sim-c
+        env:
+          DEE_IMPACT_BASE: ${{ env.impact_base }}
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
@@ -94,8 +135,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Impact routing diffs this change against the base revision, so both
+          # revisions must be present. Depth 1 would make every change
+          # unresolvable, which routes to full validation -- safe, but it would
+          # silently disable the whole feature.
+          fetch-depth: 0
       - uses: ./.github/actions/setup-project
-      - run: pnpm ci:group ci-sim-d
+      - run: pnpm ci:shard ci-sim-d
+        env:
+          DEE_IMPACT_BASE: ${{ env.impact_base }}
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
@@ -111,8 +160,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Impact routing diffs this change against the base revision, so both
+          # revisions must be present. Depth 1 would make every change
+          # unresolvable, which routes to full validation -- safe, but it would
+          # silently disable the whole feature.
+          fetch-depth: 0
       - uses: ./.github/actions/setup-project
-      - run: pnpm ci:group ci-build
+      - run: pnpm ci:shard ci-build
+        env:
+          DEE_IMPACT_BASE: ${{ env.impact_base }}
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: explorer-dist
@@ -138,18 +195,31 @@ jobs:
     needs: build
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./.github/actions/setup-project
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: explorer-dist
-          path: apps/explorer/dist
+          # Impact routing diffs this change against the base revision, so both
+          # revisions must be present. Depth 1 would make every change
+          # unresolvable, which routes to full validation -- safe, but it would
+          # silently disable the whole feature.
+          fetch-depth: 0
+      - uses: ./.github/actions/setup-project
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: playwright-${{ runner.os }}-
+      - run: pnpm ci:plan ci-browser
+        id: plan
+        env:
+          DEE_IMPACT_BASE: ${{ env.impact_base }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: steps.plan.outputs.ci-browser_has_work == 'true'
+        with:
+          name: explorer-dist
+          path: apps/explorer/dist
       - run: pnpm exec playwright install --with-deps chromium
+        if: steps.plan.outputs.ci-browser_has_work == 'true'
       - name: Start one preview server for the whole browser lane
+        if: steps.plan.outputs.ci-browser_has_work == 'true'
         run: |
           pnpm --filter @digital-evolution/explorer exec vite preview --host 127.0.0.1 --port 4173 >/tmp/digital-evolution-vite.log 2>&1 &
           ready=0
@@ -165,13 +235,17 @@ jobs:
             cat /tmp/digital-evolution-vite.log
             exit 1
           fi
+      # Unconditional on purpose. Branch protection requires this check by name,
+      # so the shard always reports; when routing left it nothing to do it says so
+      # and exits green rather than disappearing.
       - name: ci-browser
-        run: pnpm ci:group ci-browser
+        run: pnpm ci:shard ci-browser
         env:
           DEE_BASE_URL: http://127.0.0.1:4173
+          DEE_IMPACT_BASE: ${{ env.impact_base }}
       - name: Report capture coverage
         if: always()
-        run: cat testdata/visual/MANIFEST.json
+        run: cat testdata/visual/MANIFEST.json || echo "no captures, the browser lane had nothing to do for this change"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
@@ -191,8 +265,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Impact routing diffs this change against the base revision, so both
+          # revisions must be present. Depth 1 would make every change
+          # unresolvable, which routes to full validation -- safe, but it would
+          # silently disable the whole feature.
+          fetch-depth: 0
       - uses: ./.github/actions/setup-project
-      - run: pnpm ci:group ci-presentation
+      - run: pnpm ci:shard ci-presentation
+        env:
+          DEE_IMPACT_BASE: ${{ env.impact_base }}
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
@@ -211,6 +293,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Impact routing diffs this change against the base revision, so both
+          # revisions must be present. Depth 1 would make every change
+          # unresolvable, which routes to full validation -- safe, but it would
+          # silently disable the whole feature.
+          fetch-depth: 0
       - uses: ./.github/actions/setup-project
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
@@ -218,7 +306,9 @@ jobs:
           key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: playwright-${{ runner.os }}-
       - run: pnpm exec playwright install --with-deps chromium
-      - run: pnpm ci:group ci-pixi
+      - run: pnpm ci:shard ci-pixi
+        env:
+          DEE_IMPACT_BASE: ${{ env.impact_base }}
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
@@ -284,6 +374,12 @@ jobs:
     if: always()
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Impact routing diffs this change against the base revision, so both
+          # revisions must be present. Depth 1 would make every change
+          # unresolvable, which routes to full validation -- safe, but it would
+          # silently disable the whole feature.
+          fetch-depth: 0
       - uses: ./.github/actions/setup-project
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:

@@ -127,7 +127,7 @@ export function checkArchitecture(): CheckResult {
 
   // --- What CI actually executes ------------------------------------------
   const referencedShards = new Map<string, number>();
-  for (const match of workflowText.matchAll(/ci:group\s+([a-z0-9-]+)/g)) {
+  for (const match of workflowText.matchAll(/ci:(?:group|shard)\s+([a-z0-9-]+)/g)) {
     const id = match[1]!;
     referencedShards.set(id, (referencedShards.get(id) ?? 0) + 1);
   }
@@ -285,7 +285,7 @@ export function checkArchitecture(): CheckResult {
   for (const workflow of workflows) {
     const jobs = workflow.body.split(/\n {2}(?=[a-z0-9-]+:\s*\n)/);
     for (const job of jobs) {
-      if (!/ci:group\s+[a-z0-9-]+/.test(job)) continue;
+      if (!/ci:(?:group|shard)\s+[a-z0-9-]+/.test(job)) continue;
       const name = job.split("\n")[0]!.replace(/:\s*$/, "").trim();
       if (!/validation-summary-/.test(job)) {
         failures.push(`${workflow.name} job "${name}" runs a shard but uploads no validation-summary, so its cost is invisible`);
