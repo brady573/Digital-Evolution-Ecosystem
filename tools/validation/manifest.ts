@@ -208,7 +208,7 @@ export const UNITS: readonly ValidationUnit[] = [
     domains: withApparatus("contracts", "sim-core", "sim-decisions", "sim-runtime", "explorer"),
     needs: [],
     parallelSafe: true,
-    baselineSeconds: 58,
+    baselineSeconds: 75,
     claim: "The offered interventions produce their exact documented effects.",
   },
   {
@@ -220,7 +220,7 @@ export const UNITS: readonly ValidationUnit[] = [
     domains: withApparatus("contracts", "sim-core", "sim-decisions", "sim-runtime", "explorer"),
     needs: [],
     parallelSafe: true,
-    baselineSeconds: 96,
+    baselineSeconds: 123,
     claim: "Session lifecycle, forking, and pause gating behave exactly as specified.",
   },
   {
@@ -256,7 +256,7 @@ export const UNITS: readonly ValidationUnit[] = [
     domains: withApparatus("contracts", "sim-core"),
     needs: [],
     parallelSafe: true,
-    baselineSeconds: 71,
+    baselineSeconds: 91,
     claim: "Conservation and accountancy hold; population stays emergent.",
   },
   {
@@ -268,7 +268,7 @@ export const UNITS: readonly ValidationUnit[] = [
     domains: withApparatus("contracts", "sim-core", "sim-analysis", "sim-runtime"),
     needs: [],
     parallelSafe: true,
-    baselineSeconds: 72,
+    baselineSeconds: 93,
     claim: "Niche differentiation is possible and typical where claimed, and its limits still hold.",
   },
   {
@@ -282,6 +282,7 @@ export const UNITS: readonly ValidationUnit[] = [
     parallelSafe: false,
     claim:
       "An impact pause retains both sides of the effect at one tick and auto-resume never loses them.",
+    baselineSeconds: 11,
   },
   // --- Dependency shards ----------------------------------------------------
   // `pnpm test:dependency` was 647s on CI and, as a single shard, the entire
@@ -321,17 +322,31 @@ export const UNITS: readonly ValidationUnit[] = [
     parallelSafe: true,
     claim:
       "One deterministic run establishes and then loses a dependency, and resume from a checkpoint reproduces it.",
+    baselineSeconds: 90,
   },
   {
-    id: "dependency-crossfeeding",
-    title: "Cross-feeding possibility and tradeoff",
-    script: "test:dependency:crossfeeding",
+    id: "dependency-possibility",
+    title: "Cross-feeding possibility across seeds",
+    script: "test:dependency:possibility",
     cls: "deterministic",
     enforcement: "blocking",
     domains: withApparatus("contracts", "sim-core", "sim-decisions", "sim-runtime"),
     needs: [],
     parallelSafe: true,
-    claim: "Cross-feeding is genuinely possible across seeds, at a real cost.",
+    baselineSeconds: 107,
+    claim: "Cross-feeding is genuinely possible across seeds, not just in one lucky world.",
+  },
+  {
+    id: "dependency-tradeoff",
+    title: "Cross-feeding tradeoff",
+    script: "test:dependency:tradeoff",
+    cls: "deterministic",
+    enforcement: "blocking",
+    domains: withApparatus("contracts", "sim-core", "sim-decisions", "sim-runtime"),
+    needs: [],
+    parallelSafe: true,
+    baselineSeconds: 180,
+    claim: "Cross-feeding carries a real energetic cost rather than being free.",
   },
   {
     id: "dependency-washout",
@@ -343,6 +358,7 @@ export const UNITS: readonly ValidationUnit[] = [
     needs: [],
     parallelSafe: true,
     claim: "A flushed nutrient column causes real reliance, and recovery is measurable.",
+    baselineSeconds: 42,
   },
 
   // --- Class C: presentation and executable product ------------------------
@@ -535,6 +551,19 @@ export const UNITS: readonly ValidationUnit[] = [
     artifact: "testdata",
     claim: "Reliance on a flushed nutrient column measured across seeds and regimes.",
   },
+  {
+    id: "provenance",
+    title: "Constant provenance measurements",
+    script: "test:provenance",
+    cls: "scientific",
+    enforcement: "manual",
+    domains: withApparatus("contracts", "sim-core"),
+    needs: [],
+    parallelSafe: true,
+    artifact: "testdata",
+    claim:
+      "Retained current-engine distributions behind two cited constants: the nutrient stock-fraction band and the byproduct_use maximum. Measurement only; asserts nothing about whether either constant is correct.",
+  },
 
   // --- Class G: human-review evidence generation ---------------------------
   {
@@ -613,7 +642,8 @@ export const GROUPS: readonly ValidationGroup[] = [
       "aftermath",
       "dependency-policy",
       "dependency-arc",
-      "dependency-crossfeeding",
+      "dependency-possibility",
+      "dependency-tradeoff",
       "dependency-washout",
     ],
     ci: false,
@@ -645,7 +675,7 @@ export const GROUPS: readonly ValidationGroup[] = [
   {
     id: "survey",
     title: "Scientific characterisation (manual, long)",
-    unitIds: ["ecology-survey", "niche-survey", "washout-reliance"],
+    unitIds: ["ecology-survey", "niche-survey", "washout-reliance", "provenance"],
     ci: false,
   },
 
@@ -656,28 +686,34 @@ export const GROUPS: readonly ValidationGroup[] = [
     unitIds: ["typecheck", "validation-arch", "migration", "decisions"],
     ci: true,
   },
+  // Balanced from measured per-unit costs, not from intuition. The previous
+  // partition left one shard at 408s while the next was 90s, so the longest job
+  // was four and a half times the shortest and defined the whole critical path.
+  // The two heaviest long tests are kept in separate shards on purpose: the
+  // device-derived split between them is an estimate, and keeping them apart
+  // means the estimate being wrong cannot compound into one oversized shard.
   {
     id: "ci-sim-a",
-    title: "Deterministic suites A",
-    unitIds: ["catalysts", "flows", "ecology", "niche", "landscape", "time-controls", "dependency-policy"],
+    title: "Deterministic suites A (cross-feeding tradeoff)",
+    unitIds: ["dependency-tradeoff", "landscape", "dependency-policy"],
     ci: true,
   },
   {
     id: "ci-sim-b",
-    title: "Deterministic suites B (dependency arc)",
-    unitIds: ["dependency-arc"],
+    title: "Deterministic suites B (possibility, flows)",
+    unitIds: ["dependency-possibility", "flows"],
     ci: true,
   },
   {
     id: "ci-sim-c",
-    title: "Deterministic suites C (cross-feeding)",
-    unitIds: ["dependency-crossfeeding"],
+    title: "Deterministic suites C (niche, ecology)",
+    unitIds: ["niche", "ecology"],
     ci: true,
   },
   {
     id: "ci-sim-d",
-    title: "Deterministic suites D (washout)",
-    unitIds: ["dependency-washout", "aftermath"],
+    title: "Deterministic suites D (arc, catalysts, washout)",
+    unitIds: ["dependency-arc", "catalysts", "time-controls", "dependency-washout", "aftermath"],
     ci: true,
   },
   {

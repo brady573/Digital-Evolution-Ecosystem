@@ -209,6 +209,23 @@ export function checkArchitecture(): CheckResult {
     }
   }
 
+  // --- Every shard lane must report its cost ------------------------------
+  // A job that runs a shard but never uploads a summary is invisible in the
+  // merged telemetry: its units show as skipped and its cost as zero. The build
+  // lane was missing this and nothing failed, because nothing was checking. The
+  // cost data is the input to rebalancing, so a lane that does not report it is
+  // a defect, not a cosmetic gap.
+  for (const workflow of workflows) {
+    const jobs = workflow.body.split(/\n {2}(?=[a-z0-9-]+:\s*\n)/);
+    for (const job of jobs) {
+      if (!/ci:group\s+[a-z0-9-]+/.test(job)) continue;
+      const name = job.split("\n")[0]!.replace(/:\s*$/, "").trim();
+      if (!/validation-summary-/.test(job)) {
+        failures.push(`${workflow.name} job "${name}" runs a shard but uploads no validation-summary, so its cost is invisible`);
+      }
+    }
+  }
+
   // --- Declared needs must name real units --------------------------------
   for (const unit of UNITS) {
     for (const need of unit.needs) {

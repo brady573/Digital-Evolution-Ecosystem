@@ -30,7 +30,6 @@
     "test:dependency": "tsx tools/validation/dependency.ts",
     "test:dependency:fast": "tsx tools/validation/dependency.ts -- --fast",
     "test:dependency:arc": "tsx tools/validation/dependency.ts -- --skip-policy --only=arc,checkpoint",
-    "test:dependency:crossfeeding": "tsx tools/validation/dependency.ts -- --skip-policy --only=possibility,tradeoff",
     "test:dependency:washout": "tsx tools/validation/dependency.ts -- --skip-policy --only=washout",
     "test:catalysts:fast": "tsx tools/validation/catalysts.ts -- --fast",
     "test:niche": "tsx tools/validation/niche.ts",
@@ -46,8 +45,11 @@
     "test:plated": "tsx tools/plated-proof/validate.ts && tsx tools/plated-proof/geo-validate.ts",
     "test:pixi-spike": "tsx tools/pixi-spike/validate.ts",
     "test:washout-reliance": "tsx tools/validation/washout-reliance.ts",
+    "test:provenance": "tsx tools/validation/provenance.ts",
     "spike:capture": "tsx tools/pixi-spike/capture.ts",
-    "spike:dev": "pnpm --filter @digital-evolution/explorer exec vite ../../tools/pixi-spike --port 5193 --strictPort --host 127.0.0.1"
+    "spike:dev": "pnpm --filter @digital-evolution/explorer exec vite ../../tools/pixi-spike --port 5193 --strictPort --host 127.0.0.1",
+    "test:dependency:possibility": "tsx tools/validation/dependency.ts -- --skip-policy --only=possibility",
+    "test:dependency:tradeoff": "tsx tools/validation/dependency.ts -- --skip-policy --only=tradeoff"
   },
   "devDependencies": {
     "@types/node": "26.6.2",

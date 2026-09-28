@@ -127,7 +127,7 @@ const testExplorerChangeStaysNarrow = (): void => {
   }
   // Analysis may read Explorer-adjacent contracts, but a presentation-only change
   // must not re-run the multi-seed surveys or the long dependency horizons.
-  for (const forbidden of ["ecology-survey", "niche-survey", "washout-reliance", "dependency-crossfeeding"]) {
+  for (const forbidden of ["ecology-survey", "niche-survey", "washout-reliance", "dependency-possibility", "dependency-tradeoff"]) {
     assert.ok(!ids.has(forbidden), `an Explorer change must not require ${forbidden}`);
   }
   assert.ok(!ids.has("niche"), "an Explorer change must not require the niche gate");
@@ -244,7 +244,7 @@ const testDependencyShardsPartitionTheSuite = (): void => {
 
   const pkg = scripts();
   const longUnits = UNITS.filter((u) => u.id.startsWith("dependency-") && u.id !== "dependency-policy");
-  assert.equal(longUnits.length, 3, "expected three long-phase shards");
+  assert.equal(longUnits.length, 4, "expected four long-phase shards");
 
   const seen = new Set<string>();
   for (const unit of longUnits) {

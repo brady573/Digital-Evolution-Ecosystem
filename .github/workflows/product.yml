@@ -124,6 +124,17 @@ jobs:
           name: explorer-dist
           path: apps/explorer/dist
           retention-days: 7
+      # The build lane was the one job that never uploaded a summary, so the
+      # first run's merged telemetry had no cost for the build at all. Caught by
+      # reading the artifact rather than by a check failing, which is exactly
+      # what the artifact is for.
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: validation-summary-${{ github.job }}
+          path: validation-telemetry/summary.json
+          if-no-files-found: ignore
+          retention-days: 14
 
   # Class D, plus the Class G landscape captures on the same browser
   # environment. One Chromium install and one preview server serve all three:
