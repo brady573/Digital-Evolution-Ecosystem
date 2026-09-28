@@ -194,26 +194,33 @@ export const mappedPolicyKeys = (): readonly string[] => Object.keys(REGISTRY).s
  * ------------------------------------------------------------------ */
 
 /** Catalyst catalog version. Evolves independently of the event policy. */
-// UNCHANGED from before the washout work. The washout is a test-only offer, so
-// the production catalog is byte-identical to the 1.0.0 catalog and a restored
-// pending window means exactly what it meant before.
-export const CATALYST_POLICY_VERSION = "m3-catalysts-1.0.0";
+// 1.0.0 -> 1.1.0 (Issue #30 §21.1): the CATALOG is unchanged — the same three
+// production catalysts, with the washout still test-only — but drought
+// ELIGIBILITY changed, because the universal stock-fraction floor was removed.
+// A restored pending window must stay interpretable under the policy that
+// produced it, so the version is bumped rather than left claiming equivalence.
+export const CATALYST_POLICY_VERSION = "m3-catalysts-1.1.0";
 
 /**
  * Game-policy constants (not biological rules). Centralized and versioned
  * here; report evidence before changing them, never silently retune.
  *
- * Stock floors face lived reality: surveyed universes graze field stocks to a
- * 1-15% equilibrium within a few thousand ticks in every config (balanced,
- * patchwork, harsh, abundant), so higher floors make catalysts effectively
- * unavailable. A drought's bite is regen suppression, which matters most
- * exactly when stocks are tight. Set with Owner approval from that evidence.
+ * There is deliberately NO universal nutrient stock-fraction floor. One
+ * existed at 0.08 and was removed by Owner ruling (Issue #30 §21.1): the
+ * retained current-engine measurement in testdata/provenance-0.22.0.json shows
+ * field fraction spanning roughly 0.0010-0.2712 across the named
+ * configurations, so a single fixed floor sat above the ENTIRE measured
+ * Abundant range and was not configuration-neutral. It changed which product
+ * catalysts were reachable without meaning to. A drought's bite is regen
+ * suppression acting on use, so realized energy share carries that intent
+ * instead. Do not reintroduce a universal capacity-fraction floor here; a
+ * future config-aware floor is a new policy decision with its own evidence.
  */
 export const CATALYST_QUIET_TICKS = 10_000;
 export const MAJOR_CATALYST_COOLDOWN_TICKS = 25_000;
 /** Order of the existing drought duration; cooldowns match it, not vice versa. */
 export const CATALYST_MIN_ENERGY_SHARE = 0.15;
-export const CATALYST_MIN_STOCK_FRACTION = 0.08;
+/** Abiotic floor for the global crash only. Unaffected by the §21.1 ruling. */
 export const CATALYST_MIN_ABIOTIC_FRACTION = 0.1;
 export const CATALYST_MIN_POPULATION = 20;
 
@@ -302,18 +309,14 @@ function minEnergyShare(which: "A" | "B" | "C"): CatalystRequirement {
   };
 }
 
-function minStockFraction(which: "A" | "B"): CatalystRequirement {
-  return (c) => {
-    const fraction = which === "A" ? c.stockFractionA : c.stockFractionB;
-    return fraction >= CATALYST_MIN_STOCK_FRACTION
-      ? null
-      : `Nutrient ${which} field stock is ${(fraction * 100).toFixed(1)}% of capacity (needs ${(CATALYST_MIN_STOCK_FRACTION * 100).toFixed(0)}%)`;
-  };
-}
+// No stock-fraction requirement here (Issue #30 §21.1). A drought suppresses
+// regeneration on a nutrient that is actually in use, so realized energy share
+// is the eligibility signal; a fixed capacity fraction is not
+// configuration-neutral and is not reinstated without a new decision.
 
 const CATALYST_REQUIREMENTS: Readonly<Record<CatalystId, readonly CatalystRequirement[]>> = {
-  "drought-a": [noDroughtActive, minEnergyShare("A"), minStockFraction("A")],
-  "drought-b": [noDroughtActive, minEnergyShare("B"), minStockFraction("B")],
+  "drought-a": [noDroughtActive, minEnergyShare("A")],
+  "drought-b": [noDroughtActive, minEnergyShare("B")],
   // C is a biologically produced metabolite rather than an abiotic nutrient, so
   // only the energy-share floor applies: there is no modeled C field capacity to
   // measure stock against, and inventing one would be a fabricated eligibility
