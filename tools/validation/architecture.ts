@@ -32,6 +32,32 @@ const packageScripts = (): Set<string> => {
   return new Set(Object.keys(pkg.scripts ?? {}));
 };
 
+/**
+ * Remove whole-line and trailing comments.
+ *
+ * Configuration and prose share a file, and a check that cannot tell them apart
+ * forces one of them to be sacrificed. The workflow headers here document which
+ * failure modes were designed out; that documentation has to be allowed to
+ * mention the thing it removed.
+ */
+const stripComments = (source: string): string =>
+  source
+    .split("\n")
+    .map((line) => {
+      // A `#` inside a quoted string is not a comment (e.g. a colour or a shell
+      // fragment), so only treat it as one when it is unquoted.
+      let inSingle = false;
+      let inDouble = false;
+      for (let i = 0; i < line.length; i += 1) {
+        const ch = line[i]!;
+        if (ch === "'" && !inDouble) inSingle = !inSingle;
+        else if (ch === '"' && !inSingle) inDouble = !inDouble;
+        else if (ch === "#" && !inSingle && !inDouble) return line.slice(0, i);
+      }
+      return line;
+    })
+    .join("\n");
+
 const readWorkflows = (): Array<{ name: string; body: string }> =>
   readdirSync(WORKFLOWS_DIR)
     .filter((f) => f.endsWith(".yml") || f.endsWith(".yaml"))
@@ -207,6 +233,47 @@ export function checkArchitecture(): CheckResult {
     for (const id of local) {
       if (!ciFast.unitIds.includes(id)) failures.push(`\`verify:fast\` runs ${id}, which the CI fast shard does not`);
     }
+  }
+
+  // --- Platform evidence is a called workflow, not a cross-run lookup -----
+  // Android used to trigger independently and locate the product run for its own
+  // commit before packaging. That needed SHA inference, an authenticated `gh`,
+  // and a poll, and it failed three separate ways in review -- each of which
+  // looked fine in review and only broke in CI. Being a reusable workflow called
+  // with `needs:` removes the mechanism, so the mechanisms are now forbidden
+  // rather than merely absent: a future edit that reintroduces one of them is
+  // reintroducing a known failure mode.
+  const androidWorkflow = workflows.find((w) => w.name === "android.yml");
+  const productWorkflow = workflows.find((w) => w.name === "product.yml");
+
+  if (!androidWorkflow) {
+    failures.push("android.yml is missing; the platform evidence class has no definition");
+  } else {
+    if (!/on:\s*\n\s+workflow_call:/.test(androidWorkflow.body)) {
+      failures.push("android.yml must be callable (on: workflow_call) so it inherits the caller's DAG and artifact");
+    }
+    // Comments are stripped first. This file's own header explains which
+    // mechanisms were removed and why, and a guard that cannot tell prose from
+    // configuration would have to delete the explanation to pass.
+    const androidExecutable = stripComments(androidWorkflow.body);
+    for (const [pattern, what] of [
+      [/gh run list/, "cross-workflow run lookup"],
+      [/gh api/, "cross-workflow API lookup"],
+      [/\brun-id:/, "an explicit run id, which only cross-run artifact handoff needs"],
+      [/github-token:/, "a token, which only cross-run artifact handoff needs"],
+    ] as const) {
+      if (pattern.test(androidExecutable)) {
+        failures.push(
+          `android.yml uses ${what} (${pattern.source}); as a called workflow it must consume this run's artifacts directly`,
+        );
+      }
+    }
+  }
+
+  if (!productWorkflow) {
+    failures.push("product.yml is missing");
+  } else if (!/uses:\s*\.\/\.github\/workflows\/android\.yml/.test(productWorkflow.body)) {
+    failures.push("product.yml must call android.yml with `uses:` so platform evidence is gated by `needs`");
   }
 
   // --- Every shard lane must report its cost ------------------------------

@@ -1,33 +1,41 @@
 name: android
 
+# Called from product.yml as a job (`uses: ./.github/workflows/android.yml`) so
+# that Android inherits the caller's DAG, artifact, and commit association.
+# `workflow_dispatch` is kept so the platform evidence can be re-proven on its
+# own without touching the product gates.
+#
+# The earlier version of this workflow ran independently and located the
+# product run for its own commit before packaging. That required inferring a
+# SHA, authenticating the `gh` CLI, and polling another workflow -- and it
+# failed three different ways in review (unauthenticated gh, `gh run list`
+# defaulting to the default branch, and GITHUB_SHA being the pull_request merge
+# commit while the run index is keyed by the branch head). Being called removes
+# the whole mechanism: `needs:` in the caller is the contract, and `explorer-dist`
+# is an artifact of the same workflow invocation.
 on:
-  pull_request:
-  push:
-    branches: [main]
+  workflow_call:
   workflow_dispatch:
 
+# The caller already scopes this to contents: read. Declared here so a manual
+# dispatch is not more privileged than a called run. No `actions: read` is
+# needed: the bundle comes from the same run, not from a looked-up one.
 permissions:
   contents: read
-  # Needed to look up the product run for this exact commit. Read-only.
-  actions: read
-
-# A new push cancels stale runs on the same ref: only the latest state
-# consumes runners.
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
 
 # This workflow proves platform facts. It does not re-prove that the repository
-# is sound: `product` already ran the full blocking contract for this commit,
-# and this workflow refuses to build unless that run exists and succeeded. The
-# previous version ran `pnpm verify` here as well, which cost 1158s of the job's
-# 1451s to assemble an APK that takes 43s. The evidence ladder is unchanged:
+# is sound: the product gates it is called after have already done that for this
+# commit, and the caller only invokes it once they pass. The previous version
+# ran `pnpm verify` here as well, which cost 1158s of a 1451s job to assemble an
+# APK that takes 39s.
+#
+# The evidence ladder stays explicit and unchanged:
 #
 #   1. explorer-dist is the bundle the browser lane passed against
-#   2. the checked-in android/ project matches it          (android-sync)
-#   3. a debug APK is produced                            (android-assemble)
-#   4. Android's own static analysis passes               (android-lint)
-#   5. it installs, launches, stays alive, and does not crash (android-install-launch)
+#   2. the checked-in android/ project matches it            (android-sync)
+#   3. a debug APK is produced                              (android-assemble)
+#   4. Android's own static analysis passes                 (android-lint)
+#   5. it installs, launches, stays alive, does not crash    (android-install-launch)
 #
 # Nothing beyond launch is claimed. Native filesystem, share, and device
 # integration remain unvalidated, as before.
@@ -43,71 +51,13 @@ jobs:
           distribution: "temurin"
           java-version: "21"
 
-      # The gate this workflow depends on. Resolving the product run by commit
-      # keeps the evidence association unambiguous: an APK is only ever built
-      # from a revision whose blocking product validation passed.
-      - name: Require a passing product run for this commit
-        id: product
-        env:
-          # The runner ships `gh` but does not authenticate it. Without this the
-          # lookup fails instantly and, under `set -e`, the gate dies before it
-          # has checked anything.
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # NOT `github.sha`. On a pull_request event GITHUB_SHA is the *merge*
-          # commit, but the workflow-run index is keyed by the *head* commit of
-          # the branch, so querying by GITHUB_SHA returns zero runs forever --
-          # which is a 30-minute wait ending in a failure that looks like the
-          # product run never happened. On push events github.sha is already
-          # the head commit.
-          PRODUCT_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-        run: |
-          set -uo pipefail
-          echo "waiting for a product run on $PRODUCT_SHA"
-          lookup_failures=0
-          for attempt in $(seq 1 90); do
-            # Query the API by head_sha rather than using `gh run list`.
-            # `gh run list` defaults to the DEFAULT BRANCH, so it looks for runs
-            # that can never appear when filtered by a pull_request SHA.
-            #
-            # A failed lookup is not the same as "no run yet": the run may not
-            # have started. Retry a few times, then stop, rather than either
-            # dying on a transient error or polling for half an hour behind a
-            # real permissions problem.
-            if ! found=$(gh api "repos/{owner}/{repo}/actions/workflows/product.yml/runs?head_sha=$PRODUCT_SHA&per_page=20" \
-                           --jq '[.workflow_runs[] | select(.status == "completed")] | sort_by(.run_number) | reverse | .[0] // empty | {id, conclusion}' 2>&1); then
-              lookup_failures=$((lookup_failures + 1))
-              echo "attempt $attempt: could not query workflow runs: $found"
-              if [ "$lookup_failures" -ge 5 ]; then
-                echo "::error::repeatedly failed to query workflow runs; check that the job's token has 'actions: read'."
-                exit 1
-              fi
-              sleep 20
-              continue
-            fi
-            if [ -n "$found" ] && [ "$found" != "null" ]; then
-              run_id=$(echo "$found" | jq -r .id)
-              conclusion=$(echo "$found" | jq -r .conclusion)
-              if [ "$conclusion" != "success" ]; then
-                echo "::error::product workflow run $run_id concluded '$conclusion' for $PRODUCT_SHA; refusing to package unvalidated source."
-                exit 1
-              fi
-              echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
-              echo "Using product run $run_id (success) for $PRODUCT_SHA"
-              exit 0
-            fi
-            echo "attempt $attempt: no completed product run for $PRODUCT_SHA yet; waiting 20s"
-            sleep 20
-          done
-          echo "::error::no completed product run found for $PRODUCT_SHA after 30 minutes; cannot prove this revision passed the product gates."
-          exit 1
-
       # validation-unit: android-sync
+      # Same workflow invocation, so no run id and no token: this is the exact
+      # bundle the browser lane validated, not a rebuild of it.
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: explorer-dist
           path: apps/explorer/dist
-          run-id: ${{ steps.product.outputs.run_id }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Capacitor sync against the validated bundle
         run: pnpm --filter @digital-evolution/explorer exec cap sync android
@@ -124,8 +74,8 @@ jobs:
         run: |
           yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null
           "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0"
-      # Gradle-aware caching. The key includes the Gradle wrapper properties, so
-      # a toolchain change invalidates the cache rather than reusing build state
+      # Gradle-aware caching. The key includes the wrapper properties, so a
+      # toolchain change invalidates the cache rather than reusing build state
       # produced by a different Gradle. Caches are advisory: a miss costs time,
       # never correctness.
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4

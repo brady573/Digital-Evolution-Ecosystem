@@ -233,11 +233,40 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  # Class E. Called as a reusable workflow rather than triggered separately, so
+  # the platform evidence is part of this same invocation: it consumes the
+  # explorer-dist artifact this run's `build` job produced, and it cannot start
+  # until the gates below have passed for this exact commit.
+  #
+  # This replaces a gate that located the product run by SHA and polled for it.
+  # That approach failed three different ways in review, and `needs:` states the
+  # contract directly instead of inferring it.
+  #
+  # `pixi-spike` and `telemetry` are deliberately NOT dependencies: the first is
+  # non-gating evidence, the second summarises validation rather than
+  # establishing product correctness. Neither should be able to hold up an APK.
+  android:
+    name: android
+    needs:
+      - quick
+      - sim-a
+      - sim-b
+      - sim-c
+      - sim-d
+      - build
+      - smoke
+      - presentation
+    uses: ./.github/workflows/android.yml
+
   # Collects every runner's summary into one machine-readable file so "what ran,
   # what was skipped, and what did it cost" is answerable from a single artifact.
+  #
+  # `android` is included: it is part of this invocation, and a summary that
+  # omits the platform lane would understate the run. It is `if: always()` so a
+  # failed or skipped platform lane still produces a summary rather than none.
   telemetry:
     runs-on: ubuntu-latest
-    needs: [quick, sim-a, sim-b, sim-c, sim-d, build, smoke, presentation, pixi-spike]
+    needs: [quick, sim-a, sim-b, sim-c, sim-d, build, smoke, presentation, pixi-spike, android]
     if: always()
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
