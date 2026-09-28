@@ -132,7 +132,9 @@ export const planForPaths = (paths: readonly string[]): ImpactPlan =>
 export const planBroad = (reason: string): ImpactPlan => ({
   domains: [],
   unknown: true,
-  unitIds: UNITS.map((u) => u.id),
+  // Paused units are excluded here too: a missing base must run everything
+  // that is runnable, and a paused lane is not runnable by policy.
+  unitIds: UNITS.filter((u) => !u.paused).map((u) => u.id),
   reasons: [`${reason} -> running the full validation set`],
 });
 

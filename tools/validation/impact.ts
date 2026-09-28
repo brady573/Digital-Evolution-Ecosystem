@@ -145,13 +145,20 @@ export function planImpact({ units, paths }: ImpactInput): ImpactPlan {
     return {
       domains: [...domains].sort(),
       unknown: true,
-      unitIds: units.map((u) => u.id),
+      // Paused units stay paused even when the change cannot be classified.
+      // "Unknown means more validation" must not revive a lane on pause, or
+      // the pause would hold everywhere except the broadest diffs -- exactly
+      // where an unreliable lane does the most damage.
+      unitIds: units.filter((u) => !u.paused).map((u) => u.id),
       reasons,
     };
   }
 
+  // A paused unit is invisible to the runner sets, not merely skipped at
+  // runtime: no diff, however broad, may require it. Re-entry re-adds it here
+  // by dropping the flag, not by touching this filter.
   const unitIds = units
-    .filter((u) => u.domains.some((d) => domains.has(d)))
+    .filter((u) => !u.paused && u.domains.some((d) => domains.has(d)))
     .map((u) => u.id);
 
   return { domains: [...domains].sort(), unknown: false, unitIds, reasons };

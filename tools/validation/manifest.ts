@@ -145,6 +145,15 @@ export interface ValidationUnit {
   readonly artifact?: string;
   /** Measured wall time on `ubuntu-latest`; see module notes. */
   readonly baselineSeconds?: number;
+  /**
+   * Paused units keep their definition and claim so re-entry is mechanical,
+   * but are invisible to every runner set: `planImpact` and `planBroad` never
+   * require them, `requiredCiUnits` never covers them, and no group lists them.
+   * A pause is unconditional -- it is not routing, and no diff can revive the
+   * unit. Re-entry is the exact reversal: drop this flag and re-add the id to
+   * its group.
+   */
+  readonly paused?: boolean;
   /** One line: the claim this unit is the cheapest layer able to prove. */
   readonly claim: string;
 }
@@ -512,6 +521,14 @@ export const UNITS: readonly ValidationUnit[] = [
     script: null,
     cls: "platform",
     enforcement: "blocking",
+    // PAUSED. The emulator lane cannot currently boot reliably: four samples
+    // ran 487s, 789s, 828s (action gave up), and ~1150s of a 1200s budget with
+    // the device unusable afterwards, and two of four runs failed. A lane that
+    // reds on infrastructure this often teaches the repository to ignore reds.
+    // The definition and claim stay intact so re-entry is the exact reversal
+    // (drop `paused: true`, re-add the id to `android-runtime`). Re-entry
+    // criteria live in `.github/workflows/android.yml`, next to the removed job.
+    paused: true,
     // sim-core is here because a biology change alters the bundle this platform
     // packages. Android proves packaging and launch, but it is still packaging
     // *something*, and that something must be the validated product.
@@ -687,7 +704,10 @@ export const GROUPS: readonly ValidationGroup[] = [
   {
     id: "android-runtime",
     title: "Android runtime smoke (install and launch)",
-    unitIds: ["android-install-launch"],
+    // Empty while `android-install-launch` is paused. The group stays so
+    // re-entry is one line; `decideShard` on an empty group yields no work on
+    // every diff, including app-touching ones, which is exactly the pause.
+    unitIds: [],
     ci: false,
   },
   {

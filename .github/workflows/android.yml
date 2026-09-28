@@ -29,13 +29,28 @@ permissions:
 # ran `pnpm verify` here as well, which cost 1158s of a 1451s job to assemble an
 # APK that takes 39s.
 #
-# The evidence ladder stays explicit and unchanged:
+# The evidence ladder stays explicit:
 #
 #   1. explorer-dist is the bundle the browser lane passed against
 #   2. the checked-in android/ project matches it            (android-sync)
 #   3. a debug APK is produced                              (android-assemble)
 #   4. Android's own static analysis passes                 (android-lint)
-#   5. it installs, launches, stays alive, does not crash    (android-install-launch)
+#   5. PAUSED -- it installs, launches, stays alive         (android-install-launch)
+#
+# Step 5 is paused, and the `emulator-smoke` job that proved it is removed
+# below rather than skipped, so a paused lane is absent from the run instead
+# of grey. Boot is unreliable: 487s, 789s, 828s (the action gave up), ~1150s
+# of a 1200s budget with the device unusable afterwards -- two reds in four
+# runs, both infrastructure. A lane that reds this often on infrastructure
+# teaches the repository to ignore reds, which is worse than a missing fact.
+#
+# Re-entry criteria (all four, no lucky draws). When the snapshot numbers meet
+# them, re-admission is the reversal of this pause, not a new design:
+#
+#   - restore-to-usable p95 well clear of timeout, no lucky draws
+#   - 10 consecutive green real runs, zero infra-attributed reds
+#   - zero false attributions in the streak
+#   - cost per run in low single-digit minutes
 #
 # Nothing beyond launch is claimed. Native filesystem, share, and device
 # integration remain unvalidated, as before.
@@ -144,124 +159,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  # Runtime evidence (separate from assembly): install + launch the APK.
-  # Claim ladder stays explicit: "assembled" (apk job) vs
-  # "installs and launches" (this job). Native behaviors beyond launch
-  # are not covered here.
-  emulator-smoke:
-    runs-on: ubuntu-latest
-    needs: [plan, apk]
-    # Non-gating by policy, and the single most expensive step in CI. Impact
-    # routing keeps it off runs that cannot reach the packaged application.
-    if: needs.plan.outputs.android_runtime_has_work == 'true'
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: digital-evolution-debug-apk
-          path: /tmp/apk
-      # validation-unit: android-install-launch
-      #
-      # Two phases, and a red must say which one failed:
-      #
-      #   phase 1, infrastructure -- the emulator is usable (adb is in `device`
-      #     state and boot completed). Until that holds, nothing is known about
-      #     the application.
-      #   phase 2, application -- install, launch, aliveness, crash check. Only
-      #     reached once phase 1 passed.
-      #
-      # The phases stay in one job deliberately. Splitting them into two jobs
-      # would boot the emulator twice, and boot is ~15 of this job's ~17
-      # minutes, so job-level separation would roughly double a lane that is
-      # already the slowest thing in CI. The classification is therefore carried
-      # explicitly. See #50 -- the acceptance criterion is that a red reliably
-      # distinguishes the two.
-      #
-      # The single title lives in exactly one place, on purpose. Each phase writes
-      # which one failed to /tmp/dee-phase and prints a plain
-      # `PHASE n FAILED (...)` diagnostic with the exact cause; only the final
-      # `Classify Android runtime outcome` step emits a titled `::error`. Having
-      # the script raise a title too meant every red produced two, each phrased
-      # as though it were the authoritative verdict. The step log keeps the
-      # detail, the classifier owns the one classification.
-      #
-      # `continue-on-error` is required for that, because the action's own boot
-      # wait fails *before* the script runs, so a script-only phase marker would
-      # never be written in exactly the case that needs it most.
-      - name: Emulator smoke (install + launch MainActivity)
-        id: emulator
-        continue-on-error: true
-        uses: reactivecircus/android-emulator-runner@4c44018e59b437e86cdfc41da381398f93ed8808 # v2
-        with:
-          # API 34: smallest image that still satisfies minSdk 24 with headroom
-          # under targetSdk 36. API 35 first-boots took ~10 min and timed out
-          # or broke adbd twice (see PR #51 CI history) — boot cost dominates
-          # this job, so image size matters more than API recency for an
-          # install+launch smoke.
-          api-level: 34
-          target: google_apis
-          arch: x86_64
-          disable-animations: true
-          # Fast-boot flags for headless runners; boot timeout raised to
-          # match observed ~10-minute cold boots with margin.
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -camera-front none
-          emulator-boot-timeout: 1200
-          # NOTE: this action executes the script line-by-line (each line
-          # via its own sh), so every command below must be a single line —
-          # no multi-line for/if blocks (proven by a real CI failure).
-          #
-          # /tmp/dee-phase is read by the classification step after this action
-          # returns. It is written on every terminal path, including the ones
-          # where the action's own boot wait has already given up (in which case
-          # it is absent, and absent is treated as infrastructure).
-          script: |
-            echo "unknown" > /tmp/dee-phase
-            echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) PHASE-START-1 infrastructure" >> /tmp/dee-phases
-            if [ "$(adb get-state 2>/dev/null)" != "device" ]; then echo "infrastructure" > /tmp/dee-phase; echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) PHASE-1 infrastructure FAILED adb-not-device" >> /tmp/dee-phases; echo "PHASE 1 FAILED (infrastructure): adb never reached device state (got '$(adb get-state 2>&1 | head -1)'). The emulator was not usable, so no application claim was made."; exit 1; fi
-            if [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" != "1" ]; then echo "infrastructure" > /tmp/dee-phase; echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) PHASE-1 infrastructure FAILED boot-not-completed" >> /tmp/dee-phases; echo "PHASE 1 FAILED (infrastructure): emulator did not finish booting. The device was not usable, so no application claim was made."; exit 1; fi
-            echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) PHASE-1 infrastructure PASS" >> /tmp/dee-phases
-            echo "Android infrastructure phase: PASS (adb device, boot completed)"
-            echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) PHASE-START-2 application" >> /tmp/dee-phases
-            if [ "$(adb get-state 2>/dev/null)" != "device" ]; then echo "infrastructure" > /tmp/dee-phase; echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) PHASE-2 infrastructure FAILED device-gone-before-install" >> /tmp/dee-phases; echo "PHASE 2 FAILED (infrastructure): the emulator answered during the infrastructure phase but adb was no longer usable when the application phase began, so nothing about the application was tested."; exit 1; fi
-            echo "application" > /tmp/dee-phase
-            if ! adb install -r /tmp/apk/app-debug.apk 2>&1 | tee -a /tmp/dee-phases; then echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) PHASE-2 application FAILED install-failed" >> /tmp/dee-phases; echo "PHASE 2 FAILED (application): the device was alive but the debug APK did not install."; exit 1; fi
-            adb logcat -c
-            adb shell am start -n com.digitalevolution.explorer/.MainActivity
-            for i in $(seq 1 30); do if adb shell pidof com.digitalevolution.explorer >/dev/null; then break; fi; sleep 2; done
-            APP_PID=$(adb shell pidof com.digitalevolution.explorer | tr -d '\r')
-            if [ -z "$APP_PID" ] && [ "$(adb get-state 2>/dev/null)" != "device" ]; then echo "infrastructure" > /tmp/dee-phase; echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) PHASE-2 infrastructure FAILED device-died-during-launch" >> /tmp/dee-phases; echo "PHASE 2 FAILED (infrastructure): the app never appeared and adb is no longer usable, so the device died rather than the app failing."; exit 1; fi
-            if [ -z "$APP_PID" ]; then echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) PHASE-2 application FAILED app-not-alive" >> /tmp/dee-phases; echo "PHASE 2 FAILED (application): the device stayed alive but the app did not stay alive after MainActivity started."; exit 1; fi
-            if adb logcat -d --pid="$APP_PID" | grep -q "FATAL EXCEPTION"; then echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) PHASE-2 application FAILED fatal-exception" >> /tmp/dee-phases; adb logcat -d --pid="$APP_PID" | grep -A8 "FATAL EXCEPTION" | head -40 | tee -a /tmp/dee-phases; echo "PHASE 2 FAILED (application): the app threw a FATAL EXCEPTION after launch."; exit 1; fi
-            echo ok > /tmp/dee-phase
-            echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) PHASE-2 application PASS" >> /tmp/dee-phases
-            echo "Android application phase: PASS (MainActivity alive, no fatal exceptions)"
-
-      - name: Upload Android phase record
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: android-phase-record
-          path: /tmp/dee-phases
-          if-no-files-found: ignore
-          retention-days: 30
-
-      # Turns whatever happened above into exactly one classification. This step
-      # exists so that a red on this job is never ambiguous: it either means the
-      # emulator was unusable (infrastructure) or the app failed (application),
-      # and says which in a titled annotation rather than leaving it to be
-      # inferred from a timeout.
-      - name: Classify Android runtime outcome
-        if: always()
-        run: |
-          set -uo pipefail
-          phase=$(cat /tmp/dee-phase 2>/dev/null || echo unknown)
-          if [ "${{ steps.emulator.outcome }}" = "success" ]; then
-            echo "Android runtime: infrastructure and application phases both passed"
-            exit 0
-          fi
-          if [ "$phase" = "application" ]; then
-            echo "::error title=Android application failure::The emulator was usable and the application phase failed. This red is a product or runtime failure."
-            exit 1
-          fi
-          echo "::error title=Android infrastructure failure::The emulator never became usable (phase: $phase), so the application was never tested and no product claim can be drawn from this run. This red is a runner or image problem, not a product failure."
-          exit 1
+  # Runtime evidence is paused: the `emulator-smoke` job that installed and
+  # launched the APK has been removed, not skipped. See the evidence-ladder
+  # comment at the top of this file for why, and for the four re-entry criteria.
+  # The `apk` job above is the whole Android lane until re-entry.

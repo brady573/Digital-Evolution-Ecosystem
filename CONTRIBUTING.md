@@ -35,6 +35,8 @@ pnpm --filter @digital-evolution/explorer cap:sync
 
 Full APK assembly requires x86-64 Android build-tools and runs in CI. Debug APKs are attached to each `android` workflow run as the `digital-evolution-debug-apk` artifact.
 
+The emulator runtime smoke (`android-install-launch`) is **paused**: the lane reds on infrastructure too often to trust (two infra reds in four boots, up to ~1150s of a 1200s budget). The `apk` path is the whole Android lane until re-entry. The four re-entry criteria live in `.github/workflows/android.yml`, next to the removed job -- that comment is the authoritative copy, this is the pointer.
+
 ## Workflow
 
 1. Read `AGENTS.md` — it defines architecture rules, conventions, and prohibitions for this repo.
