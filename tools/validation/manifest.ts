@@ -50,10 +50,20 @@
  *
  * ## `baselineSeconds`
  *
- * Measured on CI runner `ubuntu-latest` from run 36363857021 (2026-09-28), not
- * estimated. Used to balance shards and to spot a regression in cost. A unit
- * whose measured cost has drifted well past its baseline is a maintenance
- * signal, not something to auto-tune.
+ * Measured on CI runner `ubuntu-latest`, not estimated, and used to balance
+ * shards. Sources are runs 36363857021, 36371082202, and 36372216402.
+ *
+ * Two caveats worth knowing. A unit's cost varies run to run on a shared
+ * runner -- `flows` measured 123s then 81s, `decisions` 73s then 50s -- so a
+ * single measurement is a sample, not a constant. And the shared GitHub runner
+ * is not the device: `dependency-tradeoff` measured 275s on CI against a
+ * device-derived guess of 180s, while its sibling `dependency-possibility` went
+ * the other way, 107s guessed, 58s measured. The two are therefore kept in
+ * different shards, so a wrong split between them cannot compound into one
+ * oversized job.
+ *
+ * The `validation-summary` artifact is the authority, not this field: when they
+ * disagree, the artifact is a measurement and this is a copy of one.
  */
 
 // --- Evidence classes --------------------------------------------------------
@@ -196,7 +206,7 @@ export const UNITS: readonly ValidationUnit[] = [
     domains: withApparatus("contracts", "sim-core", "sim-decisions", "sim-runtime", "explorer"),
     needs: [],
     parallelSafe: true,
-    baselineSeconds: 74,
+    baselineSeconds: 50,
     claim: "Events still map to exactly the same offered choices as before.",
   },
   {
@@ -220,7 +230,7 @@ export const UNITS: readonly ValidationUnit[] = [
     domains: withApparatus("contracts", "sim-core", "sim-decisions", "sim-runtime", "explorer"),
     needs: [],
     parallelSafe: true,
-    baselineSeconds: 123,
+    baselineSeconds: 81,
     claim: "Session lifecycle, forking, and pause gating behave exactly as specified.",
   },
   {
@@ -333,7 +343,7 @@ export const UNITS: readonly ValidationUnit[] = [
     domains: withApparatus("contracts", "sim-core", "sim-decisions", "sim-runtime"),
     needs: [],
     parallelSafe: true,
-    baselineSeconds: 107,
+    baselineSeconds: 58,
     claim: "Cross-feeding is genuinely possible across seeds, not just in one lucky world.",
   },
   {
@@ -345,7 +355,7 @@ export const UNITS: readonly ValidationUnit[] = [
     domains: withApparatus("contracts", "sim-core", "sim-decisions", "sim-runtime"),
     needs: [],
     parallelSafe: true,
-    baselineSeconds: 180,
+    baselineSeconds: 275,
     claim: "Cross-feeding carries a real energetic cost rather than being free.",
   },
   {
@@ -590,7 +600,7 @@ export const UNITS: readonly ValidationUnit[] = [
     needs: [],
     parallelSafe: false,
     artifact: "pixi-spike-evidence",
-    baselineSeconds: 67,
+    baselineSeconds: 41,
     claim:
       "GPU-dependent inspection images for the Pixi spike. Non-gating, because software-GL timing is not a property of the product.",
   },
