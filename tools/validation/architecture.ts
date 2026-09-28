@@ -75,8 +75,13 @@ export const requiredCiUnits = (): string[] =>
  * evidence-class substitution dressed up as convenience.
  */
 export const verifyFromManifest = (): string[] => {
-  const excluded = new Set(["android", "survey", "browser", "evidence"]);
-  return GROUPS.filter((g) => !g.ci && !excluded.has(g.id)).flatMap((g) => [...g.unitIds]);
+  const excluded = new Set(["survey", "browser", "evidence"]);
+  // Platform groups are excluded by prefix rather than by exact name. Android
+  // now has several routing groups (`android`, `android-apk`, `android-runtime`)
+  // and an exact-name list would silently start folding platform units back into
+  // `verify` the next time one is added.
+  return GROUPS.filter((g) => !g.ci && !excluded.has(g.id) && !g.id.startsWith("android"))
+    .flatMap((g) => [...g.unitIds]);
 };
 
 export function checkArchitecture(): CheckResult {
@@ -127,7 +132,7 @@ export function checkArchitecture(): CheckResult {
 
   // --- What CI actually executes ------------------------------------------
   const referencedShards = new Map<string, number>();
-  for (const match of workflowText.matchAll(/ci:group\s+([a-z0-9-]+)/g)) {
+  for (const match of workflowText.matchAll(/ci:(?:group|shard)\s+([a-z0-9-]+)/g)) {
     const id = match[1]!;
     referencedShards.set(id, (referencedShards.get(id) ?? 0) + 1);
   }
@@ -235,6 +240,51 @@ export function checkArchitecture(): CheckResult {
     }
   }
 
+  // --- A workflow may only invoke scripts that exist --------------------
+  // A workflow step calling `pnpm <script>` that is not in package.json fails at
+  // run time with ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL, which names neither the
+  // missing script nor the step. It shipped once already: `ci:plan` was wired
+  // into two workflows before the script existed, and every local check was
+  // green because nothing runs the workflow locally.
+  // pnpm's own subcommands are not package.json scripts.
+  const pnpmBuiltins = new Set(["exec", "install", "i", "dlx", "add", "run", "why", "list", "ls", "audit", "approve-builds", "config", "store", "outdated"]);
+  for (const workflow of workflows) {
+    for (const match of workflow.body.matchAll(/\brun:[^\n]*?\bpnpm\s+([a-z][a-z0-9:-]*)/g)) {
+      const script = match[1];
+      if (!pnpmBuiltins.has(script) && !scripts.has(script)) {
+        const line = workflow.body.slice(0, match.index).split("\n").length;
+        failures.push(
+          `${workflow.name}:${line} runs \`pnpm ${script}\`, which is not a package.json script`,
+        );
+      }
+    }
+  }
+
+  // --- GitHub expression references must be addressable ------------------
+  // A hyphen cannot appear in a `steps.<id>.outputs.<key>` or `needs.<id>`
+  // dot-notation path. GitHub rejects the workflow file for it, and the symptom
+  // is the whole run failing with zero jobs and a bare "likely failed because of
+  // a workflow file issue" -- which does not name the offending line. Two of
+  // these shipped in one attempt before a run caught it, so the check exists to
+  // make the failure local and legible.
+  for (const workflow of workflows) {
+    for (const match of workflow.body.matchAll(/\b(steps|needs)\.([A-Za-z0-9_-]+)(\.outputs\.[A-Za-z0-9_.-]+)?/g)) {
+      const [, kind, segment, tail] = match;
+      if (segment.includes("-")) {
+        const line = workflow.body.slice(0, match.index).split("\n").length;
+        failures.push(
+          `${workflow.name}:${line} references ${kind}.${segment}, whose hyphen cannot be addressed in dot notation; rename the id or use bracket syntax`,
+        );
+      }
+      if (tail?.includes("-")) {
+        const line = workflow.body.slice(0, match.index).split("\n").length;
+        failures.push(
+          `${workflow.name}:${line} output key ${tail.slice(".outputs.".length)} contains a hyphen and cannot be read as ${tail}`,
+        );
+      }
+    }
+  }
+
   // --- Platform evidence is a called workflow, not a cross-run lookup -----
   // Android used to trigger independently and locate the product run for its own
   // commit before packaging. That needed SHA inference, an authenticated `gh`,
@@ -285,7 +335,7 @@ export function checkArchitecture(): CheckResult {
   for (const workflow of workflows) {
     const jobs = workflow.body.split(/\n {2}(?=[a-z0-9-]+:\s*\n)/);
     for (const job of jobs) {
-      if (!/ci:group\s+[a-z0-9-]+/.test(job)) continue;
+      if (!/ci:(?:group|shard)\s+[a-z0-9-]+/.test(job)) continue;
       const name = job.split("\n")[0]!.replace(/:\s*$/, "").trim();
       if (!/validation-summary-/.test(job)) {
         failures.push(`${workflow.name} job "${name}" runs a shard but uploads no validation-summary, so its cost is invisible`);

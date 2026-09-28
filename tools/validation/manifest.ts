@@ -670,10 +670,24 @@ export const GROUPS: readonly ValidationGroup[] = [
     unitIds: ["browser-smoke", "mobile-ui"],
     ci: false,
   },
+  // Platform units are addressed as two routing groups rather than one, because
+  // the two halves are gated separately: packaging is cheap enough to run
+  // whenever the application could change, while the emulator smoke is the most
+  // expensive step in CI and is gated on the same routing decision. Grouping
+  // them together would force one policy onto both.
+  //
+  // There is deliberately no single `android` group: it would duplicate these
+  // units, and the exactly-once gate is right to reject that.
   {
-    id: "android",
-    title: "Android platform integration",
-    unitIds: ["android-sync", "android-assemble", "android-lint", "android-install-launch"],
+    id: "android-apk",
+    title: "Android packaging (sync, drift, assemble, lint)",
+    unitIds: ["android-sync", "android-assemble", "android-lint"],
+    ci: false,
+  },
+  {
+    id: "android-runtime",
+    title: "Android runtime smoke (install and launch)",
+    unitIds: ["android-install-launch"],
     ci: false,
   },
   {

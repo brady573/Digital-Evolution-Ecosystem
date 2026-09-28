@@ -6,6 +6,9 @@ import { join } from "node:path";
 import { UNITS, UNIT_BY_ID, GROUPS } from "./manifest.ts";
 import { REPO_ROOT, checkArchitecture, verifyFromManifest } from "./architecture.ts";
 import { classifyPath, planImpact } from "./impact.ts";
+import { decideShard, expandNeeds, planBroad, planForChange } from "./routing.ts";
+import { GROUP_BY_ID } from "./manifest.ts";
+import type { Domain } from "./manifest.ts";
 
 /**
  * Validation architecture self-test.
@@ -338,8 +341,228 @@ for (const [name, test] of tests) {
   }
 }
 
+
+
+// --- Impact routing ---------------------------------------------------------
+
+/** Every unit's impact mapping is well formed, and names real domains. */
+const testEveryUnitHasValidImpactMapping = (): void => {
+  const valid = new Set<Domain>([
+    "contracts", "sim-core", "sim-analysis", "sim-decisions", "sim-runtime",
+    "phenotype", "explorer", "android", "validation", "ci", "docs",
+  ]);
+  for (const unit of UNITS) {
+    assert.ok(unit.domains.length > 0, `${unit.id} must declare the domains that force it`);
+    for (const domain of unit.domains) {
+      assert.ok(valid.has(domain), `${unit.id} names unknown impact domain "${domain}"`);
+    }
+  }
+  // Every domain must force something, or it is a dead routing input.
+  const forced = new Set(UNITS.flatMap((u) => u.domains));
+  for (const domain of valid) {
+    assert.ok(forced.has(domain), `impact domain "${domain}" forces no unit and can never be used`);
+  }
+};
+
+/** An unknown path must widen to every unit, in every shard. */
+const testUnknownRunsEverything = (): void => {
+  for (const path of ["mystery/file.ts", "scripts/deploy.sh", "some/other/place.rs"]) {
+    const { plan, shards } = planForChange([path]);
+    assert.ok(plan.unknown, `${path} must be unclassified`);
+    for (const shard of shards) {
+      assert.equal(shard.skipped.length, 0, `${path}: shard ${shard.groupId} skipped a unit despite unknown impact`);
+    }
+  }
+  // Missing changed files must behave the same way, not as "nothing required".
+  const broadened = planBroad("no base available");
+  assert.ok(broadened.unknown, "a missing base must be unknown");
+  assert.equal(broadened.unitIds.length, UNITS.length, "a missing base must run every unit");
+  for (const shard of [...GROUP_BY_ID.values()].filter((g) => g.ci)) {
+    assert.equal(decideShard(shard.id, broadened).skipped.length, 0, `missing base skipped units in ${shard.id}`);
+  }
+};
+
+/** Contracts reach the widest downstream scope. */
+const testContractsTriggerBroadValidation = (): void => {
+  const { plan } = planForChange(["packages/contracts/src/index.ts"]);
+  assert.ok(!plan.unknown);
+  for (const unit of UNITS) {
+    if (unit.enforcement === "manual") continue;
+    assert.ok(plan.unitIds.includes(unit.id), `a contracts change must require ${unit.id}`);
+  }
+};
+
+/** Biological authority keeps all relevant simulation, runtime, and product coverage. */
+const testSimulationCoreTriggersRelevantCoverage = (): void => {
+  const { plan, shards } = planForChange(["packages/sim-core/src/engine.ts"]);
+  for (const required of ["migration", "ecology", "niche", "dependency-arc", "aftermath", "build", "browser-smoke", "android-assemble"]) {
+    assert.ok(plan.unitIds.includes(required), `a sim-core change must require ${required}`);
+  }
+  // Every deterministic shard must have real work for a biology change.
+  for (const shard of shards.filter((s) => s.groupId.startsWith("ci-sim"))) {
+    assert.ok(shard.run.length > 0, `a sim-core change must leave ${shard.groupId} with work`);
+  }
+};
+
+/** Validation apparatus and CI configuration cannot validate themselves away. */
+const testValidationInfrastructureCannotValidateItselfAway = (): void => {
+  for (const path of [
+    "tools/validation/manifest.ts",
+    "tools/validation/impact.ts",
+    "tools/validation/routing.ts",
+    "tools/validation/run.ts",
+    "package.json",
+    "pnpm-lock.yaml",
+    ".github/workflows/product.yml",
+    ".github/actions/setup-project/action.yml",
+    "legacy/prototype/engine.ts",
+  ]) {
+    const { plan, shards } = planForChange([path]);
+    for (const shard of shards) {
+      assert.equal(
+        shard.skipped.length, 0,
+        `${path} is validation infrastructure and must not skip anything in ${shard.groupId}`,
+      );
+    }
+    assert.equal(plan.unitIds.length, UNITS.length, `${path} must route to the full unit set`);
+  }
+};
+
+/** Explorer-only work skips the unrelated expensive biological suites. */
+const testExplorerSkipsUnrelatedBiologicalWork = (): void => {
+  const { plan, shards } = planForChange(["apps/explorer/src/AftermathPanel.tsx"]);
+  for (const required of ["typecheck", "build", "browser-smoke", "mobile-ui", "android-assemble", "phenotype"]) {
+    assert.ok(plan.unitIds.includes(required), `an Explorer change must require ${required}`);
+  }
+  for (const forbidden of ["ecology-survey", "niche-survey", "washout-reliance", "dependency-possibility", "niche"]) {
+    assert.ok(!plan.unitIds.includes(forbidden), `an Explorer change must not require ${forbidden}`);
+  }
+  // The expensive unrelated biology must go quiet. An Explorer change still runs
+  // the interaction points it drives -- catalysts, time controls, aftermath -- so
+  // "sim-d is empty" would be the wrong assertion; what has to be skipped are the
+  // long horizons and the ecological gates, which an Explorer change cannot reach.
+  for (const expensive of [
+    "dependency-arc", "dependency-possibility", "dependency-crossfeeding",
+    "dependency-washout", "ecology", "niche",
+  ]) {
+    assert.ok(!plan.unitIds.includes(expensive), `an Explorer change must not require ${expensive}`);
+  }
+  const simC = shards.find((s) => s.groupId === "ci-sim-c");
+  assert.ok(simC && simC.run.length === 0, "an Explorer change must leave ci-sim-c (niche, ecology) empty");
+  // And the interaction points it does drive must survive routing.
+  for (const kept of ["catalysts", "time-controls", "aftermath"]) {
+    assert.ok(plan.unitIds.includes(kept), `an Explorer change must still require ${kept}`);
+  }
+};
+
+/** Documentation takes the minimum safe path: invariants, and nothing expensive. */
+const testDocsTakesMinimumSafePath = (): void => {
+  const { plan, shards } = planForChange(["AGENTS.md"]);
+  // A markdown file cannot break the type system, so typecheck is not forced by
+  // the docs domain -- running it would be waste, not safety. The invariant
+  // units still run for every shard that holds them.
+  assert.ok(plan.unitIds.includes("validation-arch"), "a docs change must re-check the validation architecture");
+  assert.ok(!plan.unitIds.includes("typecheck"), "a docs change must not force typecheck; it cannot affect types");
+  for (const unit of UNITS) {
+    if ((unit.baselineSeconds ?? 0) < 20) continue;
+    assert.ok(!plan.unitIds.includes(unit.id), `a docs change must not require ${unit.id} (${unit.baselineSeconds}s)`);
+  }
+  for (const unit of UNITS) {
+    if (unit.cls === "browser" || unit.cls === "platform" || unit.cls === "scientific") {
+      assert.ok(!plan.unitIds.includes(unit.id), `a docs change must not require ${unit.cls} unit ${unit.id}`);
+    }
+  }
+  // The browser and Android lanes must resolve with nothing to do.
+  for (const shard of shards) {
+    if (shard.groupId === "ci-fast") continue;
+    assert.equal(shard.run.length, 0, `a docs change must leave ${shard.groupId} with nothing to do`);
+  }
+};
+
+/** Android-relevant changes still reach the Android lane. */
+const testAndroidChangesTriggerTheAndroidLane = (): void => {
+  for (const path of [
+    "apps/explorer/android/app/build.gradle",
+    "apps/explorer/capacitor.config.ts",
+    "packages/phenotype/src/index.ts",
+    "packages/contracts/src/index.ts",
+  ]) {
+    const { plan, shards } = planForChange([path]);
+    for (const required of ["android-sync", "android-assemble", "android-lint", "android-install-launch"]) {
+      assert.ok(plan.unitIds.includes(required), `${path} must require ${required}`);
+    }
+    const build = shards.find((s) => s.groupId === "ci-build");
+    assert.ok(build && build.run.some((u) => u.id === "build"), `${path} must build, or the Android lane has no artifact`);
+  }
+};
+
+/**
+ * The property that keeps merge-blocking evidence from disappearing: a shard may
+ * only skip a unit the classifier positively cleared, and a unit that routing
+ * selected must never be dropped on the way to execution.
+ */
+const testSkippedShardCannotDropRequiredWork = (): void => {
+  const classes: Array<[string, string[]]> = [
+    ["docs-only", ["AGENTS.md"]],
+    ["explorer-only", ["apps/explorer/src/App.tsx"]],
+    ["phenotype-only", ["packages/phenotype/src/index.ts"]],
+    ["sim-core", ["packages/sim-core/src/engine.ts"]],
+    ["sim-decisions", ["packages/sim-decisions/src/index.ts"]],
+    ["unknown", ["mystery/thing.rs"]],
+  ];
+  for (const [label, paths] of classes) {
+    const { plan, shards } = planForChange(paths);
+    const routed = expandNeeds(new Set(plan.unitIds));
+    for (const shard of shards) {
+      const group = GROUP_BY_ID.get(shard.groupId)!;
+      // Partitions the shard exactly: every unit is either run or explicitly
+      // skipped, never both and never neither.
+      const runIds = new Set(shard.run.map((u) => u.id));
+      for (const id of group.unitIds) {
+        assert.ok(
+          runIds.has(id) || shard.skipped.some((s) => s.unit.id === id),
+          `${label}/${shard.groupId}: ${id} is neither run nor explicitly skipped`,
+        );
+      }
+      assert.equal(
+        runIds.size + shard.skipped.length, group.unitIds.length,
+        `${label}/${shard.groupId}: units are duplicated or lost`,
+      );
+      // Anything the plan required in this shard must be running.
+      for (const id of group.unitIds) {
+        if (routed.has(id) || UNIT_BY_ID.get(id)?.cls === "invariant") {
+          assert.ok(runIds.has(id), `${label}/${shard.groupId}: required unit ${id} was skipped`);
+        }
+      }
+    }
+  }
+};
+
+const routingTests: Array<[string, () => void]> = [
+  ["every unit has a valid impact mapping", testEveryUnitHasValidImpactMapping],
+  ["unknown paths widen to full validation", testUnknownRunsEverything],
+  ["contracts trigger broad validation", testContractsTriggerBroadValidation],
+  ["sim-core keeps relevant coverage", testSimulationCoreTriggersRelevantCoverage],
+  ["validation infrastructure cannot validate itself away", testValidationInfrastructureCannotValidateItselfAway],
+  ["explorer changes skip unrelated biological work", testExplorerSkipsUnrelatedBiologicalWork],
+  ["docs takes the minimum safe path", testDocsTakesMinimumSafePath],
+  ["android changes trigger the android lane", testAndroidChangesTriggerTheAndroidLane],
+  ["a skipped shard cannot drop required work", testSkippedShardCannotDropRequiredWork],
+];
+
+for (const [name, test] of routingTests) {
+  try {
+    test();
+    console.log(`impact routing: ${name}: PASS`);
+  } catch (error) {
+    failed += 1;
+    console.error(`impact routing: ${name}: FAIL`);
+    console.error(`  ${error instanceof Error ? error.message.split("\n").join("\n  ") : String(error)}`);
+  }
+}
+
 if (failed > 0) {
-  console.error(`\nvalidation architecture: FAIL (${failed}/${tests.length})`);
+  console.error(`\nvalidation architecture: FAIL (${failed}/${tests.length + routingTests.length})`);
   process.exit(1);
 }
-console.log(`\nvalidation architecture: PASS (${tests.length} checks)`);
+console.log(`\nvalidation architecture: PASS (${tests.length + routingTests.length} checks)`);
