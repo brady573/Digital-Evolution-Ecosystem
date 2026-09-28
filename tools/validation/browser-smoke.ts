@@ -5,6 +5,24 @@ import { BARE_RGB } from "../../apps/explorer/src/landscape.ts";
 
 const baseUrl=process.env.DEE_BASE_URL||"http://127.0.0.1:4173";
 
+/**
+ * Does the minimap resource field reach every corner of the world?
+ *
+ * The ratio bound is a judgement call, so it is a named function with its
+ * justification adjacent rather than a bare number buried in an assertion.
+ * An absolute ink floor cannot express this claim: how much material is on the
+ * field depends on how far the world has been advanced, and the speed-control
+ * checks advance it by a wall-clock-derived tick count, so an absolute floor
+ * fails on total stock instead of on coverage. The bound below is relative to
+ * the densest quadrant and is pinned against its regression vectors where it is
+ * used, so retuning it cannot quietly narrow what the check proves.
+ */
+function minimapCoversWorld(quadrantInk:readonly number[]):boolean{
+  const sparsest=Math.min(...quadrantInk);
+  const densest=Math.max(...quadrantInk);
+  return sparsest>densest/4;
+}
+
 async function tick(page:Page){
   const text=await page.getByTestId("tick").innerText();
   return Number(text.replace(/[^0-9]/g,""));
@@ -164,6 +182,25 @@ async function main(){
   // Logged, not only asserted on failure: the margin is the evidence for this
   // slice, so a passing run must still produce it.
   console.log(`world consequence at zero ticks: ${lost}/${samples} samples lost material, ${gained} gained, luma ${lumaBefore.toFixed(1)}->${lumaAfter.toFixed(1)}`);
+
+  // Pin the coverage bound against the regressions it must keep rejecting, so a
+  // future retune of the ratio cannot read as a performance fix while quietly
+  // accepting a worse minimap. Each vector is a real failure mode: painting one
+  // corner, painting half, dropping a corner, and a quadrant that is present
+  // but nearly empty.
+  assert.ok(minimapCoversWorld([354, 794, 628, 518]),
+    "minimap coverage: the observed live distribution must satisfy the bound");
+  for (const [label, quadrants] of [
+    ["top-left only", [5200, 0, 0, 0]],
+    ["half painted", [5200, 4100, 0, 0]],
+    ["one corner missing", [5200, 0, 4800, 4600]],
+    ["one corner faint", [5200, 4100, 4800, 200]],
+    ["blank minimap", [0, 0, 0, 0]],
+  ] as const) {
+    assert.ok(!minimapCoversWorld([...quadrants]),
+      `minimap coverage must still reject: ${label} (${quadrants.join("/")})`);
+  }
+  console.log("minimap coverage bound: PASS (rejects single-corner, half-painted, missing-corner, faint-corner, blank)");
   // The affordance collapses the sheet; it is not a prerequisite for time.
   await deltaPage.getByTestId("aftermath-acknowledge").click();
   await deltaImpact.waitFor({state:"detached",timeout:15_000});
@@ -410,10 +447,8 @@ async function main(){
       const w=c.width,h=c.height,q=Math.floor(w*0.3);
       return[ink(0,0,q,q),ink(w-q,0,q,q),ink(0,h-q,q,q),ink(w-q,h-q,q,q)];
     })()`);
-    const densest=Math.max(...quadrantInk);
-    assert.ok(
-      Math.min(...quadrantInk)>densest/4,
-      `minimap field covers the whole world (quadrants ${quadrantInk.join("/")}, sparsest must exceed a quarter of ${densest})`);
+    assert.ok(minimapCoversWorld(quadrantInk),
+      `minimap field covers the whole world (quadrants ${quadrantInk.join("/")}, sparsest must exceed a quarter of ${Math.max(...quadrantInk)})`);
 
     // Panning across the torus must keep the camera normalized: drag well past
     // one world width and the center stays inside [0,600).
