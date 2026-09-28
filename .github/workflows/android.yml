@@ -54,21 +54,27 @@ jobs:
           # lookup fails instantly and, under `set -e`, the gate dies before it
           # has checked anything.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # NOT `github.sha`. On a pull_request event GITHUB_SHA is the *merge*
+          # commit, but the workflow-run index is keyed by the *head* commit of
+          # the branch, so querying by GITHUB_SHA returns zero runs forever --
+          # which is a 30-minute wait ending in a failure that looks like the
+          # product run never happened. On push events github.sha is already
+          # the head commit.
+          PRODUCT_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: |
           set -uo pipefail
+          echo "waiting for a product run on $PRODUCT_SHA"
           lookup_failures=0
           for attempt in $(seq 1 90); do
             # Query the API by head_sha rather than using `gh run list`.
-            # `gh run list` defaults to the DEFAULT BRANCH, so combined with
-            # --commit on a pull_request merge SHA it looks for runs that can
-            # never appear and polls to its timeout. head_sha is exact for both
-            # the pull_request and push triggers.
+            # `gh run list` defaults to the DEFAULT BRANCH, so it looks for runs
+            # that can never appear when filtered by a pull_request SHA.
             #
             # A failed lookup is not the same as "no run yet": the run may not
             # have started. Retry a few times, then stop, rather than either
             # dying on a transient error or polling for half an hour behind a
             # real permissions problem.
-            if ! found=$(gh api "repos/{owner}/{repo}/actions/workflows/product.yml/runs?head_sha=$GITHUB_SHA&per_page=20" \
+            if ! found=$(gh api "repos/{owner}/{repo}/actions/workflows/product.yml/runs?head_sha=$PRODUCT_SHA&per_page=20" \
                            --jq '[.workflow_runs[] | select(.status == "completed")] | sort_by(.run_number) | reverse | .[0] // empty | {id, conclusion}' 2>&1); then
               lookup_failures=$((lookup_failures + 1))
               echo "attempt $attempt: could not query workflow runs: $found"
@@ -83,17 +89,17 @@ jobs:
               run_id=$(echo "$found" | jq -r .id)
               conclusion=$(echo "$found" | jq -r .conclusion)
               if [ "$conclusion" != "success" ]; then
-                echo "::error::product workflow run $run_id concluded '$conclusion' for $GITHUB_SHA; refusing to package unvalidated source."
+                echo "::error::product workflow run $run_id concluded '$conclusion' for $PRODUCT_SHA; refusing to package unvalidated source."
                 exit 1
               fi
               echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
-              echo "Using product run $run_id (success) for $GITHUB_SHA"
+              echo "Using product run $run_id (success) for $PRODUCT_SHA"
               exit 0
             fi
-            echo "attempt $attempt: no completed product run for $GITHUB_SHA yet; waiting 20s"
+            echo "attempt $attempt: no completed product run for $PRODUCT_SHA yet; waiting 20s"
             sleep 20
           done
-          echo "::error::no completed product run found for $GITHUB_SHA after 30 minutes; cannot prove this revision passed the product gates."
+          echo "::error::no completed product run found for $PRODUCT_SHA after 30 minutes; cannot prove this revision passed the product gates."
           exit 1
 
       # validation-unit: android-sync
