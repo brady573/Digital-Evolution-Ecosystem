@@ -34,6 +34,7 @@
     "test:catalysts:fast": "tsx tools/validation/catalysts.ts -- --fast",
     "test:niche": "tsx tools/validation/niche.ts",
     "test:niche-survey": "tsx tools/validation/niche-survey.ts",
+    "test:washout-reliance": "tsx tools/validation/washout-reliance.ts",
     "test:phenotype": "tsx tools/validation/phenotype.ts && tsx tools/validation/phenotype-world.ts",
     "test:landscape": "tsx tools/validation/landscape.ts",
     "test:aftermath": "tsx tools/validation/aftermath.ts && tsx tools/validation/aftermath-runtime.ts",
