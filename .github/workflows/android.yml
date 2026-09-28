@@ -169,9 +169,19 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      # Resolve the SDK root in a step, because the cache path needs it and
+      # `${{ env.ANDROID_HOME }}` does NOT work: ANDROID_HOME is a variable of
+      # the runner's *shell environment*, not part of the Actions `env` context,
+      # so it resolves to the empty string there. The first version of this cache
+      # silently resolved its path to `/system-images`, which restored nothing and
+      # saved nothing -- a miss that looked like a cold cache and never populated.
+      # The shell fallback is kept so a runner with a different layout still works.
+      - name: Resolve Android SDK path
+        id: sdk
+        run: echo "root=${ANDROID_HOME:-/usr/local/lib/android/sdk}" >> "$GITHUB_OUTPUT"
       # The system image is the emulator action's largest download and is spent
-      # BEFORE the emulator starts, so it is visible as a distinct cost in the
-      # log: 62s of a 636s job on main.
+      # BEFORE the emulator starts, so it is a distinct cost in the log: 62s of a
+      # 636s job on main, 51s on the miss run.
       #
       # This caches the image directory, deliberately, and not the SDK root. The
       # whole-SDK cache was tried and cannot work: the SDK root contains special
@@ -186,7 +196,7 @@ jobs:
       # it instead of restoring a mismatched image.
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
-          path: ${{ env.ANDROID_HOME }}/system-images
+          path: ${{ steps.sdk.outputs.root }}/system-images
           # Separator-free on purpose: actions/cache keys end up in internal
           # paths and header values, and the canonical image identifier contains
           # semicolons. android34-google_apis-x86_64 is the same identity, safely.
