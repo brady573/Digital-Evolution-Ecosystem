@@ -351,11 +351,100 @@ export const CHECKPOINT_MIGRATION_RULES: readonly CheckpointMigrationRule[] = [
     omission:
       "Restore constructs a fresh observer and then overwrites only the keys the payload carries, so an absent sub-state keeps its declared initial value instead of becoming undefined.",
   },
+  // --- A3.2: the pre-A2 reference shape ------------------------------------
+  {
+    id: "entity-refs-bare-numbers-mean-unrecorded-kind",
+    path: "analysis.records[].entity_refs[]",
+    appliesToSchemas: ALL_SCHEMAS,
+    effectiveDefault: "a ref with kind null",
+    absorber: "inline-backfill",
+    omission:
+      "A2 made every entity reference carry what it denotes. A save written before that holds bare numbers, and a bare number is a real entity whose kind simply was not recorded — not an absent reference. Migrating to `kind: null` is what lets presentation omit the claim instead of guessing a namespace, which is the behaviour A2 specifies for an unrecorded kind. A wrong-typed or non-finite entry is not an omission and is not tolerated here; it is left untouched for the rejection conditions to fail on.",
+  },
 ];
 
 export const MIGRATION_RULE_BY_ID: ReadonlyMap<string, CheckpointMigrationRule> = new Map(
   CHECKPOINT_MIGRATION_RULES.map((rule) => [rule.id, rule]),
 );
+
+/**
+ * A3.2: migrate a pre-A2 entity reference list.
+ *
+ * A save written before references carried their kind holds bare numbers. Each
+ * becomes `{ kind: null, id }` — a real entity of unrecorded kind, which
+ * presentation omits rather than guessing a namespace for.
+ *
+ * **Deduplication is by value, on `(kind, id)`, never by object identity.**
+ * This is the failure A2 hit: a `Set` over freshly-constructed ref objects
+ * never dedups, so a lineage named by both the producer and remover lists came
+ * out twice, breaking the "named once" rule while every type stayed valid and
+ * only `test:niche` caught it. The key is built from the pair, so a rebuilt
+ * object is recognised as the same reference.
+ *
+ * Entries that are neither a finite number nor a ref-shaped object are passed
+ * through untouched rather than dropped. Dropping them here would silently
+ * shorten a list, which is exactly the kind of quiet normalisation Decision 2
+ * forbids; the rejection conditions decide what an unusable entry means.
+ */
+export const migrateEntityRefs = (refs: readonly unknown[]): readonly unknown[] => {
+  const out: unknown[] = [];
+  const seen = new Set<string>();
+  for (const raw of refs) {
+    if (typeof raw === "number") {
+      if (!Number.isFinite(raw)) {
+        out.push(raw);
+        continue;
+      }
+      const key = JSON.stringify([null, raw]);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ kind: null, id: raw });
+      continue;
+    }
+    if (raw !== null && typeof raw === "object") {
+      const candidate = raw as Partial<EntityRef>;
+      if (typeof candidate.id !== "number" || !Number.isFinite(candidate.id)) {
+        out.push(raw);
+        continue;
+      }
+      const kind = candidate.kind ?? null;
+      const key = JSON.stringify([kind, candidate.id]);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ kind, id: candidate.id });
+      continue;
+    }
+    out.push(raw);
+  }
+  return out;
+};
+
+/**
+ * Apply {@link migrateEntityRefs} across a stored analysis payload.
+ *
+ * Typed `unknown` in and out on purpose: the checkpoint contract declares
+ * `analysis` as unknown, and the observer's own restore is unvalidated, so this
+ * boundary must narrow defensively rather than assert a shape it cannot
+ * guarantee. A payload that is not the expected container shape is returned
+ * unchanged, leaving the decision about it to validation rather than making it
+ * here by accident.
+ */
+export const migrateAnalysisEntityRefs = (analysis: unknown): unknown => {
+  if (analysis === null || typeof analysis !== "object") return analysis;
+  const source = analysis as { records?: unknown };
+  if (!Array.isArray(source.records)) return analysis;
+  let changed = false;
+  const records = source.records.map((record: unknown) => {
+    if (record === null || typeof record !== "object") return record;
+    const refs = (record as { entity_refs?: unknown }).entity_refs;
+    if (!Array.isArray(refs)) return record;
+    const migrated = migrateEntityRefs(refs);
+    if (migrated.length === refs.length && migrated.every((r, i) => r === refs[i])) return record;
+    changed = true;
+    return { ...record, entity_refs: migrated };
+  });
+  return changed ? { ...source, records } : analysis;
+};
 
 /* ------------------------------------------------------------------ *
  * Cross-boundary read models.

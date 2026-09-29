@@ -242,7 +242,7 @@ export const UNITS: readonly ValidationUnit[] = [
     parallelSafe: true,
     baselineSeconds: 81,
     claim:
-      "Session lifecycle, forking, and pause gating behave exactly as specified, and every named checkpoint migration rule is well-formed, names where its omission is absorbed, and still matches the code that absorbs it.",
+      "Session lifecycle, forking, and pause gating behave exactly as specified, every named checkpoint migration rule is well-formed and still matches the code that absorbs it, and a save written before entity references carried their kind restores with the same reference count, no guessed namespace, and value-based deduplication.",
   },
   {
     id: "time-controls",

@@ -22,6 +22,7 @@ import type {
 import {
   AFTERMATH_COMPARABLES,
   decisionCommandId,
+  migrateAnalysisEntityRefs,
   worldId as toWorldId,
 } from "@digital-evolution/contracts";
 import {
@@ -617,7 +618,13 @@ export class UniverseSession {
     // a fresh presentation identity so rendering inertia cannot carry over.
     this.#worldId=toWorldId(++worldIdCounter);
     this.#experiment=restoreSimulationCheckpoint(checkpoint.experiment as any);
-    this.#analysis=EcologyObserver.restore(checkpoint.analysis);
+    // Migrate before the observer sees the payload. A save written before A2
+    // holds bare numbers where a ref now carries its kind, and each becomes
+    // `kind: null` — a real entity of unrecorded kind. Presentation then omits
+    // the label rather than guessing a namespace, which is A2's specified
+    // behaviour for a kind that was never recorded. Unusable entries are left
+    // in place for validation to reject, not dropped here.
+    this.#analysis=EcologyObserver.restore(migrateAnalysisEntityRefs(checkpoint.analysis));
     // Aftermath is deliberately NOT restored. It is evidence held outside the
     // checkpoint, so a restore that carried it would be reconstructing an
     // observation from simulation state alone - exactly what must not happen.
@@ -626,7 +633,9 @@ export class UniverseSession {
     // baseline across a save is a later, separate contract.
     this.#aftermath=null;
     this.#control=checkpoint.control?restoreSimulationCheckpoint(checkpoint.control as any):null;
-    this.#controlAnalysis=checkpoint.controlAnalysis?EcologyObserver.restore(checkpoint.controlAnalysis):null;
+    this.#controlAnalysis=checkpoint.controlAnalysis
+      ?EcologyObserver.restore(migrateAnalysisEntityRefs(checkpoint.controlAnalysis))
+      :null;
     if(schema==="0.3"){
       const decisions=(checkpoint as UniverseCheckpoint).decisions;
       this.#pendingDecision=normalizePendingDecision(decisions?.pending);
