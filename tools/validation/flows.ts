@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { UniverseSession } from "../../packages/sim-runtime/src/session.ts";
 import type { EngineConfig, FlowFacts } from "../../packages/contracts/src/index.ts";
+import {
+  CHECKPOINT_MIGRATION_RULES,
+  MIGRATION_RULE_BY_ID,
+} from "../../packages/contracts/src/index.ts";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { ENGINE_VERSION } from "../../packages/sim-core/src/index.ts";
 import { CHECKPOINT_SCHEMA_VERSION } from "../../packages/sim-runtime/src/session.ts";
 
@@ -410,6 +417,138 @@ function testWasteCheckpoint() {
   console.log("waste checkpoint continuation: PASS");
 }
 
+const REPO = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const src = (rel: string): string => readFileSync(join(REPO, rel), "utf8");
+
+/**
+ * Every migration rule must name the code that absorbs its omission.
+ *
+ * A table that only describes intent is a comment. What makes each entry
+ * checkable is that some real code still handles the absence, so this asserts
+ * a probe per rule: a pattern that must exist in the source the rule claims.
+ *
+ * Two properties follow. A new rule cannot be added without declaring where it
+ * is absorbed, because an unprobed rule fails. And a rule cannot outlive the
+ * code that justified it: delete the guard it names and this fails, which is
+ * the signal that the tolerance has quietly stopped being true.
+ */
+const MIGRATION_ABSORBER_PROBES: Readonly<Record<string, { file: string; probe: RegExp }>> = {
+  "organism-pc-reads-as-zero": {
+    file: "packages/sim-core/src/engine.ts",
+    probe: /o\.pc=\(o\.pc\|\|0\)\+made/,
+  },
+  "simulation-last-lineage-flows-reads-as-null": {
+    file: "packages/sim-core/src/engine.ts",
+    probe: /declare lastLineageFlows:IntervalFlowFacts\|null;/,
+  },
+  "simulation-lineage-interval-reads-as-empty-map": {
+    file: "packages/sim-core/src/engine.ts",
+    probe: /this\.lineageInterval\|\|new Map\(\)/,
+  },
+  "pending-decision-absent-reads-as-null": {
+    file: "packages/sim-runtime/src/session.ts",
+    probe: /if\(!raw\|\|typeof raw!=="object"\)return null;/,
+  },
+  "pending-decision-source-backfilled-from-event": {
+    file: "packages/sim-runtime/src/session.ts",
+    probe: /copy\.source="observed_event"/,
+  },
+  "decision-resolutions-absent-reads-as-empty": {
+    file: "packages/sim-runtime/src/session.ts",
+    probe: /Array\.isArray\(decisions\?\.resolutions\)/,
+  },
+  "decision-resolution-offer-tick-backfilled-from-tick": {
+    file: "packages/sim-runtime/src/session.ts",
+    probe: /if\(copy\.offerTick===undefined\)copy\.offerTick=copy\.tick;/,
+  },
+  "decision-resolution-catalyst-id-reads-as-null": {
+    file: "packages/sim-runtime/src/session.ts",
+    probe: /if\(copy\.catalystId===undefined\)copy\.catalystId=null;/,
+  },
+  "decision-resolution-source-reads-as-event-decision": {
+    file: "packages/sim-runtime/src/session.ts",
+    probe: /if\(copy\.source===undefined\)copy\.source="event_decision";/,
+  },
+  "last-decision-tick-absent-reads-as-zero": {
+    file: "packages/sim-runtime/src/session.ts",
+    probe: /typeof decisions\?\.lastDecisionTick==="number"\?decisions\.lastDecisionTick:0/,
+  },
+  "last-major-catalyst-tick-absent-reads-as-null": {
+    file: "packages/sim-runtime/src/session.ts",
+    probe: /typeof decisions\?\.lastMajorCatalystTick==="number"\?decisions\.lastMajorCatalystTick:null/,
+  },
+  "matched-control-absent-reads-as-null": {
+    file: "packages/sim-runtime/src/session.ts",
+    probe: /checkpoint\.control\?restoreSimulationCheckpoint/,
+  },
+  "analysis-substate-absent-reads-as-constructor-default": {
+    file: "packages/sim-analysis/src/index.ts",
+    probe: /const observer=new EcologyObserver\(\);[\s\S]{0,120}Object\.assign\(observer,/,
+  },
+};
+
+function testCheckpointMigrationRuleTable() {
+  const schemas = ["0.1", "0.2", "0.3"];
+  const absorbers = [
+    "live-step-guard",
+    "nullable-field",
+    "constructor-default",
+    "inline-backfill",
+    "structural-branch",
+  ];
+  const seen = new Set<string>();
+
+  for (const rule of CHECKPOINT_MIGRATION_RULES) {
+    assert.ok(!seen.has(rule.id), `duplicate migration rule id: ${rule.id}`);
+    seen.add(rule.id);
+    assert.ok(rule.id.length > 3, `migration rule needs a real id: ${JSON.stringify(rule.id)}`);
+    assert.ok(rule.path.length > 0, `${rule.id} must state where the field lives`);
+    assert.ok(rule.appliesToSchemas.length > 0, `${rule.id} must name at least one schema`);
+    for (const schema of rule.appliesToSchemas) {
+      assert.ok(schemas.includes(schema), `${rule.id} names unknown schema ${schema}`);
+    }
+    assert.ok(absorbers.includes(rule.absorber), `${rule.id} names unknown absorber ${rule.absorber}`);
+    assert.ok(
+      rule.effectiveDefault.length > 0,
+      `${rule.id} must state what the absence reads as`,
+    );
+    // A rule whose justification is "it was convenient" is not a rule.
+    assert.ok(
+      rule.omission.length > 40,
+      `${rule.id} must state why the omission is tolerated, not just that it is`,
+    );
+
+    const probe = MIGRATION_ABSORBER_PROBES[rule.id];
+    assert.ok(
+      probe !== undefined,
+      `${rule.id} has no absorber probe, so nothing proves this tolerance still exists`,
+    );
+    assert.ok(
+      probe.probe.test(src(probe.file)),
+      `${rule.id} claims ${rule.absorber} at ${rule.path}, but its absorber is gone from ${probe.file}`,
+    );
+  }
+
+  // Decision 2 names three omissions that must remain supported. They are
+  // asserted by id so a rename cannot quietly drop one from the contract.
+  for (const required of [
+    "organism-pc-reads-as-zero",
+    "simulation-last-lineage-flows-reads-as-null",
+    "simulation-lineage-interval-reads-as-empty-map",
+  ]) {
+    assert.ok(
+      MIGRATION_RULE_BY_ID.has(required),
+      `Decision 2 requires a named rule for ${required}`,
+    );
+  }
+  assert.equal(
+    MIGRATION_RULE_BY_ID.size,
+    CHECKPOINT_MIGRATION_RULES.length,
+    "the by-id index and the rule list must not drift apart",
+  );
+  console.log(`checkpoint migration rule table: PASS (${CHECKPOINT_MIGRATION_RULES.length} rules)`);
+}
+
 testFlowDeterminism();
 testProcessActivations();
 testWasteAccounting();
@@ -423,5 +562,7 @@ testIntervalCoversDead();
 testFlowSelfConsistency();
 testFlowRngNeutrality();
 testFlowCheckpoint();
+testCheckpointMigrationRuleTable();
+
 testFlowEvidence();
 console.log(`flow validation: PASS (checkpoint schema ${CHECKPOINT_SCHEMA_VERSION}, engine ${ENGINE_VERSION})`);
