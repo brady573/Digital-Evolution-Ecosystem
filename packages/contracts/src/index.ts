@@ -330,6 +330,20 @@ export const CHECKPOINT_MIGRATION_RULES: readonly CheckpointMigrationRule[] = [
   },
   // --- Decision-record backfills, found by enumerating the restore path ----
   {
+    id: "major-catalyst-tick-predates-cooldown",
+    path: "decisions.lastMajorCatalystTick",
+    appliesToSchemas: ["0.1", "0.2"],
+    effectiveDefault: "null",
+    absorber: "structural-branch",
+    omission:
+      "The major-catalyst cooldown did not exist before checkpoint 0.3, so a 0.1 or 0.2 save carries no value for this field. `null` is the truth about such a world rather than a permissive substitute: the mechanic had not yet been introduced, so no major catalyst had ever fired.",
+    hazard: "load-bearing-dynamics",
+    historicalBasis:
+      "`lastMajorCatalystTick` was introduced with checkpoint 0.3 in b040b19 on 2026-09-24, alongside the cooldown. The 0.2 decision checkpoint at b39fd46 writes only `pending`, `resolutions` and `policyVersion` — zero occurrences of this field — so the absence is a fact about what those builds wrote. 0.3 is deliberately NOT in scope: b040b19 does write this field, so preserving a 0.3 value is a restore correction rather than a historical absence, and is handled in `restore`.",
+    dynamicsJustification:
+      "This is the one retained rule that gates the world, so the default is the value that preserves the prior behaviour rather than the one that looks neutral. `null` means \"no major catalyst has ever fired\" and therefore reads as cooldown-clear, which is the correct reading for a world from before the mechanic existed. The default is therefore safe precisely because it is historically true, and never because absence is presumed harmless. A *present* value is a different case at every schema: it is validated, never defaulted, so a corrupt one is refused rather than cleared into a permission.",
+  },
+  {
     id: "pending-decision-source-backfilled-from-event",
     path: "decisions.pending.source",
     appliesToSchemas: ["0.2"],
@@ -658,70 +672,114 @@ export const validateCheckpoint = (checkpoint: unknown): void => {
   };
   walk(checkpoint.experiment, "experiment");
 
+  /**
+   * Whether a field may be *absent* is version-scoped: a build that wrote the
+   * save may not have had the field, and the migration table names the shape it
+   * wrote. That is the one job the version split has.
+   *
+   * Whether a value that is *present* is valid is not version-scoped. A field
+   * holding a value of the wrong kind, a malformed container, a non-finite
+   * required number, or a record that contradicts itself is invalid in every
+   * schema — an older build writing a corrupt value did not make it correct.
+   *
+   * The two were previously conflated, because one early return guarded both.
+   * A rule governing absence read as though it also governed validity, and a
+   * 0.1-0.3 save carrying a malformed container or a contradictory decision
+   * record reached `restore`. So: presence below is current-only, and validity
+   * applies to whatever is present at any schema.
+   */
+  const decisions = checkpoint.decisions;
+  if (decisions !== undefined && !isPlainObject(decisions)) {
+    reject("decisions", "malformed-container", `expected a decisions object, got ${describe(decisions)}`);
+  }
+  if (decisions !== undefined) {
+    validateDecisionRecords(decisions as Record<string, unknown>);
+  }
+  const analysis = checkpoint.analysis;
+  if (analysis !== undefined && !isPlainObject(analysis)) {
+    reject("analysis", "malformed-container", `expected an analysis object, got ${describe(analysis)}`);
+  }
+  if (analysis !== undefined && (analysis as Record<string, unknown>).records !== undefined) {
+    if (!Array.isArray((analysis as Record<string, unknown>).records)) {
+      reject("analysis.records", "malformed-container", `expected a records array, got ${describe((analysis as Record<string, unknown>).records)}`);
+    }
+  }
+  if (checkpoint.control !== undefined && checkpoint.control !== null && !isPlainObject(checkpoint.control)) {
+    reject("control", "wrong-type", `expected null or a control checkpoint object, got ${describe(checkpoint.control)}`);
+  }
   if (schema !== "0.4") return;
 
-  const decisions = checkpoint.decisions;
+  // Presence. Every field below is required of a current save and may be
+  // absent in an older one, which is what the rules above record.
   if (!isPlainObject(decisions)) {
     reject("decisions", "malformed-container", "current schema requires a decisions object");
   }
+  if (!Array.isArray((decisions as Record<string, unknown>).resolutions)) {
+    reject("decisions.resolutions", "malformed-container", `expected an array, got ${describe((decisions as Record<string, unknown>).resolutions)}`);
+  }
+  if (!isPlainObject(analysis)) {
+    reject("analysis", "malformed-container", "current schema requires an analysis object");
+  }
+  if (!Array.isArray((analysis as Record<string, unknown>).records)) {
+    reject("analysis.records", "malformed-container", "current schema requires a records array");
+  }
+};
+
+/**
+ * Validity of a present `decisions` payload, at every supported schema.
+ *
+ * These are the checks that used to sit behind the version guard, which meant
+ * they applied only to the current schema. A resolution is a record of a
+ * decision that actually happened, so its parts have to agree with each other
+ * at any schema: a source the schema does not know, or a tick that is not a
+ * tick, is not an unknown kind of resolution but a record that contradicts
+ * itself, and would otherwise pass a shape check while describing a decision
+ * that never occurred.
+ */
+function validateDecisionRecords(decisions: Record<string, unknown>): void {
   // `lastDecisionTick` gates quiet time and `lastMajorCatalystTick` gates the
-  // major cooldown, where null reads as "clear". Neither may be coerced.
-  // A non-finite number is its own contract failure rather than a wrong type.
-  // The value has the right type category and is still invalid for the field,
-  // and wrong-type and invalid-numeric are different failures a reader may want
-  // to tell apart. No claim is made here about how a non-finite value arises.
+  // major cooldown, where null reads as "clear". Neither may be coerced: a
+  // value substituted for a corrupt one would grant a capability the real
+  // cooldown would have withheld, and the player could not tell.
   if (typeof decisions.lastDecisionTick === "number" && !Number.isFinite(decisions.lastDecisionTick)) {
     reject("decisions.lastDecisionTick", "non-finite-numeric", `expected a finite number, got ${String(decisions.lastDecisionTick)}`);
   }
-  if (!isFiniteNumber(decisions.lastDecisionTick)) {
+  if (decisions.lastDecisionTick !== undefined && !isFiniteNumber(decisions.lastDecisionTick)) {
     reject("decisions.lastDecisionTick", "wrong-type", `expected a finite number, got ${describe(decisions.lastDecisionTick)}`);
   }
   const major = decisions.lastMajorCatalystTick;
   if (typeof major === "number" && !Number.isFinite(major)) {
     reject("decisions.lastMajorCatalystTick", "non-finite-numeric", `expected null or a finite number, got ${String(major)}`);
   }
-  if (major !== null && !isFiniteNumber(major)) {
+  if (major !== undefined && major !== null && !isFiniteNumber(major)) {
     reject("decisions.lastMajorCatalystTick", "wrong-type", `expected null or a finite number, got ${describe(major)}`);
   }
-  if (decisions.pending !== null && decisions.pending !== undefined && !isPlainObject(decisions.pending)) {
+  if (decisions.pending !== undefined && decisions.pending !== null && !isPlainObject(decisions.pending)) {
     reject("decisions.pending", "wrong-type", `expected null or a decision object, got ${describe(decisions.pending)}`);
   }
+  if (decisions.resolutions === undefined) return;
   if (!Array.isArray(decisions.resolutions)) {
     reject("decisions.resolutions", "malformed-container", `expected an array, got ${describe(decisions.resolutions)}`);
   }
-  // A resolution is a record of a decision that actually happened, so its parts
-  // have to agree with each other. A source the schema does not know, or a tick
-  // that is not a tick, is not a resolution of unknown type — it is a record
-  // that contradicts itself, which is a different failure from a wrong type and
-  // would otherwise pass a shape check while describing a decision that never
-  // occurred.
-  decisions.resolutions.forEach((raw: unknown, index: number) => {
+  (decisions.resolutions as unknown[]).forEach((raw: unknown, index: number) => {
     const at = `decisions.resolutions[${index}]`;
     if (!isPlainObject(raw)) {
       reject(at, "malformed-container", `expected a resolution object, got ${describe(raw)}`);
     }
+    const record = raw as Record<string, unknown>;
     for (const key of ["opportunityId", "commandId"] as const) {
-      if (typeof raw[key] !== "string" || raw[key] === "") {
-        reject(`${at}.${key}`, "structural-contradiction", `a resolved decision must name its ${key}, got ${describe(raw[key])}`);
+      if (typeof record[key] !== "string" || record[key] === "") {
+        reject(`${at}.${key}`, "structural-contradiction", `a resolved decision must name its ${key}, got ${describe(record[key])}`);
       }
     }
-    if (!isFiniteNumber(raw.tick)) {
-      reject(`${at}.tick`, "structural-contradiction", `a resolution must be stamped with a finite tick, got ${describe(raw.tick)}`);
+    if (!isFiniteNumber(record.tick)) {
+      reject(`${at}.tick`, "structural-contradiction", `a resolution must be stamped with a finite tick, got ${describe(record.tick)}`);
     }
-    if (raw.source !== "event_decision" && raw.source !== "world_catalyst") {
-      reject(`${at}.source`, "structural-contradiction", `unknown decision source ${JSON.stringify(raw.source)}`);
+    if (record.source !== "event_decision" && record.source !== "world_catalyst") {
+      reject(`${at}.source`, "structural-contradiction", `unknown decision source ${JSON.stringify(record.source)}`);
     }
   });
-  if (!isPlainObject(checkpoint.analysis)) {
-    reject("analysis", "malformed-container", "current schema requires an analysis object");
-  }
-  if (!Array.isArray((checkpoint.analysis as Record<string, unknown>).records)) {
-    reject("analysis.records", "malformed-container", "current schema requires a records array");
-  }
-  if (checkpoint.control !== null && checkpoint.control !== undefined && !isPlainObject(checkpoint.control)) {
-    reject("control", "wrong-type", `expected null or a control checkpoint object, got ${describe(checkpoint.control)}`);
-  }
-};
+}
 
 
 /* ------------------------------------------------------------------ *

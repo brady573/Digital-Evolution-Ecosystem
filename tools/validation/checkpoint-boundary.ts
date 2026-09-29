@@ -210,7 +210,7 @@ lines.push("");
 lines.push("## Known limits of this boundary");
 lines.push("");
 lines.push(
-  `- **Strict field requirements apply to the current schema (\`${CURRENT_SCHEMA}\`) only.** A save declaring an older supported version is checked for a known version, a usable container, and recognised type tags — and no further. So a legacy save whose *contents* are malformed inside that container can still restore. **This is a known gap rather than a deliberate trade**, and it is being corrected: whether a field may be absent and whether a present value is valid are two independent axes, and only the first was version-scoped.`,
+  `- **Whether a field may be absent is version-scoped; whether a present value is valid is not.** A save declaring an older supported version may omit the fields listed above, because a supported build really did write it without them. But once a value *is* present, it is held to the same checks at every schema: a wrong type, a malformed container, a non-finite required number, or a decision record whose parts disagree is refused wherever it appears. **Migration widens compatibility for known historical absence; it does not widen validity.**`,
 );
 lines.push(
   "- **Migration runs before validation.** A save that migrates cleanly is never caught by a pre-migration check.",

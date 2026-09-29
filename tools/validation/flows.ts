@@ -451,6 +451,15 @@ const MIGRATION_ABSORBER_PROBES: Readonly<Record<string, { file: string; probe: 
     file: "packages/sim-core/src/engine.ts",
     probe: /this\.lineageInterval\|\|new Map\(\)/,
   },
+  "major-catalyst-tick-predates-cooldown": {
+    file: "packages/sim-runtime/src/session.ts",
+    // Absorber `structural-branch`: the legacy branch reads the field, and a
+    // payload that predates the field falls to the canonical value. Probed
+    // against the same expression the branch actually uses, so a rewrite that
+    // drops the fallback fails here rather than silently re-allowing a
+    // dynamics-gating default.
+    probe: /typeof major==="number"&&Number\.isFinite\(major\)\?major:null;/,
+  },
   "pending-decision-source-backfilled-from-event": {
     file: "packages/sim-runtime/src/session.ts",
     probe: /copy\.source="observed_event"/,
@@ -860,7 +869,54 @@ function testCooldownPreservationAcrossRestore() {
     },
     "a corrupt lastMajorCatalystTick is refused, not defaulted to the permissive end",
   );
-  console.log("major-catalyst cooldown preservation: PASS");
+
+  // (c) A real 0.3 save. 0.3 wrote this field — `b040b19`'s decision checkpoint
+  // assigns it — so discarding it on restore is a restore defect, not a
+  // historical absence, and no migration rule is warranted. The failure mode
+  // is that `null` reads as cooldown-clear, so a suppressed cooldown silently
+  // re-enables a major catalyst after the restore.
+  const legacy: any = JSON.parse(JSON.stringify(saved));
+  legacy.checkpointSchemaVersion = "0.3";
+  const atLegacy = legacy.decisions.lastMajorCatalystTick as number;
+  assert.equal(
+    atLegacy,
+    at,
+    "the 0.3 payload carries the same recorded cooldown, so 0.3 wrote the field",
+  );
+  const legacyRestored = new UniverseSession();
+  legacyRestored.restore(legacy);
+  assert.ok(
+    cooldownBlocked(legacyRestored),
+    "a 0.3 save with an active major-catalyst cooldown restores with the cooldown still active",
+  );
+
+  // (d) The same field, present but wrong-typed, refused at 0.3 too. The
+  // version split governs absence; it must not become a licence to accept a
+  // corrupt value from an older schema.
+  const legacyCorrupt: any = JSON.parse(JSON.stringify(legacy));
+  legacyCorrupt.decisions.lastMajorCatalystTick = "not a tick";
+  assert.throws(
+    () => new UniverseSession().restore(legacyCorrupt),
+    (error: unknown) =>
+      error instanceof CheckpointRejectionError && error.field === "decisions.lastMajorCatalystTick",
+    "a corrupt lastMajorCatalystTick in a 0.3 save is refused, not cleared to the permissive end",
+  );
+
+  // (e) A 0.2 save predates the field — zero occurrences in `b39fd46`. Absence
+  // there is historical fact, so it migrates to the canonical value, and
+  // "never fired" is the truth about a 0.2 world because the mechanic did not
+  // exist yet.
+  const older: any = JSON.parse(JSON.stringify(legacy));
+  older.checkpointSchemaVersion = "0.2";
+  delete older.decisions.lastMajorCatalystTick;
+  const olderRestored = new UniverseSession();
+  olderRestored.restore(older);
+  assert.ok(
+    !cooldownBlocked(olderRestored),
+    "a 0.2 save predating the field migrates to clear, which is historically correct rather than permissive",
+  );
+
+  console.log("major-catalyst cooldown preservation: PASS (0.4, 0.3, and 0.2-absence)");
 }
 
 
@@ -1001,6 +1057,28 @@ function testCheckpointRejectionConditions() {
     delete bad.analysis.records;
     return bad;
   };
+  // The other axis, and the one the version split does not test. A rule
+  // governs *absence*; it says nothing about whether a value that is present
+  // is valid. The asymmetry above proves absence tolerance is version-scoped,
+  // which is why it stayed green while a malformed historical payload loaded.
+  // A field covered by a rule must be *absent* and load; the same field
+  // *present with a wrong type* must be refused at every supported schema.
+  // Scoped to the schemas where that shape is constructible: 0.3 and 0.4 wrote
+  // the field, and 0.1/0.2 predate it, so they are absence cases the migration
+  // table absorbs rather than invalidity cases.
+  for (const schema of ["0.3", "0.4"]) {
+    const wrongTyped: any = JSON.parse(JSON.stringify(good));
+    wrongTyped.checkpointSchemaVersion = schema;
+    wrongTyped.decisions.resolutions = "not an array";
+    const error = rejected(wrongTyped);
+    assert.equal(
+      error.field,
+      "decisions.resolutions",
+      `a present-but-malformed value must be refused at ${schema}, not tolerated because ${schema} may omit the field`,
+    );
+    assert.equal(error.reason, "malformed-container");
+  }
+
   const asCurrent = rejected(missingRecords("0.4"));
   assert.equal(
     asCurrent.field,

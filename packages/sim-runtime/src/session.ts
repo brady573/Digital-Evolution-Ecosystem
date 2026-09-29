@@ -683,7 +683,24 @@ export class UniverseSession {
       this.#policyVersion=DECISION_POLICY_VERSION;
       this.#catalystPolicyVersion=CATALYST_POLICY_VERSION;
       this.#lastDecisionTick=newestKnownDecisionTick(pending,resolutions);
-      this.#lastMajorCatalystTick=null;
+      // 0.3 and 0.2 differ here, and the difference is historical fact rather
+      // than a shared convention. 0.3 wrote this field — b040b19's decision
+      // checkpoint assigns it — so discarding it now would silence a real
+      // cooldown: `null` reads as "clear", and a world restored from a 0.3 save
+      // would permit a major catalyst the save itself recorded as suppressed.
+      // 0.2 predates the field entirely (zero occurrences in b39fd46), so
+      // absence there is the truth about that world and `null` is the
+      // historically correct value rather than a permissive one.
+      //
+      // 0.3's own restore discarded this value on purpose — its comment read
+      // "pacing state restarts ... with a clear cooldown". That convention is
+      // deliberately reversed here: a world whose cooldown is running should
+      // not come back eligible for the catalyst the cooldown was suppressing,
+      // and a save that loads and then behaves differently is worse than one
+      // that refuses, because the player cannot tell which happened.
+      const major=decisions?.lastMajorCatalystTick;
+      this.#lastMajorCatalystTick=
+        typeof major==="number"&&Number.isFinite(major)?major:null;
     }else{
       this.#pendingDecision=null;
       this.#decisionResolutions=[];
