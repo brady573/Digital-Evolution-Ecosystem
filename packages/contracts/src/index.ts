@@ -38,6 +38,137 @@ export interface EngineConfig {
 }
 
 /* ------------------------------------------------------------------ *
+ * Typed identity.
+ *
+ * Lineage and clade are different kinds of thing that look identical at
+ * runtime — both are plain numbers — and the product's namespace split rests
+ * entirely on never confusing them. A clade is the deepest established
+ * mutation branch; a lineage is an ancestral chain. Neither is a subset of the
+ * other, and `L-0007` and `C-0007` are unrelated organisms of the world.
+ *
+ * So the identities are branded rather than aliased. `type CladeId = number`
+ * would document the distinction while permitting the exact conflation that
+ * Decision 3 exists to prevent; a brand makes it a compile error instead.
+ *
+ * The brand itself is a compile-time fiction: it is erased at runtime, so no
+ * stored value, checkpoint, or export changes shape because of it. What *does*
+ * change shape is `EntityRef` below, because a reference must now persist what
+ * it denotes. A checkpoint written before that carries bare numbers, which is
+ * why `typedRefs` treats an unkind or primitive ref as "real but unnameable"
+ * rather than guessing -- and why the named, versioned migration for those
+ * legacy references belongs to the checkpoint unit, not here.
+ * ------------------------------------------------------------------ */
+
+declare const identityBrand: unique symbol;
+type Identity<K extends string, B> = B & { readonly [identityBrand]: K };
+
+/** A single organism instance. Not an ancestor and not a group. */
+export type OrganismId = Identity<"organism", number>;
+/** An ancestral chain. `L-` is reserved for this and nothing else. */
+export type LineageId = Identity<"lineage", number>;
+/** An analytical clade: the deepest established mutation branch. `C-` is
+ *  reserved for this and nothing else. */
+export type CladeId = Identity<"clade", number>;
+/** A durable history record. */
+export type HistoryRecordId = Identity<"history-record", string>;
+/** One observed event. */
+export type EventId = Identity<"event", string>;
+/** A persistent story/event family that several events belong to. */
+export type ArcId = Identity<"arc", string>;
+/** A decision the runtime offered and the player answered. */
+export type DecisionOpportunityId = Identity<"decision-opportunity", string>;
+/** The applied record of a player's decision. */
+export type DecisionCommandId = Identity<"decision-command", string>;
+/** A displayed universe instance. Presentation identity, not biological state. */
+export type WorldId = Identity<"world", number>;
+/* A matched control twin is not given its own identity type: the model has no
+ * comparison id field today — the twin is reached through `control`, and its
+ * world identity is a `WorldId` like any other. If a comparison id is ever
+ * introduced it should be branded then, rather than reserved here now. */
+
+/**
+ * The one place a raw number becomes a typed identity. Producers call these so
+ * the widening is explicit and reviewable; consumers never call them, because a
+ * consumer that has to invent an identity is a consumer reading the wrong
+ * field. A `number` reaching these functions is a producer stating what it
+ * means, which is exactly the claim that needs to be visible in review.
+ */
+export const organismId = (value: number): OrganismId => value as OrganismId;
+export const lineageId = (value: number): LineageId => value as LineageId;
+export const cladeId = (value: number): CladeId => value as CladeId;
+export const worldId = (value: number): WorldId => value as WorldId;
+export const historyRecordId = (value: string): HistoryRecordId => value as HistoryRecordId;
+export const eventId = (value: string): EventId => value as EventId;
+export const arcId = (value: string): ArcId => value as ArcId;
+export const decisionOpportunityId = (value: string): DecisionOpportunityId =>
+  value as DecisionOpportunityId;
+export const decisionCommandId = (value: string): DecisionCommandId => value as DecisionCommandId;
+
+/**
+ * What an entity reference denotes.
+ *
+ * `kind` is `null` when the reference is real but its kind was not recorded —
+ * a checkpoint written before refs carried their kind. That is not the same as
+ * a reference being absent: the entity exists, we simply cannot say what it is.
+ * A consumer must therefore omit the claim rather than guess a namespace,
+ * because printing `L-0009` for an unnamed reference would assert something
+ * unverified, and printing `C-0009` would be equally unverified.
+ */
+export type EntityRefKind = "organism" | "lineage" | "clade";
+
+export interface EntityRef {
+  readonly kind: EntityRefKind | null;
+  readonly id: number;
+}
+
+/** An `EntityRef` whose kind is actually known. */
+export interface TypedEntityRef {
+  readonly kind: EntityRefKind;
+  readonly id: number;
+}
+
+export const lineageRef = (id: number): EntityRef => ({ kind: "lineage", id });
+export const cladeRef = (id: number): EntityRef => ({ kind: "clade", id });
+export const organismRef = (id: number): EntityRef => ({ kind: "organism", id });
+
+const ENTITY_REF_KINDS: readonly EntityRefKind[] = ["organism", "lineage", "clade"];
+
+/**
+ * Keep only the references whose kind is actually recorded.
+ *
+ * This is also the boundary that legacy data crosses. A checkpoint written
+ * before refs carried their kind holds bare numbers, and `restore` performs no
+ * deep validation, so those entries arrive as primitives. `typeof ref === "object"`
+ * is what keeps them from being read as objects whose `id` is `undefined`, and
+ * it is why the filter is defensive rather than a plain `kind !== null` test.
+ *
+ * The kind is checked against the known set rather than merely for
+ * non-nullness. A restore performs no validation, so an unrecognised kind is
+ * exactly the kind of data that can arrive here, and forwarding it would push
+ * a bogus namespace into the contract and into rendered output.
+ */
+export const typedRefs = (refs: readonly unknown[]): readonly TypedEntityRef[] => {
+  const out: TypedEntityRef[] = [];
+  for (const ref of refs) {
+    if (ref === null || typeof ref !== "object") continue;
+    const candidate = ref as Partial<EntityRef>;
+    if (typeof candidate.id !== "number" || !Number.isFinite(candidate.id)) continue;
+    if (candidate.kind === null || candidate.kind === undefined) continue;
+    if (!ENTITY_REF_KINDS.includes(candidate.kind)) continue;
+    out.push({ kind: candidate.kind, id: candidate.id });
+  }
+  return out;
+};
+
+/**
+ * Namespace labels. `L-` is a lineage and only a lineage; `C-` is a clade and
+ * only a clade. Both analysis prose and presentation format through these, so
+ * the two cannot drift apart into two truths for the same identity.
+ */
+export const formatLineageId = (id: LineageId): string => `L-${String(id).padStart(4, "0")}`;
+export const formatCladeId = (id: CladeId): string => `C-${String(id).padStart(4, "0")}`;
+
+/* ------------------------------------------------------------------ *
  * Cross-boundary read models.
  *
  * These declarations describe what sim-core and sim-analysis already
@@ -183,15 +314,16 @@ export type HistoryEvidence = ObservationFrame & Partial<NicheBaselineEvidence>;
  *
  * Field names are snake_case because they are the retained on-the-wire
  * shape the product and its history consumers already read; they are not
- * renamed here. `entity_refs` is an untyped numeric reference list at this
- * stage: what each reference *denotes* is typed in a later unit, and until
- * then a consumer must not infer a namespace from the number alone.
+ * renamed here. `entity_refs` carries what each reference denotes, so a
+ * consumer never has to infer a namespace from a bare number. A reference
+ * whose `kind` is null is a real entity of unrecorded kind: omit it rather
+ * than guess.
  */
 export interface HistoryRecord {
   /** Durable record identity: `<arc id>-<phase>-<tick>`. */
-  readonly id: string;
+  readonly id: HistoryRecordId;
   /** Persistent story/event family identity this record belongs to. */
-  readonly arc_id: string;
+  readonly arc_id: ArcId;
   readonly kind: string;
   readonly tick: number;
   readonly phase: string;
@@ -199,7 +331,7 @@ export interface HistoryRecord {
   readonly summary: string;
   readonly level: string;
   readonly evidence: HistoryEvidence;
-  readonly entity_refs: readonly number[];
+  readonly entity_refs: readonly EntityRef[];
 }
 
 /** A durable ecological era boundary — the era read model. */
@@ -237,9 +369,9 @@ export interface AnalysisState {
 export interface ObservedEvent {
   readonly schemaVersion: 1;
   /** Immutable within universe history. */
-  readonly eventId: string;
+  readonly eventId: EventId;
   /** Persistent story/event family identity. */
-  readonly arcId: string;
+  readonly arcId: ArcId;
   readonly kind: string;
   readonly phase: string;
   readonly tick: number;
@@ -247,7 +379,9 @@ export interface ObservedEvent {
   readonly title: string;
   readonly summary: string;
   readonly evidence: Readonly<Record<string, number | string | boolean>>;
-  readonly entityRefs: readonly number[];
+  /** Entities this event is about, each tagged with what it denotes. A ref
+   *  whose kind is null must not be rendered into either namespace. */
+  readonly entityRefs: readonly EntityRef[];
 }
 
 /**
@@ -282,12 +416,12 @@ export interface DecisionChoice {
 
 export interface DecisionOpportunity {
   readonly schemaVersion: 1;
-  readonly opportunityId: string;
+  readonly opportunityId: DecisionOpportunityId;
   /** So a restored opportunity stays interpretable after the catalog evolves. */
   readonly policyVersion: string;
   readonly source: "observed_event";
-  readonly sourceEventId: string;
-  readonly sourceArcId: string | null;
+  readonly sourceEventId: EventId;
+  readonly sourceArcId: ArcId | null;
   readonly createdTick: number;
   readonly status: "pending" | "resolved";
   readonly prompt: string;
@@ -301,15 +435,15 @@ export interface DecisionOpportunity {
 /** An action followed by later outcomes. Not a causal claim. */
 export interface DecisionResolution {
   readonly schemaVersion: 1;
-  readonly commandId: string;
+  readonly commandId: DecisionCommandId;
   /** Tick at resolution/application. Resolution never advances the world. */
   readonly tick: number;
   /** Tick the opportunity was offered. Preserved so History and evidence can
    *  order offer before resolution without re-derivation. */
   readonly offerTick: number;
-  readonly opportunityId: string;
+  readonly opportunityId: DecisionOpportunityId;
   /** Null for world-catalyst decisions: never a fabricated event id. */
-  readonly sourceEventId: string | null;
+  readonly sourceEventId: EventId | null;
   readonly choiceId: string;
   /** Presentation copy as offered, recorded so History never needs its own
    *  choice catalog and cannot drift from what was actually applied. */
@@ -412,8 +546,8 @@ export interface AftermathBaseline {
  */
 export interface AftermathState {
   readonly schemaVersion: 1;
-  readonly opportunityId: string;
-  readonly commandId: string;
+  readonly opportunityId: DecisionOpportunityId;
+  readonly commandId: DecisionCommandId;
   /** The tick the intervention was applied at. Resolution advanced zero ticks
    *  to get here, and the impact state must not advance any. */
   readonly resolutionTick: number;
@@ -485,7 +619,7 @@ export interface CatalystDiagnosis {
 
 export interface CatalystOpportunity {
   readonly schemaVersion: 1;
-  readonly opportunityId: string;
+  readonly opportunityId: DecisionOpportunityId;
   /** Catalyst catalog version that generated this window. */
   readonly policyVersion: string;
   readonly source: "world_catalyst";
@@ -618,11 +752,11 @@ export interface FlowFacts {
 
 
 export interface RenderOrganism {
-  readonly id: number;
-  readonly parent: number | null;
+  readonly id: OrganismId;
+  readonly parent: OrganismId | null;
   readonly generation: number;
-  readonly lineageId: number;
-  readonly cladeId: number;
+  readonly lineageId: LineageId;
+  readonly cladeId: CladeId;
   readonly x: number;
   readonly y: number;
   readonly energy: number;
@@ -666,8 +800,8 @@ export interface RenderWasteField {
  * separate properties so neither can be substituted for the other.
  */
 export interface Clade {
-  readonly id: number;
-  readonly root_lineage: number;
+  readonly id: CladeId;
+  readonly root_lineage: LineageId;
   readonly founder_family: number;
   readonly born: number;
   readonly mutations: readonly string[];
@@ -721,7 +855,7 @@ export interface RenderSnapshot {
    *  checkpoints and does not affect replay. The renderer uses it to scope
    *  presentation-only state, because two universes can share a seed and a
    *  resolved config. */
-  readonly worldId: number;
+  readonly worldId: WorldId;
   /** Exact resolved engine configuration of the running universe (0.20.0+).
    *  Presentation uses it to show the active recipe without ever restaging
    *  it as pending. Read-only: it never changes simulation behavior. */
@@ -829,7 +963,7 @@ export type RuntimeCommand =
   | { readonly type: "CREATE_CONTROL_FORK" }
   | {
       readonly type: "RESOLVE_EVENT_DECISION";
-      readonly opportunityId: string;
+      readonly opportunityId: DecisionOpportunityId;
       readonly choiceId: string;
       readonly requestId?: string;
     }

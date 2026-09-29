@@ -77,7 +77,12 @@ function cuseArc(session: UniverseSession, fromTick: number) {
       return {
         tick: r.tick,
         phase: r.phase,
-        leadingLineage: (r.entityRefs && r.entityRefs[0]) ?? null,
+        // `r` is a `cuse` record, whose refs are guild top consumers: genuine
+        // lineages. The kind is read rather than assumed, because this file also
+        // sweeps `ObservedEvent`s whose refs are tagged, and a bare `[0]` would
+        // hand back the whole ref object rather than an identity. A ref of
+        // unrecorded kind yields null instead of a guessed namespace.
+        leadingLineage: (r.entityRefs ?? []).find((ref: { kind: string | null }) => ref && ref.kind === "lineage")?.id ?? null,
         scavengerShare: typeof scalars.crossfeeder_fraction === "number" ? scalars.crossfeeder_fraction : null,
         evidence: scalars,
       };

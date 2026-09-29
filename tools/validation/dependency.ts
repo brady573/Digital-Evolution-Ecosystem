@@ -149,7 +149,7 @@ function testFormAndEstablish() {
   assert.equal(records.length, 1, "one establishment record");
   assert.equal(records[0].phase, "established", "established phase");
   assert.equal(records[0].tick, 45000, "record stamped at the establishing tick");
-  assert.deepEqual(records[0].entity_refs, [9], "top consumer lineage referenced");
+  assert.deepEqual(records[0].entity_refs, [{ kind: "lineage", id: 9 }], "top consumer lineage referenced");
   assert.equal((observer as any).dep.baselineProduced, 60, "production baseline captured");
   assert.equal((observer as any).dep.estScav, 0.07, "established guild level captured");
   console.log("dependency form + establish: PASS");
@@ -193,7 +193,7 @@ function testDisruption() {
   assert.equal(records[1].title, "The C-using guild collapsed", "collapse titled plainly");
   assert.ok(records[1].summary.includes("Scavenger share fell from 7%"), "guild loss quantified");
   assert.ok(records[1].summary.includes("per-stride C production stood at"), "production reported as measured context");
-  assert.deepEqual(records[1].entity_refs, [9], "prior top consumer referenced");
+  assert.deepEqual(records[1].entity_refs, [{ kind: "lineage", id: 9 }], "prior top consumer referenced");
   console.log("dependency disruption: PASS");
 }
 
@@ -230,7 +230,13 @@ function testRecoverySameLineage() {
   assert.equal(records[2].tick, 62500, "recovery stamped at persistence");
   assert.equal(records[2].phase, "recovered", "recovered phase");
   assert.ok(records[2].title.includes("recovered"), "same lineage worded as recovery");
-  assert.deepEqual(records[2].entity_refs, [9], "returning lineage referenced");
+  // Decision 3 audit: this is a C-use guild recovery record, not the
+  // dormant-return one. `depRecords` filters the guild detector, and the guild's
+  // top consumer is a lineage (`flows.lineages[].lineageId`), so `L-` and
+  // "lineage" are both correct here. The assertion now pins the kind as well as
+  // the id, so a future change that reclassified this ref as a clade would fail
+  // rather than pass on the bare id alone.
+  assert.deepEqual(records[2].entity_refs, [{ kind: "lineage", id: 9 }], "returning lineage referenced");
   console.log("dependency recovery: PASS");
 }
 
@@ -247,7 +253,7 @@ function testRecoveryReplacement() {
   assert.equal(records.length, 3, "establishment + disruption + replacement records");
   assert.equal(records[2].title, "A new lineage became a major C consumer", "new lineage worded as major consumer");
   assert.ok(records[2].summary.includes("succeeding L-0009"), "replaced lineage named factually");
-  assert.deepEqual(records[2].entity_refs, [41], "replacing lineage referenced");
+  assert.deepEqual(records[2].entity_refs, [{ kind: "lineage", id: 41 }], "replacing lineage referenced");
   console.log("dependency replacement: PASS");
 }
 
@@ -288,7 +294,7 @@ function testTopConsumerRanksAbsolute() {
   observer.observe(frame(45000, { scav: 28, top: null, extraLineages: [tiny, main] }));
   const records = depRecords(observer);
   assert.equal(records.length, 1, "one establishment record");
-  assert.deepEqual(records[0].entity_refs, [9], "main supplier named, not the 100% singleton");
+  assert.deepEqual(records[0].entity_refs, [{ kind: "lineage", id: 9 }], "main supplier named, not the 100% singleton");
   console.log("dependency absolute ranking: PASS");
 }
 

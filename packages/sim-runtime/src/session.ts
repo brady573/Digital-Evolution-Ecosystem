@@ -15,8 +15,15 @@ import type {
   SupportedUniverseCheckpoint,
   UniverseCheckpoint,
   UniverseCheckpointV02,
+  WorldId,
 } from "@digital-evolution/contracts";
-import { AFTERMATH_COMPARABLES } from "@digital-evolution/contracts";
+// Aliased: `renderSnapshot` has a parameter named `worldId`, and the shadow
+// would otherwise hide the constructor that assigns the presentation identity.
+import {
+  AFTERMATH_COMPARABLES,
+  decisionCommandId,
+  worldId as toWorldId,
+} from "@digital-evolution/contracts";
 import {
   ENGINE_VERSION,
   EVENT_STRIDE,
@@ -106,7 +113,7 @@ function observeIfDue(sim:any,observer:EcologyObserver){
   if(sim.t>0&&sim.t%EVENT_STRIDE===0)observer.observe(analysisFrame(sim));
 }
 
-function renderSnapshot(sim:any,analysis:EcologyObserver,control:any|null,pendingDecision:PendingDecision|null,resolvedDecisions:readonly DecisionResolution[],worldId:number,aftermath:AftermathState|null):RenderSnapshot{
+function renderSnapshot(sim:any,analysis:EcologyObserver,control:any|null,pendingDecision:PendingDecision|null,resolvedDecisions:readonly DecisionResolution[],worldId:WorldId,aftermath:AftermathState|null):RenderSnapshot{
   const metrics=sim.metrics();
   return{
     tick:sim.t,
@@ -228,11 +235,11 @@ export class UniverseSession {
    * sufficient: two universes (or a fork, or a same-seed restore) can
    * legitimately share both.
    */
-  #worldId=0;
+  #worldId:WorldId=toWorldId(0);
   get worldId(){return this.#worldId}
 
   create(config:EngineConfig){
-    this.#worldId=++worldIdCounter;
+    this.#worldId=toWorldId(++worldIdCounter);
     this.#experiment=new Simulation(config);
     this.#analysis=new EcologyObserver();
     this.#control=null;
@@ -494,7 +501,7 @@ export class UniverseSession {
     const fromCatalyst=pending.source==="world_catalyst";
     const resolution:DecisionResolution={
       schemaVersion:1,
-      commandId:decisionCommandIdFor(pending.opportunityId,choice.choiceId,pending.policyVersion),
+      commandId:decisionCommandId(decisionCommandIdFor(pending.opportunityId,choice.choiceId,pending.policyVersion)),
       tick:this.#experiment.t,
       offerTick:pending.createdTick,
       opportunityId:pending.opportunityId,
@@ -608,7 +615,7 @@ export class UniverseSession {
     if(checkpoint.engineVersion!==ENGINE_VERSION)throw new Error(`Checkpoint engine ${checkpoint.engineVersion} does not match ${ENGINE_VERSION}`);
     // A restore is a new displayed world, not the old one continued: hand out
     // a fresh presentation identity so rendering inertia cannot carry over.
-    this.#worldId=++worldIdCounter;
+    this.#worldId=toWorldId(++worldIdCounter);
     this.#experiment=restoreSimulationCheckpoint(checkpoint.experiment as any);
     this.#analysis=EcologyObserver.restore(checkpoint.analysis);
     // Aftermath is deliberately NOT restored. It is evidence held outside the
