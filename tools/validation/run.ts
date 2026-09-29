@@ -39,6 +39,7 @@ export interface UnitRecord {
   readonly id: string;
   readonly cls: string;
   readonly enforcement: string;
+  readonly mergeGate: boolean;
   readonly group: string;
   readonly executed: boolean;
   readonly status: "pass" | "fail" | "skipped";
@@ -148,6 +149,7 @@ export function runGroup(groupId: string, dryRun = false): number {
         id: unit.id,
         cls: unit.cls,
         enforcement: unit.enforcement,
+        mergeGate: unit.mergeGate,
         group: groupId,
         executed: false,
         status: "skipped",
@@ -165,6 +167,7 @@ export function runGroup(groupId: string, dryRun = false): number {
       id: unit.id,
       cls: unit.cls,
       enforcement: unit.enforcement,
+        mergeGate: unit.mergeGate,
       group: groupId,
       executed: true,
       status: ok ? "pass" : "fail",
@@ -191,6 +194,7 @@ export function runGroup(groupId: string, dryRun = false): number {
       id: unit.id,
       cls: unit.cls,
       enforcement: unit.enforcement,
+        mergeGate: unit.mergeGate,
       group: groupId,
       executed: false,
       status: "skipped",
@@ -279,7 +283,9 @@ const mergeSummaries = (dir: string): number => {
     console.warn(`ignoring summary for a different commit: ${otherCommit}`);
   }
 
-  const validation = [...records.values()].sort((a, b) => a.id.localeCompare(b.id));
+  const validation = [...records.values()]
+    .map((r) => (r.mergeGate === undefined ? { ...r, mergeGate: UNIT_BY_ID.get(r.id)?.mergeGate ?? false } : r))
+    .sort((a, b) => a.id.localeCompare(b.id));
   const summary: RunSummary = { schema: 1, commit, runner: "merged", validation };
   mkdirSync(TELEMETRY_DIR, { recursive: true });
   writeFileSync(TELEMETRY_FILE, `${JSON.stringify(summary, null, 2)}\n`, "utf8");
@@ -361,6 +367,7 @@ export const runShard = (groupId: string): number => {
       id: unit.id,
       cls: unit.cls,
       enforcement: unit.enforcement,
+        mergeGate: unit.mergeGate,
       group: groupId,
       executed: false,
       status: "skipped",
@@ -377,6 +384,7 @@ export const runShard = (groupId: string): number => {
         id: unit.id,
         cls: unit.cls,
         enforcement: unit.enforcement,
+        mergeGate: unit.mergeGate,
         group: groupId,
         executed: false,
         status: "skipped",
@@ -393,6 +401,7 @@ export const runShard = (groupId: string): number => {
       id: unit.id,
       cls: unit.cls,
       enforcement: unit.enforcement,
+        mergeGate: unit.mergeGate,
       group: groupId,
       executed: true,
       status: ok ? "pass" : "fail",
@@ -427,6 +436,7 @@ const printPlan = (asJson: boolean): void => {
             id: u.id,
             cls: u.cls,
             enforcement: u.enforcement,
+            mergeGate: u.mergeGate,
             script: u.script,
             domains: u.domains,
             needs: u.needs,

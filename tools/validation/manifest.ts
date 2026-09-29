@@ -132,6 +132,15 @@ export interface ValidationUnit {
   readonly script: string | null;
   readonly cls: EvidenceClass;
   readonly enforcement: Enforcement;
+  /**
+   * Whether successful completion is required for merge readiness.
+   *
+   * Distinct from `enforcement`: `enforcement` says whether failure fails
+   * this unit/lane, `mergeGate` says whether success is required to merge.
+   * Platform packaging is `blocking` (its lane fails on failure) but not
+   * merge-gating; evidence captures are neither.
+   */
+  readonly mergeGate: boolean;
   /** Repository areas whose change forces this unit. See module notes. */
   readonly domains: Domain[];
   /** Unit ids that must pass before this one is meaningful. */
@@ -166,6 +175,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "typecheck",
     cls: "invariant",
     enforcement: "blocking",
+    mergeGate: true,
     domains: CODE,
     needs: [],
     parallelSafe: true,
@@ -178,6 +188,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:migration",
     cls: "invariant",
     enforcement: "blocking",
+    mergeGate: true,
     domains: CODE,
     needs: [],
     parallelSafe: true,
@@ -192,6 +203,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:validation-arch",
     cls: "invariant",
     enforcement: "blocking",
+    mergeGate: true,
     // The apparatus, the shared vocabulary whose contract it proves, and the
     // documentation that describes it. It is cheap, and a change to any of those
     // is exactly when the claim "this repository's validation contract holds"
@@ -212,6 +224,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:decisions",
     cls: "deterministic",
     enforcement: "blocking",
+    mergeGate: true,
     domains: withApparatus("contracts", "sim-core", "sim-decisions", "sim-runtime", "explorer"),
     needs: [],
     parallelSafe: true,
@@ -225,6 +238,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:catalysts",
     cls: "deterministic",
     enforcement: "blocking",
+    mergeGate: true,
     domains: withApparatus("contracts", "sim-core", "sim-decisions", "sim-runtime", "explorer"),
     needs: [],
     parallelSafe: true,
@@ -237,6 +251,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:flows",
     cls: "deterministic",
     enforcement: "blocking",
+    mergeGate: true,
     domains: withApparatus("contracts", "sim-core", "sim-analysis", "sim-decisions", "sim-runtime", "explorer"),
     needs: [],
     parallelSafe: true,
@@ -250,6 +265,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:time-controls",
     cls: "deterministic",
     enforcement: "blocking",
+    mergeGate: true,
     domains: withApparatus("contracts", "sim-core", "sim-runtime", "explorer"),
     needs: [],
     parallelSafe: true,
@@ -262,6 +278,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:landscape",
     cls: "deterministic",
     enforcement: "blocking",
+    mergeGate: true,
     domains: withApparatus("contracts", "sim-core", "explorer"),
     needs: [],
     parallelSafe: true,
@@ -274,6 +291,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:ecology",
     cls: "deterministic",
     enforcement: "blocking",
+    mergeGate: true,
     domains: withApparatus("contracts", "sim-core"),
     needs: [],
     parallelSafe: true,
@@ -286,6 +304,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:niche",
     cls: "deterministic",
     enforcement: "blocking",
+    mergeGate: true,
     domains: withApparatus("contracts", "sim-core", "sim-analysis", "sim-runtime"),
     needs: [],
     parallelSafe: true,
@@ -299,6 +318,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:aftermath",
     cls: "deterministic",
     enforcement: "blocking",
+    mergeGate: true,
     domains: withApparatus("contracts", "sim-core", "sim-decisions", "sim-runtime", "explorer"),
     needs: [],
     parallelSafe: false,
@@ -326,6 +346,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:dependency:fast",
     cls: "deterministic",
     enforcement: "blocking",
+    mergeGate: true,
     domains: withApparatus("contracts", "sim-core", "sim-decisions", "sim-runtime"),
     needs: [],
     parallelSafe: true,
@@ -339,6 +360,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:dependency:arc",
     cls: "deterministic",
     enforcement: "blocking",
+    mergeGate: true,
     domains: withApparatus("contracts", "sim-core", "sim-decisions", "sim-runtime"),
     needs: [],
     parallelSafe: true,
@@ -352,6 +374,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:dependency:possibility",
     cls: "deterministic",
     enforcement: "blocking",
+    mergeGate: true,
     domains: withApparatus("contracts", "sim-core", "sim-decisions", "sim-runtime"),
     needs: [],
     parallelSafe: true,
@@ -364,6 +387,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:dependency:tradeoff",
     cls: "deterministic",
     enforcement: "blocking",
+    mergeGate: true,
     domains: withApparatus("contracts", "sim-core", "sim-decisions", "sim-runtime"),
     needs: [],
     parallelSafe: true,
@@ -376,6 +400,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:dependency:washout",
     cls: "deterministic",
     enforcement: "blocking",
+    mergeGate: true,
     domains: withApparatus("contracts", "sim-core", "sim-decisions", "sim-runtime"),
     needs: [],
     parallelSafe: true,
@@ -390,6 +415,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "build",
     cls: "presentation",
     enforcement: "blocking",
+    mergeGate: true,
     domains: CODE,
     needs: [],
     parallelSafe: false,
@@ -403,6 +429,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:phenotype",
     cls: "presentation",
     enforcement: "blocking",
+    mergeGate: true,
     domains: withApparatus("contracts", "phenotype", "explorer"),
     needs: [],
     parallelSafe: true,
@@ -415,6 +442,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:art-review",
     cls: "presentation",
     enforcement: "blocking",
+    mergeGate: true,
     domains: withApparatus("contracts", "phenotype", "explorer"),
     needs: [],
     parallelSafe: true,
@@ -426,6 +454,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:plated",
     cls: "presentation",
     enforcement: "blocking",
+    mergeGate: true,
     domains: withApparatus("contracts", "phenotype", "explorer"),
     needs: [],
     parallelSafe: true,
@@ -438,6 +467,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:pixi-spike",
     cls: "presentation",
     enforcement: "blocking",
+    mergeGate: true,
     domains: withApparatus("contracts", "explorer"),
     needs: [],
     parallelSafe: true,
@@ -452,6 +482,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:browser",
     cls: "browser",
     enforcement: "blocking",
+    mergeGate: true,
     domains: withApparatus("contracts", "sim-core", "sim-decisions", "sim-runtime", "phenotype", "explorer", "android"),
     needs: ["build"],
     parallelSafe: false,
@@ -465,6 +496,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:mobile-ui",
     cls: "browser",
     enforcement: "blocking",
+    mergeGate: true,
     domains: withApparatus("contracts", "sim-core", "sim-decisions", "sim-runtime", "phenotype", "explorer", "android"),
     needs: ["build"],
     parallelSafe: false,
@@ -479,6 +511,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: null,
     cls: "platform",
     enforcement: "blocking",
+    mergeGate: false,
     // sim-core is here because a biology change alters the bundle this platform
     // packages. Android proves packaging and launch, but it is still packaging
     // *something*, and that something must be the validated product.
@@ -493,6 +526,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: null,
     cls: "platform",
     enforcement: "blocking",
+    mergeGate: false,
     // sim-core is here because a biology change alters the bundle this platform
     // packages. Android proves packaging and launch, but it is still packaging
     // *something*, and that something must be the validated product.
@@ -509,6 +543,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: null,
     cls: "platform",
     enforcement: "blocking",
+    mergeGate: false,
     // sim-core is here because a biology change alters the bundle this platform
     // packages. Android proves packaging and launch, but it is still packaging
     // *something*, and that something must be the validated product.
@@ -524,6 +559,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: null,
     cls: "platform",
     enforcement: "blocking",
+    mergeGate: false,
     // PAUSED. The emulator lane cannot currently boot reliably: four samples
     // ran 487s, 789s, 828s (action gave up), and ~1150s of a 1200s budget with
     // the device unusable afterwards, and two of four runs failed. A lane that
@@ -550,6 +586,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:survey",
     cls: "scientific",
     enforcement: "manual",
+    mergeGate: false,
     domains: withApparatus("contracts", "sim-core"),
     needs: [],
     parallelSafe: true,
@@ -563,6 +600,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:niche-survey",
     cls: "scientific",
     enforcement: "manual",
+    mergeGate: false,
     domains: withApparatus("contracts", "sim-core", "sim-analysis"),
     needs: [],
     parallelSafe: true,
@@ -575,6 +613,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:washout-reliance",
     cls: "scientific",
     enforcement: "manual",
+    mergeGate: false,
     domains: withApparatus("contracts", "sim-core", "sim-decisions"),
     needs: [],
     parallelSafe: true,
@@ -587,6 +626,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:provenance",
     cls: "scientific",
     enforcement: "manual",
+    mergeGate: false,
     domains: withApparatus("contracts", "sim-core"),
     needs: [],
     parallelSafe: true,
@@ -602,6 +642,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:visual",
     cls: "evidence",
     enforcement: "evidence",
+    mergeGate: false,
     domains: withApparatus("contracts", "sim-core", "phenotype", "explorer", "android"),
     needs: ["build"],
     parallelSafe: false,
@@ -616,6 +657,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "spike:capture",
     cls: "evidence",
     enforcement: "evidence",
+    mergeGate: false,
     domains: withApparatus("contracts", "explorer"),
     needs: [],
     parallelSafe: false,

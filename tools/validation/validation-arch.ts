@@ -57,6 +57,26 @@ const testDuplicateScriptKeysAreRejected = (): void => {
   assert.deepEqual(duplicateScriptKeys(synthetic), ["a"], "synthetic duplicate script key must be reported");
 };
 
+// --- 1c. Merge gating is explicit, distinct from lane enforcement ---------
+
+const testMergeGateIsExplicit = (): void => {
+  for (const unit of UNITS) {
+    assert.equal(typeof (unit as { mergeGate?: unknown }).mergeGate, "boolean", `${unit.id} must declare mergeGate:boolean`);
+  }
+  const byId = new Map(UNITS.map((u) => [u.id, u]));
+  for (const id of ["typecheck", "migration", "validation-arch", "decisions", "browser-smoke", "mobile-ui"]) {
+    assert.equal(byId.get(id)?.mergeGate, true, `${id} must be merge-gating`);
+  }
+  for (const id of ["visual-capture", "pixi-capture", "ecology-survey", "android-sync", "android-assemble", "android-lint"]) {
+    assert.equal(byId.get(id)?.mergeGate, false, `${id} must not be merge-gating`);
+  }
+  for (const unit of UNITS) {
+    if (unit.enforcement === "evidence" || unit.enforcement === "manual") {
+      assert.equal(unit.mergeGate, false, `${unit.id} is ${unit.enforcement} and must not gate merges`);
+    }
+  }
+};
+
 // --- 2. Path classification -------------------------------------------------
 
 const testPathClassification = (): void => {
@@ -496,6 +516,7 @@ const testIdentityNamespacesStayTyped = (): void => {
 const tests: Array<[string, () => void]> = [
   ["architecture has no drift", testArchitectureHasNoDrift],
   ["duplicate script keys are rejected", testDuplicateScriptKeysAreRejected],
+  ["merge gate is explicit", testMergeGateIsExplicit],
   ["path classification", testPathClassification],
   ["biological authority reaches ecological evidence", testBiologicalAuthorityReachesEcologicalEvidence],
   ["contracts are the broadest scope", testContractsAreBroadest],
