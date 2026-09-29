@@ -444,6 +444,19 @@ export const UNITS: readonly ValidationUnit[] = [
     baselineSeconds: 2,
     claim: "The Pixi spike still satisfies the manifest that would justify adopting it.",
   },
+  {
+    id: "pixi-p0",
+    title: "Pixi P0 preparation harness",
+    script: "test:pixi-p0",
+    cls: "presentation",
+    enforcement: "blocking",
+    domains: withApparatus("contracts", "phenotype", "explorer"),
+    needs: [],
+    parallelSafe: true,
+    baselineSeconds: 2,
+    claim:
+      "The P0 Pixi texture/cache/layer preparation is deterministic, movement-isolated, ref-count sound, camera-aligned with the Canvas2D World, and covered by the asset manifest — while the production World stays Canvas2D.",
+  },
 
   // --- Class D: browser / runtime ------------------------------------------
   {
@@ -681,7 +694,7 @@ export const GROUPS: readonly ValidationGroup[] = [
   {
     id: "presentation",
     title: "Presentation and executable product",
-    unitIds: ["build", "phenotype", "art-review", "plated", "pixi-spike"],
+    unitIds: ["build", "phenotype", "art-review", "plated", "pixi-spike", "pixi-p0"],
     ci: false,
   },
   {
@@ -766,7 +779,7 @@ export const GROUPS: readonly ValidationGroup[] = [
   {
     id: "ci-presentation",
     title: "Presentation contracts",
-    unitIds: ["phenotype", "art-review", "plated", "pixi-spike"],
+    unitIds: ["phenotype", "art-review", "plated", "pixi-spike", "pixi-p0"],
     ci: true,
   },
   {
