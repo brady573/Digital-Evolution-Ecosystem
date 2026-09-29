@@ -603,7 +603,7 @@ export class UniverseSession {
   }
 
   /**
-   * Restore schema 0.3 exactly. Older schemas migrate forward explicitly:
+   * Restore schema 0.4 exactly. Older schemas migrate forward explicitly:
    * - 0.2: same simulation/analysis/control state; pending normalizes (a
    *   sourceless pending with a sourceEventId is an event decision);
    *   resolutions backfill offerTick/catalystId; pacing state restarts from

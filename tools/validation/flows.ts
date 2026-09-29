@@ -479,10 +479,17 @@ const MIGRATION_ABSORBER_PROBES: Readonly<Record<string, { file: string; probe: 
   },
 };
 
+/** The schema the maintained save path writes. No rule may tolerate an
+ *  omission in it: that is the whole point of the 0.4 split. */
+const CURRENT_SCHEMA = CHECKPOINT_SCHEMA_VERSION;
+
 const SPLIT_RULE_IDS = ["analysis-substate-absent-reads-as-constructor-default"];
 
 function testCheckpointMigrationRuleTable() {
-  const schemas = ["0.1", "0.2", "0.3"];
+  // Every version the contract knows, so a rule scoped to 0.4 — which no
+  // absence tolerance may be — is still a *valid* value here and has to be
+  // caught by the no-crossing assertion below rather than by the whitelist.
+  const schemas = ["0.1", "0.2", "0.3", "0.4"];
   const absorbers = [
     "live-step-guard",
     "nullable-field",
@@ -513,6 +520,12 @@ function testCheckpointMigrationRuleTable() {
     for (const schema of rule.appliesToSchemas) {
       assert.ok(schemas.includes(schema), `${rule.id} names unknown schema ${schema}`);
     }
+    // No absence tolerance may cross into the current schema: a 0.4 save is
+    // written by the build that requires these fields, so it may not omit them.
+    assert.ok(
+      !rule.appliesToSchemas.includes(CURRENT_SCHEMA),
+      `${rule.id} tolerates its omission in ${CURRENT_SCHEMA}, but the current schema requires it`,
+    );
     assert.ok(absorbers.includes(rule.absorber), `${rule.id} names unknown absorber ${rule.absorber}`);
     assert.ok(
       rule.effectiveDefault.length > 0,

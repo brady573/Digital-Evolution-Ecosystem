@@ -1453,7 +1453,15 @@ export interface DecisionCheckpoint {
   readonly lastMajorCatalystTick: number | null;
 }
 
-/** Resumable checkpoint, schema 0.3: adds catalyst windows and pacing state. */
+/**
+ * The current resumable checkpoint. Schema 0.4.
+ *
+ * Carries catalyst windows and pacing state as 0.3 did, and additionally
+ * guarantees the fields that arrived *during* 0.3 — `Organism.pc`,
+ * `Simulation.lastLineageFlows` and `Simulation.lineageInterval`, the C-use and
+ * niche sub-states, and tagged entity references. Those are the fields 0.3
+ * could not promise, which is the whole reason for this version.
+ */
 export interface UniverseCheckpoint {
   readonly checkpointSchemaVersion: "0.4";
   readonly engineVersion: string;

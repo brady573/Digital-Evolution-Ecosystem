@@ -417,7 +417,7 @@ function testCrashAndCooldown() {
 function testCatalystCheckpoint() {
   const { session, window } = atFirstWindow();
   const saved = session.checkpoint();
-  assert.equal(saved.checkpointSchemaVersion, CHECKPOINT_SCHEMA_VERSION, "new saves use schema 0.3");
+  assert.equal(saved.checkpointSchemaVersion, CHECKPOINT_SCHEMA_VERSION, "new saves use the running build's current schema");
   assert.equal(saved.decisions.pending?.opportunityId, window.opportunityId, "pending catalyst persisted");
   assert.equal(saved.decisions.catalystPolicyVersion, CATALYST_POLICY_VERSION, "catalyst catalog version persisted");
   assert.equal(typeof saved.decisions.lastDecisionTick, "number", "quiet state persisted");
@@ -445,7 +445,16 @@ function testCatalystCheckpoint() {
   };
   const migrated = new UniverseSession();
   assert.equal(migrated.restore(legacy02).pendingDecision?.source, "observed_event", "0.2 pending normalizes to event provenance");
-  assert.equal(migrated.checkpoint().checkpointSchemaVersion, "0.3", "migrated save re-saves as 0.3");
+  // The intent is unchanged from when this read "0.3": a world restored from an
+  // older schema is re-saved in the *running build's* current schema, so it
+  // moves forward rather than staying pinned to a legacy version. A3.3 made
+  // that current schema 0.4, so the expected value moved with it. Bound to the
+  // constant so the next version bump cannot leave this a stale string.
+  assert.equal(
+    migrated.checkpoint().checkpointSchemaVersion,
+    CHECKPOINT_SCHEMA_VERSION,
+    "migrated save re-saves in the running build's current schema",
+  );
 
   // 0.1 migration still works through the new chain.
   const legacy01: SupportedUniverseCheckpoint = {
