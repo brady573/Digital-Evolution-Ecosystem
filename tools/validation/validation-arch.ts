@@ -387,6 +387,103 @@ const testCrossBoundaryReadModelsStayCastFree = (): void => {
   }
 };
 
+// --- 8. Identity namespaces and typed refs ----------------------------------
+
+/**
+ * Decision 3 splits the identity namespaces: `L-` is a lineage and only a
+ * lineage, `C-` is a clade and only a clade. Both are four-digit numbers at
+ * runtime, so nothing about the *value* distinguishes them — only the code that
+ * chooses the prefix, and the kind tag on a reference.
+ *
+ * That makes this easy to break silently, so it is asserted from both ends:
+ * the product source must never emit a bare `L-`/`C-` template (a formatter in
+ * contracts is the only thing allowed to name a namespace), and no consumer may
+ * reach past a ref's `kind` to render an identity.
+ *
+ * The frozen legacy decoder in sim-core is the one deliberate exception, and it
+ * is named explicitly rather than pattern-matched around, so the exemption
+ * cannot quietly widen.
+ */
+const testIdentityNamespacesStayTyped = (): void => {
+  const contracts = readFileSync(join(REPO_ROOT, "packages/contracts/src/index.ts"), "utf8");
+
+  // The formatters exist and are the only place a namespace prefix is spelled.
+  assert.ok(
+    /export const formatLineageId = .*`L-\$\{/.test(contracts),
+    "contracts must own the lineage label formatter",
+  );
+  assert.ok(
+    /export const formatCladeId = .*`C-\$\{/.test(contracts),
+    "contracts must own the clade label formatter",
+  );
+
+  // EntityRef must be able to express "real entity, kind not recorded", or the
+  // no-guessing rule is unrepresentable and consumers will guess anyway.
+  assert.ok(
+    /readonly kind: EntityRefKind \| null/.test(contracts),
+    "EntityRef.kind must admit null so an unrecorded kind is expressible",
+  );
+
+  // Only sim-core's frozen decoder may keep the old bare template.
+  const FROZEN = "packages/sim-core/src/engine.ts";
+  const bare = /`L-\$\{String\(|`C-\$\{String\(/;
+  const sources = [
+    "apps/explorer/src/App.tsx",
+    "packages/sim-analysis/src/index.ts",
+    FROZEN,
+  ];
+  for (const rel of sources) {
+    const source = readFileSync(join(REPO_ROOT, rel), "utf8");
+    const hit = source.match(bare);
+    if (rel === FROZEN) {
+      // Frozen by decision, and it must stay marked as frozen.
+      assert.ok(
+        hit !== null,
+        "the legacy sim-core decoder is expected to keep its pre-Decision-3 template",
+      );
+      assert.ok(
+        /FROZEN LEGACY CHECKPOINT DECODER/.test(source),
+        `${rel} keeps a divergent identity template, so its frozen-decoder marking must stay present`,
+      );
+      continue;
+    }
+    assert.equal(
+      hit,
+      null,
+      `${rel} spells an identity namespace directly instead of using the contract formatter: ${hit?.[0] ?? ""}`,
+    );
+  }
+
+  // A consumer must not render a ref without reading its kind. Both of these
+  // patterns previously reinterpreted a bare number into `L-`.
+  const explorer = readFileSync(join(REPO_ROOT, "apps/explorer/src/App.tsx"), "utf8");
+  assert.doesNotMatch(
+    explorer,
+    /entity_refs\s*\.map\(\s*\(?\s*n\s*:\s*number/,
+    "History must not map entity_refs as bare numbers; read ref.kind instead",
+  );
+  assert.ok(
+    /typedRefs\(story\.entity_refs\)/.test(explorer),
+    "History must render History refs through typedRefs so an unrecorded kind is omitted",
+  );
+
+  // The live dormant-return path must describe a clade as a clade.
+  const analysis = readFileSync(join(REPO_ROOT, "packages/sim-analysis/src/index.ts"), "utf8");
+  assert.doesNotMatch(
+    analysis,
+    /A dormant lineage returned/,
+    "the live dormant-return path must not describe a clade as a lineage",
+  );
+  assert.ok(
+    /A dormant clade returned/.test(analysis),
+    "the live dormant-return path must describe a clade as a clade",
+  );
+  assert.ok(
+    /cladeRef\(Number\(clade\)\)/.test(analysis),
+    "the dormant-return record must tag its reference as a clade",
+  );
+};
+
 const tests: Array<[string, () => void]> = [
   ["architecture has no drift", testArchitectureHasNoDrift],
   ["path classification", testPathClassification],
@@ -403,6 +500,7 @@ const tests: Array<[string, () => void]> = [
   ["verify matches the contract", testVerifyMatchesTheContract],
   ["every unit is classified and reachable", testEveryUnitIsClassifiedAndReachable],
   ["cross-boundary read models stay cast-free", testCrossBoundaryReadModelsStayCastFree],
+  ["identity namespaces stay typed", testIdentityNamespacesStayTyped],
 ];
 
 let failed = 0;

@@ -268,7 +268,7 @@ function testLineageRefs() {
   }));
   const records = nicheRecords(observer);
   assert.equal(records.length, 1, "one establishment record");
-  assert.deepEqual(records[0].entity_refs, [5, 9], "meaningful producer and remover named");
+  assert.deepEqual(records[0].entity_refs, [{ kind: "lineage", id: 5 }, { kind: "lineage", id: 9 }], "meaningful producer and remover named");
 
   const diffuse = new EcologyObserver();
   const many = Array.from({ length: 12 }, (_, i) => ({ id: 100 + i, share: 0.05 }));
@@ -303,7 +303,7 @@ function testLineageRefs() {
   }));
   const bothRecords = nicheRecords(both);
   assert.equal(bothRecords.length, 1, "dual-role establishment records once");
-  assert.deepEqual(bothRecords[0].entity_refs, [7], "dual top lineage named once");
+  assert.deepEqual(bothRecords[0].entity_refs, [{ kind: "lineage", id: 7 }], "dual top lineage named once");
   console.log("niche lineage refs: PASS");
 }
 

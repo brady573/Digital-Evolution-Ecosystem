@@ -22,6 +22,7 @@ import type {
   SupportedUniverseCheckpoint,
   UniverseCheckpoint,
 } from "../../packages/contracts/src/index.ts";
+import { typedRefs } from "../../packages/contracts/src/index.ts";
 import { ENGINE_VERSION, EVENT_STRIDE } from "../../packages/sim-core/src/index.ts";
 import { UniverseSession, CHECKPOINT_SCHEMA_VERSION } from "../../packages/sim-runtime/src/session.ts";
 import {
@@ -462,6 +463,55 @@ function testDeterministicReplay() {
   console.log("deterministic replay: PASS");
 }
 
+/**
+ * Decision 3's no-guessing rule, proved behaviourally rather than structurally.
+ *
+ * A reference whose kind was never recorded is a real entity we cannot name.
+ * Printing `L-0009` for it would assert a namespace we have no evidence for,
+ * and printing `C-0009` would be equally unfounded. This is the boundary that
+ * legacy checkpoints cross, so it is asserted on all three shapes: a tagged
+ * lineage, a tagged clade, and both ways a reference can arrive unkinded.
+ */
+function testUnrecordedRefKindIsNeverGuessed() {
+  assert.deepEqual(
+    typedRefs([{ kind: "lineage", id: 9 }, { kind: "clade", id: 41 }]),
+    [{ kind: "lineage", id: 9 }, { kind: "clade", id: 41 }],
+    "a tagged ref is kept, and keeps its kind",
+  );
+  assert.deepEqual(
+    typedRefs([{ kind: null, id: 9 }]),
+    [],
+    "a ref whose kind is explicitly null yields no claim",
+  );
+  assert.deepEqual(
+    typedRefs([{ id: 9 }]),
+    [],
+    "a ref missing its kind entirely yields no claim",
+  );
+  // A checkpoint written before refs carried a kind holds bare numbers, and
+  // restore performs no deep validation, so they arrive as primitives. Reading
+  // `id` off one would silently yield undefined, and `Number({...})` would
+  // silently yield NaN -- which is how a namespace label could become "L-NaN".
+  assert.deepEqual(
+    typedRefs([9, 41] as unknown[]),
+    [],
+    "a legacy bare-number ref yields no claim rather than an invented identity",
+  );
+  assert.deepEqual(
+    typedRefs([null, undefined, "x", { kind: "clade", id: 3 }] as unknown[]),
+    [{ kind: "clade", id: 3 }],
+    "junk entries are dropped and the real ref survives",
+  );
+  // A restore performs no validation, so an unrecognised kind can reach this
+  // boundary. Forwarding one would put a bogus namespace into the contract.
+  assert.deepEqual(
+    typedRefs([{ kind: "banana", id: 4 }, { kind: "clade", id: NaN }] as unknown[]),
+    [],
+    "an unrecognised kind and a non-finite id both yield no claim",
+  );
+  console.log("unrecorded ref kind is never guessed: PASS");
+}
+
 testPolicyLayer();
 testVerticalSliceAndGate();
 testForwardCompatPolicyVersion();
@@ -469,4 +519,5 @@ testInterventionAndControlSeparation();
 testCheckpointRoundTripAndMigration();
 testEvidenceSeparation();
 testDeterministicReplay();
+testUnrecordedRefKindIsNeverGuessed();
 console.log(`decisions validation: PASS (checkpoint schema ${CHECKPOINT_SCHEMA_VERSION}, engine ${ENGINE_VERSION})`);

@@ -10,6 +10,7 @@
  * All identifiers are derived from the source event, so the same event under
  * the same policy always produces byte-identical output (deterministic replay).
  */
+import { decisionOpportunityId } from "@digital-evolution/contracts";
 import type {
   CatalystContext,
   CatalystDiagnosis,
@@ -118,7 +119,7 @@ export function buildDecisionOpportunity(
   if (choices.length === 0) return null;
   return {
     schemaVersion: 1,
-    opportunityId: `dop:${event.eventId}`,
+    opportunityId: decisionOpportunityId(`dop:${event.eventId}`),
     source: "observed_event",
     policyVersion,
     sourceEventId: event.eventId,
@@ -406,7 +407,7 @@ export function selectCatalystWindow(input: CatalystWindowInput): CatalystOpport
   }
   return {
     schemaVersion: 1,
-    opportunityId: `wcat:${input.tick}`,
+    opportunityId: decisionOpportunityId(`wcat:${input.tick}`),
     policyVersion,
     source: "world_catalyst",
     catalystIds: eligible,

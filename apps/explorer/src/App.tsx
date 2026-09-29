@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { EngineConfig, RenderOrganism, RenderSnapshot } from "@digital-evolution/contracts";
+import type { CladeId, EngineConfig, HistoryRecordId, OrganismId, RenderOrganism, RenderSnapshot } from "@digital-evolution/contracts";
+import { cladeId, formatCladeId, formatLineageId, lineageId, typedRefs } from "@digital-evolution/contracts";
 import { ENGINE_VERSION } from "@digital-evolution/sim-core";
 import { WorkerRuntimeClient, normalizeSpeedMode, sliceFor } from "@digital-evolution/sim-runtime";
 import { Capacitor } from "@capacitor/core";
@@ -27,8 +28,8 @@ function SelectedOrganismCard({ selected, onViewLineage, onClear }: {
   return <>
     <span className="eyebrow">Selected organism</span><h2>#{selected.id}</h2>
     {fam && <figure className="family-portrait"><img src={familyArtwork(fam)} width={128} height={128} alt={`${fam} family portrait`} /><figcaption>{fam} family</figcaption></figure>}
-    <p>{selected.activity} · generation {selected.generation}</p><p className="breadcrumb">Organism #{selected.id} → Lineage {`L-${String(selected.lineageId).padStart(4, "0")}`} → Clade {`L-${String(selected.cladeId).padStart(4, "0")}`}</p><dl>
-      <div><dt>Clade</dt><dd>L-{String(selected.cladeId).padStart(4, "0")}</dd></div>
+    <p>{selected.activity} · generation {selected.generation}</p><p className="breadcrumb">Organism #{selected.id} → Lineage {formatLineageId(selected.lineageId)} → Clade {formatCladeId(selected.cladeId)}</p><dl>
+      <div><dt>Clade</dt><dd>{formatCladeId(selected.cladeId)}</dd></div>
       <div><dt>Energy</dt><dd>{selected.energy.toFixed(1)}</dd></div>
       <div><dt>Movement</dt><dd>{selected.speed.toFixed(2)}</dd></div>
       <div><dt>Sensing</dt><dd>{selected.sensing.toFixed(1)}</dd></div>
@@ -172,7 +173,7 @@ function WorldCanvas({
   snapshot,lens,resourceView,traitView,selectedId,onSelect,cam,zoom,onCamera,onView,
 }:{
   snapshot:RenderSnapshot;lens:Lens;resourceView:ResourceView;traitView:TraitView;
-  selectedId:number|null;onSelect:(id:number|null)=>void;
+  selectedId:OrganismId|null;onSelect:(id:OrganismId|null)=>void;
   cam:Camera;zoom:number;onCamera:(c:Camera)=>void;onView:(u:{w:number;h:number})=>void;
 }){
   const ref=useRef<HTMLCanvasElement>(null);
@@ -501,9 +502,9 @@ export function App(){
   const [moreOpen,setMoreOpen]=useState(false);
   const [resourceView,setResourceView]=useState<ResourceView>("combined");
   const [traitView,setTraitView]=useState<TraitView>("speed");
-  const [selectedId,setSelectedId]=useState<number|null>(null);
-  const [selectedStoryId,setSelectedStoryId]=useState<string|null>(null);
-  const [selectedCladeId,setSelectedCladeId]=useState<number|null>(null);
+  const [selectedId,setSelectedId]=useState<OrganismId|null>(null);
+  const [selectedStoryId,setSelectedStoryId]=useState<HistoryRecordId|null>(null);
+  const [selectedCladeId,setSelectedCladeId]=useState<CladeId|null>(null);
   // Camera: uniform zoom + toroidal pan into the same 600x600 world.
   const [cam,setCam]=useState<Camera>({x:300,y:300});
   const [zoom,setZoom]=useState(1);
@@ -810,13 +811,18 @@ export function App(){
 
         {surface==="history"&&<section className="panel">
         <div className="panel-head"><div><span className="eyebrow">What happened here?</span><h2>History</h2></div><span>{records.length} durable ecological records</span></div>
-        {(()=>{const story=records.find((r)=>r.id===selectedStoryId);if(!story)return null;const ev=story.evidence;const niche=story.kind==="niche";return<article key={story.id} className="story-detail"><span>{formatTickAge(story.tick)} · {story.phase}</span><h3>{story.title}</h3><p>{story.summary}</p>{niche&&<dl className="evidence"><div><dt>Waste load then</dt><dd>{typeof ev.waste_fraction==="number"?`${Math.round(ev.waste_fraction*100)}% of waste-field capacity`:"not measured"}</dd></div><div><dt>Waste load when the regime first formed</dt><dd>{typeof ev.base_waste==="number"?`${Math.round(ev.base_waste*100)}%`:"not measured"}</dd></div><div><dt>Organisms in burden-relevant cells</dt><dd>{typeof ev.waste_exposed_share==="number"?`${Math.round(ev.waste_exposed_share*100)}%`:"not measured"}</dd></div><div><dt>Waste tolerance mean</dt><dd>{typeof ev.tolerance_mean==="number"?ev.tolerance_mean.toFixed(3):"not measured"}</dd></div><div><dt>Waste cleanup mean</dt><dd>{typeof ev.cleanup_mean==="number"?ev.cleanup_mean.toFixed(3):"not measured"}</dd></div></dl>}{niche&&<p className="causal-note"><strong>Observational.</strong> This record pairs the environmental change with a measured strategy shift in the same run. It is not a matched comparison, so it cannot show that the modification caused the shift. Matched evidence for waste reliance exists only in the Slice 2 validation survey, where one of 24 surveyed worlds established such a regime — possible, not typical.</p>}{!niche&&<dl className="evidence"><div><dt>Population then</dt><dd>{ev.population}</dd></div><div><dt>Dormant share</dt><dd>{Math.round((ev.dormant_fraction||0)*100)}%</dd></div><div><dt>Metabolite C energy</dt><dd>{Math.round((ev.c_energy_share||0)*100)}%</dd></div><div><dt>Leading way of life</dt><dd>{String(ev.dominant_role||"—")}</dd></div></dl>}{Array.isArray(story.entity_refs)&&story.entity_refs.length>0&&<p>Lineages involved: {story.entity_refs.map((n:number)=>`L-${String(Number(n)).padStart(4,"0")}`).join(", ")}</p>}{Array.isArray(story.entity_refs)&&story.entity_refs.length===0&&niche&&<p>No single lineage accounted for enough of the interval waste flow to be named.</p>}<button onClick={()=>setSelectedStoryId(null)}>Back to all stories</button></article>})()}
+        {(()=>{const story=records.find((r)=>r.id===selectedStoryId);if(!story)return null;const ev=story.evidence;const niche=story.kind==="niche";return<article key={story.id} className="story-detail"><span>{formatTickAge(story.tick)} · {story.phase}</span><h3>{story.title}</h3><p>{story.summary}</p>{niche&&<dl className="evidence"><div><dt>Waste load then</dt><dd>{typeof ev.waste_fraction==="number"?`${Math.round(ev.waste_fraction*100)}% of waste-field capacity`:"not measured"}</dd></div><div><dt>Waste load when the regime first formed</dt><dd>{typeof ev.base_waste==="number"?`${Math.round(ev.base_waste*100)}%`:"not measured"}</dd></div><div><dt>Organisms in burden-relevant cells</dt><dd>{typeof ev.waste_exposed_share==="number"?`${Math.round(ev.waste_exposed_share*100)}%`:"not measured"}</dd></div><div><dt>Waste tolerance mean</dt><dd>{typeof ev.tolerance_mean==="number"?ev.tolerance_mean.toFixed(3):"not measured"}</dd></div><div><dt>Waste cleanup mean</dt><dd>{typeof ev.cleanup_mean==="number"?ev.cleanup_mean.toFixed(3):"not measured"}</dd></div></dl>}{niche&&<p className="causal-note"><strong>Observational.</strong> This record pairs the environmental change with a measured strategy shift in the same run. It is not a matched comparison, so it cannot show that the modification caused the shift. Matched evidence for waste reliance exists only in the Slice 2 validation survey, where one of 24 surveyed worlds established such a regime — possible, not typical.</p>}{!niche&&<dl className="evidence"><div><dt>Population then</dt><dd>{ev.population}</dd></div><div><dt>Dormant share</dt><dd>{Math.round((ev.dormant_fraction||0)*100)}%</dd></div><div><dt>Metabolite C energy</dt><dd>{Math.round((ev.c_energy_share||0)*100)}%</dd></div><div><dt>Leading way of life</dt><dd>{String(ev.dominant_role||"—")}</dd></div></dl>}{(()=>{const named=typedRefs(story.entity_refs).map(r=>r.kind==="clade"?formatCladeId(cladeId(r.id)):r.kind==="lineage"?formatLineageId(lineageId(r.id)):null).filter((s):s is string=>s!==null);if(named.length>0)return <p>Entities involved: {named.join(", ")}</p>;if(niche)return <p>No lineage or clade accounted for enough of the interval waste flow to be named.</p>;return null})()}<button onClick={()=>setSelectedStoryId(null)}>Back to all stories</button></article>})()}
         {records.length===0?<><p>No durable ecological arc has been established yet.</p><h3>Recent simulation events</h3>{snapshot.events.slice(-8).reverse().map((e,i)=><article key={`${e.tick}-${i}`}><span>Tick {e.tick.toLocaleString()}</span><p>{e.label}</p></article>)}</>:records.slice().reverse().map((r)=><article key={r.id}><button className="record-button" onClick={()=>setSelectedStoryId(r.id)}><span>{formatTickAge(r.tick)} · {r.phase}</span><h3>{r.title}</h3><p>{r.summary}</p></button></article>)}
         {snapshot.resolvedDecisions.length>0&&<>
           <h3>Your decisions</h3>
           <p>Actions you took, in order. A decision is an action followed by later outcomes, not a proven cause.</p>
           {snapshot.resolvedDecisions.slice().reverse().map(d=>{
-            const source=d.sourceEventId?records.find((r)=>r.id===d.sourceEventId):null;
+            // A decision's `sourceEventId` is an Event, not a HistoryRecord, so
+            // the two identities are deliberately not compared directly: the
+            // brand makes that a compile error, which is the point. They are
+            // matched on their string form because an event id is derived from
+            // the record that produced it (see `observedEvents`).
+            const source=d.sourceEventId?records.find(r=>String(r.id)===d.sourceEventId):null;
             const offered=d.source==="world_catalyst"
               ?`World catalyst offered at tick ${d.offerTick.toLocaleString()}.`
               :source?`After: ${source.title}.`:"No linked event.";
@@ -832,8 +838,8 @@ export function App(){
       {surface==="tree"&&<section className="panel">
         <div className="panel-head"><div><span className="eyebrow">Evolutionary branches</span><h2>Tree</h2></div><span>{m.clades?.active??0} active clades</span></div>
         <p>{m.clades?.definition}</p>
-        {(()=>{const clade=clades.find((c)=>c.id===selectedCladeId);if(!clade)return null;const members=snapshot.organisms.filter(o=>o.cladeId===clade.id);return<article key={`detail-${clade.id}`} className="lineage-detail"><span className="breadcrumb">Tree → Clade {`L-${String(clade.id).padStart(4,"0")}`}</span><h3>{`L-${String(clade.id).padStart(4,"0")}`}</h3><p>{clade.count} living · {((clade.share||0)*100).toFixed(0)}% of the world · {members.filter(o=>o.activity==="dormant").length} dormant right now</p><p>{(clade.mutations||[]).join(" + ")||"founder ancestry"} · {formatTickAge(Number(clade.age||0))} old</p><p className="gloss">{clade.count>0?"This family is alive in the world right now.":"No living members — this branch survives only in history."}</p><button onClick={()=>{const first=members[0];if(first){setSelectedId(first.id);setSurface("world")}}}>Locate in world</button><button onClick={()=>setSelectedCladeId(null)}>Back to all clades</button></article>})()}
-        <div className="cards">{clades.map((c)=><article key={c.id} style={{borderTopColor:cladeColor(c.id)}}><button className="record-button" onClick={()=>setSelectedCladeId(c.id)}><h3>L-{String(c.id).padStart(4,"0")}</h3><p>{c.count} living · {(c.share*100).toFixed(0)}%</p><small>{(c.mutations||[]).join(" + ")||"founder ancestry"} · {formatTickAge(Number(c.age||0))} old</small></button></article>)}</div>
+        {(()=>{const clade=clades.find((c)=>c.id===selectedCladeId);if(!clade)return null;const members=snapshot.organisms.filter(o=>o.cladeId===clade.id);return<article key={`detail-${clade.id}`} className="lineage-detail"><span className="breadcrumb">Tree → Clade {formatCladeId(clade.id)}</span><h3>{formatCladeId(clade.id)}</h3><p>{clade.count} living · {((clade.share||0)*100).toFixed(0)}% of the world · {members.filter(o=>o.activity==="dormant").length} dormant right now</p><p>{(clade.mutations||[]).join(" + ")||"founder ancestry"} · {formatTickAge(Number(clade.age||0))} old</p><p className="gloss">{clade.count>0?"This family is alive in the world right now.":"No living members — this branch survives only in history."}</p><button onClick={()=>{const first=members[0];if(first){setSelectedId(first.id);setSurface("world")}}}>Locate in world</button><button onClick={()=>setSelectedCladeId(null)}>Back to all clades</button></article>})()}
+        <div className="cards">{clades.map((c)=><article key={c.id} style={{borderTopColor:cladeColor(c.id)}}><button className="record-button" onClick={()=>setSelectedCladeId(c.id)}><h3>{formatCladeId(c.id)}</h3><p>{c.count} living · {(c.share*100).toFixed(0)}%</p><small>{(c.mutations||[]).join(" + ")||"founder ancestry"} · {formatTickAge(Number(c.age||0))} old</small></button></article>)}</div>
       </section>}
 
       {surface==="experiments"&&<section className="panel">

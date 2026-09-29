@@ -202,7 +202,7 @@ export const UNITS: readonly ValidationUnit[] = [
     parallelSafe: true,
     baselineSeconds: 2,
     claim:
-      "The canonical definition is self-consistent, the impact classifier is conservative, the sharded dependency suites still cover the whole suite, and the History and Tree read models stay typed and cast-free at every consumer.",
+      "The canonical definition is self-consistent, the impact classifier is conservative, the sharded dependency suites still cover the whole suite, the History and Tree read models stay typed and cast-free at every consumer, and the L-/C- identity namespaces stay distinct in contracts, analysis prose and rendered output.",
   },
 
   // --- Class B: deterministic product behaviour ----------------------------
@@ -216,7 +216,8 @@ export const UNITS: readonly ValidationUnit[] = [
     needs: [],
     parallelSafe: true,
     baselineSeconds: 50,
-    claim: "Events still map to exactly the same offered choices as before.",
+    claim:
+      "Events still map to exactly the same offered choices as before, and an entity reference whose kind was never recorded yields no L- or C- claim rather than a guessed one.",
   },
   {
     id: "catalysts",
@@ -288,7 +289,8 @@ export const UNITS: readonly ValidationUnit[] = [
     needs: [],
     parallelSafe: true,
     baselineSeconds: 93,
-    claim: "Niche differentiation is possible and typical where claimed, and its limits still hold.",
+    claim:
+      "Niche differentiation is possible and typical where claimed, its limits still hold, and the lineages it names are asserted as lineages rather than as untyped numbers.",
   },
   {
     id: "aftermath",
@@ -340,7 +342,7 @@ export const UNITS: readonly ValidationUnit[] = [
     needs: [],
     parallelSafe: true,
     claim:
-      "One deterministic run establishes and then loses a dependency, and resume from a checkpoint reproduces it.",
+      "One deterministic run establishes and then loses a dependency, resume from a checkpoint reproduces it, and each named entity reference asserts the kind it denotes rather than a bare id.",
     baselineSeconds: 90,
   },
   {

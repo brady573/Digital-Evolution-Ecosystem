@@ -1,7 +1,20 @@
+import {
+  arcId,
+  cladeId,
+  cladeRef,
+  eventId,
+  formatCladeId,
+  formatLineageId,
+  historyRecordId,
+  lineageId,
+  lineageRef,
+  typedRefs,
+} from "@digital-evolution/contracts";
 import type {
   AnalysisState,
   CuseGuildState,
   CrossfeedingState,
+  EntityRef,
   Era,
   HistoryRecord,
   NicheBaselineEvidence,
@@ -114,12 +127,16 @@ export class EcologyObserver {
   records:HistoryRecord[]=[];
   eras:Era[]=[];
 
-  add(kind:string,id:string,tick:number,phase:string,title:string,summary:string,level:string,evidence:ObservationFrame,refs:number[]=[],extra?:Partial<NicheBaselineEvidence>):HistoryRecord{
+  add(kind:string,id:string,tick:number,phase:string,title:string,summary:string,level:string,evidence:ObservationFrame,refs:readonly EntityRef[]=[],extra?:Partial<NicheBaselineEvidence>):HistoryRecord{
     // Records keep the observed frame verbatim; a baseline block is attached
     // alongside it (never merged into it) so the evidence carries the
     // before/after pair the summary cites.
+    //
+    // `refs` arrives already tagged, because the caller is the only place that
+    // knows what it is pointing at. A detector that reasoned from a clade must
+    // say so, rather than hand over a number and let a later reader guess.
     const stored=extra?{...evidence,...extra}:evidence;
-    const record:HistoryRecord={id:`${id}-${phase}-${tick}`,arc_id:id,kind,tick,phase,title,summary,level,evidence:stored,entity_refs:refs};
+    const record:HistoryRecord={id:historyRecordId(`${id}-${phase}-${tick}`),arc_id:arcId(id),kind,tick,phase,title,summary,level,evidence:stored,entity_refs:refs};
     this.records.push(record);
     return record;
   }
@@ -167,7 +184,13 @@ export class EcologyObserver {
         const prev=d.priorDormantClades[clade];
         if(n>=2&&(prev??0)>=.8&&(s.clade_totals[clade]||0)>=5&&!d.returnedClades[clade]){
           d.returnedClades[clade]=s.tick;d.lastReturnTick=s.tick;
-          this.add("dormancy",d.id,s.tick,"recovered","A dormant lineage returned",`Members of clade L-${String(clade).padStart(4,"0")} woke after the clade had been represented primarily by dormant living cells.`,"major",s,[Number(clade)]);
+          // This path reasons from a clade, not a lineage: `wake_clades` is
+          // keyed by clade root and the summary below cites a clade. So the
+          // record says "clade" and tags the reference as one. Calling it a
+          // lineage while emitting an `L-` label was the mislabelling Decision
+          // 3 exists to remove, and it would have taught a reader that `L-`
+          // names clades too.
+          this.add("dormancy",d.id,s.tick,"recovered","A dormant clade returned",`Members of clade ${formatCladeId(cladeId(Number(clade)))} woke after the clade had been represented primarily by dormant living cells.`,"major",s,[cladeRef(Number(clade))]);
           break;
         }
       }
@@ -188,7 +211,7 @@ export class EcologyObserver {
       if(l.energyC>topEnergyC){topEnergyC=l.energyC;topConsumer=l.lineageId;topConsumerShare=e>0?l.energyC/e:0}
     }
     const topMeaningful=topConsumer!==null&&guildC>0&&topEnergyC/guildC>=DEP_MAJOR_SHARE;
-    const topRefs=topMeaningful&&topConsumer!==null?[topConsumer]:[];
+    const topRefs=topMeaningful&&topConsumer!==null?[lineageRef(topConsumer)]:[];
     if(dd.state==="absent"&&depForm){dd.state="forming";dd.candidateSince=s.tick}
     else if(dd.state==="forming"){
       if(!depForm){dd.state="absent";dd.candidateSince=null}
@@ -205,7 +228,7 @@ export class EcologyObserver {
         if(dd.lowSince===null)dd.lowSince=s.tick;
         if(s.tick-dd.lowSince>=DEP_PERSIST){
           dd.state="disrupted";dd.candidateSince=null;dd.lowSince=null;
-          this.add("cuse",dd.id,s.tick,"disrupted","The C-using guild collapsed",`Scavenger share fell from ${Math.round(dd.estScav*100)}% to ${Math.round(scav*100)}% of the living population; per-stride C production stood at ${Math.round(dd.baselineProduced>0?100*s.interval.producedC/dd.baselineProduced:0)}% of its established level.`,"major",s,dd.topConsumer===null?[]:[dd.topConsumer]);
+          this.add("cuse",dd.id,s.tick,"disrupted","The C-using guild collapsed",`Scavenger share fell from ${Math.round(dd.estScav*100)}% to ${Math.round(scav*100)}% of the living population; per-stride C production stood at ${Math.round(dd.baselineProduced>0?100*s.interval.producedC/dd.baselineProduced:0)}% of its established level.`,"major",s,dd.topConsumer===null?[]:[lineageRef(dd.topConsumer)]);
         }
       } else dd.lowSince=null;
     } else if(dd.state==="disrupted"){
@@ -217,13 +240,13 @@ export class EcologyObserver {
           if(!topMeaningful||topConsumer===null){
             this.add("cuse",dd.id,s.tick,"recovered","The C-using guild recovered",`Scavenger share returned to ${Math.round(scav*100)}% of the living population; C use is distributed across lineages; no lineage met the attribution threshold.`,"major",s,[]);
           }else if(same){
-            this.add("cuse",dd.id,s.tick,"recovered","The C-using lineage recovered",`Lineage L-${String(topConsumer).padStart(4,"0")} again realizes ${Math.round(topConsumerShare*100)}% of its energy from biologically produced Metabolite C after disruption.`,"major",s,[topConsumer]);
+            this.add("cuse",dd.id,s.tick,"recovered","The C-using lineage recovered",`Lineage ${formatLineageId(lineageId(topConsumer))} again realizes ${Math.round(topConsumerShare*100)}% of its energy from biologically produced Metabolite C after disruption.`,"major",s,[lineageRef(topConsumer)]);
           }else{
             // 10% marks a major consumer, never dominance: in a near-even
             // guild the top lineage leads by deterministic ordering, so the
             // record claims plurality factually (largest share) without a
             // dominance conclusion.
-            this.add("cuse",dd.id,s.tick,"recovered","A new lineage became a major C consumer",`Lineage L-${String(topConsumer).padStart(4,"0")} now realizes ${Math.round(topConsumerShare*100)}% of its energy from C, the largest share among living lineages${dd.topConsumer===null?"":`, succeeding L-${String(dd.topConsumer).padStart(4,"0")} after disruption`}.`,"major",s,[topConsumer]);
+            this.add("cuse",dd.id,s.tick,"recovered","A new lineage became a major C consumer",`Lineage ${formatLineageId(lineageId(topConsumer))} now realizes ${Math.round(topConsumerShare*100)}% of its energy from C, the largest share among living lineages${dd.topConsumer===null?"":`, succeeding ${formatLineageId(lineageId(dd.topConsumer))} after disruption`}.`,"major",s,[lineageRef(topConsumer)]);
           }
           dd.state="established";dd.establishedTick=s.tick;dd.estScav=scav;dd.baselineProduced=s.interval.producedC;
           dd.topConsumer=topMeaningful?topConsumer:null;dd.topConsumerShare=topConsumerShare;dd.candidateSince=null;dd.lowSince=null;
@@ -251,7 +274,12 @@ export class EcologyObserver {
       if(ivProd>0&&l.wasteProduced/ivProd>topProdShare){topProdShare=l.wasteProduced/ivProd;topProd=l.lineageId}
       if(ivRem>0&&l.wasteRemoved/ivRem>topRemShare){topRemShare=l.wasteRemoved/ivRem;topRem=l.lineageId}
     }
-    const ncRefs=[...new Set([topProdShare>=NC_MEANINGFUL_SHARE&&topProd!==null?topProd:null,topRemShare>=NC_MEANINGFUL_SHARE&&topRem!==null?topRem:null].filter((v):v is number=>v!==null))];
+    // Dedup on the id, then tag. Deduplicating the tagged refs themselves would
+    // compare object identity, so a lineage that tops both the producer and the
+    // remover list would be named twice -- which is exactly the "named once"
+    // rule this detector's evidence rule exists to enforce.
+    const ncIds=[...new Set([topProdShare>=NC_MEANINGFUL_SHARE&&topProd!==null?topProd:null,topRemShare>=NC_MEANINGFUL_SHARE&&topRem!==null?topRem:null].filter((v):v is number=>v!==null))];
+    const ncRefs=ncIds.map(lineageRef);
     if(nc.state==="absent"&&mod){nc.state="forming";nc.candidateSince=s.tick;nc.shiftSince=null;nc.baseWaste=s.waste_fraction;nc.baseTol=s.tolerance_mean;nc.baseCu=s.cleanup_mean;nc.baseExposed=s.waste_exposed_share}
     else if(nc.state==="forming"){
       // Modification and strategy response each carry their own clock: the
@@ -366,8 +394,8 @@ export class EcologyObserver {
   observedEvents(): ObservedEvent[]{
     return this.records.map((record:any)=>({
       schemaVersion:1 as const,
-      eventId:String(record.id),
-      arcId:String(record.arc_id),
+      eventId:eventId(String(record.id)),
+      arcId:arcId(String(record.arc_id)),
       kind:String(record.kind),
       phase:String(record.phase),
       tick:Number(record.tick),
@@ -379,7 +407,11 @@ export class EcologyObserver {
           ([,v])=>typeof v==="number"||typeof v==="string"||typeof v==="boolean",
         ) as [string,number|string|boolean][],
       ),
-      entityRefs:Array.isArray(record.entity_refs)?record.entity_refs.map(Number):[],
+      // Refs keep their kind. This used to be `.map(Number)`, which silently
+      // turned every tagged ref into NaN once refs carried a kind, and would
+      // have turned a legacy bare-number ref into NaN too. `typedRefs` is the
+      // boundary that drops unkind refs instead of inventing an identity.
+      entityRefs:typedRefs(Array.isArray(record.entity_refs)?record.entity_refs:[]),
     }));
   }
 }
