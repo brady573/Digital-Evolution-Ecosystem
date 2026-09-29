@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { UNITS, UNIT_BY_ID, GROUPS } from "./manifest.ts";
-import { REPO_ROOT, checkArchitecture, duplicateScriptKeys, verifyFromManifest } from "./architecture.ts";
+import { REPO_ROOT, checkArchitecture, checkGatingDependencies, duplicateScriptKeys, verifyFromManifest } from "./architecture.ts";
 import { classifyPath, planImpact } from "./impact.ts";
 import { decideShard, expandNeeds, planBroad, planForChange } from "./routing.ts";
 import { GROUP_BY_ID } from "./manifest.ts";
@@ -75,6 +75,40 @@ const testMergeGateIsExplicit = (): void => {
       assert.equal(unit.mergeGate, false, `${unit.id} is ${unit.enforcement} and must not gate merges`);
     }
   }
+};
+
+// --- 1d. Merge gates must not depend on non-gating evidence ---------------
+
+const testMergeGateHasNoNonGatingDependency = (): void => {
+  const { failures } = checkArchitecture();
+  const gating = failures.filter((f) => f.includes("merge-gating"));
+  assert.deepEqual(gating, [], `merge-gating dependency violations:\n  ${gating.join("\n  ")}`);
+};
+
+const testGatingGuardCatchesIntroducedViolation = (): void => {
+  const failures = checkGatingDependencies(
+    UNITS,
+    [{ id: "ci-browser", title: "x", unitIds: ["browser-smoke", "visual-capture"], ci: true }],
+    new Map([["telemetry", ["quick", "pixi-spike"]]]),
+    new Map([
+      ["quick", ["typecheck", "validation-arch"]],
+      ["smoke", ["browser-smoke", "visual-capture"]],
+      ["pixi-spike", ["pixi-capture"]],
+    ]),
+  );
+  assert.ok(failures.length > 0, "synthetic merge-gate -> non-gating edge must be reported");
+  assert.ok(failures.some((f) => f.includes("ci-browser")), "group mixing must be reported");
+  assert.ok(failures.some((f) => f.includes("pixi-spike")), "telemetry needing evidence must be reported");
+};
+
+/** Blocking browser validation must not include visual capture. */
+const testBrowserBlockingExcludesVisualCapture = (): void => {
+  const browser = GROUP_BY_ID.get("ci-browser");
+  const visual = GROUP_BY_ID.get("ci-visual");
+  assert.ok(browser, "ci-browser shard must exist");
+  assert.ok(visual, "ci-visual shard must exist");
+  assert.ok(!browser!.unitIds.includes("visual-capture"), "ci-browser must not contain visual-capture");
+  assert.ok(visual!.unitIds.includes("visual-capture"), "ci-visual must contain visual-capture");
 };
 
 // --- 2. Path classification -------------------------------------------------
@@ -517,6 +551,9 @@ const tests: Array<[string, () => void]> = [
   ["architecture has no drift", testArchitectureHasNoDrift],
   ["duplicate script keys are rejected", testDuplicateScriptKeysAreRejected],
   ["merge gate is explicit", testMergeGateIsExplicit],
+  ["merge gate has no non-gating dependency", testMergeGateHasNoNonGatingDependency],
+  ["gating guard catches introduced violation", testGatingGuardCatchesIntroducedViolation],
+  ["browser blocking excludes visual capture", testBrowserBlockingExcludesVisualCapture],
   ["path classification", testPathClassification],
   ["biological authority reaches ecological evidence", testBiologicalAuthorityReachesEcologicalEvidence],
   ["contracts are the broadest scope", testContractsAreBroadest],

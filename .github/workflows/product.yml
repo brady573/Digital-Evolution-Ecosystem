@@ -187,9 +187,12 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
-  # Class D, plus the Class G landscape captures on the same browser
-  # environment. One Chromium install and one preview server serve all three:
-  # splitting them would mean paying that setup again for no additional claim.
+  # Class D blocking browser validation. Visual captures (Class G) run in the
+  # separate `visual` job below on their own runner: a slow or failed capture
+  # must not delay or flip this merge-gating lane, and a software-GL failure
+  # here cannot fail the blocking checks. Each lane pays its own Chromium
+  # setup (~20s) for that isolation; the same-run explorer-dist artifact is
+  # shared, not rebuilt.
   smoke:
     runs-on: ubuntu-latest
     needs: build
@@ -243,9 +246,64 @@ jobs:
         env:
           DEE_BASE_URL: http://127.0.0.1:4173
           DEE_IMPACT_BASE: ${{ env.impact_base }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: validation-summary-${{ github.job }}
+          path: validation-telemetry/summary.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # Class G landscape captures (non-gating human-review evidence). Separate
+  # runner from `smoke` so capture timing can never gate merge readiness.
+  # Shares the same-run explorer-dist artifact; pays its own Chromium setup.
+  # Not in telemetry's needs; failure stays visible via the uploaded artifact.
+  visual:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/setup-project
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: playwright-${{ runner.os }}-
+      - run: pnpm ci:plan ci-visual
+        id: plan
+        env:
+          DEE_IMPACT_BASE: ${{ env.impact_base }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: steps.plan.outputs.ci_visual_has_work == 'true'
+        with:
+          name: explorer-dist
+          path: apps/explorer/dist
+      - run: pnpm exec playwright install --with-deps chromium
+        if: steps.plan.outputs.ci_visual_has_work == 'true'
+      - name: Start preview server for visual captures
+        if: steps.plan.outputs.ci_visual_has_work == 'true'
+        run: |
+          pnpm --filter @digital-evolution/explorer exec vite preview --host 127.0.0.1 --port 4173 >/tmp/digital-evolution-vite.log 2>&1 &
+          ready=0
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:4173 >/dev/null; then ready=1; break; fi
+            sleep 1
+          done
+          if [ "$ready" -ne 1 ]; then
+            echo "::error::vite preview did not become ready on 127.0.0.1:4173"
+            cat /tmp/digital-evolution-vite.log
+            exit 1
+          fi
+      - name: ci-visual
+        run: pnpm ci:shard ci-visual
+        env:
+          DEE_BASE_URL: http://127.0.0.1:4173
+          DEE_IMPACT_BASE: ${{ env.impact_base }}
       - name: Report capture coverage
         if: always()
-        run: cat testdata/visual/MANIFEST.json || echo "no captures, the browser lane had nothing to do for this change"
+        run: cat testdata/visual/MANIFEST.json || echo "no captures, the visual lane had nothing to do for this change"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
@@ -388,8 +446,16 @@ jobs:
     # skipping it cannot weaken a merge gate.
     if: ${{ needs.build.result == 'success' && needs.smoke.result == 'success' && needs.android_plan.outputs.android_apk_has_work == 'true' }}
 
-  # Collects every runner's summary into one machine-readable file so "what ran,
-  # what was skipped, and what did it cost" is answerable from a single artifact.
+  # Collects every merge-gating runner's summary into one machine-readable file
+  # so "what ran, what was skipped, and what did it cost" is answerable from a
+  # single artifact.
+  #
+  # Only merge-gating jobs are dependencies: quick, sim-a..d, build, smoke
+  # (blocking browser), presentation (blocking contracts including the pixi-spike
+  # unit). Non-gating evidence -- visual captures, pixi captures (job
+  # `pixi-spike` runs shard `ci-pixi`, not unit `pixi-spike`), Android -- runs
+  # in parallel and is NOT awaited. A slow or failed capture must not delay or
+  # flip merge readiness; its failure stays visible in its own artifact.
   #
   # `android` is deliberately NOT a dependency, even though it runs in this same
   # invocation.
@@ -410,7 +476,7 @@ jobs:
   # which is when a skip reason is most worth reading.
   telemetry:
     runs-on: ubuntu-latest
-    needs: [quick, sim-a, sim-b, sim-c, sim-d, build, smoke, presentation, pixi-spike]
+    needs: [quick, sim-a, sim-b, sim-c, sim-d, build, smoke, presentation]
     if: always()
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

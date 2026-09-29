@@ -105,6 +105,103 @@ export const requiredCiUnits = (): string[] =>
   UNITS.filter((u) => u.enforcement !== "manual" && !u.paused).map((u) => u.id);
 
 /**
+ * Merge-gating dependency guard.
+ *
+ * `enforcement` says whether failure fails the lane; `mergeGate` says whether
+ * success is required to merge. A merge-gating result must never transitively
+ * depend on non-gating evidence -- otherwise a slow or failed visual capture
+ * can delay or flip a merge gate whose claim it does not support.
+ *
+ * Three rules, all pure over the passed structures so tests can use synthetic
+ * inputs without touching the filesystem:
+ *
+ *   (a) no CI group mixes merge-gating units with non-gating evidence;
+ *   (b) no merge-gating unit `needs` a non-gating unit;
+ *   (c) every merge-gating job's `needs` resolve only to merge-gating jobs,
+ *       where a job is merge-gating when it executes at least one unit and
+ *       every unit it executes is merge-gating. The `telemetry` summary job
+ *       executes no units itself and is the gate: its needs must all be
+ *       merge-gating jobs.
+ */
+export const checkGatingDependencies = (
+  units: ReadonlyArray<{ readonly id: string; readonly mergeGate: boolean; readonly needs: readonly string[] }>,
+  groups: ReadonlyArray<{ readonly id: string; readonly unitIds: readonly string[]; readonly ci: boolean }>,
+  jobNeeds: ReadonlyMap<string, readonly string[]>,
+  jobUnits: ReadonlyMap<string, readonly string[]>,
+): string[] => {
+  const failures: string[] = [];
+  const byId = new Map(units.map((u) => [u.id, u]));
+
+  for (const group of groups) {
+    if (!group.ci) continue;
+    const gate = group.unitIds.filter((id) => byId.get(id)?.mergeGate === true);
+    const evidence = group.unitIds.filter((id) => byId.get(id)?.mergeGate === false);
+    if (gate.length > 0 && evidence.length > 0) {
+      failures.push(
+        `CI shard ${group.id} mixes merge-gating units (${gate.join(", ")}) with non-gating evidence (${evidence.join(", ")}); a merge-gating result must not transitively depend on non-gating evidence`,
+      );
+    }
+  }
+
+  for (const unit of units) {
+    if (!unit.mergeGate) continue;
+    for (const need of unit.needs) {
+      if (byId.get(need)?.mergeGate === false) {
+        failures.push(`merge-gating unit ${unit.id} needs non-gating evidence ${need}`);
+      }
+    }
+  }
+
+  const jobIsGating = (job: string): boolean => {
+    const ids = jobUnits.get(job) ?? [];
+    return ids.length > 0 && ids.every((id) => byId.get(id)?.mergeGate === true);
+  };
+  const gatingJobs = new Set([...jobNeeds.keys()].filter(jobIsGating));
+  gatingJobs.add("telemetry");
+  for (const job of gatingJobs) {
+    for (const need of jobNeeds.get(job) ?? []) {
+      if (!jobIsGating(need)) {
+        const ids = jobUnits.get(need) ?? [];
+        failures.push(
+          `merge-gating check "${job}" needs "${need}" which executes non-gating evidence (${ids.join(", ") || "no merge-gating units"}); non-gating evidence must not gate a merge result`,
+        );
+      }
+    }
+  }
+
+  return failures;
+};
+
+const parseJobNeeds = (jobBody: string): string[] => {
+  const lines = jobBody.split("\n");
+  const out: string[] = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i]!;
+    const inline = /needs:\s*\[([^\]]*)\]/.exec(line);
+    if (inline) {
+      for (const part of inline[1]!.split(",")) {
+        const name = part.trim();
+        if (name) out.push(name);
+      }
+      continue;
+    }
+    const single = /needs:\s*([A-Za-z0-9_-]+)\s*$/.exec(line);
+    if (single) {
+      out.push(single[1]!);
+      continue;
+    }
+    if (/needs:\s*$/.test(line)) {
+      for (let j = i + 1; j < lines.length; j += 1) {
+        const item = /^\s*-\s*([A-Za-z0-9_-]+)\s*$/.exec(lines[j]!);
+        if (!item) break;
+        out.push(item[1]!);
+      }
+    }
+  }
+  return [...new Set(out)];
+};
+
+/**
  * The local completion contract, derived from the non-shard groups.
  *
  * `android`, `survey`, `browser`, and `evidence` are excluded by construction:
@@ -422,6 +519,30 @@ export function checkArchitecture(): CheckResult {
   for (const unit of UNITS) {
     for (const need of unit.needs) {
       if (!UNIT_BY_ID.has(need)) failures.push(`unit ${unit.id} needs unknown unit: ${need}`);
+    }
+  }
+
+  // --- Merge-gating results must not wait on non-gating evidence -----------
+  if (productWorkflow) {
+    const jobBlocks = productWorkflow.body.split(/\n {2}(?=[A-Za-z0-9_-]+:\s*\n)/);
+    const jobNeeds = new Map<string, string[]>();
+    const jobUnits = new Map<string, string[]>();
+    for (const block of jobBlocks) {
+      const name = block.split("\n")[0]!.replace(/:\s*$/, "").trim();
+      if (!/^[A-Za-z0-9_-]+$/.test(name)) continue;
+      jobNeeds.set(name, parseJobNeeds(block));
+      const ids: string[] = [];
+      for (const match of block.matchAll(/ci:(?:group|shard)\s+([a-z0-9-]+)/g)) {
+        const shard = GROUP_BY_ID.get(match[1]!);
+        if (shard) ids.push(...shard.unitIds);
+      }
+      for (const match of block.matchAll(/#\s*validation-unit:\s*([a-z0-9-]+)/g)) {
+        ids.push(match[1]!);
+      }
+      jobUnits.set(name, [...new Set(ids)]);
+    }
+    for (const failure of checkGatingDependencies(UNITS, GROUPS, jobNeeds, jobUnits)) {
+      failures.push(failure);
     }
   }
 

@@ -819,8 +819,14 @@ export const GROUPS: readonly ValidationGroup[] = [
   },
   {
     id: "ci-browser",
-    title: "Browser, mobile UI, and landscape captures",
-    unitIds: ["browser-smoke", "mobile-ui", "visual-capture"],
+    title: "Browser and mobile UI (blocking)",
+    unitIds: ["browser-smoke", "mobile-ui"],
+    ci: true,
+  },
+  {
+    id: "ci-visual",
+    title: "Landscape visual evidence (non-gating)",
+    unitIds: ["visual-capture"],
     ci: true,
   },
   {
