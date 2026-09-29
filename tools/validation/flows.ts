@@ -644,6 +644,21 @@ function testBoundaryGeneratorIsDerived() {
 
   const heading = out.split("\n").find((l) => l.startsWith("## A valid ") && l.includes("never depends"));
   assert.ok(heading !== undefined, "the document must state the no-current-schema-migration property");
+
+  // A generated document that states the opposite of the code is worse than no
+  // document, so the asymmetry proof is checked against the field the suite
+  // actually proves it with. When the negative control moved to `analysis.dep`
+  // this line kept naming `analysis.records` as tolerated at the historical
+  // schema — which that same change had just made refused at every schema. The
+  // prose outlived the behaviour it described, and only diffing against the
+  // previous artifact caught it.
+  const asymmetry = out.split("\n").find((l) => l.startsWith("3. **The asymmetry"));
+  assert.ok(asymmetry !== undefined, "the document must state the absence/invalidity asymmetry");
+  assert.equal(
+    asymmetry.match(/`analysis\.([a-z_]+)`/)?.[1],
+    "dep",
+    "the asymmetry proof must name the sub-state the suite actually proves it with",
+  );
   assert.ok(
     heading.includes(CURRENT_SCHEMA),
     `the property heading must name the live current schema ${CURRENT_SCHEMA}, got: ${heading}`,

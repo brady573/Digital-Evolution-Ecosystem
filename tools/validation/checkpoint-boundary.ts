@@ -33,6 +33,7 @@ const CURRENT_SCHEMA = CHECKPOINT_SCHEMA_VERSION;
  */
 const HISTORICAL_SCHEMAS = SUPPORTED_SCHEMAS.filter((s) => s !== CURRENT_SCHEMA);
 const NEWEST_HISTORICAL = HISTORICAL_SCHEMAS[HISTORICAL_SCHEMAS.length - 1];
+const OLDEST_SUPPORTED = SUPPORTED_SCHEMAS[0];
 
 /**
  * Self-check: this file may not name a supported schema version in code.
@@ -125,7 +126,7 @@ lines.push(
   `2. **Migration absorbs absences that older builds wrote, and ${CURRENT_SCHEMA} is written by the build that requires those fields.** Every rule above names the change that introduced its field, and that change predates ${CURRENT_SCHEMA} — the current version is the first to *require* fields that older supported builds already wrote. That is what makes the tolerance historical rather than permissive: each one describes a build that really existed and really omitted the field, not a gap in the current contract.`,
 );
 lines.push(
-  `3. **The asymmetry is proved on one payload, twice.** \`analysis.records\` is removed from an otherwise valid save: as "${CURRENT_SCHEMA}" it is refused (\`analysis.records\`, malformed-container); as "${NEWEST_HISTORICAL}" the identical payload is accepted. If loadability leaked across the version boundary, that pair could not disagree.`,
+  `3. **The asymmetry is proved on one payload, twice.** \`analysis.dep\` is removed from an otherwise valid save: as "${CURRENT_SCHEMA}" it is refused (\`analysis.dep\`, malformed-container); as "${NEWEST_HISTORICAL}" the identical payload is accepted. If loadability leaked across the version boundary, that pair could not disagree. The subject is the C-use sub-state rather than a long-standing one deliberately: \`analysis.records\` has been written since ${OLDEST_SUPPORTED}, so a save omitting it is refused at *every* schema and cannot demonstrate a version-scoped absence.`,
 );
 lines.push("");
 lines.push(
