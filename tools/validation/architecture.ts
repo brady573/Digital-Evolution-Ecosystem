@@ -33,6 +33,41 @@ const packageScripts = (): Set<string> => {
 };
 
 /**
+ * Duplicate `package.json` script keys, from raw text.
+ *
+ * `JSON.parse` collapses duplicates silently, so this reads the `scripts`
+ * block before parsing: brace-count from its opening `{` to the matching
+ * `}`, then count `"key":` occurrences inside. Scoped to `scripts` so an
+ * identical dependency name elsewhere cannot false-positive.
+ */
+export const duplicateScriptKeys = (raw: string): string[] => {
+  const anchor = raw.search(/"scripts"\s*:/);
+  if (anchor < 0) return [];
+  const open = raw.indexOf("{", anchor);
+  if (open < 0) return [];
+  let depth = 0;
+  let close = -1;
+  for (let i = open; i < raw.length; i += 1) {
+    if (raw[i] === "{") depth += 1;
+    else if (raw[i] === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        close = i;
+        break;
+      }
+    }
+  }
+  if (close < 0) return [];
+  const block = raw.slice(open, close + 1);
+  const counts = new Map<string, number>();
+  for (const match of block.matchAll(/"([^"]+)"\s*:/g)) {
+    const key = match[1]!;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return [...counts.entries()].filter(([, n]) => n > 1).map(([k]) => k).sort();
+};
+
+/**
  * Remove whole-line and trailing comments.
  *
  * Configuration and prose share a file, and a check that cannot tell them apart
@@ -90,6 +125,9 @@ export function checkArchitecture(): CheckResult {
   const failures: string[] = [];
   const notes: string[] = [];
   const scripts = packageScripts();
+  for (const dup of duplicateScriptKeys(readFileSync(join(REPO_ROOT, "package.json"), "utf8"))) {
+    failures.push(`package.json defines script "${dup}" more than once; JSON parsing keeps only the last, so the other is dead config`);
+  }
 
   // --- Unit integrity ------------------------------------------------------
   const seen = new Set<string>();

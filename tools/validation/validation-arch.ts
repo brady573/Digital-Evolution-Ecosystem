@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { UNITS, UNIT_BY_ID, GROUPS } from "./manifest.ts";
-import { REPO_ROOT, checkArchitecture, verifyFromManifest } from "./architecture.ts";
+import { REPO_ROOT, checkArchitecture, duplicateScriptKeys, verifyFromManifest } from "./architecture.ts";
 import { classifyPath, planImpact } from "./impact.ts";
 import { decideShard, expandNeeds, planBroad, planForChange } from "./routing.ts";
 import { GROUP_BY_ID } from "./manifest.ts";
@@ -46,6 +46,15 @@ const runDependency = (args: string[]): string => {
 const testArchitectureHasNoDrift = (): void => {
   const { failures } = checkArchitecture();
   assert.deepEqual(failures, [], `validation architecture drift:\n  ${failures.join("\n  ")}`);
+};
+
+// --- 1b. Duplicate package.json script keys cannot collapse silently ------
+
+const testDuplicateScriptKeysAreRejected = (): void => {
+  const raw = readFileSync(join(REPO_ROOT, "package.json"), "utf8");
+  assert.deepEqual(duplicateScriptKeys(raw), [], "package.json must not contain duplicate script keys");
+  const synthetic = `{"scripts": {"a": "1", "b": "2", "a": "3"}}`;
+  assert.deepEqual(duplicateScriptKeys(synthetic), ["a"], "synthetic duplicate script key must be reported");
 };
 
 // --- 2. Path classification -------------------------------------------------
@@ -486,6 +495,7 @@ const testIdentityNamespacesStayTyped = (): void => {
 
 const tests: Array<[string, () => void]> = [
   ["architecture has no drift", testArchitectureHasNoDrift],
+  ["duplicate script keys are rejected", testDuplicateScriptKeysAreRejected],
   ["path classification", testPathClassification],
   ["biological authority reaches ecological evidence", testBiologicalAuthorityReachesEcologicalEvidence],
   ["contracts are the broadest scope", testContractsAreBroadest],
