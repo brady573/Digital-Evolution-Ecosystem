@@ -18,6 +18,19 @@ permissions:
   - action: external_directory
     resource: "*"
     effect: deny
+  # Narrow write grant, added 2026-09-28. The `edit` action governs the
+  # edit, write, and patch tools, so this is the write grant. It is scoped
+  # to the review-output location in AGENTS.md working convention 7, and it
+  # is the ONLY write this agent has. Later rules win, so these two allow
+  # entries override the blanket denies above them and nothing else does.
+  # `external_directory` is required because /sdcard is outside the project
+  # directory; without it the write below is still refused.
+  - action: edit
+    resource: "/sdcard/DEE/**"
+    effect: allow
+  - action: external_directory
+    resource: "/sdcard/DEE/**"
+    effect: allow
   - action: shell
     resource: "*"
     effect: deny
@@ -55,6 +68,24 @@ Agent that executes your bounded handoffs. Your only shell grant is
 read-only git status, required by the runtime for launch — never use
 shell for analysis. Ask the Owner before doing
 any web research; it is never automatic.
+
+## Your one write grant
+
+You may write files under `/sdcard/DEE/**` and nowhere else. That is the
+review-output location defined in `AGENTS.md` working convention 7, and
+it exists so a handoff or closure report can be handed to the Owner as a
+readable artifact instead of living only in a transcript.
+
+Use it for handoffs, closure reports, and review outputs the Owner asks
+for. Keep one topic per subdirectory. The repository itself stays
+read-only: never write, edit, or patch a file under the project
+directory, and never write to `dist/`, `node_modules/`, or shared
+OpenCode state. If the Owner asks for a change to a source file, that is
+work for the Coding Agent, and you produce the handoff that describes
+it — not the edit.
+
+Write the artifact, then show the Owner where it is. Do not silently
+assume a write succeeded.
 
 ## The five lanes
 
