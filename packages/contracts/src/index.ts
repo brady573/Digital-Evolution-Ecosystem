@@ -227,6 +227,15 @@ export interface CheckpointMigrationRule {
   readonly absorber: MigrationAbsorber;
   /** Why tolerating this is correct, rather than merely convenient. */
   readonly omission: string;
+  /**
+   * What this rule explicitly does **not** tolerate, when it is only half a
+   * rule. Decision 2's asymmetry: a field may be legitimately absent in an
+   * older schema while a wrong-typed value for that same field is corrupt in
+   * every schema. Recording the rejected case here is what stops the
+   * absence-tolerance from being read as blanket tolerance — the rejection
+   * itself is implemented by the validator, not by this table.
+   */
+  readonly rejects?: string;
 }
 
 const ALL_SCHEMAS: readonly CheckpointSchemaVersion[] = ["0.1", "0.2", "0.3"];
@@ -262,36 +271,18 @@ export const CHECKPOINT_MIGRATION_RULES: readonly CheckpointMigrationRule[] = [
   },
   // --- Decision-record backfills, found by enumerating the restore path ----
   {
-    id: "pending-decision-absent-reads-as-null",
-    path: "decisions.pending",
-    appliesToSchemas: ALL_SCHEMAS,
-    effectiveDefault: "null",
-    absorber: "inline-backfill",
-    omission:
-      "A save taken with no decision outstanding has no pending gate. Absent and explicitly-null are the same state, and a non-object value here cannot be a gate.",
-  },
-  {
     id: "pending-decision-source-backfilled-from-event",
     path: "decisions.pending.source",
-    appliesToSchemas: ["0.1", "0.2"],
+    appliesToSchemas: ["0.2"],
     effectiveDefault: '"observed_event" when a string sourceEventId is present',
     absorber: "inline-backfill",
     omission:
       "Saves predating the catalyst source have no `source`, but a `sourceEventId` can only have come from an observed event, so the backfill is forced by the data rather than guessed from it.",
   },
   {
-    id: "decision-resolutions-absent-reads-as-empty",
-    path: "decisions.resolutions",
-    appliesToSchemas: ALL_SCHEMAS,
-    effectiveDefault: "[]",
-    absorber: "inline-backfill",
-    omission:
-      "No decisions were resolved before the save. A non-array value is not a resolution list, so an empty list is the only coherent reading.",
-  },
-  {
     id: "decision-resolution-offer-tick-backfilled-from-tick",
     path: "decisions.resolutions[].offerTick",
-    appliesToSchemas: ["0.1", "0.2"],
+    appliesToSchemas: ["0.2"],
     effectiveDefault: "the resolution's own tick",
     absorber: "inline-backfill",
     omission:
@@ -300,7 +291,7 @@ export const CHECKPOINT_MIGRATION_RULES: readonly CheckpointMigrationRule[] = [
   {
     id: "decision-resolution-catalyst-id-reads-as-null",
     path: "decisions.resolutions[].catalystId",
-    appliesToSchemas: ["0.1", "0.2"],
+    appliesToSchemas: ["0.2"],
     effectiveDefault: "null",
     absorber: "inline-backfill",
     omission:
@@ -309,29 +300,11 @@ export const CHECKPOINT_MIGRATION_RULES: readonly CheckpointMigrationRule[] = [
   {
     id: "decision-resolution-source-reads-as-event-decision",
     path: "decisions.resolutions[].source",
-    appliesToSchemas: ["0.1", "0.2"],
+    appliesToSchemas: ["0.2"],
     effectiveDefault: '"event_decision"',
     absorber: "inline-backfill",
     omission:
       "Before the source field existed, every resolution was an event decision. Naming it is a restatement of the era, not a classification of the record.",
-  },
-  {
-    id: "last-decision-tick-absent-reads-as-zero",
-    path: "decisions.lastDecisionTick",
-    appliesToSchemas: ALL_SCHEMAS,
-    effectiveDefault: "0",
-    absorber: "inline-backfill",
-    omission:
-      "A save with no recorded decision tick means no decision has been made, and tick 0 is before the world began.",
-  },
-  {
-    id: "last-major-catalyst-tick-absent-reads-as-null",
-    path: "decisions.lastMajorCatalystTick",
-    appliesToSchemas: ALL_SCHEMAS,
-    effectiveDefault: "null",
-    absorber: "inline-backfill",
-    omission:
-      "Distinct from the rule above on purpose: 'never a major catalyst' and 'happened at tick 0' are different facts, and only null says the first.",
   },
   {
     id: "matched-control-absent-reads-as-null",
@@ -340,7 +313,9 @@ export const CHECKPOINT_MIGRATION_RULES: readonly CheckpointMigrationRule[] = [
     effectiveDefault: "null",
     absorber: "inline-backfill",
     omission:
-      "A matched twin is created by the first intervention. No twin existing is a normal state, not a missing one.",
+      "A matched twin is created by the first intervention. No twin existing is a normal state, not a missing one. The save path always writes both keys, explicitly null, so absence is tolerated here only because an older payload may predate matched forks — not because absence is a shape the current schema produces.",
+    rejects:
+      "A truthy non-object `control` is not an absent twin and is not defaulted. It is already refused downstream by the simulation restore, which rejects it on its schema tag rather than reading it as no twin.",
   },
   {
     id: "analysis-substate-absent-reads-as-constructor-default",
@@ -349,13 +324,104 @@ export const CHECKPOINT_MIGRATION_RULES: readonly CheckpointMigrationRule[] = [
     effectiveDefault: "the freshly constructed observer's own initial state",
     absorber: "constructor-default",
     omission:
-      "Restore constructs a fresh observer and then overwrites only the keys the payload carries, so an absent sub-state keeps its declared initial value instead of becoming undefined.",
+      "Restore constructs a fresh observer and then overwrites only the keys the payload carries, so an absent sub-state keeps its declared initial value instead of becoming undefined. A detector that has not yet fired genuinely has no sub-state, which is different from a detector that fired and lost its record.",
+    rejects:
+      "A present-but-wrong-typed sub-state is not covered by this rule. `Object.assign` writes whatever it is handed, so a corrupt value becomes live state rather than being defaulted — which is the opposite failure from normalisation, and is why the validator has to refuse it rather than rely on the constructor.",
+  },
+  // --- A3.2: the pre-A2 reference shape ------------------------------------
+  {
+    id: "entity-refs-bare-numbers-mean-unrecorded-kind",
+    path: "analysis.records[].entity_refs[]",
+    appliesToSchemas: ALL_SCHEMAS,
+    effectiveDefault: "a ref with kind null",
+    absorber: "inline-backfill",
+    omission:
+      "A2 made every entity reference carry what it denotes. A save written before that holds bare numbers, and a bare number is a real entity whose kind simply was not recorded — not an absent reference. Migrating to `kind: null` is what lets presentation omit the claim instead of guessing a namespace, which is the behaviour A2 specifies for an unrecorded kind. A wrong-typed or non-finite entry is not an omission and is not tolerated here; it is left untouched for the rejection conditions to fail on.",
   },
 ];
 
 export const MIGRATION_RULE_BY_ID: ReadonlyMap<string, CheckpointMigrationRule> = new Map(
   CHECKPOINT_MIGRATION_RULES.map((rule) => [rule.id, rule]),
 );
+
+/**
+ * A3.2: migrate a pre-A2 entity reference list.
+ *
+ * A save written before references carried their kind holds bare numbers. Each
+ * becomes `{ kind: null, id }` — a real entity of unrecorded kind, which
+ * presentation omits rather than guessing a namespace for.
+ *
+ * **Deduplication is by value, on `(kind, id)`, never by object identity.**
+ * This is the failure A2 hit: a `Set` over freshly-constructed ref objects
+ * never dedups, so a lineage named by both the producer and remover lists came
+ * out twice, breaking the "named once" rule while every type stayed valid and
+ * only `test:niche` caught it. The key is built from the pair, so a rebuilt
+ * object is recognised as the same reference.
+ *
+ * Entries that are neither a finite number nor a ref-shaped object are passed
+ * through untouched rather than dropped. Dropping them here would silently
+ * shorten a list, which is exactly the kind of quiet normalisation Decision 2
+ * forbids; the rejection conditions decide what an unusable entry means.
+ */
+export const migrateEntityRefs = (refs: readonly unknown[]): readonly unknown[] => {
+  const out: unknown[] = [];
+  const seen = new Set<string>();
+  for (const raw of refs) {
+    if (typeof raw === "number") {
+      if (!Number.isFinite(raw)) {
+        out.push(raw);
+        continue;
+      }
+      const key = JSON.stringify([null, raw]);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ kind: null, id: raw });
+      continue;
+    }
+    if (raw !== null && typeof raw === "object") {
+      const candidate = raw as Partial<EntityRef>;
+      if (typeof candidate.id !== "number" || !Number.isFinite(candidate.id)) {
+        out.push(raw);
+        continue;
+      }
+      const kind = candidate.kind ?? null;
+      const key = JSON.stringify([kind, candidate.id]);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ kind, id: candidate.id });
+      continue;
+    }
+    out.push(raw);
+  }
+  return out;
+};
+
+/**
+ * Apply {@link migrateEntityRefs} across a stored analysis payload.
+ *
+ * Typed `unknown` in and out on purpose: the checkpoint contract declares
+ * `analysis` as unknown, and the observer's own restore is unvalidated, so this
+ * boundary must narrow defensively rather than assert a shape it cannot
+ * guarantee. A payload that is not the expected container shape is returned
+ * unchanged, leaving the decision about it to validation rather than making it
+ * here by accident.
+ */
+export const migrateAnalysisEntityRefs = (analysis: unknown): unknown => {
+  if (analysis === null || typeof analysis !== "object") return analysis;
+  const source = analysis as { records?: unknown };
+  if (!Array.isArray(source.records)) return analysis;
+  let changed = false;
+  const records = source.records.map((record: unknown) => {
+    if (record === null || typeof record !== "object") return record;
+    const refs = (record as { entity_refs?: unknown }).entity_refs;
+    if (!Array.isArray(refs)) return record;
+    const migrated = migrateEntityRefs(refs);
+    if (migrated.length === refs.length && migrated.every((r, i) => r === refs[i])) return record;
+    changed = true;
+    return { ...record, entity_refs: migrated };
+  });
+  return changed ? { ...source, records } : analysis;
+};
 
 /* ------------------------------------------------------------------ *
  * Cross-boundary read models.

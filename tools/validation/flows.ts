@@ -4,6 +4,8 @@ import type { EngineConfig, FlowFacts } from "../../packages/contracts/src/index
 import {
   CHECKPOINT_MIGRATION_RULES,
   MIGRATION_RULE_BY_ID,
+  migrateEntityRefs,
+  typedRefs,
 } from "../../packages/contracts/src/index.ts";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -445,17 +447,9 @@ const MIGRATION_ABSORBER_PROBES: Readonly<Record<string, { file: string; probe: 
     file: "packages/sim-core/src/engine.ts",
     probe: /this\.lineageInterval\|\|new Map\(\)/,
   },
-  "pending-decision-absent-reads-as-null": {
-    file: "packages/sim-runtime/src/session.ts",
-    probe: /if\(!raw\|\|typeof raw!=="object"\)return null;/,
-  },
   "pending-decision-source-backfilled-from-event": {
     file: "packages/sim-runtime/src/session.ts",
     probe: /copy\.source="observed_event"/,
-  },
-  "decision-resolutions-absent-reads-as-empty": {
-    file: "packages/sim-runtime/src/session.ts",
-    probe: /Array\.isArray\(decisions\?\.resolutions\)/,
   },
   "decision-resolution-offer-tick-backfilled-from-tick": {
     file: "packages/sim-runtime/src/session.ts",
@@ -469,23 +463,21 @@ const MIGRATION_ABSORBER_PROBES: Readonly<Record<string, { file: string; probe: 
     file: "packages/sim-runtime/src/session.ts",
     probe: /if\(copy\.source===undefined\)copy\.source="event_decision";/,
   },
-  "last-decision-tick-absent-reads-as-zero": {
-    file: "packages/sim-runtime/src/session.ts",
-    probe: /typeof decisions\?\.lastDecisionTick==="number"\?decisions\.lastDecisionTick:0/,
-  },
-  "last-major-catalyst-tick-absent-reads-as-null": {
-    file: "packages/sim-runtime/src/session.ts",
-    probe: /typeof decisions\?\.lastMajorCatalystTick==="number"\?decisions\.lastMajorCatalystTick:null/,
-  },
   "matched-control-absent-reads-as-null": {
     file: "packages/sim-runtime/src/session.ts",
     probe: /checkpoint\.control\?restoreSimulationCheckpoint/,
+  },
+  "entity-refs-bare-numbers-mean-unrecorded-kind": {
+    file: "packages/contracts/src/index.ts",
+    probe: /export const migrateEntityRefs = /,
   },
   "analysis-substate-absent-reads-as-constructor-default": {
     file: "packages/sim-analysis/src/index.ts",
     probe: /const observer=new EcologyObserver\(\);[\s\S]{0,120}Object\.assign\(observer,/,
   },
 };
+
+const SPLIT_RULE_IDS = ["matched-control-absent-reads-as-null", "analysis-substate-absent-reads-as-constructor-default"];
 
 function testCheckpointMigrationRuleTable() {
   const schemas = ["0.1", "0.2", "0.3"];
@@ -517,6 +509,14 @@ function testCheckpointMigrationRuleTable() {
       rule.omission.length > 40,
       `${rule.id} must state why the omission is tolerated, not just that it is`,
     );
+    // A half rule must say what it refuses, or the absence-tolerance reads as
+    // blanket tolerance. A whole rule needs no `rejects`.
+    if (SPLIT_RULE_IDS.includes(rule.id)) {
+      assert.ok(
+        typeof rule.rejects === "string" && rule.rejects.length > 40,
+        `${rule.id} is a half rule and must state the wrong-typed case it refuses`,
+      );
+    }
 
     const probe = MIGRATION_ABSORBER_PROBES[rule.id];
     assert.ok(
@@ -561,7 +561,130 @@ testIntervalNetMembers();
 testIntervalCoversDead();
 testFlowSelfConsistency();
 testFlowRngNeutrality();
+/**
+ * A3.2: a save written before references carried their kind.
+ *
+ * Three things have to hold, and the third is the one worth having a test for.
+ *
+ * The save restores at all, and each bare number becomes a real ref of
+ * unrecorded kind rather than a dropped entry. Presentation then omits the
+ * label, because a kind that was never recorded cannot be printed as either
+ * `L-` or `C-` without asserting something unverified.
+ *
+ * And the migrated list has the same length as the bare-number original.
+ * That is the A2 regression restated as a test: a migration that builds a
+ * fresh object per element and dedups by reference produces a longer list, not
+ * a shorter one, and a lineage named by both the producer and remover lists
+ * comes out twice. Dedup here is on the `(kind, id)` pair, so a rebuilt object
+ * is recognised as the reference it already was.
+ */
+function testPreA2EntityRefMigration() {
+  // Value, not identity: the same lineage twice collapses to one entry.
+  assert.deepEqual(
+    migrateEntityRefs([9, 9, 7]),
+    [{ kind: null, id: 9 }, { kind: null, id: 7 }],
+    "a bare number becomes an unrecorded-kind ref, deduplicated by value",
+  );
+  // An already-tagged ref survives unchanged, and two distinct kinds of the
+  // same id are two different references.
+  assert.deepEqual(
+    migrateEntityRefs([{ kind: "lineage", id: 9 }, { kind: "clade", id: 9 }, { kind: "lineage", id: 9 }]),
+    [{ kind: "lineage", id: 9 }, { kind: "clade", id: 9 }],
+    "dedup is on the (kind, id) pair, so a lineage and a clade of one id stay distinct",
+  );
+  // Unusable entries are passed through, not dropped. Silently shortening the
+  // list would be the quiet normalisation Decision 2 forbids; deciding what an
+  // unusable entry means belongs to validation.
+  assert.deepEqual(
+    migrateEntityRefs(["nope", { kind: "lineage" }, 4]),
+    ["nope", { kind: "lineage" }, { kind: null, id: 4 }],
+    "an entry that is not a usable ref is passed through rather than dropped",
+  );
+  assert.deepEqual(
+    migrateEntityRefs([9, NaN]),
+    [{ kind: null, id: 9 }, NaN],
+    "a finite number still migrates, and a non-finite one is not treated as an omission",
+  );
+
+  // End to end: a real save, stripped back to the pre-A2 shape, then restored.
+  const session = new UniverseSession();
+  session.create(config(FIXTURE_SEED));
+  settle(session, 20000);
+  const saved: any = JSON.parse(JSON.stringify(session.checkpoint()));
+
+  const taggedCount = saved.analysis.records
+    .flatMap((r: any) => r.entity_refs as any[])
+    .filter((ref: any) => ref !== null && typeof ref === "object").length;
+  assert.ok(taggedCount > 0, "this run produced tagged refs, so the strip below is meaningful");
+  // Strip to the pre-A2 shape FIRST, then capture: `originals` must be the
+  // bare-number form, because that is what the migrated list is compared against.
+  for (const r of saved.analysis.records) {
+    r.entity_refs = (r.entity_refs as any[]).map((ref: any) => ref.id);
+  }
+  const originals: number[][] = saved.analysis.records.map((r: any) => [...r.entity_refs]);
+
+  const aged = new UniverseSession();
+  aged.restore(saved);
+  const migrated = (aged.analysis as any).records as any[];
+  assert.equal(migrated.length, saved.analysis.records.length, "no record is lost or invented");
+
+  let compared = 0;
+  for (let i = 0; i < migrated.length; i++) {
+    const before = originals[i] as number[];
+    const after = migrated[i].entity_refs as any[];
+    assert.equal(
+      after.length,
+      before.length,
+      `record ${i}: migrated refs must be the same length as the bare-number original`,
+    );
+    for (let j = 0; j < before.length; j++) {
+      assert.equal(after[j].kind, null, `record ${i} ref ${j}: kind must be unrecorded, not guessed`);
+      assert.equal(after[j].id, before[j], `record ${i} ref ${j}: id survives the migration`);
+      compared++;
+    }
+    // The presentation consequence: no label is claimed in either namespace.
+    assert.deepEqual(
+      typedRefs(after),
+      [],
+      `record ${i}: an unrecorded kind yields no L- or C- claim`,
+    );
+  }
+  assert.ok(compared > 0, "the comparison above actually ran");
+
+  // The engine's own output is incidental here — in 20k ticks it may name one
+  // entity or several. So the dedup case is stated explicitly on the restore
+  // path, with a record whose bare numbers repeat a lineage. A migration that
+  // rebuilt each ref as a fresh object and deduped by reference would leave
+  // all three entries, which is the A2 failure exactly.
+  saved.analysis.records.push({
+    id: "synthetic-duplicate-refs-established-1",
+    arc_id: "synthetic",
+    kind: "cuse",
+    tick: 1,
+    phase: "established",
+    title: "synthetic",
+    summary: "synthetic",
+    level: "major",
+    evidence: {},
+    entity_refs: [9, 9, 7],
+  });
+  const dup = new UniverseSession();
+  dup.restore(saved);
+  const dupRef = ((dup.analysis as any).records as any[]).at(-1).entity_refs as any[];
+  assert.equal(dupRef.length, 2, "a repeated bare lineage collapses to one ref, by value not by identity");
+  assert.deepEqual(
+    dupRef,
+    [{ kind: null, id: 9 }, { kind: null, id: 7 }],
+    "the collapsed ref keeps the first occurrence's order and an unrecorded kind",
+  );
+  console.log(
+    `pre-A2 entity_refs migration: PASS (${compared} real refs length-preserved, duplicate case collapsed)`,
+  );
+}
+
+
 testFlowCheckpoint();
+testPreA2EntityRefMigration();
 testCheckpointMigrationRuleTable();
 
 testFlowEvidence();
