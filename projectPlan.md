@@ -8,11 +8,16 @@
 
 ## Current Phase
 
-Not started
+Pre-M7 stabilization gate (Tranche A). Product features below are implemented
+and running; the gate hardens contracts, identity, checkpoints, and evidence
+before M7 may resume.
 
-## Current Phase
+## Current Focus
 
-Requirements (structured from project.md; not yet implemented)
+Tranche A hardening: A1, A2, A3.1, A3.2 merged; A3.3 (checkpoint rejection +
+strict schema 0.4) open as PR #70, unmerged pending design acceptance. M7
+investigation work is on hold until the full gate closes with explicit
+activation.
 
 ## Structured Requirements
 
@@ -49,7 +54,8 @@ Requirements (structured from project.md; not yet implemented)
 **Acceptance Criteria:**
 
 - Same engine version + resolved config + seed + command sequence reproduces a run
-- Engine 0.20.0 saves do not restore as 0.21.0 under the strict version check
+- Checkpoint schema 0.4 is the strict current schema; only named historical
+  omissions migrate, everything else fails explicitly before becoming live state
 - Every universe records seed, full starting config, and engine version
 
 ### REQ-SIM-002
@@ -213,59 +219,59 @@ Requirements (structured from project.md; not yet implemented)
 ### Feature 1 — World lifecycle
 
 - Requirements: REQ-WORLD-001, REQ-WORLD-002
-- Status: Not Started
+- Status: Implemented
 - Description: Creation flows, archetypes, pending-vs-active clarity
 - Dependencies: REQ-SIM-001
-- Implementation Notes:
+- Implementation Notes: Under Tranche A hardening (typed read models, A1)
 
 ### Feature 2 — Deterministic engine core
 
 - Requirements: REQ-SIM-001, REQ-SIM-002, REQ-SIM-003
-- Status: Not Started
+- Status: Implemented
 - Description: Reference world model with authority boundaries intact
 - Dependencies:
-- Implementation Notes: Engine 0.21.0 boundary for c_washout semantics
+- Implementation Notes: Under Tranche A hardening (checkpoint migration/validation, A3)
 
 ### Feature 3 — Explorer shell and time
 
 - Requirements: REQ-UX-001, REQ-UX-002, REQ-M4-001, REQ-GRAPH-001
-- Status: Not Started
+- Status: Implemented
 - Description: World-first layout, bounded speeds, immersive presentation
 - Dependencies: Feature 2
-- Implementation Notes:
+- Implementation Notes: PixiJS v8/WebGL2 approved for production World migration (Tranche D), after contract stabilization
 
 ### Feature 4 — Events, clades, and population story
 
 - Requirements: REQ-EVENT-001, REQ-EVENT-002, REQ-POP-001, REQ-CLADE-001
-- Status: Not Started
+- Status: Implemented
 - Description: Stateful events, decision gates, emergent population arcs, clade identity
 - Dependencies: Feature 2
-- Implementation Notes:
+- Implementation Notes: Typed identity + `L-`/`C-` namespace landed (A2, verified in-app)
 
 ### Feature 5 — Experiments and evidence
 
 - Requirements: REQ-EXP-001, REQ-EXPORT-001
-- Status: Not Started
+- Status: Implemented
 - Description: Interventions, lazy forks, structured exports
 - Dependencies: Features 2, 4
-- Implementation Notes:
+- Implementation Notes: Typed `EvidenceExport` with revision/cleanliness provenance is Tranche A unit A6 (not started)
 
 ### Feature 6 — Niche-construction slice
 
 - Requirements: REQ-SLICE-002
-- Status: Not Started
+- Status: Implemented
 - Description: Waste field with tolerance/cleanup traits and analysis arc
 - Dependencies: Feature 2
-- Implementation Notes: Advances engine version; no user-facing waste controls
+- Implementation Notes: No user-facing waste controls (read-only overlay only)
 
 ## Development Tasks
 
 - [x] Read raw requirements in project.md
 - [x] Structure them as requirements with IDs (above)
-- [ ] Define architecture
-- [ ] Implement core features
-- [ ] Implement tests
-- [ ] Review implementation
+- [x] Define architecture (`docs/architecture/MIGRATION.md` + plan Architecture section)
+- [x] Implement core features (Features 1–6; now under Tranche A hardening)
+- [x] Implement tests (`tools/validation/*`, manifest-driven; `pnpm verify` is the blocking contract)
+- [ ] Review implementation (pre-M7 reconciliation gate still open; M7 on hold)
 
 ## Architecture
 

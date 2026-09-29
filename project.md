@@ -25,8 +25,11 @@ https://docs.google.com/document/d/16zic3rFlPyFQeLRy9RLUvdwCS4imJTmWM7kh0aBFN6o/
 (Sections below track that doc; it remains the authoritative design text.
 Older scope statements in it are historical snapshots, not hard limits.)
 
-Current maintained state: app 0.30.0 / engine 0.20.0 (0.21.0 adds the
-c_washout intervention), TypeScript modular monolith (contracts, sim-core,
+Current maintained state: app 0.31.0 / engine 0.22.0 (authoritative values
+in `packages/sim-core/src/version.ts`; do not restate versions here without
+checking that file), checkpoint schema 0.4 is the strict current schema
+(`CHECKPOINT_SCHEMA_VERSION` in `packages/sim-runtime/src/session.ts`),
+TypeScript modular monolith (contracts, sim-core,
 sim-analysis, sim-runtime, React/Vite explorer, Capacitor Android packaging).
 Reference world: motile asexual microbes in a 600×600 toroidal environment
 with 60×60 substance fields; abiotic nutrients plus biologically produced

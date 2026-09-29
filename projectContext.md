@@ -7,47 +7,99 @@
 
 ## Project Summary
 
-Not defined yet.
+Offline-first ecosystem laboratory. The Living Evolution Explorer lets a user
+create worlds, watch autonomous evolution unfold, investigate ecological
+history and ancestry, intervene transparently, and compare matched
+evolutionary branches — without writing code. Currently under a pre-M7
+stabilization gate (Tranche A: typed cross-boundary contracts, checkpoint
+migration/validation); M7 investigation work is on hold.
 
 ## Technology Stack
 
-Not defined yet.
+TypeScript modular monorepo (pnpm workspaces). React + Vite explorer app,
+Canvas 2D production renderer with a PixiJS v8 spike (`tools/pixi-spike`).
+Capacitor Android packaging. No backend, no database, no network at runtime.
 
 ## Architecture
 
-Not defined yet.
+`packages/contracts` (cross-boundary types) → `packages/sim-core`
+(deterministic biological authority) → `packages/sim-runtime` (worker/session
+orchestration, matched forks) → `apps/explorer` (React UI).
+`packages/sim-analysis` reads immutable observations only (clades, records,
+wording). `packages/sim-decisions` maps observed events to choices without
+mutating state. See `docs/architecture/MIGRATION.md` for module boundaries.
 
 ## Application Structure
 
-Not defined yet.
+`apps/explorer` (UI: World, History, Tree, Experiments surfaces);
+`packages/{contracts,sim-core,sim-analysis,sim-runtime,sim-decisions,phenotype}`;
+`tools/validation` (gates, manifest-driven); `legacy/prototype` (frozen
+regression evidence — never edit).
 
 ## Database
 
-Not defined yet.
+None. Persistence is resumable checkpoints and structured evidence exports
+(JSON/JSONL), which are separate contracts.
 
 ## Authentication
 
-Not defined yet.
+None. Offline-first single-user product; no accounts, no network services.
 
 ## Important Decisions
 
-None yet.
+- M7 is ON HOLD until the pre-M7 fix gate closes (Tranches A–E + reconciliation).
+- PixiJS v8/WebGL2 approved as the production World renderer; migration follows
+  Tranche A/B contract stabilization.
+- `L-` is reserved for genealogical lineage; analytical clades use `C-`.
+- Checkpoint compatibility is an allow-list: only named historical omissions
+  migrate; everything else fails explicitly before becoming live state.
+  Absence compatibility and value validity are independent axes.
+- Declare the smallest truthful contract first; add enforcement second
+  (narrowing heuristic).
+- Full record: `/sdcard/DEE/review/tranche-a-decisions.md` (review copy; session
+  and main are the source of truth).
 
 ## Current Implementation
 
-Nothing implemented yet.
+All six product feature families exist and run: world lifecycle, deterministic
+engine core, explorer shell + time controls, events/clades/population story,
+experiments + evidence export, waste-field niche-construction slice. Tranche A
+hardening merged: A1 typed read models (`f5641c4`), A2 typed identity +
+namespace (`46ccfe9`), A3.1 migration rule table (`b5c2a36`), A3.2 pre-A2 ref
+migration + table correction (`821dd9f`).
 
 ## Current Focus
 
-Requirements gathering.
+A3.3 checkpoint rejection + strict 0.4 schema (PR #70, unmerged — design
+acceptance gate §4.7 not yet granted, do not merge). Then A3.4 ordering proof,
+then A4–A6.
 
 ## Important Constraints
 
-None yet.
+- Offline-first: sim, saves, history, experiments, inspection, export work
+  with no network.
+- Determinism: same engine version + resolved config + seed + command sequence
+  reproduces a run.
+- Authority boundaries (sim-core biology, read-only analysis, non-manufacturing
+  presentation) are required by design review.
+- Never weaken or delete tests, gates, or CI checks to make a change pass.
+- Do not edit `legacy/prototype/`.
+- `pnpm verify` is the blocking repo contract, but a handoff's validation list
+  is a floor, not a substitute: completion needs the handoff's named checks
+  **and** every blocking unit/CI shard the manifest routes for the diff.
+- No commits, pushes, PRs, or new network/analytics services without explicit
+  approval.
 
 ## Known Issues
 
-None yet.
+- Android emulator runtime smoke is paused (device acquisition unreliable);
+  packaging gate only — tracked in issue #50.
+- A2 visual evidence (screenshots) verified in-app but not yet filed into the
+  `visual-capture` trail.
+- `packages/phenotype` has no row in the `AGENTS.md` architecture table (fix
+  before Tranche D).
+- Uncommitted `.opencode/agents/project-manager.md` write grant (resolve
+  before Tranche F).
 
 ## Things AI Should Know
 
@@ -57,7 +109,11 @@ None yet.
 - Keep documentation files synchronized with project progress.
 - Create/update test cases for implemented features.
 - Update project status after completing meaningful work.
+- The manifest (`tools/validation/manifest.ts`) is authoritative for what
+  evidence exists; a handoff's check list narrows attention, it does not bound it.
+- Check `/sdcard/DEE/review/` for the current handoff and decisions record
+  before starting tranche work.
 
 ## Last Context Update
 
-Not yet updated.
+2026-09-29 — filled from template; prior "Not defined yet" state retired.
