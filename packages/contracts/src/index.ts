@@ -191,7 +191,7 @@ export const formatCladeId = (id: CladeId): string => `C-${String(id).padStart(4
  * ------------------------------------------------------------------ */
 
 /** Schema versions a universe checkpoint may declare. */
-export type CheckpointSchemaVersion = "0.1" | "0.2" | "0.3";
+export type CheckpointSchemaVersion = "0.1" | "0.2" | "0.3" | "0.4";
 
 /**
  * What actually absorbs a tolerated omission today.
@@ -215,6 +215,26 @@ export type MigrationAbsorber =
   | "inline-backfill"
   | "structural-branch";
 
+/**
+ * What a tolerated omission can affect, and therefore whether absence is a
+ * safe default for it.
+ *
+ * - `inert` — written but never read for a decision. Any default is harmless.
+ * - `load-bearing-display` — load-bearing for what the player is told, not for
+ *   what the world does. A default must not assert something untrue.
+ * - `load-bearing-dynamics` — the field gates whether the simulation may act.
+ *   Absence is **not** a safe default here: it must either be refused, or
+ *   defaulted to the value that preserves prior behaviour rather than the one
+ *   that looks neutral.
+ *
+ * A classification is a snapshot of the code at one commit, not a durable
+ * property. `lastDecisionTick` is the cautionary case: inert today because
+ * nothing reads it, and dangerous the moment something does — which is why a
+ * `load-bearing-dynamics` rule is a finding to re-derive, and why an inert one needs a
+ * test that fails if a reader appears.
+ */
+export type MigrationHazard = "inert" | "load-bearing-display" | "load-bearing-dynamics";
+
 export interface CheckpointMigrationRule {
   /** Stable identifier. Tests reference this, so renaming one is a real change. */
   readonly id: string;
@@ -236,38 +256,77 @@ export interface CheckpointMigrationRule {
    * itself is implemented by the validator, not by this table.
    */
   readonly rejects?: string;
+  /**
+   * Concrete evidence that a *supported build* could have written this shape:
+   * the change that introduced the field, and the schema version in force at
+   * that moment. Required on every rule.
+   *
+   * This is deliberately not "the restore code currently tolerates it". Code
+   * that happens to cope is not a compatibility promise, and inferring one from
+   * it is how a rule table starts describing the present instead of the past.
+   * A rule that cannot name its basis does not belong here — that standard is
+   * what removed `matched-control-absent-reads-as-null`, whose fields have been
+   * written by every save since the initial import and so were never absent in
+   * any supported build.
+   */
+  readonly historicalBasis: string;
+  /** What a tolerated omission can affect. Required on every rule. */
+  readonly hazard: MigrationHazard;
+  /**
+   * For a `load-bearing-dynamics` rule: why its default is safe anyway, because
+   * absence here is meaningful rather than merely unhandled. Required on every
+   * `load-bearing-dynamics` rule and forbidden on the other kinds, so the
+   * justification cannot be quietly omitted.
+   */
+  readonly dynamicsJustification?: string;
 }
 
-const ALL_SCHEMAS: readonly CheckpointSchemaVersion[] = ["0.1", "0.2", "0.3"];
+/**
+ * Every version except the current one. A 0.4 save is written by the build that
+ * requires these fields, so it may not omit them — that is the whole point of
+ * the split. A rule here describes what an *older* supported build could have
+ * written, which is a claim about history and has to be evidenced, not a claim
+ * about what the current build tolerates.
+ */
+const PRE_CURRENT_SCHEMAS: readonly CheckpointSchemaVersion[] = ["0.1", "0.2", "0.3"];
 
 export const CHECKPOINT_MIGRATION_RULES: readonly CheckpointMigrationRule[] = [
   // --- The three omissions Decision 2 names explicitly ---------------------
   {
     id: "organism-pc-reads-as-zero",
     path: "experiment.state.props.o[].pc",
-    appliesToSchemas: ALL_SCHEMAS,
+    appliesToSchemas: PRE_CURRENT_SCHEMAS,
     effectiveDefault: "0",
     absorber: "live-step-guard",
     omission:
       "Cumulative produced-C per organism. Saves written before the counter existed leave it absent, and the per-step production and aggregation reads already treat an absent counter as zero rather than producing NaN.",
+    hazard: "load-bearing-display",
+    historicalBasis:
+      "`Organism.pc` was added in f6bfbe7 on 2026-09-25 (Issue #30 Phase B1), which is after the 0.3 bump in b040b19 on 2026-09-24. A 0.3 save written between those two dates carries organisms with no `pc` at all.",
   },
   {
     id: "simulation-last-lineage-flows-reads-as-null",
     path: "experiment.state.props.lastLineageFlows",
-    appliesToSchemas: ALL_SCHEMAS,
+    appliesToSchemas: PRE_CURRENT_SCHEMAS,
     effectiveDefault: "null",
     absorber: "nullable-field",
     omission:
       "Per-lineage interval flow facts. The field is declared `IntervalFlowFacts | null` and initialised to null, so an absent value is already a legal state of the field rather than a missing one. The next observation stride replaces it before anything reads it as evidence.",
+    hazard: "load-bearing-display",
+    historicalBasis:
+      "`lastLineageFlows` was declared and first assigned in 4da996c on 2026-09-25 (Issue #30 Stage 2.2), after the 0.3 bump. A 0.3 save from before that has no `lastLineageFlows` key.",
   },
   {
     id: "simulation-lineage-interval-reads-as-empty-map",
     path: "experiment.state.props.lineageInterval",
-    appliesToSchemas: ALL_SCHEMAS,
+    appliesToSchemas: PRE_CURRENT_SCHEMAS,
     effectiveDefault: "an empty Map",
     absorber: "live-step-guard",
     omission:
       "Accumulated within-stride lineage deltas. Reading it for interval attribution already tolerates absence, and an empty map is the correct meaning: no delta accumulated yet, not a lost one.",
+    hazard: "load-bearing-display",
+    historicalBasis:
+      "`lineageInterval` arrived in the same change, 4da996c on 2026-09-25. The build that introduced it initialises the map empty, so an earlier save simply lacks the key and empty is what the code already treats it as.",
   },
   // --- Decision-record backfills, found by enumerating the restore path ----
   {
@@ -278,6 +337,9 @@ export const CHECKPOINT_MIGRATION_RULES: readonly CheckpointMigrationRule[] = [
     absorber: "inline-backfill",
     omission:
       "Saves predating the catalyst source have no `source`, but a `sourceEventId` can only have come from an observed event, so the backfill is forced by the data rather than guessed from it.",
+    hazard: "load-bearing-display",
+    historicalBasis:
+      "`source` was introduced together with checkpoint 0.3 in b040b19 on 2026-09-24. A 0.2 save holds a pending decision carrying `sourceEventId` and no `source`, which is the case this backfill exists for.",
   },
   {
     id: "decision-resolution-offer-tick-backfilled-from-tick",
@@ -287,6 +349,9 @@ export const CHECKPOINT_MIGRATION_RULES: readonly CheckpointMigrationRule[] = [
     absorber: "inline-backfill",
     omission:
       "0.2 records predate the field. The resolution tick is the best available estimate of when the offer happened, and it is an estimate rather than an invention.",
+    hazard: "load-bearing-display",
+    historicalBasis:
+      "`offerTick` was introduced with 0.3 in b040b19. A 0.2 resolution carries `tick` and no `offerTick`.",
   },
   {
     id: "decision-resolution-catalyst-id-reads-as-null",
@@ -296,6 +361,9 @@ export const CHECKPOINT_MIGRATION_RULES: readonly CheckpointMigrationRule[] = [
     absorber: "inline-backfill",
     omission:
       "No 0.2 resolution came from a catalyst window, because catalyst decisions did not exist then. Null states that fact rather than implying a catalyst was involved.",
+    hazard: "load-bearing-display",
+    historicalBasis:
+      "`catalystId` was introduced with 0.3 in b040b19, alongside the catalyst source it names. Catalyst decisions did not exist before it, so no 0.2 resolution can carry one.",
   },
   {
     id: "decision-resolution-source-reads-as-event-decision",
@@ -305,38 +373,38 @@ export const CHECKPOINT_MIGRATION_RULES: readonly CheckpointMigrationRule[] = [
     absorber: "inline-backfill",
     omission:
       "Before the source field existed, every resolution was an event decision. Naming it is a restatement of the era, not a classification of the record.",
-  },
-  {
-    id: "matched-control-absent-reads-as-null",
-    path: "control / controlAnalysis",
-    appliesToSchemas: ALL_SCHEMAS,
-    effectiveDefault: "null",
-    absorber: "inline-backfill",
-    omission:
-      "A matched twin is created by the first intervention. No twin existing is a normal state, not a missing one. The save path always writes both keys, explicitly null, so absence is tolerated here only because an older payload may predate matched forks — not because absence is a shape the current schema produces.",
-    rejects:
-      "A truthy non-object `control` is not an absent twin and is not defaulted. It is already refused downstream by the simulation restore, which rejects it on its schema tag rather than reading it as no twin.",
+    hazard: "load-bearing-display",
+    historicalBasis:
+      "`source` on a resolution was introduced with 0.3 in b040b19. Every 0.2 resolution predates the field and was an event decision.",
   },
   {
     id: "analysis-substate-absent-reads-as-constructor-default",
     path: "analysis.{crossfeeding,seed_bank,era,cuse_guild,niche_construction,records,eras}",
-    appliesToSchemas: ALL_SCHEMAS,
+    appliesToSchemas: PRE_CURRENT_SCHEMAS,
     effectiveDefault: "the freshly constructed observer's own initial state",
     absorber: "constructor-default",
     omission:
       "Restore constructs a fresh observer and then overwrites only the keys the payload carries, so an absent sub-state keeps its declared initial value instead of becoming undefined. A detector that has not yet fired genuinely has no sub-state, which is different from a detector that fired and lost its record.",
     rejects:
       "A present-but-wrong-typed sub-state is not covered by this rule. `Object.assign` writes whatever it is handed, so a corrupt value becomes live state rather than being defaulted — which is the opposite failure from normalisation, and is why the validator has to refuse it rather than rely on the constructor.",
+    hazard: "load-bearing-dynamics",
+    dynamicsJustification:
+      "Absence is meaningful: a detector that has not fired has no sub-state, and that is the same world as one whose records were empty. Critically, this default *removes* a capability rather than granting one — an observer with no records raises no event, so the pause gate stays shut. The hazard is the opposite case and is why `rejects` exists: a wrong-typed sub-state is written into live state by `Object.assign` and can then raise a gate the analysis never earned.",
+    historicalBasis:
+      "The detector sub-states did not all arrive at once: `cuse_guild` came in 064d727 on 2026-09-25 and `niche_construction` in af9ad23 on 2026-09-26, both after the 0.3 bump of 2026-09-24. `seed_bank` predates every version, but one 0.3 save can predate either later detector, so a single rule covers the group.",
   },
   // --- A3.2: the pre-A2 reference shape ------------------------------------
   {
     id: "entity-refs-bare-numbers-mean-unrecorded-kind",
     path: "analysis.records[].entity_refs[]",
-    appliesToSchemas: ALL_SCHEMAS,
+    appliesToSchemas: PRE_CURRENT_SCHEMAS,
     effectiveDefault: "a ref with kind null",
     absorber: "inline-backfill",
     omission:
       "A2 made every entity reference carry what it denotes. A save written before that holds bare numbers, and a bare number is a real entity whose kind simply was not recorded — not an absent reference. Migrating to `kind: null` is what lets presentation omit the claim instead of guessing a namespace, which is the behaviour A2 specifies for an unrecorded kind. A wrong-typed or non-finite entry is not an omission and is not tolerated here; it is left untouched for the rejection conditions to fail on.",
+    hazard: "load-bearing-display",
+    historicalBasis:
+      "A2 (afbccfc) changed the persisted reference list from bare numbers to tagged `EntityRef` objects without changing the schema version, so 0.3 names both shapes at once. This is the concrete case that forced 0.4.",
   },
 ];
 
@@ -422,6 +490,233 @@ export const migrateAnalysisEntityRefs = (analysis: unknown): unknown => {
   });
   return changed ? { ...source, records } : analysis;
 };
+
+
+/* ------------------------------------------------------------------ *
+ * Checkpoint rejection.
+ *
+ * The allow-list has an inverse, and this is it. The ten rules say what may be
+ * absent; everything else that the current schema requires must be *present and
+ * of the right type*, or the save is refused.
+ *
+ * Two properties matter more than the individual checks.
+ *
+ * It runs **after** migration. A save that migrates cleanly must not be caught
+ * by a pre-migration check, or compatibility is broken by the very mechanism
+ * meant to preserve it.
+ *
+ * And it is **narrower than it looks**. Every check below corresponds to a key
+ * the maintained save path actually writes. A field that is genuinely optional
+ * gets no check, because inventing a requirement for it produces exactly the
+ * over-broad rejection that shows up as a user's own world failing to open.
+ * The current-save round trip is what proves the width; a hand-written fixture
+ * cannot.
+ * ------------------------------------------------------------------ */
+
+export type CheckpointRejectionReason =
+  | "wrong-type"
+  | "malformed-container"
+  | "non-finite-numeric"
+  | "unsupported-version"
+  | "unsupported-tag"
+  | "structural-contradiction";
+
+/**
+ * Player-facing text per reason. **DRAFT — awaiting Owner wording.**
+ *
+ * A3.3 is the first unit that makes ordinary saves fail to load, and the
+ * Explorer restore path surfaces `error.message` verbatim, so whatever is here
+ * is what a player reads. The developer message below is a field name, a quoted
+ * value and a reason code: precise for a log, useless to someone who wants to
+ * know whether their world is still there.
+ *
+ * Branch on `reason` and read `playerMessage`, never the other way round. The
+ * reason set is a contract; the wording is copy, and is expected to change
+ * without touching the validator.
+ */
+export const CHECKPOINT_PLAYER_MESSAGES: Readonly<Record<CheckpointRejectionReason, string>> = {
+  "wrong-type": "This save has a value in a place the app expects a different kind of value.",
+  "malformed-container": "Part of this save doesn't have the shape the app expects.",
+  "non-finite-numeric": "Part of this save contains a number that isn't valid.",
+  "unsupported-version": "This save uses a format this version of the app doesn't support.",
+  "unsupported-tag": "Part of this save is in a form this version of the app doesn't recognise.",
+  "structural-contradiction":
+    "Part of this save contains decision information that doesn't form a valid record.",
+};
+
+/**
+ * The shared frame, appended to every reason's text.
+ *
+ * It says only that the world was not loaded — not partially loaded. It
+ * deliberately does **not** promise the save was left unchanged: a refused
+ * restore returns before making live state, but that is not the same as
+ * proving the whole persistence and UI path never rewrites the stored save
+ * during a failed load. That promise needs an end-to-end persistence assertion
+ * first, and stays out until one exists.
+ */
+export const CHECKPOINT_PLAYER_NOTICE = "The world wasn't loaded.";
+/** An explicit refusal, naming the field and the class of failure. */
+export class CheckpointRejectionError extends Error {
+  readonly field: string;
+  readonly reason: CheckpointRejectionReason;
+  /** Plain-language text for the player. See {@link CHECKPOINT_PLAYER_MESSAGES}. */
+  readonly playerMessage: string;
+  constructor(field: string, reason: CheckpointRejectionReason, detail: string) {
+    super(`checkpoint rejected: ${field} — ${detail} (${reason})`);
+    this.name = "CheckpointRejectionError";
+    this.field = field;
+    this.reason = reason;
+    this.playerMessage = CHECKPOINT_PLAYER_MESSAGES[reason];
+  }
+}
+
+// A function declaration, not a const arrow: TypeScript only narrows control
+// flow past a `never` call when the callee is a declared function, and every
+// check below relies on that narrowing to reach the next field.
+function reject(field: string, reason: CheckpointRejectionReason, detail: string): never {
+  throw new CheckpointRejectionError(field, reason, detail);
+}
+
+const isPlainObject = (v: unknown): v is Record<string, unknown> =>
+  v !== null && typeof v === "object" && !Array.isArray(v);
+
+const isFiniteNumber = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+
+const describe = (v: unknown): string => (v === null ? "null" : Array.isArray(v) ? "array" : typeof v);
+
+const SUPPORTED_SCHEMAS: readonly CheckpointSchemaVersion[] = ["0.1", "0.2", "0.3", "0.4"];
+
+const CHECKPOINT_TAGS: readonly string[] = [
+  "simulation",
+  "resource-system",
+  "waste-field",
+  "legacy-observer",
+  "map",
+  "undefined",
+  "number",
+  "rng",
+  "typed-array",
+];
+
+/**
+ * A tagged node of the encoded simulation tree, as `encodeCheckpointValue`
+ * writes it. The key is sim-core's `CHECKPOINT_TAG`; a mismatch would make the
+ * unsupported-tag condition vacuous, because the walk would find no tags and
+ * therefore reject nothing while appearing to run.
+ */
+const CHECKPOINT_TAG_KEY = "__digital_evolution_type";
+
+/**
+ * Refuse a checkpoint the current schema cannot accept.
+ *
+ * **Strict requirements apply to the current schema (`0.4`) only.** Every
+ * earlier version is checked for a known version and a usable container, and
+ * nothing more — their omissions are the migration rules' business, and
+ * holding them to today's requirements would refuse exactly the saves
+ * Decision 2 exists to protect.
+ *
+ * That split is the reason `0.4` exists. `0.3` was already two shapes before
+ * this unit: `Organism.pc`, `Simulation.lastLineageFlows` and
+ * `Simulation.lineageInterval` all arrived while the schema was already `0.3`,
+ * as did the C-use and niche sub-states and then A2's tagged entity references.
+ * So "a 0.3 save may omit `pc`" and "a current save missing `pc` is refused"
+ * were both true and could not be told apart by version. Making the hardened
+ * shape its own version is what lets both hold.
+ */
+export const validateCheckpoint = (checkpoint: unknown): void => {
+  if (!isPlainObject(checkpoint)) {
+    reject("(root)", "malformed-container", `expected a checkpoint object, got ${checkpoint === null ? "null" : typeof checkpoint}`);
+  }
+  const schema = checkpoint.checkpointSchemaVersion;
+  if (typeof schema !== "string" || !SUPPORTED_SCHEMAS.includes(schema as CheckpointSchemaVersion)) {
+    reject("checkpointSchemaVersion", "unsupported-version", `unsupported schema ${JSON.stringify(schema)}`);
+  }
+  if (!isPlainObject(checkpoint.experiment)) {
+    reject("experiment", "malformed-container", "missing or not a simulation checkpoint object");
+  }
+
+  // An unrecognised tag would otherwise be decoded as a plain object, which is
+  // the one rejection gap with no existing throw behind it.
+  const seen = new Set<unknown>();
+  const walk = (node: unknown, path: string): void => {
+    if (!isPlainObject(node) || seen.has(node)) return;
+    seen.add(node);
+    const tag = (node as Record<string, unknown>)[CHECKPOINT_TAG_KEY];
+    if (tag === undefined) {
+      for (const [key, value] of Object.entries(node)) walk(value, `${path}.${key}`);
+      return;
+    }
+    if (typeof tag !== "string" || !CHECKPOINT_TAGS.includes(tag)) {
+      reject(path, "unsupported-tag", `unrecognised checkpoint tag ${JSON.stringify(tag)}`);
+    }
+  };
+  walk(checkpoint.experiment, "experiment");
+
+  if (schema !== "0.4") return;
+
+  const decisions = checkpoint.decisions;
+  if (!isPlainObject(decisions)) {
+    reject("decisions", "malformed-container", "current schema requires a decisions object");
+  }
+  // `lastDecisionTick` gates quiet time and `lastMajorCatalystTick` gates the
+  // major cooldown, where null reads as "clear". Neither may be coerced.
+  // A non-finite number is its own contract failure rather than a wrong type.
+  // The value has the right type category and is still invalid for the field,
+  // and wrong-type and invalid-numeric are different failures a reader may want
+  // to tell apart. No claim is made here about how a non-finite value arises.
+  if (typeof decisions.lastDecisionTick === "number" && !Number.isFinite(decisions.lastDecisionTick)) {
+    reject("decisions.lastDecisionTick", "non-finite-numeric", `expected a finite number, got ${String(decisions.lastDecisionTick)}`);
+  }
+  if (!isFiniteNumber(decisions.lastDecisionTick)) {
+    reject("decisions.lastDecisionTick", "wrong-type", `expected a finite number, got ${describe(decisions.lastDecisionTick)}`);
+  }
+  const major = decisions.lastMajorCatalystTick;
+  if (typeof major === "number" && !Number.isFinite(major)) {
+    reject("decisions.lastMajorCatalystTick", "non-finite-numeric", `expected null or a finite number, got ${String(major)}`);
+  }
+  if (major !== null && !isFiniteNumber(major)) {
+    reject("decisions.lastMajorCatalystTick", "wrong-type", `expected null or a finite number, got ${describe(major)}`);
+  }
+  if (decisions.pending !== null && decisions.pending !== undefined && !isPlainObject(decisions.pending)) {
+    reject("decisions.pending", "wrong-type", `expected null or a decision object, got ${describe(decisions.pending)}`);
+  }
+  if (!Array.isArray(decisions.resolutions)) {
+    reject("decisions.resolutions", "malformed-container", `expected an array, got ${describe(decisions.resolutions)}`);
+  }
+  // A resolution is a record of a decision that actually happened, so its parts
+  // have to agree with each other. A source the schema does not know, or a tick
+  // that is not a tick, is not a resolution of unknown type — it is a record
+  // that contradicts itself, which is a different failure from a wrong type and
+  // would otherwise pass a shape check while describing a decision that never
+  // occurred.
+  decisions.resolutions.forEach((raw: unknown, index: number) => {
+    const at = `decisions.resolutions[${index}]`;
+    if (!isPlainObject(raw)) {
+      reject(at, "malformed-container", `expected a resolution object, got ${describe(raw)}`);
+    }
+    for (const key of ["opportunityId", "commandId"] as const) {
+      if (typeof raw[key] !== "string" || raw[key] === "") {
+        reject(`${at}.${key}`, "structural-contradiction", `a resolved decision must name its ${key}, got ${describe(raw[key])}`);
+      }
+    }
+    if (!isFiniteNumber(raw.tick)) {
+      reject(`${at}.tick`, "structural-contradiction", `a resolution must be stamped with a finite tick, got ${describe(raw.tick)}`);
+    }
+    if (raw.source !== "event_decision" && raw.source !== "world_catalyst") {
+      reject(`${at}.source`, "structural-contradiction", `unknown decision source ${JSON.stringify(raw.source)}`);
+    }
+  });
+  if (!isPlainObject(checkpoint.analysis)) {
+    reject("analysis", "malformed-container", "current schema requires an analysis object");
+  }
+  if (!Array.isArray((checkpoint.analysis as Record<string, unknown>).records)) {
+    reject("analysis.records", "malformed-container", "current schema requires a records array");
+  }
+  if (checkpoint.control !== null && checkpoint.control !== undefined && !isPlainObject(checkpoint.control)) {
+    reject("control", "wrong-type", `expected null or a control checkpoint object, got ${describe(checkpoint.control)}`);
+  }
+};
+
 
 /* ------------------------------------------------------------------ *
  * Cross-boundary read models.
@@ -1160,7 +1455,7 @@ export interface DecisionCheckpoint {
 
 /** Resumable checkpoint, schema 0.3: adds catalyst windows and pacing state. */
 export interface UniverseCheckpoint {
-  readonly checkpointSchemaVersion: "0.3";
+  readonly checkpointSchemaVersion: "0.4";
   readonly engineVersion: string;
   readonly createdTick: number;
   readonly experiment: unknown;
@@ -1206,7 +1501,34 @@ export interface LegacyUniverseCheckpoint {
   readonly controlAnalysis: unknown | null;
 }
 
-export type SupportedUniverseCheckpoint = UniverseCheckpoint | UniverseCheckpointV02 | LegacyUniverseCheckpoint;
+/**
+ * Schema 0.3 as first written. **Not one shape.** Several fields the current
+ * build requires arrived while the schema was already 0.3 — `Organism.pc`,
+ * `Simulation.lastLineageFlows` and `Simulation.lineageInterval` on 2026-09-25,
+ * the C-use and niche sub-states the same week, and tagged entity references
+ * with A2 — so a 0.3 save from the start of that version and a 0.3 save from the
+ * end of it differ in fields the current contract requires. That is why 0.4
+ * exists: a strict current contract cannot be expressed by reinterpreting a
+ * version that already named two shapes.
+ */
+export interface UniverseCheckpointV03 {
+  readonly checkpointSchemaVersion: "0.3";
+  readonly engineVersion: string;
+  readonly createdTick: number;
+  readonly experiment: unknown;
+  readonly analysis: unknown;
+  readonly control: unknown;
+  readonly controlAnalysis: unknown;
+  /** Same decision shape as the current contract: 0.3 predates the strict
+   *  *checkpoint* contract, not the decision record. */
+  readonly decisions: DecisionCheckpoint;
+}
+
+export type SupportedUniverseCheckpoint =
+  | UniverseCheckpoint
+  | UniverseCheckpointV03
+  | UniverseCheckpointV02
+  | LegacyUniverseCheckpoint;
 
 export type RuntimeCommand =
   | { readonly type: "CREATE_UNIVERSE"; readonly config: EngineConfig }

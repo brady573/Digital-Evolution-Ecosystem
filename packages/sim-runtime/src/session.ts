@@ -15,6 +15,7 @@ import type {
   SupportedUniverseCheckpoint,
   UniverseCheckpoint,
   UniverseCheckpointV02,
+  UniverseCheckpointV03,
   WorldId,
 } from "@digital-evolution/contracts";
 // Aliased: `renderSnapshot` has a parameter named `worldId`, and the shadow
@@ -23,6 +24,7 @@ import {
   AFTERMATH_COMPARABLES,
   decisionCommandId,
   migrateAnalysisEntityRefs,
+  validateCheckpoint,
   worldId as toWorldId,
 } from "@digital-evolution/contracts";
 import {
@@ -49,7 +51,7 @@ import {
   selectCatalystWindow,
 } from "@digital-evolution/sim-decisions";
 
-export const CHECKPOINT_SCHEMA_VERSION = "0.3" as const;
+export const CHECKPOINT_SCHEMA_VERSION = "0.4" as const;
 
 /**
  * Process-unique universe counter. Presentation identity only: it is
@@ -611,8 +613,27 @@ export class UniverseSession {
    * resolutions keep their own embedded versions.
    */
   restore(checkpoint:SupportedUniverseCheckpoint){
-    const schema=(checkpoint as any)?.checkpointSchemaVersion;
-    if(schema!=="0.1"&&schema!=="0.2"&&schema!=="0.3")throw new Error(`Unsupported runtime checkpoint schema: ${String(schema)}`);
+    // Refusal happens before anything is applied, so a rejected payload never
+    // becomes live state — and before any sim-core call, so the simulation is
+    // never handed a value it would have to partially apply.
+    //
+    // This runs on the *migrated* payload, not the raw one: a save that
+    // migrates cleanly must not be caught by a pre-migration check, or
+    // compatibility is broken by the mechanism meant to preserve it. The
+    // engine-version guard stays below, where it always was, because it is a
+    // different question from whether the payload is well-formed.
+    //
+    // `migrateAnalysisEntityRefs` takes an analysis payload, not a checkpoint:
+    // it was written and tested against one, and handing it a checkpoint makes
+    // it look for `records` at the top level, find none, and no-op. The first
+    // wiring attempt did exactly that, and the pre-A2 length test caught it.
+    const migrated={
+      ...checkpoint,
+      analysis:migrateAnalysisEntityRefs(checkpoint.analysis),
+      controlAnalysis:migrateAnalysisEntityRefs(checkpoint.controlAnalysis),
+    };
+    validateCheckpoint(migrated);
+    const schema=(migrated as any)?.checkpointSchemaVersion;
     if(checkpoint.engineVersion!==ENGINE_VERSION)throw new Error(`Checkpoint engine ${checkpoint.engineVersion} does not match ${ENGINE_VERSION}`);
     // A restore is a new displayed world, not the old one continued: hand out
     // a fresh presentation identity so rendering inertia cannot carry over.
@@ -624,7 +645,7 @@ export class UniverseSession {
     // the label rather than guessing a namespace, which is A2's specified
     // behaviour for a kind that was never recorded. Unusable entries are left
     // in place for validation to reject, not dropped here.
-    this.#analysis=EcologyObserver.restore(migrateAnalysisEntityRefs(checkpoint.analysis));
+    this.#analysis=EcologyObserver.restore(migrated.analysis as any);
     // Aftermath is deliberately NOT restored. It is evidence held outside the
     // checkpoint, so a restore that carried it would be reconstructing an
     // observation from simulation state alone - exactly what must not happen.
@@ -634,9 +655,9 @@ export class UniverseSession {
     this.#aftermath=null;
     this.#control=checkpoint.control?restoreSimulationCheckpoint(checkpoint.control as any):null;
     this.#controlAnalysis=checkpoint.controlAnalysis
-      ?EcologyObserver.restore(migrateAnalysisEntityRefs(checkpoint.controlAnalysis))
+      ?EcologyObserver.restore(migrated.controlAnalysis as any)
       :null;
-    if(schema==="0.3"){
+    if(schema==="0.4"){
       const decisions=(checkpoint as UniverseCheckpoint).decisions;
       this.#pendingDecision=normalizePendingDecision(decisions?.pending);
       this.#decisionResolutions=Array.isArray(decisions?.resolutions)
@@ -646,8 +667,12 @@ export class UniverseSession {
       this.#catalystPolicyVersion=CATALYST_POLICY_VERSION;
       this.#lastDecisionTick=typeof decisions?.lastDecisionTick==="number"?decisions.lastDecisionTick:0;
       this.#lastMajorCatalystTick=typeof decisions?.lastMajorCatalystTick==="number"?decisions.lastMajorCatalystTick:null;
-    }else if(schema==="0.2"){
-      const decisions=(checkpoint as UniverseCheckpointV02).decisions;
+    }else if(schema==="0.3"||schema==="0.2"){
+      // 0.3 and 0.2 share a shape for decision purposes: both predate the
+      // strict current contract, and both are normalised the same way. They are
+      // separate versions because they are separate histories, not because
+      // their decision records are read differently.
+      const decisions=(checkpoint as UniverseCheckpointV03).decisions;
       const pending=normalizePendingDecision(decisions?.pending);
       const resolutions=Array.isArray(decisions?.resolutions)
         ?(decisions.resolutions as any[]).map(normalizeResolution)

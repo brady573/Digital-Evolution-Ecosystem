@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CladeId, EngineConfig, HistoryRecordId, OrganismId, RenderOrganism, RenderSnapshot } from "@digital-evolution/contracts";
+import { CHECKPOINT_PLAYER_NOTICE, CheckpointRejectionError } from "@digital-evolution/contracts";
 import { cladeId, formatCladeId, formatLineageId, lineageId, typedRefs } from "@digital-evolution/contracts";
 import { ENGINE_VERSION } from "@digital-evolution/sim-core";
 import { WorkerRuntimeClient, normalizeSpeedMode, sliceFor } from "@digital-evolution/sim-runtime";
@@ -662,7 +663,12 @@ export function App(){
       setSettings(mapped);setActiveSettings(mapped);setPreset(presetForSettings(mapped));
       setStatus("Checkpoint restored — active settings match the resumed universe");
     }catch(error){
-      setStatus(`Restore failed: ${error instanceof Error?error.message:String(error)}`);
+      // Branch on the typed reason, never on the message text. A3.3 makes an
+      // ordinary save fail to load for the first time, so this string is now
+      // something a player can meet: the developer message names a field, a
+      // quoted value and a reason code, which is right for a log and useless
+      // to someone who just wants their world back.
+      setStatus(`Restore failed: ${error instanceof CheckpointRejectionError?`${error.playerMessage} ${CHECKPOINT_PLAYER_NOTICE}`:error instanceof Error?error.message:String(error)}`);
     }
   };
   const exportEvidence=async()=>{

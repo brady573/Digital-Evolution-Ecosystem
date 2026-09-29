@@ -3,9 +3,11 @@ import { UniverseSession } from "../../packages/sim-runtime/src/session.ts";
 import type { EngineConfig, FlowFacts } from "../../packages/contracts/src/index.ts";
 import {
   CHECKPOINT_MIGRATION_RULES,
+  CheckpointRejectionError,
   MIGRATION_RULE_BY_ID,
   migrateEntityRefs,
   typedRefs,
+  validateCheckpoint,
 } from "../../packages/contracts/src/index.ts";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -477,7 +479,7 @@ const MIGRATION_ABSORBER_PROBES: Readonly<Record<string, { file: string; probe: 
   },
 };
 
-const SPLIT_RULE_IDS = ["matched-control-absent-reads-as-null", "analysis-substate-absent-reads-as-constructor-default"];
+const SPLIT_RULE_IDS = ["analysis-substate-absent-reads-as-constructor-default"];
 
 function testCheckpointMigrationRuleTable() {
   const schemas = ["0.1", "0.2", "0.3"];
@@ -495,6 +497,18 @@ function testCheckpointMigrationRuleTable() {
     seen.add(rule.id);
     assert.ok(rule.id.length > 3, `migration rule needs a real id: ${JSON.stringify(rule.id)}`);
     assert.ok(rule.path.length > 0, `${rule.id} must state where the field lives`);
+    // A rule must name a supported build that could have written the shape.
+    // "The restore code currently tolerates it" is not a basis, and the whole
+    // point of 0.4 is that the two are no longer the same claim.
+    assert.ok(
+      typeof rule.historicalBasis === "string" && rule.historicalBasis.length > 40,
+      `${rule.id} must name concrete evidence that a supported build wrote this shape`,
+    );
+    assert.doesNotMatch(
+      rule.historicalBasis,
+      /currently tolerates|restore code|happens to/i,
+      `${rule.id} cites present-day tolerance instead of history, which is not a basis`,
+    );
     assert.ok(rule.appliesToSchemas.length > 0, `${rule.id} must name at least one schema`);
     for (const schema of rule.appliesToSchemas) {
       assert.ok(schemas.includes(schema), `${rule.id} names unknown schema ${schema}`);
@@ -511,6 +525,26 @@ function testCheckpointMigrationRuleTable() {
     );
     // A half rule must say what it refuses, or the absence-tolerance reads as
     // blanket tolerance. A whole rule needs no `rejects`.
+    // §4.5: every rule states what its omission can affect, and a rule that can
+    // affect the world must justify why its default is safe anyway. Without
+    // this, "we default it" is the whole record and a later reader inherits the
+    // default without the reasoning that made it acceptable.
+    assert.ok(
+      ["inert", "load-bearing-display", "load-bearing-dynamics"].includes(rule.hazard),
+      `${rule.id} must declare one of the three hazard kinds, got ${String(rule.hazard)}`,
+    );
+    if (rule.hazard === "load-bearing-dynamics") {
+      assert.ok(
+        typeof rule.dynamicsJustification === "string" && rule.dynamicsJustification.length > 40,
+        `${rule.id} gates the world, so it must justify why its default preserves behaviour rather than granting a capability`,
+      );
+    } else {
+      assert.equal(
+        rule.dynamicsJustification,
+        undefined,
+        `${rule.id} does not gate the world, so a dynamics justification would be claiming a hazard it does not have`,
+      );
+    }
     if (SPLIT_RULE_IDS.includes(rule.id)) {
       assert.ok(
         typeof rule.rejects === "string" && rule.rejects.length > 40,
@@ -683,7 +717,264 @@ function testPreA2EntityRefMigration() {
 }
 
 
+/**
+ * A3.3, built before the rejection conditions on purpose.
+ *
+ * Every other new check asks "is a corrupt value refused?". This one asks the
+ * question none of them can: **what does the world do when nothing refuses
+ * it?** A default that is merely wrong is a truthfulness defect the player
+ * might notice. A default that reads as "clear" is a dynamics change, and it
+ * is silent.
+ *
+ * The case is `lastMajorCatalystTick`. `isMajorCooldownClear` is
+ * `lastMajorCatalystTick === null || tick - lastMajorCatalystTick >= 25_000`,
+ * so `null` does not mean unknown — it means *no major catalyst has ever
+ * fired*, which grants a major catalyst the real cooldown would have
+ * suppressed. A corrupt value therefore restores into a world that quietly
+ * diverges, and a save that refuses to load would at least have been legible.
+ *
+ * Two assertions, because they are different claims:
+ *
+ *   (a) preservation — a real, recent cooldown survives the round trip, so
+ *       validation cannot cost a correctly-saved world its own history.
+ *   (b) refusal — a corrupt value is refused, not coerced to the permissive
+ *       end of the range. (b) is the one that fails before A3.3 and passes
+ *       after it.
+ */
+const cooldownBlocked = (session: UniverseSession): boolean =>
+  session
+    .describeCatalystEligibility()
+    .diagnoses.some((d) => d.reasons.includes("major-catalyst cooldown has not elapsed"));
+
+function testCooldownPreservationAcrossRestore() {
+  const session = new UniverseSession();
+  session.create(config(FIXTURE_SEED));
+  settle(session, 20000);
+
+  // (a) A genuine, recent cooldown. The saved tick is well inside the 25_000
+  // window, so the major cooldown is still running and must still be running
+  // after a round trip through the hardened boundary.
+  const saved: any = JSON.parse(JSON.stringify(session.checkpoint()));
+  saved.decisions.lastMajorCatalystTick = saved.decisions.lastDecisionTick;
+  const at = saved.decisions.lastMajorCatalystTick as number;
+  assert.ok(
+    saved.decisions.lastDecisionTick - at < 25_000,
+    "the saved cooldown is inside its window, so this save is a suppressed one",
+  );
+
+  const restored = new UniverseSession();
+  restored.restore(saved);
+  assert.ok(
+    cooldownBlocked(restored),
+    "a suppressed major cooldown stays suppressed across restore (preservation)",
+  );
+
+  // The discriminator, and it is the hazard stated as a fact: `null` is a
+  // *legal* value for this field meaning "no major catalyst has ever fired",
+  // and it reads as cooldown-clear. So the assertion above discriminates on the
+  // value rather than on eligibility, and the reason a corrupt value must not be
+  // coerced to `null` is visible in two lines of test.
+  const neverFired: any = JSON.parse(JSON.stringify(saved));
+  neverFired.decisions.lastMajorCatalystTick = null;
+  const clear = new UniverseSession();
+  clear.restore(neverFired);
+  assert.ok(
+    !cooldownBlocked(clear),
+    'a null lastMajorCatalystTick reads as "never fired" and is therefore clear, not blocked',
+  );
+
+  // (b) The absence-of-refusal case. A wrong-typed value is not an elapsed
+  // cooldown and not an absent one; it is corrupt. It must be refused. Before
+  // A3.3 this restores as `null`, which reads as "clear", and the suppressed
+  // cooldown below silently disappears.
+  const corrupt: any = JSON.parse(JSON.stringify(saved));
+  corrupt.decisions.lastMajorCatalystTick = "not a tick";
+  assert.throws(
+    () => new UniverseSession().restore(corrupt),
+    (error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      assert.match(
+        message,
+        /lastMajorCatalystTick/,
+        `the error must name the field, got: ${message}`,
+      );
+      return true;
+    },
+    "a corrupt lastMajorCatalystTick is refused, not defaulted to the permissive end",
+  );
+  console.log("major-catalyst cooldown preservation: PASS");
+}
+
+
+/**
+ * A3.3 step 3: prove the validator on its own, before it is wired.
+ *
+ * These run against `validateCheckpoint` directly rather than through
+ * `restore`, so a failure here is the validator's and not the wiring's. The
+ * current-save round trip (§4.4) is the one that matters most: it is the only
+ * check that can catch a condition broad enough to refuse a save the current
+ * build itself produced.
+ */
+const rejected = (payload: any): CheckpointRejectionError => {
+  try {
+    validateCheckpoint(payload);
+  } catch (error) {
+    assert.ok(error instanceof CheckpointRejectionError, `expected a typed rejection, got ${String(error)}`);
+    return error;
+  }
+  assert.fail("expected the checkpoint to be refused");
+};
+
+function testCheckpointRejectionConditions() {
+  const session = new UniverseSession();
+  session.create(config(FIXTURE_SEED));
+  settle(session, 20000);
+  const good: any = JSON.parse(JSON.stringify(session.checkpoint()));
+
+  // The positive case first: a real save must survive, or nothing below means
+  // anything. This is the current-save round trip, through the maintained path.
+  validateCheckpoint(good);
+  assert.ok(true, "a checkpoint from the maintained save path is accepted");
+
+  // wrong-type
+  for (const [field, corrupt, reason] of [
+    ["decisions.lastMajorCatalystTick", "not a tick", "wrong-type"],
+    ["decisions.lastDecisionTick", "soon", "wrong-type"],
+    ["decisions.pending", "gate", "wrong-type"],
+    ["control", 42, "wrong-type"],
+  ] as const) {
+    const bad = JSON.parse(JSON.stringify(good));
+    const parts = field.split(".");
+    let target: any = bad;
+    for (const part of parts.slice(0, -1)) target = target[part];
+    target[parts[parts.length - 1]!] = corrupt;
+    const error = rejected(bad);
+    assert.equal(error.field, field, `the error must name ${field}`);
+    assert.equal(error.reason, reason, `${field} must fail as ${reason}`);
+  }
+
+  // malformed-container
+  for (const [field, corrupt] of [
+    ["decisions.resolutions", { not: "an array" }],
+    ["decisions", "not an object"],
+    ["analysis.records", { not: "an array" }],
+    ["experiment", null],
+  ] as const) {
+    const bad = JSON.parse(JSON.stringify(good));
+    const parts = field.split(".");
+    let target: any = bad;
+    for (const part of parts.slice(0, -1)) target = target[part];
+    target[parts[parts.length - 1]!] = corrupt;
+    const error = rejected(bad);
+    assert.equal(error.field, field, `the error must name ${field}`);
+    assert.equal(error.reason, "malformed-container", `${field} must fail as malformed-container`);
+  }
+
+  // non-finite-numeric, via the decision ticks that gate the world
+  for (const value of [NaN, Infinity, -Infinity]) {
+    const bad = JSON.parse(JSON.stringify(good));
+    bad.decisions.lastMajorCatalystTick = value;
+    const error = rejected(bad);
+    assert.equal(error.field, "decisions.lastMajorCatalystTick");
+    assert.equal(error.reason, "non-finite-numeric", `a non-finite tick must be refused, got ${value}`);
+    // The player-facing text exists for every reason and never leaks the field
+    // name, the quoted value, or the reason code into the surface.
+    assert.ok(error.playerMessage.length > 0, "every refusal carries player-facing text");
+    assert.doesNotMatch(
+      error.playerMessage,
+      /lastMajorCatalystTick|non-finite-numeric|NaN|Infinity/,
+      `player text must not be developer text: ${error.playerMessage}`,
+    );
+  }
+
+  // unsupported-version
+  for (const version of ["0.5", "1.0", "", null, 3]) {
+    const bad = JSON.parse(JSON.stringify(good));
+    bad.checkpointSchemaVersion = version;
+    const error = rejected(bad);
+    assert.equal(error.field, "checkpointSchemaVersion");
+    assert.equal(error.reason, "unsupported-version", `schema ${JSON.stringify(version)} must be refused`);
+  }
+
+  // unsupported-tag — the condition with no existing throw behind it. Before
+  // this, an unrecognised tag decoded as a plain object and was accepted.
+  const badTag = JSON.parse(JSON.stringify(good));
+  badTag.experiment.__digital_evolution_type = "not-a-real-tag";
+  const tagError = rejected(badTag);
+  assert.equal(tagError.reason, "unsupported-tag");
+  assert.match(tagError.message, /not-a-real-tag/);
+
+  // structural-contradiction: a resolution whose parts disagree — here a
+  // non-string opportunityId, a null commandId, a string tick and a source the
+  // schema does not know. Refusing a value that is internally inconsistent,
+  // rather than a value of the wrong type.
+  const contradiction = JSON.parse(JSON.stringify(good));
+  contradiction.decisions.resolutions = [
+    { opportunityId: 1, commandId: null, tick: "later", source: "from_the_future" },
+  ];
+  const contradictionError = rejected(contradiction);
+  assert.equal(contradictionError.reason, "structural-contradiction");
+  // Named to the exact part, not just the array element: an error that says
+  // "resolutions[0]" leaves the reader to guess which field contradicted itself.
+  assert.equal(
+    contradictionError.field,
+    "decisions.resolutions[0].opportunityId",
+    "the error must name the exact part that contradicts itself",
+  );
+  assert.match(contradictionError.message, /structural-contradiction/);
+
+  // A legacy save that the rules exist for is still accepted.
+  const legacy: any = JSON.parse(JSON.stringify(good));
+  legacy.checkpointSchemaVersion = "0.1";
+  delete legacy.decisions;
+  validateCheckpoint(legacy);
+  assert.ok(true, "a 0.1 save without a decisions object is still accepted");
+
+  // --- The negative control -------------------------------------------------
+  //
+  // `analysis.records` is the sharpest case, because a migration rule tolerates
+  // its absence for 0.1-0.3 and a 0.4 save may not omit it. If the validator
+  // simply checked "is this omission tolerated somewhere" it would accept the
+  // 0.4 save too, and the whole point of the version split would be lost. The
+  // same payload is therefore asserted twice: refused as 0.4, tolerated as 0.3.
+  const missingRecords = (schema: string): any => {
+    const bad = JSON.parse(JSON.stringify(good));
+    bad.checkpointSchemaVersion = schema;
+    delete bad.analysis.records;
+    return bad;
+  };
+  const asCurrent = rejected(missingRecords("0.4"));
+  assert.equal(
+    asCurrent.field,
+    "analysis.records",
+    "a current save may not omit a field that only older schemas may lack",
+  );
+  assert.equal(asCurrent.reason, "malformed-container");
+  validateCheckpoint(missingRecords("0.3"));
+  assert.ok(
+    true,
+    "the identical omission is tolerated for 0.3, where a supported build wrote it",
+  );
+
+  // The same asymmetry, reached through a real restore rather than the
+  // validator, so the ordering in `restore` is what is under test.
+  const realCurrent = new UniverseSession();
+  assert.throws(
+    () => realCurrent.restore(missingRecords("0.4")),
+    (error: unknown) => error instanceof CheckpointRejectionError && error.field === "analysis.records",
+    "restore refuses a 0.4 save missing analysis.records",
+  );
+  const realLegacy = new UniverseSession();
+  realLegacy.restore(missingRecords("0.3"));
+  assert.ok(true, "restore still accepts the 0.3 form of the same payload");
+
+  console.log("checkpoint rejection conditions: PASS (6 conditions)");
+}
+
+
 testFlowCheckpoint();
+testCheckpointRejectionConditions();
+testCooldownPreservationAcrossRestore();
 testPreA2EntityRefMigration();
 testCheckpointMigrationRuleTable();
 
