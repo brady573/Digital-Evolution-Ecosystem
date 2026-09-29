@@ -227,6 +227,15 @@ export interface CheckpointMigrationRule {
   readonly absorber: MigrationAbsorber;
   /** Why tolerating this is correct, rather than merely convenient. */
   readonly omission: string;
+  /**
+   * What this rule explicitly does **not** tolerate, when it is only half a
+   * rule. Decision 2's asymmetry: a field may be legitimately absent in an
+   * older schema while a wrong-typed value for that same field is corrupt in
+   * every schema. Recording the rejected case here is what stops the
+   * absence-tolerance from being read as blanket tolerance — the rejection
+   * itself is implemented by the validator, not by this table.
+   */
+  readonly rejects?: string;
 }
 
 const ALL_SCHEMAS: readonly CheckpointSchemaVersion[] = ["0.1", "0.2", "0.3"];
@@ -262,36 +271,18 @@ export const CHECKPOINT_MIGRATION_RULES: readonly CheckpointMigrationRule[] = [
   },
   // --- Decision-record backfills, found by enumerating the restore path ----
   {
-    id: "pending-decision-absent-reads-as-null",
-    path: "decisions.pending",
-    appliesToSchemas: ALL_SCHEMAS,
-    effectiveDefault: "null",
-    absorber: "inline-backfill",
-    omission:
-      "A save taken with no decision outstanding has no pending gate. Absent and explicitly-null are the same state, and a non-object value here cannot be a gate.",
-  },
-  {
     id: "pending-decision-source-backfilled-from-event",
     path: "decisions.pending.source",
-    appliesToSchemas: ["0.1", "0.2"],
+    appliesToSchemas: ["0.2"],
     effectiveDefault: '"observed_event" when a string sourceEventId is present',
     absorber: "inline-backfill",
     omission:
       "Saves predating the catalyst source have no `source`, but a `sourceEventId` can only have come from an observed event, so the backfill is forced by the data rather than guessed from it.",
   },
   {
-    id: "decision-resolutions-absent-reads-as-empty",
-    path: "decisions.resolutions",
-    appliesToSchemas: ALL_SCHEMAS,
-    effectiveDefault: "[]",
-    absorber: "inline-backfill",
-    omission:
-      "No decisions were resolved before the save. A non-array value is not a resolution list, so an empty list is the only coherent reading.",
-  },
-  {
     id: "decision-resolution-offer-tick-backfilled-from-tick",
     path: "decisions.resolutions[].offerTick",
-    appliesToSchemas: ["0.1", "0.2"],
+    appliesToSchemas: ["0.2"],
     effectiveDefault: "the resolution's own tick",
     absorber: "inline-backfill",
     omission:
@@ -300,7 +291,7 @@ export const CHECKPOINT_MIGRATION_RULES: readonly CheckpointMigrationRule[] = [
   {
     id: "decision-resolution-catalyst-id-reads-as-null",
     path: "decisions.resolutions[].catalystId",
-    appliesToSchemas: ["0.1", "0.2"],
+    appliesToSchemas: ["0.2"],
     effectiveDefault: "null",
     absorber: "inline-backfill",
     omission:
@@ -309,29 +300,11 @@ export const CHECKPOINT_MIGRATION_RULES: readonly CheckpointMigrationRule[] = [
   {
     id: "decision-resolution-source-reads-as-event-decision",
     path: "decisions.resolutions[].source",
-    appliesToSchemas: ["0.1", "0.2"],
+    appliesToSchemas: ["0.2"],
     effectiveDefault: '"event_decision"',
     absorber: "inline-backfill",
     omission:
       "Before the source field existed, every resolution was an event decision. Naming it is a restatement of the era, not a classification of the record.",
-  },
-  {
-    id: "last-decision-tick-absent-reads-as-zero",
-    path: "decisions.lastDecisionTick",
-    appliesToSchemas: ALL_SCHEMAS,
-    effectiveDefault: "0",
-    absorber: "inline-backfill",
-    omission:
-      "A save with no recorded decision tick means no decision has been made, and tick 0 is before the world began.",
-  },
-  {
-    id: "last-major-catalyst-tick-absent-reads-as-null",
-    path: "decisions.lastMajorCatalystTick",
-    appliesToSchemas: ALL_SCHEMAS,
-    effectiveDefault: "null",
-    absorber: "inline-backfill",
-    omission:
-      "Distinct from the rule above on purpose: 'never a major catalyst' and 'happened at tick 0' are different facts, and only null says the first.",
   },
   {
     id: "matched-control-absent-reads-as-null",
@@ -340,7 +313,9 @@ export const CHECKPOINT_MIGRATION_RULES: readonly CheckpointMigrationRule[] = [
     effectiveDefault: "null",
     absorber: "inline-backfill",
     omission:
-      "A matched twin is created by the first intervention. No twin existing is a normal state, not a missing one.",
+      "A matched twin is created by the first intervention. No twin existing is a normal state, not a missing one. The save path always writes both keys, explicitly null, so absence is tolerated here only because an older payload may predate matched forks — not because absence is a shape the current schema produces.",
+    rejects:
+      "A truthy non-object `control` is not an absent twin and is not defaulted. It is already refused downstream by the simulation restore, which rejects it on its schema tag rather than reading it as no twin.",
   },
   {
     id: "analysis-substate-absent-reads-as-constructor-default",
@@ -349,7 +324,9 @@ export const CHECKPOINT_MIGRATION_RULES: readonly CheckpointMigrationRule[] = [
     effectiveDefault: "the freshly constructed observer's own initial state",
     absorber: "constructor-default",
     omission:
-      "Restore constructs a fresh observer and then overwrites only the keys the payload carries, so an absent sub-state keeps its declared initial value instead of becoming undefined.",
+      "Restore constructs a fresh observer and then overwrites only the keys the payload carries, so an absent sub-state keeps its declared initial value instead of becoming undefined. A detector that has not yet fired genuinely has no sub-state, which is different from a detector that fired and lost its record.",
+    rejects:
+      "A present-but-wrong-typed sub-state is not covered by this rule. `Object.assign` writes whatever it is handed, so a corrupt value becomes live state rather than being defaulted — which is the opposite failure from normalisation, and is why the validator has to refuse it rather than rely on the constructor.",
   },
   // --- A3.2: the pre-A2 reference shape ------------------------------------
   {

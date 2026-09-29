@@ -447,17 +447,9 @@ const MIGRATION_ABSORBER_PROBES: Readonly<Record<string, { file: string; probe: 
     file: "packages/sim-core/src/engine.ts",
     probe: /this\.lineageInterval\|\|new Map\(\)/,
   },
-  "pending-decision-absent-reads-as-null": {
-    file: "packages/sim-runtime/src/session.ts",
-    probe: /if\(!raw\|\|typeof raw!=="object"\)return null;/,
-  },
   "pending-decision-source-backfilled-from-event": {
     file: "packages/sim-runtime/src/session.ts",
     probe: /copy\.source="observed_event"/,
-  },
-  "decision-resolutions-absent-reads-as-empty": {
-    file: "packages/sim-runtime/src/session.ts",
-    probe: /Array\.isArray\(decisions\?\.resolutions\)/,
   },
   "decision-resolution-offer-tick-backfilled-from-tick": {
     file: "packages/sim-runtime/src/session.ts",
@@ -470,14 +462,6 @@ const MIGRATION_ABSORBER_PROBES: Readonly<Record<string, { file: string; probe: 
   "decision-resolution-source-reads-as-event-decision": {
     file: "packages/sim-runtime/src/session.ts",
     probe: /if\(copy\.source===undefined\)copy\.source="event_decision";/,
-  },
-  "last-decision-tick-absent-reads-as-zero": {
-    file: "packages/sim-runtime/src/session.ts",
-    probe: /typeof decisions\?\.lastDecisionTick==="number"\?decisions\.lastDecisionTick:0/,
-  },
-  "last-major-catalyst-tick-absent-reads-as-null": {
-    file: "packages/sim-runtime/src/session.ts",
-    probe: /typeof decisions\?\.lastMajorCatalystTick==="number"\?decisions\.lastMajorCatalystTick:null/,
   },
   "matched-control-absent-reads-as-null": {
     file: "packages/sim-runtime/src/session.ts",
@@ -492,6 +476,8 @@ const MIGRATION_ABSORBER_PROBES: Readonly<Record<string, { file: string; probe: 
     probe: /const observer=new EcologyObserver\(\);[\s\S]{0,120}Object\.assign\(observer,/,
   },
 };
+
+const SPLIT_RULE_IDS = ["matched-control-absent-reads-as-null", "analysis-substate-absent-reads-as-constructor-default"];
 
 function testCheckpointMigrationRuleTable() {
   const schemas = ["0.1", "0.2", "0.3"];
@@ -523,6 +509,14 @@ function testCheckpointMigrationRuleTable() {
       rule.omission.length > 40,
       `${rule.id} must state why the omission is tolerated, not just that it is`,
     );
+    // A half rule must say what it refuses, or the absence-tolerance reads as
+    // blanket tolerance. A whole rule needs no `rejects`.
+    if (SPLIT_RULE_IDS.includes(rule.id)) {
+      assert.ok(
+        typeof rule.rejects === "string" && rule.rejects.length > 40,
+        `${rule.id} is a half rule and must state the wrong-typed case it refuses`,
+      );
+    }
 
     const probe = MIGRATION_ABSORBER_PROBES[rule.id];
     assert.ok(
