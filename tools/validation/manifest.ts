@@ -51,11 +51,16 @@
  * ## `baselineSeconds`
  *
  * Measured on CI runner `ubuntu-latest`, not estimated, and used to balance
- * shards. Sources are runs 36363857021, 36371082202, and 36372216402.
+ * shards. Sources are runs 36580426436, 36516033777, and 36508723384
+ * (medians; refreshed 2026-09-29 after flows/possibility/decisions drifted).
  *
  * Two caveats worth knowing. A unit's cost varies run to run on a shared
- * runner -- `flows` measured 123s then 81s, `decisions` 73s then 50s -- so a
- * single measurement is a sample, not a constant. And the shared GitHub runner
+ * runner -- `flows` measured 164s then 149s twice (median 149, was 81),
+ * `dependency-possibility` 99s/93s/93s (median 94, was 58), `decisions`
+ * 75s/79s/77s (median 77, was 50) -- so a single measurement is a sample,
+ * not a constant. Cheap units were overestimated the other way (`typecheck`
+ * 1.3s vs 10, `build` 0.6s vs 12, `phenotype` 0.7s vs 10) and are now medians
+ * too. And the shared GitHub runner
  * is not the device: `dependency-tradeoff` measured 275s on CI against a
  * device-derived guess of 180s, while its sibling `dependency-possibility` went
  * the other way, 107s guessed, 58s measured. The two are therefore kept in
@@ -179,7 +184,7 @@ export const UNITS: readonly ValidationUnit[] = [
     domains: CODE,
     needs: [],
     parallelSafe: true,
-    baselineSeconds: 10,
+    baselineSeconds: 1,
     claim: "Every package still typechecks against the shared contracts.",
   },
   {
@@ -228,7 +233,7 @@ export const UNITS: readonly ValidationUnit[] = [
     domains: withApparatus("contracts", "sim-core", "sim-decisions", "sim-runtime", "explorer"),
     needs: [],
     parallelSafe: true,
-    baselineSeconds: 50,
+    baselineSeconds: 77,
     claim:
       "Events still map to exactly the same offered choices as before, and an entity reference whose kind was never recorded yields no L- or C- claim rather than a guessed one.",
   },
@@ -255,7 +260,7 @@ export const UNITS: readonly ValidationUnit[] = [
     domains: withApparatus("contracts", "sim-core", "sim-analysis", "sim-decisions", "sim-runtime", "explorer"),
     needs: [],
     parallelSafe: true,
-    baselineSeconds: 81,
+    baselineSeconds: 149,
     claim:
       "Session lifecycle, forking, and pause gating behave exactly as specified, every named checkpoint migration rule is well-formed and still matches the code that absorbs it, and a save written before entity references carried their kind restores with the same reference count, no guessed namespace, and value-based deduplication.",
   },
@@ -269,7 +274,7 @@ export const UNITS: readonly ValidationUnit[] = [
     domains: withApparatus("contracts", "sim-core", "sim-runtime", "explorer"),
     needs: [],
     parallelSafe: true,
-    baselineSeconds: 20,
+    baselineSeconds: 26,
     claim: "Playback speed changes advance exactly the tick counts they claim.",
   },
   {
@@ -378,7 +383,7 @@ export const UNITS: readonly ValidationUnit[] = [
     domains: withApparatus("contracts", "sim-core", "sim-decisions", "sim-runtime"),
     needs: [],
     parallelSafe: true,
-    baselineSeconds: 58,
+    baselineSeconds: 94,
     claim: "Cross-feeding is genuinely possible across seeds, not just in one lucky world.",
   },
   {
@@ -420,7 +425,7 @@ export const UNITS: readonly ValidationUnit[] = [
     needs: [],
     parallelSafe: false,
     artifact: "explorer-dist",
-    baselineSeconds: 12,
+    baselineSeconds: 1,
     claim: "The product compiles, and the resulting bundle is the one every browser lane tests.",
   },
   {
@@ -433,7 +438,7 @@ export const UNITS: readonly ValidationUnit[] = [
     domains: withApparatus("contracts", "phenotype", "explorer"),
     needs: [],
     parallelSafe: true,
-    baselineSeconds: 10,
+    baselineSeconds: 1,
     claim: "A genotype maps to the same phenotype, in Node and in the world model alike.",
   },
   {
