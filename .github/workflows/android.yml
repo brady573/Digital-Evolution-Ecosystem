@@ -15,6 +15,17 @@ name: android
 # is an artifact of the same workflow invocation.
 on:
   workflow_call:
+    inputs:
+      android_apk_has_work:
+        description: "Precomputed impact decision from the caller (true/false). Empty means compute internally (manual dispatch)."
+        required: false
+        type: string
+        default: ""
+      android_runtime_has_work:
+        description: "Precomputed runtime impact decision from the caller (true/false). Empty means compute internally."
+        required: false
+        type: string
+        default: ""
   workflow_dispatch:
 
 # The caller already scopes this to contents: read. Declared here so a manual
@@ -70,12 +81,25 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      # Skipped when the caller already computed impact: the decision arrives
+      # via workflow_call inputs, so reinstalling the project only to recompute
+      # it would be the duplicate planning this lane exists to remove.
       - uses: ./.github/actions/setup-project
+        if: inputs.android_apk_has_work == ''
       - name: Plan the Android lane
         id: plan
         env:
           DEE_IMPACT_BASE: ${{ env.impact_base }}
-        run: pnpm ci:plan android-apk android-runtime
+          PRECOMPUTED_APK: ${{ inputs.android_apk_has_work }}
+          PRECOMPUTED_RUNTIME: ${{ inputs.android_runtime_has_work }}
+        run: |
+          if [ -n "$PRECOMPUTED_APK" ]; then
+            echo "Using caller-provided Android impact decision; no recomputation."
+            echo "android_apk_has_work=$PRECOMPUTED_APK" >> "$GITHUB_OUTPUT"
+            echo "android_runtime_has_work=$PRECOMPUTED_RUNTIME" >> "$GITHUB_OUTPUT"
+          else
+            pnpm ci:plan android-apk android-runtime
+          fi
 
   # Gated on impact. Android packaging and the emulator smoke cost ~4m55s and
   # ~16m respectively, and neither is relevant to a change that cannot reach the

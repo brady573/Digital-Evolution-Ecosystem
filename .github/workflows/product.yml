@@ -412,6 +412,7 @@ jobs:
     # not shared between jobs. The answer has to travel as a job output.
     outputs:
       android_apk_has_work: ${{ steps.plan.outputs.android_apk_has_work }}
+      android_runtime_has_work: ${{ steps.plan.outputs.android_runtime_has_work }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -440,6 +441,12 @@ jobs:
       - presentation
       - android_plan
     uses: ./.github/workflows/android.yml
+    # The impact decision is computed once in `android_plan` above and passed
+    # in: the reusable workflow reuses it instead of recomputing. Manual
+    # dispatches of android.yml (inputs empty) still compute internally.
+    with:
+      android_apk_has_work: ${{ needs.android_plan.outputs.android_apk_has_work }}
+      android_runtime_has_work: ${{ needs.android_plan.outputs.android_runtime_has_work }}
     # Gated on impact, not on whether the gates above happened to pass. Android
     # packaging costs ~4m55s and is irrelevant to a change that cannot reach the
     # packaged application. `if` is evaluated after `needs`, so the gate still
