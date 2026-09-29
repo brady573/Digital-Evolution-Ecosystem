@@ -122,7 +122,7 @@ lines.push(
   `1. **No rule tolerates an omission in ${CURRENT_SCHEMA}.** Checked at print time: ${crossing.length === 0 ? "no rule names it" : `**${crossing.length} RULE(S) VIOLATE THIS — ${crossing.map((r) => r.id).join(", ")}**`}. The rule table also refuses such a rule as a blocking assertion, with ${CURRENT_SCHEMA} deliberately left a valid schema value in the whitelist so the property is proved rather than obtained by accident from an outdated list.`,
 );
 lines.push(
-  `2. **Migration absorbs absences that older builds wrote, and ${CURRENT_SCHEMA} is written by the build that requires those fields.** Every rule above names the change that introduced its field and the schema version in force at that moment; none of those changes predates ${CURRENT_SCHEMA}.`,
+  `2. **Migration absorbs absences that older builds wrote, and ${CURRENT_SCHEMA} is written by the build that requires those fields.** Every rule above names the change that introduced its field, and that change predates ${CURRENT_SCHEMA} — the current version is the first to *require* fields that older supported builds already wrote. That is what makes the tolerance historical rather than permissive: each one describes a build that really existed and really omitted the field, not a gap in the current contract.`,
 );
 lines.push(
   `3. **The asymmetry is proved on one payload, twice.** \`analysis.records\` is removed from an otherwise valid save: as "${CURRENT_SCHEMA}" it is refused (\`analysis.records\`, malformed-container); as "${NEWEST_HISTORICAL}" the identical payload is accepted. If loadability leaked across the version boundary, that pair could not disagree.`,

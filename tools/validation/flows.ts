@@ -484,7 +484,11 @@ const MIGRATION_ABSORBER_PROBES: Readonly<Record<string, { file: string; probe: 
     file: "packages/contracts/src/index.ts",
     probe: /export const migrateEntityRefs = /,
   },
-  "analysis-substate-absent-reads-as-constructor-default": {
+  "analysis-cuse-guild-absent-reads-as-constructor-default": {
+    file: "packages/sim-analysis/src/index.ts",
+    probe: /const observer=new EcologyObserver\(\);[\s\S]{0,120}Object\.assign\(observer,/,
+  },
+  "analysis-niche-construction-absent-reads-as-constructor-default": {
     file: "packages/sim-analysis/src/index.ts",
     probe: /const observer=new EcologyObserver\(\);[\s\S]{0,120}Object\.assign\(observer,/,
   },
@@ -494,7 +498,10 @@ const MIGRATION_ABSORBER_PROBES: Readonly<Record<string, { file: string; probe: 
  *  omission in it: that is the whole point of the 0.4 split. */
 const CURRENT_SCHEMA = CHECKPOINT_SCHEMA_VERSION;
 
-const SPLIT_RULE_IDS = ["analysis-substate-absent-reads-as-constructor-default"];
+const SPLIT_RULE_IDS = [
+  "analysis-cuse-guild-absent-reads-as-constructor-default",
+  "analysis-niche-construction-absent-reads-as-constructor-default",
+];
 
 function testCheckpointMigrationRuleTable() {
   // Every version the contract knows, so a rule scoped to 0.4 — which no
@@ -1079,6 +1086,39 @@ function testCheckpointRejectionConditions() {
     assert.equal(error.reason, "malformed-container");
   }
 
+  // The asymmetry, restated against a field whose history actually supports
+  // it. `analysis.records` is written by every checkpoint build since d86ddfe,
+  // so a save omitting it is malformed at 0.3 too and is refused at both. The
+  // version split is therefore NOT "0.3 may omit what 0.4 requires" in general:
+  // it is scoped per field, by when that field was introduced.
+  const missingRecordsAt03 = rejected(missingRecords("0.3"));
+  assert.equal(
+    missingRecordsAt03.field,
+    "analysis.records",
+    "0.3 wrote analysis.records, so a 0.3 save omitting it is malformed rather than historical",
+  );
+
+  // `analysis.dep` (the C-use guild) arrived in 3ddb287 on 2026-09-25, after
+  // the 0.3 bump, so a 0.3 save may genuinely omit it. That is the real
+  // version-scoped absence, and it is the case the version split exists for.
+  const missingDep = (schema: string): any => {
+    const payload = JSON.parse(JSON.stringify(good));
+    payload.checkpointSchemaVersion = schema;
+    delete payload.analysis.dep;
+    return payload;
+  };
+  validateCheckpoint(missingDep("0.3"));
+  assert.ok(
+    true,
+    "a 0.3 save omitting the post-0.3 C-use sub-state loads, because no 0.3 build wrote it",
+  );
+  const depAsCurrent = rejected(missingDep("0.4"));
+  assert.equal(
+    depAsCurrent.field,
+    "analysis.dep",
+    "a current save may not omit the C-use sub-state, so no rule may tolerate its absence there",
+  );
+
   const asCurrent = rejected(missingRecords("0.4"));
   assert.equal(
     asCurrent.field,
@@ -1086,23 +1126,19 @@ function testCheckpointRejectionConditions() {
     "a current save may not omit a field that only older schemas may lack",
   );
   assert.equal(asCurrent.reason, "malformed-container");
-  validateCheckpoint(missingRecords("0.3"));
-  assert.ok(
-    true,
-    "the identical omission is tolerated for 0.3, where a supported build wrote it",
-  );
 
   // The same asymmetry, reached through a real restore rather than the
-  // validator, so the ordering in `restore` is what is under test.
+  // validator, so the ordering in `restore` is what is under test. `dep` is
+  // the field whose absence is genuinely historical at 0.3.
   const realCurrent = new UniverseSession();
   assert.throws(
-    () => realCurrent.restore(missingRecords("0.4")),
-    (error: unknown) => error instanceof CheckpointRejectionError && error.field === "analysis.records",
-    "restore refuses a 0.4 save missing analysis.records",
+    () => realCurrent.restore(missingDep("0.4")),
+    (error: unknown) => error instanceof CheckpointRejectionError && error.field === "analysis.dep",
+    "restore refuses a current save missing the C-use sub-state",
   );
   const realLegacy = new UniverseSession();
-  realLegacy.restore(missingRecords("0.3"));
-  assert.ok(true, "restore still accepts the 0.3 form of the same payload");
+  realLegacy.restore(missingDep("0.3"));
+  assert.ok(true, "restore still accepts the 0.3 form of that same payload");
 
   console.log("checkpoint rejection conditions: PASS (6 conditions)");
 }

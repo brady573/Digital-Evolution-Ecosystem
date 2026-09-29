@@ -392,20 +392,36 @@ export const CHECKPOINT_MIGRATION_RULES: readonly CheckpointMigrationRule[] = [
       "`source` on a resolution was introduced with 0.3 in b040b19. Every 0.2 resolution predates the field and was an event decision.",
   },
   {
-    id: "analysis-substate-absent-reads-as-constructor-default",
-    path: "analysis.{crossfeeding,seed_bank,era,cuse_guild,niche_construction,records,eras}",
+    id: "analysis-cuse-guild-absent-reads-as-constructor-default",
+    path: "analysis.dep",
     appliesToSchemas: PRE_CURRENT_SCHEMAS,
     effectiveDefault: "the freshly constructed observer's own initial state",
     absorber: "constructor-default",
     omission:
-      "Restore constructs a fresh observer and then overwrites only the keys the payload carries, so an absent sub-state keeps its declared initial value instead of becoming undefined. A detector that has not yet fired genuinely has no sub-state, which is different from a detector that fired and lost its record.",
+      "The C-use guild's dependency-arc sub-state. Restore constructs a fresh observer and overwrites only the keys the payload carries, so an absent sub-state keeps its declared initial value. A detector that has not yet fired genuinely has no sub-state, which is different from one that fired and lost its record.",
     rejects:
-      "A present-but-wrong-typed sub-state is not covered by this rule. `Object.assign` writes whatever it is handed, so a corrupt value becomes live state rather than being defaulted — which is the opposite failure from normalisation, and is why the validator has to refuse it rather than rely on the constructor.",
+      "A present-but-wrong-typed sub-state is not covered by this rule. `Object.assign` writes whatever it is handed, so a corrupt value becomes live state rather than being defaulted — the opposite failure from normalisation, and why the validator refuses it rather than relying on the constructor.",
     hazard: "load-bearing-dynamics",
     dynamicsJustification:
-      "Absence is meaningful: a detector that has not fired has no sub-state, and that is the same world as one whose records were empty. Critically, this default *removes* a capability rather than granting one — an observer with no records raises no event, so the pause gate stays shut. The hazard is the opposite case and is why `rejects` exists: a wrong-typed sub-state is written into live state by `Object.assign` and can then raise a gate the analysis never earned.",
+      "Absence is meaningful: a detector that has not fired has no sub-state, which is the same world as one whose records were empty. Critically this default *removes* a capability rather than granting one — an observer with no dependency arcs raises no event, so the pause gate stays shut. The hazard is the opposite case and is why `rejects` exists.",
     historicalBasis:
-      "The detector sub-states did not all arrive at once: `cuse_guild` came in 064d727 on 2026-09-25 and `niche_construction` in af9ad23 on 2026-09-26, both after the 0.3 bump of 2026-09-24. `seed_bank` predates every version, but one 0.3 save can predate either later detector, so a single rule covers the group.",
+      "`this.dep` was introduced in 3ddb287 on 2026-09-25 (Issue #30 Phase C1), after the 0.3 bump in b040b19 on 2026-09-24. The analysis checkpoint at b040b19 writes only `cross`, `seedbank`, `era`, `records` and `eras`, so a 0.3 save written before 3ddb287 carries no `dep` key at all.",
+  },
+  {
+    id: "analysis-niche-construction-absent-reads-as-constructor-default",
+    path: "analysis.niche",
+    appliesToSchemas: PRE_CURRENT_SCHEMAS,
+    effectiveDefault: "the freshly constructed observer's own initial state",
+    absorber: "constructor-default",
+    omission:
+      "The niche-construction sub-state, arriving later than the C-use guild and therefore separately absent from different saves. Same absorber and same reasoning as the C-use rule: a detector that has not fired has no sub-state.",
+    rejects:
+      "A present-but-wrong-typed sub-state is not covered by this rule, for the same `Object.assign` reason as the C-use guild.",
+    hazard: "load-bearing-dynamics",
+    dynamicsJustification:
+      "As with the C-use guild, the default withholds a capability rather than granting one: an observer with no niche sub-state raises no event, so the pause gate stays shut.",
+    historicalBasis:
+      "`this.niche` was introduced in af9ad23 on 2026-09-26 (Issue #30 Slice 2), the latest of the analysis sub-states. A 0.3 save written before that date carries neither `dep` nor `niche`, and one written between 3ddb287 and af9ad23 carries `dep` but not `niche`, so the two absences are genuinely independent and need separate rules.",
   },
   // --- A3.2: the pre-A2 reference shape ------------------------------------
   {
@@ -707,10 +723,38 @@ export const validateCheckpoint = (checkpoint: unknown): void => {
   if (checkpoint.control !== undefined && checkpoint.control !== null && !isPlainObject(checkpoint.control)) {
     reject("control", "wrong-type", `expected null or a control checkpoint object, got ${describe(checkpoint.control)}`);
   }
+  /**
+   * Presence, decided per field by when that field was introduced.
+   *
+   * This is the only axis the version split governs, and it is narrower than
+   * "the current schema requires it". `cross`, `seedbank`, `era`, `records` and
+   * `eras` are written by every analysis checkpoint since d86ddfe on
+   * 2026-09-23, so a save omitting one of them is malformed at *every* schema
+   * and no migration rule may tolerate its absence. `dep` and `niche` arrived
+   * after the 0.3 bump and are genuinely absent from older saves, which is what
+   * the two analysis rules record.
+   *
+   * Treating the whole analysis object as version-scoped is what let a 0.3 save
+   * omit `analysis.records` — an absence no supported build ever produced. The
+   * boundary has to be drawn where the history actually puts it, or the
+   * document describes a wider boundary than the code has.
+   */
+  if (isPlainObject(analysis)) {
+    const sub = analysis as Record<string, unknown>;
+    for (const key of ["records", "eras", "cross", "seedbank", "era"] as const) {
+      if (sub[key] === undefined) {
+        reject(
+          `analysis.${key}`,
+          "malformed-container",
+          `every analysis checkpoint since 0.1 wrote ${key}, so its absence is not a historical shape`,
+        );
+      }
+    }
+  }
   if (schema !== "0.4") return;
 
-  // Presence. Every field below is required of a current save and may be
-  // absent in an older one, which is what the rules above record.
+  // Presence, current schema only. `dep` and `niche` are the analysis
+  // sub-states older saves may genuinely lack; the five checked above are not.
   if (!isPlainObject(decisions)) {
     reject("decisions", "malformed-container", "current schema requires a decisions object");
   }
@@ -720,8 +764,17 @@ export const validateCheckpoint = (checkpoint: unknown): void => {
   if (!isPlainObject(analysis)) {
     reject("analysis", "malformed-container", "current schema requires an analysis object");
   }
-  if (!Array.isArray((analysis as Record<string, unknown>).records)) {
-    reject("analysis.records", "malformed-container", "current schema requires a records array");
+  if (isPlainObject(analysis)) {
+    const sub = analysis as Record<string, unknown>;
+    for (const key of ["dep", "niche"] as const) {
+      if (sub[key] === undefined) {
+        reject(
+          `analysis.${key}`,
+          "malformed-container",
+          `current schema requires ${key}, and no rule may tolerate its absence here`,
+        );
+      }
+    }
   }
 };
 
