@@ -6,10 +6,12 @@ import {
   CheckpointRejectionError,
   MIGRATION_RULE_BY_ID,
   migrateEntityRefs,
+  SUPPORTED_SCHEMAS,
   typedRefs,
   validateCheckpoint,
 } from "../../packages/contracts/src/index.ts";
 import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ENGINE_VERSION } from "../../packages/sim-core/src/index.ts";
@@ -596,6 +598,49 @@ function testCheckpointMigrationRuleTable() {
   console.log(`checkpoint migration rule table: PASS (${CHECKPOINT_MIGRATION_RULES.length} rules)`);
 }
 
+/**
+ * The supported-save document must stay derived from the table.
+ *
+ * The generator refuses to run when it names a supported schema version in
+ * code, but a self-check nobody executes proves nothing: the boundary is
+ * presented to the Owner between runs, so the failure would land on the
+ * decision rather than on the build. This executes it from a routed unit, and
+ * separately asserts the printed heading carries the live current version and
+ * no historical one — so the rot is caught at the output even if the source
+ * scan is bypassed.
+ */
+function testBoundaryGeneratorIsDerived() {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const result = spawnSync(join(here, "..", "..", "node_modules", ".bin", "tsx"), [join(here, "checkpoint-boundary.ts")], {
+    encoding: "utf8",
+  });
+  assert.equal(
+    result.status,
+    0,
+    `the boundary generator refused to run, so the supported-save document cannot be produced:\n${result.stderr}`,
+  );
+  const out = result.stdout;
+
+  assert.ok(
+    out.includes(`(${CHECKPOINT_MIGRATION_RULES.length} rules)`),
+    "the document's rule count must come from the table, not from prose that a rule edit can invalidate",
+  );
+
+  const heading = out.split("\n").find((l) => l.startsWith("## A valid ") && l.includes("never depends"));
+  assert.ok(heading !== undefined, "the document must state the no-current-schema-migration property");
+  assert.ok(
+    heading.includes(CURRENT_SCHEMA),
+    `the property heading must name the live current schema ${CURRENT_SCHEMA}, got: ${heading}`,
+  );
+  for (const historical of SUPPORTED_SCHEMAS.filter((s) => s !== CURRENT_SCHEMA)) {
+    assert.ok(
+      !heading.includes(historical),
+      `the property heading names historical schema ${historical}, which is rot: it was correct until the version moved`,
+    );
+  }
+  console.log("boundary generator is derived: PASS (no supported-version literal, heading carries current schema)");
+}
+
 testFlowDeterminism();
 testProcessActivations();
 testWasteAccounting();
@@ -990,6 +1035,7 @@ testCheckpointRejectionConditions();
 testCooldownPreservationAcrossRestore();
 testPreA2EntityRefMigration();
 testCheckpointMigrationRuleTable();
+testBoundaryGeneratorIsDerived();
 
 testFlowEvidence();
 console.log(`flow validation: PASS (checkpoint schema ${CHECKPOINT_SCHEMA_VERSION}, engine ${ENGINE_VERSION})`);

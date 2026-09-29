@@ -12,12 +12,65 @@
  *
  * Run: pnpm exec tsx tools/validation/checkpoint-boundary.ts
  */
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { CHECKPOINT_SCHEMA_VERSION } from "../../packages/sim-runtime/src/session.ts";
 import {
   CHECKPOINT_MIGRATION_RULES,
   CHECKPOINT_PLAYER_MESSAGES,
   CHECKPOINT_PLAYER_NOTICE,
   MIGRATION_RULE_BY_ID,
+  SUPPORTED_SCHEMAS,
 } from "../../packages/contracts/src/index.ts";
+
+const CURRENT_SCHEMA = CHECKPOINT_SCHEMA_VERSION;
+
+/**
+ * The newest supported schema that is not the current one, derived rather than
+ * named. Used as the historical half of the absence/invalidity asymmetry, so a
+ * future bump moves both halves instead of leaving one pinned to a literal that
+ * has quietly become the current version.
+ */
+const HISTORICAL_SCHEMAS = SUPPORTED_SCHEMAS.filter((s) => s !== CURRENT_SCHEMA);
+const NEWEST_HISTORICAL = HISTORICAL_SCHEMAS[HISTORICAL_SCHEMAS.length - 1];
+
+/**
+ * Self-check: this file may not name a supported schema version in code.
+ *
+ * A supported-version reference here is rot by definition — it was correct when
+ * written and stops being correct at the next bump, while the document still
+ * reads as authoritative. A version this build does *not* support is fine and
+ * intentional: those are illustrative rejected values, and there is nothing to
+ * derive them from.
+ *
+ * The token is matched anywhere in code, not only as a bare quoted string. A
+ * bare-quoted pattern is what this check looked like first, and it was
+ * vacuous in the exact way that matters: the real rot read "A valid 0.4 save",
+ * with the version embedded in prose, and a bare-quoted scan passed over it.
+ * Dot-bounded on both sides so a longer dotted number (`0.22.0`) is not
+ * mistaken for a schema version.
+ *
+ * Comments are excluded. A stale *document* is the hazard; a stale comment
+ * produces no output, and a check that fires on harmless prose is a check that
+ * eventually gets switched off.
+ */
+const SOURCE = readFileSync(fileURLToPath(import.meta.url), "utf8");
+const stripComments = (src: string): string =>
+  src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/([^:])\/\/[^\n]*/g, "$1");
+const CODE = stripComments(SOURCE);
+const VERSION_TOKEN = /(?<![\w.])(\d+\.\d+)(?![\w.])/g;
+const literals = [...CODE.matchAll(VERSION_TOKEN)]
+  .map((m) => m[1])
+  .filter((v): v is string => (SUPPORTED_SCHEMAS as readonly string[]).includes(v));
+if (literals.length > 0) {
+  throw new Error(
+    `checkpoint-boundary.ts names supported schema version(s) in code: ${[...new Set(literals)].join(", ")}.\n` +
+      "Every supported-version reference in generated prose must come from\n" +
+      "CHECKPOINT_SCHEMA_VERSION or the schemas the migration table declares.\n" +
+      "A version this build does NOT support is allowed: those are the\n" +
+      "illustrative rejected values, and they have nothing to derive from.",
+  );
+}
 
 const HAZARD: Record<string, string> = {
   inert: "inert — written but never read for a decision",
@@ -58,21 +111,88 @@ lines.push(
   "A field with no rule above gets no default. A wrong type, a malformed container, a non-finite required number, an unsupported schema or checkpoint tag, and a record that contradicts itself are all refused with the field named, before the payload becomes live state.",
 );
 lines.push("");
+lines.push(`## A valid ${CURRENT_SCHEMA} save never depends on a migration rule`);
+lines.push("");
+lines.push(
+  "This is the property the version split exists to guarantee, and it is checked rather than asserted:",
+);
+lines.push("");
+const crossing = CHECKPOINT_MIGRATION_RULES.filter((r) => r.appliesToSchemas.includes(CURRENT_SCHEMA));
+lines.push(
+  `1. **No rule tolerates an omission in ${CURRENT_SCHEMA}.** Checked at print time: ${crossing.length === 0 ? "no rule names it" : `**${crossing.length} RULE(S) VIOLATE THIS — ${crossing.map((r) => r.id).join(", ")}**`}. The rule table also refuses such a rule as a blocking assertion, with ${CURRENT_SCHEMA} deliberately left a valid schema value in the whitelist so the property is proved rather than obtained by accident from an outdated list.`,
+);
+lines.push(
+  `2. **Migration absorbs absences that older builds wrote, and ${CURRENT_SCHEMA} is written by the build that requires those fields.** Every rule above names the change that introduced its field and the schema version in force at that moment; none of those changes predates ${CURRENT_SCHEMA}.`,
+);
+lines.push(
+  `3. **The asymmetry is proved on one payload, twice.** \`analysis.records\` is removed from an otherwise valid save: as "${CURRENT_SCHEMA}" it is refused (\`analysis.records\`, malformed-container); as "${NEWEST_HISTORICAL}" the identical payload is accepted. If loadability leaked across the version boundary, that pair could not disagree.`,
+);
+lines.push("");
+lines.push(
+  "So a save written by the current build opens on its own terms. Migration is what keeps *older* worlds open; it is never what lets a current one through.",
+);
+lines.push("");
+
 lines.push("## Shapes that will now be refused");
 lines.push("");
 lines.push("A save that does any of the following will no longer open. This is the intended direction: Decision 2 authorises refusing invalid data, and until now these shapes loaded silently.");
 lines.push("");
-lines.push("| Reason code | What is refused |");
-lines.push("|---|---|");
-for (const [reason, text] of Object.entries({
-  "wrong-type": "a field holds a value of the wrong kind — a tick that is a string, a gate that is a number, a control that is a bare value",
-  "malformed-container": "a field that should hold a list or an object does not",
-  "non-finite-numeric": "a number field holds a value that is not finite",
-  "unsupported-version": "a save declaring a schema version this build does not know",
-  "unsupported-tag": "a part of the saved world carrying a type marker this build does not recognise",
-  "structural-contradiction": "a decision record whose parts disagree — no identifier, an unreadable tick, or a source the schema does not know",
-})) {
-  lines.push(`| \`${reason}\` | ${text} |`);
+const REFUSED: Readonly<Record<string, { what: string; examples: readonly string[] }>> = {
+  "wrong-type": {
+    what: "a field holds a value of the wrong kind",
+    examples: [
+      '`decisions.lastMajorCatalystTick: "not a tick"`',
+      "`decisions.lastDecisionTick: \"soon\"`",
+      '`decisions.pending: "gate"`',
+      "`control: 42`",
+    ],
+  },
+  "malformed-container": {
+    what: "a field that should hold a list or an object does not",
+    examples: [
+      "`decisions.resolutions: {}`",
+      "`analysis.records: {}`",
+      "`decisions: \"not an object\"`",
+      "`experiment: null`",
+    ],
+  },
+  "non-finite-numeric": {
+    what: "a number field holds a value that is not finite",
+    examples: [
+      "`decisions.lastMajorCatalystTick: NaN`",
+      "`decisions.lastMajorCatalystTick: Infinity`",
+      "`decisions.lastMajorCatalystTick: -Infinity`",
+    ],
+  },
+  "unsupported-version": {
+    what: "a save declares a schema version this build does not know",
+    examples: [
+      '`checkpointSchemaVersion: "0.5"`',
+      '`checkpointSchemaVersion: "1.0"`',
+      '`checkpointSchemaVersion: ""`',
+      "`checkpointSchemaVersion: null`",
+      "`checkpointSchemaVersion: 3`",
+    ],
+  },
+  "unsupported-tag": {
+    what: "part of the saved world carries a type marker this build does not recognise",
+    examples: ['`experiment.__digital_evolution_type: "not-a-real-tag"`'],
+  },
+  "structural-contradiction": {
+    what: "a decision record's parts disagree with each other",
+    examples: [
+      "`resolutions[0].opportunityId: 1` (not a string)",
+      "`resolutions[0].commandId: null` (no command named)",
+      '`resolutions[0].tick: "later"` (a tick that is not a tick)',
+      '`resolutions[0].source: "from_the_future"` (a source the schema does not know)',
+    ],
+  },
+};
+for (const [reason, entry] of Object.entries(REFUSED)) {
+  lines.push(`**\`${reason}\`** — ${entry.what}`);
+  lines.push("");
+  for (const example of entry.examples) lines.push(`- ${example}`);
+  lines.push("");
 }
 
 lines.push("");
@@ -90,7 +210,7 @@ lines.push("");
 lines.push("## Known limits of this boundary");
 lines.push("");
 lines.push(
-  "- **Strict field requirements apply to the current schema (`0.3`) only.** A `0.1` or `0.2` save is checked for a known version and a usable container, and no further. Holding a legacy save to today's requirements would refuse exactly the saves Decision 2 exists to protect, so the trade is deliberate: a legacy save with corrupt *contents* inside it can still restore.",
+  `- **Strict field requirements apply to the current schema (\`${CURRENT_SCHEMA}\`) only.** A save declaring an older supported version is checked for a known version, a usable container, and recognised type tags — and no further. So a legacy save whose *contents* are malformed inside that container can still restore. **This is a known gap rather than a deliberate trade**, and it is being corrected: whether a field may be absent and whether a present value is valid are two independent axes, and only the first was version-scoped.`,
 );
 lines.push(
   "- **Migration runs before validation.** A save that migrates cleanly is never caught by a pre-migration check.",

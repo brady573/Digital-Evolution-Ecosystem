@@ -584,7 +584,13 @@ const isFiniteNumber = (v: unknown): v is number => typeof v === "number" && Num
 
 const describe = (v: unknown): string => (v === null ? "null" : Array.isArray(v) ? "array" : typeof v);
 
-const SUPPORTED_SCHEMAS: readonly CheckpointSchemaVersion[] = ["0.1", "0.2", "0.3", "0.4"];
+/**
+ * Exported so the boundary generator can derive "a version this build does not
+ * support" without re-declaring the list. A second copy of this array would be
+ * a second thing to forget to update on a version bump, and it is the exact
+ * shape of rot this generator exists to prevent.
+ */
+export const SUPPORTED_SCHEMAS: readonly CheckpointSchemaVersion[] = ["0.1", "0.2", "0.3", "0.4"];
 
 const CHECKPOINT_TAGS: readonly string[] = [
   "simulation",
