@@ -273,8 +273,8 @@
       "verification": {
         "native_scale_reviewed": false,
         "in_engine_reviewed": false,
-        "technical_checks_passed": false,
-        "approved_by": "pending P0 texture/cache tests + spike parity (pnpm test:phenotype, pnpm test:pixi-spike)"
+        "technical_checks_passed": true,
+        "approved_by": "pending P1 gate (pre-M7 Tranches A/B/C) — non-production P0, not Owner art acceptance"
       }
     },
     {
@@ -307,8 +307,8 @@
       "verification": {
         "native_scale_reviewed": false,
         "in_engine_reviewed": false,
-        "technical_checks_passed": false,
-        "approved_by": "pending P0 architecture review + P1 gate (pre-M7 Tranches A/B/C)"
+        "technical_checks_passed": true,
+        "approved_by": "pending P1 gate (pre-M7 Tranches A/B/C) — non-production P0 architecture, not production acceptance"
       }
     }
   ]
