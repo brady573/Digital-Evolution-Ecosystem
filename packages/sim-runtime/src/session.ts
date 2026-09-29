@@ -441,6 +441,7 @@ export class UniverseSession {
     return this.snapshot();
   }
 
+  // impl: REQ-EXP-001 (lazy matched-control fork; interventions apply env-only effects)
   createControlFork(){
     if(!this.#experiment)throw new Error("Universe has not been created");
     if(!this.#control){

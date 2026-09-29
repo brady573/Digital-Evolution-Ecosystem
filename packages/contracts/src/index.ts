@@ -1517,6 +1517,7 @@ export interface DecisionCheckpoint {
   readonly lastMajorCatalystTick: number | null;
 }
 
+// impl: REQ-EXPORT-001 (resumable checkpoints are a separate contract from evidence exports)
 /**
  * The current resumable checkpoint. Schema 0.4.
  *

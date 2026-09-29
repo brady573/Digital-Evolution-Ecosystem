@@ -62,6 +62,7 @@ export function landscapeTileLayout(
   };
 }
 
+// impl: REQ-M4-001 (read-only waste overlay lens)
 export type Ecological = "normal" | "nutrients" | "waste";
 
 /** World is a 600x600 torus at a 60x60 substance grid (engine constants). */

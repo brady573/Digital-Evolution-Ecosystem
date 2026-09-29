@@ -28,6 +28,7 @@ export const TICKS_PER_SECOND: Record<SpeedMode, number> = {
 /** Max ticks in a single worker slice (keeps one message UI-responsive). */
 export const MAX_SLICE_TICKS = 2000;
 
+// impl: REQ-UX-002 (bounded playback speeds; product UI exposes Pause/1x/10x/100x)
 export function normalizeSpeedMode(speed: number): SpeedMode {
   if (speed >= 500) return 500;
   if (speed >= 100) return 100;

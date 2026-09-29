@@ -127,6 +127,7 @@ export class EcologyObserver {
   records:HistoryRecord[]=[];
   eras:Era[]=[];
 
+  // impl: REQ-EVENT-001 (stateful event records with phase lifecycle + entity refs)
   add(kind:string,id:string,tick:number,phase:string,title:string,summary:string,level:string,evidence:ObservationFrame,refs:readonly EntityRef[]=[],extra?:Partial<NicheBaselineEvidence>):HistoryRecord{
     // Records keep the observed frame verbatim; a baseline block is attached
     // alongside it (never merged into it) so the evidence carries the

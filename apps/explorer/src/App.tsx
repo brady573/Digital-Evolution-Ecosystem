@@ -74,6 +74,7 @@ const DEFAULT_SETTINGS:WorldSettings={
 
 // Named world archetypes (M4 Phase A). Values are the v0.28.2 prototype
 // preset sliders verbatim; the engine mapping is unchanged.
+// impl: REQ-WORLD-002 (Balanced/Patchwork/Harsh/Abundant richness presets)
 const PRESETS:Record<string,{settings:Omit<WorldSettings,"seed">,note:string}>={
   Balanced:{settings:{richness:.6,separation:.6,variety:1,population:30,variation:.35,mutation:.03,pressure:.45},note:"Balanced starts with a small founder population and a nutrient field that can support expansion, overshoot, stability, or decline."},
   Patchwork:{settings:{richness:.68,separation:.9,variety:1,population:34,variation:.45,mutation:.03,pressure:.42},note:"Patchwork starts below its potential scale and strongly separates nutrient zones, giving divergent clades room to expand into different niches."},
@@ -492,6 +493,7 @@ export function App(){
   const [settings,setSettings]=useState(DEFAULT_SETTINGS);
   // Recipe of the running universe (set on create/load). Settings staged in
   // the modal stay pending until Create universe applies them.
+  // impl: REQ-WORLD-001 (pending-vs-active universe settings)
   const [activeSettings,setActiveSettings]=useState(DEFAULT_SETTINGS);
   const pendingDirty=!settingsEqual(settings,activeSettings);
   const [settingsOpen,setSettingsOpen]=useState(false);
@@ -849,6 +851,7 @@ export function App(){
       </section>}
 
       {surface==="experiments"&&<section className="panel">
+        {/* impl: REQ-UX-001 (World/History/Tree/Experiments investigation surfaces) */}
         <span className="eyebrow">What if this world changed?</span><h2>Experiments</h2>
         {snapshot.control?<div className="compare"><div><strong>Experiment</strong><span>{snapshot.population} living</span><span>{m.ecological_outcome}</span><span>{formatYear(snapshot.tick)}</span></div><div><strong>Untouched twin</strong><span>{snapshot.control.population} living</span><span>{snapshot.control.metrics.ecological_outcome}</span><span>{formatYear(snapshot.control.tick)}</span></div></div>:<p>No matched control exists yet. Applying an intervention creates an exact twin first.</p>}
         <div className="actions"><button onClick={()=>{if(blockWhilePending())return;runtime.intervene("global")}}>Global nutrient crash</button><button onClick={()=>{if(blockWhilePending())return;runtime.intervene("droughtA")}}>Nutrient A drought</button><button onClick={()=>{if(blockWhilePending())return;runtime.intervene("droughtB")}}>Nutrient B drought</button></div>
