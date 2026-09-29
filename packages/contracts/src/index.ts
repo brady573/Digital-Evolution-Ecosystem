@@ -169,6 +169,195 @@ export const formatLineageId = (id: LineageId): string => `L-${String(id).padSta
 export const formatCladeId = (id: CladeId): string => `C-${String(id).padStart(4, "0")}`;
 
 /* ------------------------------------------------------------------ *
+ * Checkpoint migration rules.
+ *
+ * Decision 2: "a missing field is tolerated only when a supported historical
+ * checkpoint/schema has an explicit migration/default rule for that omission."
+ * That makes tolerance something to be *declared*, not something to be
+ * discovered later by noticing that a save happened to load. This table is that
+ * declaration.
+ *
+ * A rule is a promise: "a save of this schema may omit this field, and here is
+ * what the absence reads as." Anything not in this table is not tolerated, and
+ * must fail before the payload becomes live state. A rule that is added without
+ * a stated reason, or whose absorber stops existing, is the table going stale,
+ * which the validation unit asserts directly.
+ *
+ * The `absorber` field is the part that keeps this honest. Several of these
+ * omissions are not "migrated" anywhere in particular — the restore path simply
+ * assigns whatever the payload contains and the absence is absorbed later by
+ * code that already handles it. Recording *what* absorbs each omission is what
+ * distinguishes a named rule from a hope.
+ * ------------------------------------------------------------------ */
+
+/** Schema versions a universe checkpoint may declare. */
+export type CheckpointSchemaVersion = "0.1" | "0.2" | "0.3";
+
+/**
+ * What actually absorbs a tolerated omission today.
+ *
+ * - `live-step-guard` — the restore path applies nothing; a `|| default` in
+ *   code that already runs per step reads the absence as that value. These live
+ *   inside the biological step and are not this tranche's to move.
+ * - `nullable-field` — the field's own type admits the absence, so no runtime
+ *   default is involved at all.
+ * - `constructor-default` — a freshly constructed value keeps its own
+ *   initializer because the stored payload never overwrites the key.
+ * - `inline-backfill` — restore writes the missing field explicitly, for a
+ *   named older schema.
+ * - `structural-branch` — an older schema takes a branch that sets the defaults
+ *   directly rather than reading them.
+ */
+export type MigrationAbsorber =
+  | "live-step-guard"
+  | "nullable-field"
+  | "constructor-default"
+  | "inline-backfill"
+  | "structural-branch";
+
+export interface CheckpointMigrationRule {
+  /** Stable identifier. Tests reference this, so renaming one is a real change. */
+  readonly id: string;
+  /** Where the field actually lives in the payload, not its contract name. */
+  readonly path: string;
+  /** The schema versions whose saves may legitimately omit this field. */
+  readonly appliesToSchemas: readonly CheckpointSchemaVersion[];
+  /** What the absence reads as, stated so it can be checked. */
+  readonly effectiveDefault: string;
+  readonly absorber: MigrationAbsorber;
+  /** Why tolerating this is correct, rather than merely convenient. */
+  readonly omission: string;
+}
+
+const ALL_SCHEMAS: readonly CheckpointSchemaVersion[] = ["0.1", "0.2", "0.3"];
+
+export const CHECKPOINT_MIGRATION_RULES: readonly CheckpointMigrationRule[] = [
+  // --- The three omissions Decision 2 names explicitly ---------------------
+  {
+    id: "organism-pc-reads-as-zero",
+    path: "experiment.state.props.o[].pc",
+    appliesToSchemas: ALL_SCHEMAS,
+    effectiveDefault: "0",
+    absorber: "live-step-guard",
+    omission:
+      "Cumulative produced-C per organism. Saves written before the counter existed leave it absent, and the per-step production and aggregation reads already treat an absent counter as zero rather than producing NaN.",
+  },
+  {
+    id: "simulation-last-lineage-flows-reads-as-null",
+    path: "experiment.state.props.lastLineageFlows",
+    appliesToSchemas: ALL_SCHEMAS,
+    effectiveDefault: "null",
+    absorber: "nullable-field",
+    omission:
+      "Per-lineage interval flow facts. The field is declared `IntervalFlowFacts | null` and initialised to null, so an absent value is already a legal state of the field rather than a missing one. The next observation stride replaces it before anything reads it as evidence.",
+  },
+  {
+    id: "simulation-lineage-interval-reads-as-empty-map",
+    path: "experiment.state.props.lineageInterval",
+    appliesToSchemas: ALL_SCHEMAS,
+    effectiveDefault: "an empty Map",
+    absorber: "live-step-guard",
+    omission:
+      "Accumulated within-stride lineage deltas. Reading it for interval attribution already tolerates absence, and an empty map is the correct meaning: no delta accumulated yet, not a lost one.",
+  },
+  // --- Decision-record backfills, found by enumerating the restore path ----
+  {
+    id: "pending-decision-absent-reads-as-null",
+    path: "decisions.pending",
+    appliesToSchemas: ALL_SCHEMAS,
+    effectiveDefault: "null",
+    absorber: "inline-backfill",
+    omission:
+      "A save taken with no decision outstanding has no pending gate. Absent and explicitly-null are the same state, and a non-object value here cannot be a gate.",
+  },
+  {
+    id: "pending-decision-source-backfilled-from-event",
+    path: "decisions.pending.source",
+    appliesToSchemas: ["0.1", "0.2"],
+    effectiveDefault: '"observed_event" when a string sourceEventId is present',
+    absorber: "inline-backfill",
+    omission:
+      "Saves predating the catalyst source have no `source`, but a `sourceEventId` can only have come from an observed event, so the backfill is forced by the data rather than guessed from it.",
+  },
+  {
+    id: "decision-resolutions-absent-reads-as-empty",
+    path: "decisions.resolutions",
+    appliesToSchemas: ALL_SCHEMAS,
+    effectiveDefault: "[]",
+    absorber: "inline-backfill",
+    omission:
+      "No decisions were resolved before the save. A non-array value is not a resolution list, so an empty list is the only coherent reading.",
+  },
+  {
+    id: "decision-resolution-offer-tick-backfilled-from-tick",
+    path: "decisions.resolutions[].offerTick",
+    appliesToSchemas: ["0.1", "0.2"],
+    effectiveDefault: "the resolution's own tick",
+    absorber: "inline-backfill",
+    omission:
+      "0.2 records predate the field. The resolution tick is the best available estimate of when the offer happened, and it is an estimate rather than an invention.",
+  },
+  {
+    id: "decision-resolution-catalyst-id-reads-as-null",
+    path: "decisions.resolutions[].catalystId",
+    appliesToSchemas: ["0.1", "0.2"],
+    effectiveDefault: "null",
+    absorber: "inline-backfill",
+    omission:
+      "No 0.2 resolution came from a catalyst window, because catalyst decisions did not exist then. Null states that fact rather than implying a catalyst was involved.",
+  },
+  {
+    id: "decision-resolution-source-reads-as-event-decision",
+    path: "decisions.resolutions[].source",
+    appliesToSchemas: ["0.1", "0.2"],
+    effectiveDefault: '"event_decision"',
+    absorber: "inline-backfill",
+    omission:
+      "Before the source field existed, every resolution was an event decision. Naming it is a restatement of the era, not a classification of the record.",
+  },
+  {
+    id: "last-decision-tick-absent-reads-as-zero",
+    path: "decisions.lastDecisionTick",
+    appliesToSchemas: ALL_SCHEMAS,
+    effectiveDefault: "0",
+    absorber: "inline-backfill",
+    omission:
+      "A save with no recorded decision tick means no decision has been made, and tick 0 is before the world began.",
+  },
+  {
+    id: "last-major-catalyst-tick-absent-reads-as-null",
+    path: "decisions.lastMajorCatalystTick",
+    appliesToSchemas: ALL_SCHEMAS,
+    effectiveDefault: "null",
+    absorber: "inline-backfill",
+    omission:
+      "Distinct from the rule above on purpose: 'never a major catalyst' and 'happened at tick 0' are different facts, and only null says the first.",
+  },
+  {
+    id: "matched-control-absent-reads-as-null",
+    path: "control / controlAnalysis",
+    appliesToSchemas: ALL_SCHEMAS,
+    effectiveDefault: "null",
+    absorber: "inline-backfill",
+    omission:
+      "A matched twin is created by the first intervention. No twin existing is a normal state, not a missing one.",
+  },
+  {
+    id: "analysis-substate-absent-reads-as-constructor-default",
+    path: "analysis.{crossfeeding,seed_bank,era,cuse_guild,niche_construction,records,eras}",
+    appliesToSchemas: ALL_SCHEMAS,
+    effectiveDefault: "the freshly constructed observer's own initial state",
+    absorber: "constructor-default",
+    omission:
+      "Restore constructs a fresh observer and then overwrites only the keys the payload carries, so an absent sub-state keeps its declared initial value instead of becoming undefined.",
+  },
+];
+
+export const MIGRATION_RULE_BY_ID: ReadonlyMap<string, CheckpointMigrationRule> = new Map(
+  CHECKPOINT_MIGRATION_RULES.map((rule) => [rule.id, rule]),
+);
+
+/* ------------------------------------------------------------------ *
  * Cross-boundary read models.
  *
  * These declarations describe what sim-core and sim-analysis already

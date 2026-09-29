@@ -237,11 +237,12 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:flows",
     cls: "deterministic",
     enforcement: "blocking",
-    domains: withApparatus("contracts", "sim-core", "sim-decisions", "sim-runtime", "explorer"),
+    domains: withApparatus("contracts", "sim-core", "sim-analysis", "sim-decisions", "sim-runtime", "explorer"),
     needs: [],
     parallelSafe: true,
     baselineSeconds: 81,
-    claim: "Session lifecycle, forking, and pause gating behave exactly as specified.",
+    claim:
+      "Session lifecycle, forking, and pause gating behave exactly as specified, and every named checkpoint migration rule is well-formed, names where its omission is absorbed, and still matches the code that absorbs it.",
   },
   {
     id: "time-controls",
