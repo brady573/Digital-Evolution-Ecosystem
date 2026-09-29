@@ -1,35 +1,43 @@
-import type { FlowFacts, IntervalFlowFacts, IntervalRates, ObservedEvent } from "@digital-evolution/contracts";
+import type {
+  AnalysisState,
+  CuseGuildState,
+  CrossfeedingState,
+  Era,
+  HistoryRecord,
+  NicheBaselineEvidence,
+  NicheConstructionState,
+  ObservedEvent,
+  ObservationFrame,
+  SeedBankState,
+} from "@digital-evolution/contracts";
 
-export interface ObservationFrame {
-  readonly tick: number;
-  readonly population: number;
-  readonly starting_population: number;
-  readonly active_population: number;
-  readonly dormant_population: number;
-  readonly dormant_fraction: number;
-  readonly c_energy_share: number;
-  readonly crossfeeder_fraction: number;
-  readonly partitioned: boolean;
-  readonly dominant_role: string;
-  readonly roles: Readonly<Record<string, number>>;
-  readonly wake_events: number;
-  readonly wake_clades: Readonly<Record<string, number>>;
-  readonly dormant_clade_fraction: Readonly<Record<string, number>>;
-  readonly clade_totals: Readonly<Record<string, number>>;
-  /** Deterministic per-lineage flow facts at this tick (analysis reads, never writes). */
-  readonly flows: FlowFacts;
-  /** Per-stride biological interval rates ending at this tick. */
-  readonly interval: IntervalRates;
-  /** Per-lineage interval activity, dead included. Read-only. */
-  readonly intervalFlows: IntervalFlowFacts;
-  /** Waste field share of capacity (0..1): persistent modification signal. */
-  readonly waste_fraction: number;
-  /** Share of living organisms in burden-relevant cells (fraction >= half-max). */
-  readonly waste_exposed_share: number;
-  /** Population mean inherited tolerance / cleanup (strategy bundle). */
-  readonly tolerance_mean: number;
-  readonly cleanup_mean: number;
-}
+/**
+ * The observed frame is a cross-boundary read model (it travels inside every
+ * durable record's evidence), so its declaration lives in `packages/contracts`.
+ * It is re-exported here because sim-analysis is its only producer and
+ * existing validation consumers import it from here.
+ */
+export type { ObservationFrame };
+
+/**
+ * Read-only contract shapes are exactly right for what crosses a boundary and
+ * exactly wrong for the observer's own working state, which it mutates in
+ * place. `Mutable` strips `readonly` without restating a single field, so the
+ * contract stays the one source of truth for the shape.
+ */
+type Mutable<T> = { -readonly [K in keyof T]: T[K] };
+
+/**
+ * The observer indexes into the seed bank's clade maps to record a return, so
+ * its working copy needs mutable maps even though the read model exposes them
+ * readonly. Restating only those two fields keeps the single `Mutable` helper
+ * shallow and honest instead of hiding a deep-conditional mapping inside it.
+ */
+type MutableSeedBankState =
+  Mutable<Omit<SeedBankState, "priorDormantClades" | "returnedClades">> & {
+    priorDormantClades: Record<string, number>;
+    returnedClades: Record<string, number>;
+  };
 
 const CROSSFEED_FORM=.035;
 const CROSSFEED_EST=.055;
@@ -85,7 +93,7 @@ const NC_MEANINGFUL_SHARE=.10;
  * summary cites without re-deriving it. Presentation of evidence only; the
  * frame itself is never modified.
  */
-function nicheEvidence(s:ObservationFrame,nc:{baseWaste:number;baseTol:number;baseCu:number;baseExposed:number;estWaste:number;estExposed:number}):Record<string,number>{
+function nicheEvidence(s:ObservationFrame,nc:{baseWaste:number;baseTol:number;baseCu:number;baseExposed:number;estWaste:number;estExposed:number}):NicheBaselineEvidence{
   return{
     base_waste:nc.baseWaste,
     base_exposed_share:nc.baseExposed||0,
@@ -98,20 +106,20 @@ function nicheEvidence(s:ObservationFrame,nc:{baseWaste:number;baseTol:number;ba
 }
 
 export class EcologyObserver {
-  cross={id:"eco-crossfeeding-1",state:"absent",candidateSince:null as number|null,lowSince:null as number|null};
-  seedbank={id:"eco-seedbank-1",state:"absent",candidateSince:null as number|null,lowSince:null as number|null,establishedTick:null as number|null,lastReturnTick:null as number|null,priorDormantClades:{} as Record<string,number>,returnedClades:{} as Record<string,number>};
+  cross:Mutable<CrossfeedingState>={id:"eco-crossfeeding-1",state:"absent",candidateSince:null,lowSince:null};
+  seedbank:MutableSeedBankState={id:"eco-seedbank-1",state:"absent",candidateSince:null,lowSince:null,establishedTick:null,lastReturnTick:null,priorDormantClades:{},returnedClades:{}};
   era={current:null as string|null,candidate:null as string|null,candidateSince:null as number|null,index:0};
-  dep={id:"eco-cuse-1",state:"absent",candidateSince:null as number|null,lowSince:null as number|null,establishedTick:null as number|null,estScav:0,baselineProduced:0,topConsumer:null as number|null,topConsumerShare:0};
-  niche={id:"eco-niche-1",state:"absent",candidateSince:null as number|null,shiftSince:null as number|null,lowSince:null as number|null,establishedTick:null as number|null,baseWaste:0,baseTol:0,baseCu:0,baseExposed:0,estWaste:0,estExposed:0,wasDisrupted:false};
-  records:any[]=[];
-  eras:any[]=[];
+  dep:Mutable<CuseGuildState>={id:"eco-cuse-1",state:"absent",candidateSince:null,lowSince:null,establishedTick:null,estScav:0,baselineProduced:0,topConsumer:null,topConsumerShare:0};
+  niche:Mutable<NicheConstructionState>={id:"eco-niche-1",state:"absent",candidateSince:null,shiftSince:null,lowSince:null,establishedTick:null,baseWaste:0,baseTol:0,baseCu:0,baseExposed:0,estWaste:0,estExposed:0,wasDisrupted:false};
+  records:HistoryRecord[]=[];
+  eras:Era[]=[];
 
-  add(kind:string,id:string,tick:number,phase:string,title:string,summary:string,level:string,evidence:ObservationFrame,refs:number[]=[],extra?:Record<string,number>){
+  add(kind:string,id:string,tick:number,phase:string,title:string,summary:string,level:string,evidence:ObservationFrame,refs:number[]=[],extra?:Partial<NicheBaselineEvidence>):HistoryRecord{
     // Records keep the observed frame verbatim; a baseline block is attached
     // alongside it (never merged into it) so the evidence carries the
     // before/after pair the summary cites.
     const stored=extra?{...evidence,...extra}:evidence;
-    const record={id:`${id}-${phase}-${tick}`,arc_id:id,kind,tick,phase,title,summary,level,evidence:stored,entity_refs:refs};
+    const record:HistoryRecord={id:`${id}-${phase}-${tick}`,arc_id:id,kind,tick,phase,title,summary,level,evidence:stored,entity_refs:refs};
     this.records.push(record);
     return record;
   }
@@ -296,7 +304,7 @@ export class EcologyObserver {
       if(e.candidate!==sig){e.candidate=sig;e.candidateSince=s.tick}
       else if(e.candidateSince!==null&&s.tick-e.candidateSince>=ERA_PERSIST){
         const prior=e.current;e.current=sig;e.index++;
-        const era={id:`eco-era-${e.index}`,kind:"era",start_tick:s.tick,signature:sig,previous_signature:prior,evidence:s};
+        const era:Era={id:`eco-era-${e.index}`,kind:"era",start_tick:s.tick,signature:sig,previous_signature:prior,evidence:s};
         this.eras.push(era);
         if(prior!==null)this.add("era",era.id,s.tick,"established","The community entered a new ecological era",`Durable community state changed from ${prior.replaceAll("|"," · ")} to ${sig.replaceAll("|"," · ")}.`,"major",s);
         e.candidate=null;e.candidateSince=null;
@@ -318,7 +326,7 @@ export class EcologyObserver {
     return observer;
   }
 
-  export(){
+  export():AnalysisState{
     return{
       crossfeeding:{...this.cross},
       seed_bank:{...this.seedbank},

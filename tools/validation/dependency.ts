@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { EcologyObserver, type ObservationFrame } from "../../packages/sim-analysis/src/index.ts";
+import { EcologyObserver } from "../../packages/sim-analysis/src/index.ts";
 import { UniverseSession } from "../../packages/sim-runtime/src/session.ts";
-import type { EngineConfig } from "../../packages/contracts/src/index.ts";
+import type { EngineConfig, ObservationFrame } from "../../packages/contracts/src/index.ts";
 import {
   catalystIds,
   engineCatalystModeFor,

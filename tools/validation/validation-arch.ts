@@ -320,6 +320,73 @@ const testEveryUnitIsClassifiedAndReachable = (): void => {
   assert.ok(paused.some((u) => u.id === "android-install-launch"), "the pause must name android-install-launch, or the empty group is unexplained");
 };
 
+// --- 7. Cross-boundary read models stay readable without a cast -------------
+
+/**
+ * The History and Tree read models are a contract, and a contract that
+ * consumers bypass with `as any[]` proves nothing at all: the compile-time
+ * guarantee is gone the moment one caller opts out, and `typecheck` stays
+ * green while the read model silently degrades back to `unknown`.
+ *
+ * So this asserts both halves. The types must be declared, and they must not be
+ * `any`/`unknown` placeholders. And no consumer outside `packages/contracts`
+ * may reach past them to read History or Tree.
+ *
+ * Scoped deliberately: it names the read-model expressions rather than banning
+ * `any` repository-wide, so it cannot fail on unrelated legitimate casts.
+ */
+const testCrossBoundaryReadModelsStayCastFree = (): void => {
+  const contracts = readFileSync(join(REPO_ROOT, "packages/contracts/src/index.ts"), "utf8");
+
+  for (const declared of [
+    "export interface ObservationFrame",
+    "export interface HistoryRecord",
+    "export interface Era",
+    "export interface Clade",
+    "export interface CladeMetrics",
+    "export interface RenderMetrics",
+  ]) {
+    assert.ok(contracts.includes(declared), `contracts must declare \`${declared}\``);
+  }
+
+  // The read models must be real types, not the placeholders they replaced.
+  assert.doesNotMatch(
+    contracts,
+    /readonly (records|eras): readonly unknown\[\]/,
+    "AnalysisState.records/eras must be typed read models, not unknown[]",
+  );
+  assert.doesNotMatch(
+    contracts,
+    /readonly metrics: any/,
+    "RenderSnapshot.metrics must be a typed read model, not any",
+  );
+
+  // Consumers may not reach past those types on the read-model expressions.
+  const consumers = [
+    "apps/explorer/src/App.tsx",
+    "packages/sim-runtime/src/session.ts",
+    "packages/sim-analysis/src/index.ts",
+    "tools/validation/ecology.ts",
+    "tools/validation/ecology-survey.ts",
+    "tools/validation/time-controls.ts",
+  ];
+  const bypasses = [
+    /analysis\.(records|eras)[^;\n]*\bas\s+(any|unknown)\b/,
+    /\((?:r|c):any\)/,
+  ];
+  for (const rel of consumers) {
+    const source = readFileSync(join(REPO_ROOT, rel), "utf8");
+    for (const bypass of bypasses) {
+      const hit = source.match(bypass);
+      assert.equal(
+        hit,
+        null,
+        `${rel} reaches past the typed History/Tree read models: ${hit?.[0] ?? ""}`,
+      );
+    }
+  }
+};
+
 const tests: Array<[string, () => void]> = [
   ["architecture has no drift", testArchitectureHasNoDrift],
   ["path classification", testPathClassification],
@@ -335,6 +402,7 @@ const tests: Array<[string, () => void]> = [
   ["dependency shards partition the suite", testDependencyShardsPartitionTheSuite],
   ["verify matches the contract", testVerifyMatchesTheContract],
   ["every unit is classified and reachable", testEveryUnitIsClassifiedAndReachable],
+  ["cross-boundary read models stay cast-free", testCrossBoundaryReadModelsStayCastFree],
 ];
 
 let failed = 0;

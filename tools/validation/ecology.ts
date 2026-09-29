@@ -76,7 +76,7 @@ for(const regime of ["balanced","patchwork","harsh"] as Regime[]){
       maxCrossfeederFraction:maxCross,maxCEnergyShare:maxCEnergy,
       metaboliteCProduced:final.metrics.metabolite_c.produced,
       metaboliteCConsumed:final.metrics.metabolite_c.consumed,
-      analysisRecords:(final.analysis.records as any[]).length,
+      analysisRecords:final.analysis.records.length,
       nichePersistentPartitioning:final.metrics.niche_structure.persistent_partitioning,
       nicheEffectiveNiches:final.metrics.niche_structure.effective_niches,
     });

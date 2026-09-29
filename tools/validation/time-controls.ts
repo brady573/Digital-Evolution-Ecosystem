@@ -78,7 +78,7 @@ function stateOf(s: RenderSnapshot): string {
     tick: s.tick,
     pop: s.population,
     dormant: s.dormantPopulation,
-    records: (s.analysis.records as unknown[]).length,
+    records: s.analysis.records.length,
     events: s.events.length,
   });
 }
@@ -135,7 +135,7 @@ function fresh(seed: number): UniverseSession {
       if (snap.tick > 25000 && !session.advance(0).pendingDecision) break;
     }
     const done = session.advance(0);
-    return ((done.analysis.records as Array<{ tick: number }>).map((r) => r.tick));
+    return done.analysis.records.map((r) => r.tick);
   };
   const fine = recordTicks(25);
   const coarse = recordTicks(125);
