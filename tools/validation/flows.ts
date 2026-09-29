@@ -451,6 +451,12 @@ const MIGRATION_ABSORBER_PROBES: Readonly<Record<string, { file: string; probe: 
     file: "packages/sim-core/src/engine.ts",
     probe: /this\.lineageInterval\|\|new Map\(\)/,
   },
+  "last-decision-tick-reconstructed-from-newest-record": {
+    file: "packages/sim-runtime/src/session.ts",
+    // Absorber `structural-branch`: the legacy branch computes the value from
+    // the save's own records rather than reading a stored field.
+    probe: /this\.#lastDecisionTick=newestKnownDecisionTick\(pending,resolutions\);/,
+  },
   "major-catalyst-tick-predates-cooldown": {
     file: "packages/sim-runtime/src/session.ts",
     // Absorber `structural-branch`: the legacy branch reads the field, and a
@@ -652,6 +658,34 @@ function testBoundaryGeneratorIsDerived() {
   // schema — which that same change had just made refused at every schema. The
   // prose outlived the behaviour it described, and only diffing against the
   // previous artifact caught it.
+  // The document must not claim a completeness it does not have. Restore sets
+  // values for state no save format ever carried — a 0.1 world's absent
+  // decision system, and the running build's policy versions. Those are
+  // deliberately not absence-compatibility rules, and the document has to say
+  // so, or "everything not listed here is refused" reads as a claim that
+  // unlisted defaults do not exist.
+  assert.ok(
+    out.includes("### What the rules do not cover"),
+    "the document must state what its rules do not cover, so its completeness claim is bounded",
+  );
+  assert.ok(
+    /never part of any save format|never carried/.test(out),
+    "the uncovered section must name the non-historical reconstruction explicitly",
+  );
+
+  // A3.3 proves three narrow properties. It does not prove canonical
+  // migrate-then-validate ordering: pre-A2 entity migration runs before
+  // validation, but other historical reconstruction happens later in `restore`.
+  // Claiming the ordering here would assert a property the code does not have.
+  assert.ok(
+    !/Migration runs before validation/.test(out),
+    "the document must not claim migrate-before-validate ordering; A3.3 does not prove it",
+  );
+  assert.ok(
+    out.includes("What A3.3 proves"),
+    "the document must state the properties A3.3 actually proves",
+  );
+
   const asymmetry = out.split("\n").find((l) => l.startsWith("3. **The asymmetry"));
   assert.ok(asymmetry !== undefined, "the document must state the absence/invalidity asymmetry");
   assert.equal(

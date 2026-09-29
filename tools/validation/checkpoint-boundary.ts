@@ -109,7 +109,24 @@ for (const [index, rule] of CHECKPOINT_MIGRATION_RULES.entries()) {
 lines.push("## Everything not listed here is refused");
 lines.push("");
 lines.push(
-  "A field with no rule above gets no default. A wrong type, a malformed container, a non-finite required number, an unsupported schema or checkpoint tag, and a record that contradicts itself are all refused with the field named, before the payload becomes live state.",
+  "Within the persisted checkpoint, a field with no rule above gets no default. A wrong type, a malformed container, a non-finite required number, an unsupported schema or checkpoint tag, and a record that contradicts itself are all refused with the field named, before the payload becomes live state.",
+);
+lines.push("");
+lines.push("### What the rules do not cover");
+lines.push("");
+lines.push(
+  "The rules above describe **omissions from a saved payload**. Restore also sets values that were never part of any save format, and those are a different thing — running-build state, not historical compatibility. They are listed here so this document does not claim a completeness it does not have.",
+);
+lines.push("");
+lines.push(
+  `- **Decision-pacing state for a world that never had one.** A save declaring ${OLDEST_SUPPORTED} predates the decision system entirely (\`d86ddfe\` contains no \`decisions\` at all), so restore starts it with no pending decision, no decision history, and a last-decision tick of 0. There is no historical value to preserve, because the build that wrote the save had no such state to write.`,
+);
+lines.push(
+  "- **Policy and catalog generator versions.** Every schema, including the current one, restores with the running code's `DECISION_POLICY_VERSION` and `CATALYST_POLICY_VERSION`. A save's own copy is retained inside its resolution records, where it identifies the generator that produced that record; the runtime's own copy is always the running code's. This is deliberately not a historical omission: there is no older value worth restoring, and restoring one would apply a retired catalog's decisions to a current world.",
+);
+lines.push("");
+lines.push(
+  "None of these is an absence compatibility rule, and none can be turned into one: each supplies a value for state the save format never carried. Presenting them as migration rules would imply older worlds depended on them, which is not true — and would put them inside the version-scoped absence axis, where they do not belong.",
 );
 lines.push("");
 lines.push(`## A valid ${CURRENT_SCHEMA} save never depends on a migration rule`);
@@ -214,10 +231,10 @@ lines.push(
   `- **Whether a field may be absent is version-scoped; whether a present value is valid is not.** A save declaring an older supported version may omit the fields listed above, because a supported build really did write it without them. But once a value *is* present, it is held to the same checks at every schema: a wrong type, a malformed container, a non-finite required number, or a decision record whose parts disagree is refused wherever it appears. **Migration widens compatibility for known historical absence; it does not widen validity.**`,
 );
 lines.push(
-  "- **Migration runs before validation.** A save that migrates cleanly is never caught by a pre-migration check.",
+  `- **What A3.3 proves:** a named historical absence is permitted according to its supported schema, a value that *is* present is validated regardless of the schema it arrived under, and a rejected payload cannot become live simulation state.`,
 );
 lines.push(
-  "- **Refusal happens before any simulation call**, so a rejected save cannot become live state.",
+  "- **Canonical migrate-then-validate ordering is not claimed here.** Some migration work — pre-A2 entity references among it — does happen before validation, but other historical reconstruction happens later inside `restore`. Proving that every migration step precedes every validation step is a separate property, left to A3.4, which will make it structurally true and then test it rather than inherit the claim from here.",
 );
 
 if (MIGRATION_RULE_BY_ID.size !== CHECKPOINT_MIGRATION_RULES.length) {

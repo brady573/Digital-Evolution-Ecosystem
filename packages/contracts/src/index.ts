@@ -330,6 +330,20 @@ export const CHECKPOINT_MIGRATION_RULES: readonly CheckpointMigrationRule[] = [
   },
   // --- Decision-record backfills, found by enumerating the restore path ----
   {
+    id: "last-decision-tick-reconstructed-from-newest-record",
+    path: "decisions.lastDecisionTick",
+    appliesToSchemas: ["0.1", "0.2", "0.3"],
+    effectiveDefault: "the newest created/offer/decision tick present in the save's own pending decision or resolutions, or 0 when it holds none",
+    absorber: "structural-branch",
+    omission:
+      "`lastDecisionTick` records when the world last took a decision, and it is written by the current build. Older saves do not carry it as a field, so restore reconstructs it from the newest timestamp the save itself holds — the pending decision's `createdTick`, or any resolution's `tick` or `offerTick`. This is the same class of backfill as the pending-decision `source` rule: the value is forced by data in the save rather than guessed.",
+    hazard: "load-bearing-dynamics",
+    dynamicsJustification:
+      "The field gates decision pacing, so a default here is not a display convenience. It is reconstructed from the save's own decision records and is 0 only when the save records no decision at all, which is the same reading as a world that never acted. Restoring a world as if it had just decided would suppress a decision the save shows as due, so the reconstruction errs toward the earlier tick.",
+    historicalBasis:
+      "`lastDecisionTick` was introduced with checkpoint 0.4, in this branch on 2026-09-29. The 0.3 decision checkpoint at b040b19 writes `pending`, `resolutions`, `policyVersion`, `catalystPolicyVersion` and `lastMajorCatalystTick` but no `lastDecisionTick`, and the 0.2 one at b39fd46 writes only `pending`, `resolutions` and `policyVersion`. 0.1 predates the decision system entirely — `d86ddfe` contains zero occurrences of `decisions` — so a 0.1 save offers nothing to reconstruct from and reads as 0, which is the truth about that world.",
+  },
+  {
     id: "major-catalyst-tick-predates-cooldown",
     path: "decisions.lastMajorCatalystTick",
     appliesToSchemas: ["0.1", "0.2"],
