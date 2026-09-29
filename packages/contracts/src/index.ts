@@ -37,11 +37,190 @@ export interface EngineConfig {
   readonly study?: boolean;
 }
 
+/* ------------------------------------------------------------------ *
+ * Cross-boundary read models.
+ *
+ * These declarations describe what sim-core and sim-analysis already
+ * produce. They introduce no new data, no new measurement, and no new
+ * meaning: they replace `unknown`/`any` at the surfaces presentation
+ * reads, so the History and Tree read models can be read without a cast.
+ *
+ * Authority is unchanged by declaring them here. sim-core still produces
+ * metrics and sim-analysis still produces records; neither is edited to
+ * satisfy a type. What changes is that a consumer outside
+ * `packages/contracts` no longer has to assert what the producer already
+ * guarantees, and a producer that stops guaranteeing it becomes a
+ * compile error instead of a silent `any`.
+ * ------------------------------------------------------------------ */
+
+/**
+ * Lifecycle of a durable ecological detector (crossfeeding, dormancy, the
+ * C-using guild, niche construction). These are the detector's own
+ * vocabulary for what it has observed so far — not biological states of
+ * any organism, and not a claim about cause.
+ */
+export type EcologicalArcState =
+  | "absent"
+  | "forming"
+  | "established"
+  | "disrupted"
+  | "recovered"
+  | "superseded";
+
+export interface CrossfeedingState {
+  readonly id: string;
+  readonly state: EcologicalArcState;
+  readonly candidateSince: number | null;
+  readonly lowSince: number | null;
+}
+
+export interface SeedBankState {
+  readonly id: string;
+  readonly state: EcologicalArcState;
+  readonly candidateSince: number | null;
+  readonly lowSince: number | null;
+  readonly establishedTick: number | null;
+  readonly lastReturnTick: number | null;
+  readonly priorDormantClades: Readonly<Record<string, number>>;
+  readonly returnedClades: Readonly<Record<string, number>>;
+}
+
+export interface CuseGuildState {
+  readonly id: string;
+  readonly state: EcologicalArcState;
+  readonly candidateSince: number | null;
+  readonly lowSince: number | null;
+  readonly establishedTick: number | null;
+  /** Scavenger share at establishment: the collapse tripwire's reference. */
+  readonly estScav: number;
+  /** Interval C production at establishment: recorded context, never a tripwire. */
+  readonly baselineProduced: number;
+  readonly topConsumer: number | null;
+  readonly topConsumerShare: number;
+}
+
+export interface NicheConstructionState {
+  readonly id: string;
+  readonly state: EcologicalArcState;
+  readonly candidateSince: number | null;
+  readonly shiftSince: number | null;
+  readonly lowSince: number | null;
+  readonly establishedTick: number | null;
+  /** Measured baseline captured at first crossing; the strategy-shift reference. */
+  readonly baseWaste: number;
+  readonly baseTol: number;
+  readonly baseCu: number;
+  readonly baseExposed: number;
+  readonly estWaste: number;
+  readonly estExposed: number;
+  readonly wasDisrupted: boolean;
+}
+
+/**
+ * One observed ecological frame, retained verbatim by every durable record.
+ *
+ * Declared here rather than in sim-analysis because it crosses the
+ * boundary inside record evidence: it is part of the read model that
+ * presentation receives, not an implementation detail of the observer.
+ * sim-analysis is its only producer.
+ */
+export interface ObservationFrame {
+  readonly tick: number;
+  readonly population: number;
+  readonly starting_population: number;
+  readonly active_population: number;
+  readonly dormant_population: number;
+  readonly dormant_fraction: number;
+  readonly c_energy_share: number;
+  readonly crossfeeder_fraction: number;
+  readonly partitioned: boolean;
+  readonly dominant_role: string;
+  readonly roles: Readonly<Record<string, number>>;
+  readonly wake_events: number;
+  readonly wake_clades: Readonly<Record<string, number>>;
+  readonly dormant_clade_fraction: Readonly<Record<string, number>>;
+  readonly clade_totals: Readonly<Record<string, number>>;
+  /** Deterministic per-lineage flow facts at this tick (analysis reads, never writes). */
+  readonly flows: FlowFacts;
+  /** Per-stride biological interval rates ending at this tick. */
+  readonly interval: IntervalRates;
+  /** Per-lineage interval activity, dead included. Read-only. */
+  readonly intervalFlows: IntervalFlowFacts;
+  /** Waste field share of capacity (0..1): persistent modification signal. */
+  readonly waste_fraction: number;
+  /** Share of living organisms in burden-relevant cells (fraction >= half-max). */
+  readonly waste_exposed_share: number;
+  /** Population mean inherited tolerance / cleanup (strategy bundle). */
+  readonly tolerance_mean: number;
+  readonly cleanup_mean: number;
+}
+
+/**
+ * The measured baseline block a niche-construction record carries
+ * alongside its observed frame, so a reader can see the before/after pair
+ * the summary cites. Attached beside the frame, never merged into it.
+ */
+export interface NicheBaselineEvidence {
+  readonly base_waste: number;
+  readonly base_exposed_share: number;
+  readonly base_tolerance_mean: number;
+  readonly base_cleanup_mean: number;
+  readonly established_waste: number;
+  readonly established_exposed_share: number;
+  readonly strategy_persistence_ticks: number;
+}
+
+/**
+ * Evidence retained on a durable history record: the observed frame, plus
+ * the niche baseline block where that record kind produces one. The block
+ * is partial because it is optional per record kind, not because a value
+ * may be absent within it.
+ */
+export type HistoryEvidence = ObservationFrame & Partial<NicheBaselineEvidence>;
+
+/**
+ * A durable ecological history record — the History read model.
+ *
+ * Field names are snake_case because they are the retained on-the-wire
+ * shape the product and its history consumers already read; they are not
+ * renamed here. `entity_refs` is an untyped numeric reference list at this
+ * stage: what each reference *denotes* is typed in a later unit, and until
+ * then a consumer must not infer a namespace from the number alone.
+ */
+export interface HistoryRecord {
+  /** Durable record identity: `<arc id>-<phase>-<tick>`. */
+  readonly id: string;
+  /** Persistent story/event family identity this record belongs to. */
+  readonly arc_id: string;
+  readonly kind: string;
+  readonly tick: number;
+  readonly phase: string;
+  readonly title: string;
+  readonly summary: string;
+  readonly level: string;
+  readonly evidence: HistoryEvidence;
+  readonly entity_refs: readonly number[];
+}
+
+/** A durable ecological era boundary — the era read model. */
+export interface Era {
+  readonly id: string;
+  readonly kind: string;
+  readonly start_tick: number;
+  /** Durable community-state signature this era begins. */
+  readonly signature: string;
+  /** Signature in force before this era, or null at the first recorded era. */
+  readonly previous_signature: string | null;
+  readonly evidence: ObservationFrame;
+}
+
 export interface AnalysisState {
-  readonly crossfeeding: unknown;
-  readonly seed_bank: unknown;
-  readonly eras: readonly unknown[];
-  readonly records: readonly unknown[];
+  readonly crossfeeding: CrossfeedingState;
+  readonly seed_bank: SeedBankState;
+  readonly cuse_guild: CuseGuildState;
+  readonly niche_construction: NicheConstructionState;
+  readonly eras: readonly Era[];
+  readonly records: readonly HistoryRecord[];
   readonly rules: Readonly<Record<string, number>>;
 }
 
@@ -477,6 +656,64 @@ export interface RenderWasteField {
   readonly capacity: readonly number[];
 }
 
+/**
+ * An analytical clade — the deepest established mutation branch meeting the
+ * clade definition, or founder ancestry as the documented fallback.
+ *
+ * This is a clade identity, not a lineage one: `root_lineage` names the
+ * lineage the clade roots at, but the clade is the unit analysis groups and
+ * presentation labels. A clade and its root lineage are deliberately
+ * separate properties so neither can be substituted for the other.
+ */
+export interface Clade {
+  readonly id: number;
+  readonly root_lineage: number;
+  readonly founder_family: number;
+  readonly born: number;
+  readonly mutations: readonly string[];
+  readonly established: boolean;
+  readonly peak: number;
+  readonly count: number;
+  readonly share: number;
+  readonly age: number;
+}
+
+/** Clade census for the current tick — the Tree read model. */
+export interface CladeMetrics {
+  readonly active: number;
+  readonly effective: number;
+  /** Clades ranked by living count, most numerous first. */
+  readonly top: readonly Clade[];
+  readonly dominant: Clade | null;
+  /** The definition in force, so a reader can see what qualifies as a clade. */
+  readonly definition: string;
+}
+
+/**
+ * The engine metrics the cross-boundary read model exposes.
+ *
+ * This is deliberately the subset presentation reads, not the engine's
+ * whole metrics object: the read model is a contract, and a contract that
+ * silently mirrored every internal metric would carry no information.
+ * Reading a field outside this list is a contract change, which is the
+ * point — an unlisted field should fail to compile rather than resolve to
+ * `any` at runtime. Engine metrics remain fully available inside
+ * sim-core and to evidence exports, which are a separate contract.
+ */
+export interface RenderMetrics {
+  readonly population: number;
+  readonly peak_population: number;
+  readonly effective_niches: number;
+  readonly ecological_outcome: string;
+  readonly clades: CladeMetrics;
+  readonly metabolite_c: { readonly fraction: number };
+  readonly metabolic_roles: { readonly crossfeeder_fraction: number };
+  /** Absolute nutrient accountancy residual, per nutrient. */
+  readonly nutrient_field: {
+    readonly accounting: { readonly absolute_residual: readonly number[] };
+  };
+}
+
 export interface RenderSnapshot {
   readonly tick: number;
   /** Presentation-only identity of this displayed universe instance. Unique
@@ -498,7 +735,7 @@ export interface RenderSnapshot {
   /** Metabolic Waste field. Read-only rendering input; independent of
    *  nutrients in storage and in meaning. */
   readonly waste: RenderWasteField;
-  readonly metrics: any;
+  readonly metrics: RenderMetrics;
   readonly analysis: AnalysisState;
   readonly events: readonly { readonly tick: number; readonly label: string }[];
   /** Pending decision gate. While set, no further tick may execute. */
@@ -514,7 +751,7 @@ export interface RenderSnapshot {
   readonly control: {
     readonly tick: number;
     readonly population: number;
-    readonly metrics: any;
+    readonly metrics: RenderMetrics;
   } | null;
 }
 

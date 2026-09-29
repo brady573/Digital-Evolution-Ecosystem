@@ -133,8 +133,8 @@ function surveyRun(session: UniverseSession, ticks: number): any {
     activeFamilies: fm.families?.active ?? null,
     traitDiversity: fm.trait_diversity ?? null,
     resourceResidualMax: residualMax,
-    analysisRecords: (final.analysis.records as any[]).length,
-    eras: (final.analysis.eras as any[]).length,
+    analysisRecords: final.analysis.records.length,
+    eras: final.analysis.eras.length,
     durationMs: Date.now() - t0,
   };
 }

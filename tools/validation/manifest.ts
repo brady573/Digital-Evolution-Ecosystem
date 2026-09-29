@@ -197,12 +197,12 @@ export const UNITS: readonly ValidationUnit[] = [
     // is exactly when the claim "this repository's validation contract holds"
     // needs re-checking. Anything broader would be circular: the rest of the
     // repository is what this unit exists to check.
-    domains: withApparatus("contracts", "docs"),
+    domains: withApparatus("contracts", "sim-analysis", "sim-runtime", "explorer", "docs"),
     needs: [],
     parallelSafe: true,
     baselineSeconds: 2,
     claim:
-      "The canonical definition is self-consistent, the impact classifier is conservative, and the sharded dependency suites still cover the whole suite.",
+      "The canonical definition is self-consistent, the impact classifier is conservative, the sharded dependency suites still cover the whole suite, and the History and Tree read models stay typed and cast-free at every consumer.",
   },
 
   // --- Class B: deterministic product behaviour ----------------------------
