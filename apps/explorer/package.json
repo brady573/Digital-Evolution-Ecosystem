@@ -18,6 +18,7 @@
     "@digital-evolution/sim-analysis": "workspace:*",
     "@digital-evolution/sim-core": "workspace:*",
     "@digital-evolution/sim-runtime": "workspace:*",
+    "pixi.js": "8.21.0",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },
