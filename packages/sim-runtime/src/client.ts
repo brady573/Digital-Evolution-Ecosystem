@@ -44,7 +44,11 @@ export class WorkerRuntimeClient implements RuntimeClient {
   #worker:Worker;
   #listeners=new Set<(snapshot:RenderSnapshot)=>void>();
   #pending=new Map<string,{resolve:(value:any)=>void,reject:(reason?:any)=>void}>();
-  #pendingLoad:{expectedTick:number,requestId:string,resolve:(snapshot:RenderSnapshot)=>void,reject:(reason?:any)=>void,timer:ReturnType<typeof setTimeout>}|null=null;
+  /** A load in flight. Keyed by the requestId the worker echoes in
+   *  CHECKPOINT_LOADED, never by a tick: matching on tick let any live frame at
+   *  the same tick satisfy a restore. `requestId` of the superseded load is
+   *  remembered so its late reply is ignored rather than misattributed. */
+  #pendingLoad:{requestId:string,resolve:(snapshot:RenderSnapshot)=>void,reject:(reason?:any)=>void,timer:ReturnType<typeof setTimeout>}|null=null;
   #seq=0;
 
   constructor(factory?:WorkerFactory){
@@ -72,20 +76,20 @@ export class WorkerRuntimeClient implements RuntimeClient {
     // Acknowledged restore: resolves only after the worker has restored the
     // checkpoint and emitted the corresponding snapshot. Rejects on worker
     // error or timeout instead of silently falling back.
+    // Supersession is explicit and deterministic: a second load rejects the
+    // first rather than letting one request quietly satisfy another. The
+    // message is byte-for-byte the previous behaviour.
     if(this.#pendingLoad){
       clearTimeout(this.#pendingLoad.timer);
       this.#pendingLoad.reject(new Error("Superseded by a newer restore request"));
       this.#pendingLoad=null;
     }
     return new Promise<RenderSnapshot>((resolve,reject)=>{
-      // Correlated by identity, never by tick equality. A requestId is minted
-      // here and matched against the worker's CHECKPOINT_LOADED reply, so an
-      // unrelated live frame at the same tick cannot satisfy this load. Task 4
-      // moves the resolution itself onto the pending-request map; until then
-      // the correlation is carried in the shape the session now guarantees.
+      // Completion is correlated by request identity, never by tick equality:
+      // the worker echoes this requestId in CHECKPOINT_LOADED and nothing else
+      // can settle the promise.
       const requestId=`load-${++this.#seq}`;
       this.#pendingLoad={
-        expectedTick:checkpoint.createdTick,
         requestId,
         resolve:(snapshot)=>{
           if(this.#pendingLoad){clearTimeout(this.#pendingLoad.timer);this.#pendingLoad=null}
@@ -140,9 +144,18 @@ export class WorkerRuntimeClient implements RuntimeClient {
 
   #receive(response:RuntimeResponse){
     if(response.type==="SNAPSHOT"){
-      const pendingLoad=this.#pendingLoad;
-      if(pendingLoad&&response.snapshot.tick===pendingLoad.expectedTick)pendingLoad.resolve(response.snapshot);
+      // A bare snapshot only notifies subscribers. It can never complete a
+      // load: settling on tick equality is what let an unrelated live frame at
+      // the same tick satisfy a restore.
       for(const listener of this.#listeners)listener(response.snapshot);
+      return;
+    }
+    if(response.type==="CHECKPOINT_LOADED"){
+      const pendingLoad=this.#pendingLoad;
+      // A reply for an already-settled or superseded load is normal, not an
+      // error: ignore it rather than misattribute it to the live load.
+      if(!pendingLoad||pendingLoad.requestId!==response.requestId)return;
+      pendingLoad.resolve(response.snapshot);
       return;
     }
     if(response.type==="DECISION_RESOLVED"||response.type==="AFTERMATH_ACKNOWLEDGED"){

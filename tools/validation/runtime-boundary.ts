@@ -336,7 +336,154 @@ function testTransportIsInjectable() {
   assert.equal(fake.terminated, false, "the client has not terminated the injected transport");
 }
 
-function main() {
+/** A snapshot stub carrying only what these tests observe. */
+const snap = (tick: number) => ({ tick }) as unknown as RenderSnapshot;
+
+/** Resolve/reject tracking, so "did it settle, and how" is observable. */
+function tracked<T>(promise: Promise<T>) {
+  const state = { settled: false, value: undefined as T | undefined, error: undefined as unknown };
+  const wrapped = promise.then(
+    (value) => {
+      state.settled = true;
+      state.value = value;
+      return value;
+    },
+    (error) => {
+      state.settled = true;
+      state.error = error;
+      throw error;
+    },
+  );
+  // Keep the rejection from surfacing as an unhandled rejection in the harness.
+  wrapped.catch(() => {});
+  return { state, wrapped };
+}
+
+/** Yield the microtask queue so promise callbacks have run. */
+const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+/** A real checkpoint payload to restore, taken from a live session. */
+const realCheckpoint = () => {
+  const session = liveSession();
+  session.advance(20);
+  return session.checkpoint();
+};
+
+/**
+ * A same-tick snapshot that is not the correlated reply must not complete a
+ * load. This is the AC7 defect: any live frame at the checkpoint's tick used to
+ * satisfy the restore, including a decision-gated advance that returns a
+ * snapshot at the unchanged tick.
+ */
+async function testSameTickSnapshotCannotCompleteALoad() {
+  const fake = new FakeWorker();
+  const client = new WorkerRuntimeClient(() => fake);
+  const checkpoint = realCheckpoint();
+  const createdTick = checkpoint.createdTick;
+
+  const load = tracked(client.loadCheckpoint(checkpoint));
+  const posted = fake.posted.at(-1) as { type: string; requestId: string };
+  assert.equal(posted.type, "LOAD_CHECKPOINT", "the load is posted as a command");
+  assert.equal(typeof posted.requestId, "string", "the load carries a request id");
+
+  // The hostile case: an unrelated live frame at exactly the restore tick.
+  fake.deliver({ type: "SNAPSHOT", snapshot: snap(createdTick) });
+  await tick();
+  assert.equal(load.state.settled, false, "an unrelated same-tick snapshot does not complete the load");
+
+  // Also a stale snapshot from an earlier restore, same tick.
+  fake.deliver({ type: "SNAPSHOT", snapshot: snap(Math.max(0, createdTick - 1)) });
+  await tick();
+  assert.equal(load.state.settled, false, "a stale snapshot does not complete the load");
+
+  // Only the correlated reply settles it. Promise callbacks are microtasks, so
+  // the settlement flag is observed after yielding, not synchronously.
+  fake.deliver({ type: "CHECKPOINT_LOADED", requestId: posted.requestId, snapshot: snap(createdTick) });
+  await tick();
+  assert.equal(load.state.settled, true, "the correlated reply completes the load");
+  assert.equal((load.state.value as RenderSnapshot).tick, createdTick, "the load resolves to the restored world");
+}
+
+/** A reply belonging to a different, already-settled load must be ignored. */
+async function testStaleReplyCannotSatisfyALiveLoad() {
+  const fake = new FakeWorker();
+  const client = new WorkerRuntimeClient(() => fake);
+  const checkpoint = realCheckpoint();
+
+  const first = tracked(client.loadCheckpoint(checkpoint));
+  const firstId = (fake.posted.at(-1) as { requestId: string }).requestId;
+  fake.deliver({ type: "CHECKPOINT_LOADED", requestId: firstId, snapshot: snap(7) });
+  await tick();
+  assert.equal(first.state.settled, true, "the first load settles on its own reply");
+
+  // A second load is now live. A late reply for the FIRST must not settle it.
+  const second = tracked(client.loadCheckpoint(checkpoint));
+  const secondId = (fake.posted.at(-1) as { requestId: string }).requestId;
+  assert.notEqual(secondId, firstId, "each load gets a distinct request id");
+
+  fake.deliver({ type: "CHECKPOINT_LOADED", requestId: firstId, snapshot: snap(999) });
+  await tick();
+  assert.equal(second.state.settled, false, "a stale reply does not complete a different live load");
+
+  fake.deliver({ type: "CHECKPOINT_LOADED", requestId: secondId, snapshot: snap(11) });
+  await tick();
+  assert.equal(second.state.settled, true, "the live load settles on its own reply");
+  assert.equal((second.state.value as RenderSnapshot).tick, 11, "and resolves to its own world, not the stale one");
+}
+
+/** Multiple in-flight loads: the second explicitly supersedes the first. */
+async function testASecondLoadSupersedesTheFirst() {
+  const fake = new FakeWorker();
+  const client = new WorkerRuntimeClient(() => fake);
+  const checkpoint = realCheckpoint();
+
+  const first = tracked(client.loadCheckpoint(checkpoint));
+  const second = tracked(client.loadCheckpoint(checkpoint));
+  const secondId = (fake.posted.at(-1) as { requestId: string }).requestId;
+
+  await tick();
+  assert.equal(first.state.settled, true, "the superseded load settles immediately");
+  assert.match(
+    String((first.state.error as Error).message),
+    /superseded by a newer restore request/i,
+    "and says so explicitly rather than silently hanging",
+  );
+  await tick();
+  assert.equal(second.state.settled, false, "the newer load is still in flight");
+
+  // The superseded load's late reply must not settle the live one.
+  const firstId = (fake.posted.at(-2) as { requestId: string }).requestId;
+  fake.deliver({ type: "CHECKPOINT_LOADED", requestId: firstId, snapshot: snap(3) });
+  await tick();
+  assert.equal(second.state.settled, false, "the superseded reply does not complete the newer load");
+
+  fake.deliver({ type: "CHECKPOINT_LOADED", requestId: secondId, snapshot: snap(5) });
+  await tick();
+  assert.equal(second.state.settled, true, "the newer load completes on its own reply");
+  assert.equal((second.state.value as RenderSnapshot).tick, 5, "and resolves to its own world");
+}
+
+/** Subscribers still receive every snapshot, correlated or not. */
+function testSubscribersAreStillNotified() {
+  const fake = new FakeWorker();
+  const client = new WorkerRuntimeClient(() => fake);
+  const seen: number[] = [];
+  const unsubscribe = client.subscribe((s) => seen.push(s.tick));
+
+  fake.deliver({ type: "SNAPSHOT", snapshot: snap(1) });
+  fake.deliver({ type: "SNAPSHOT", snapshot: snap(2) });
+  assert.deepEqual(seen, [1, 2], "subscribers see every live frame");
+
+  unsubscribe();
+  fake.deliver({ type: "SNAPSHOT", snapshot: snap(3) });
+  assert.deepEqual(seen, [1, 2], "unsubscribe still stops notification");
+}
+
+async function main() {
+  await testSameTickSnapshotCannotCompleteALoad();
+  await testStaleReplyCannotSatisfyALiveLoad();
+  await testASecondLoadSupersedesTheFirst();
+  testSubscribersAreStillNotified();
   testTransportIsInjectable();
   testLoadCompletionIsCorrelatedByRequestId();
   testUnknownTagIsAStructuredFailure();
