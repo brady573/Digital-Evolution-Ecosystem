@@ -53,6 +53,7 @@ import {
   selectCatalystWindow,
 } from "@digital-evolution/sim-decisions";
 import { readInjectedSource, resolveSourceProvenance } from "./provenance";
+import { validateRuntimeCommand } from "./command-validation";
 
 /**
  * The schema this build writes. DERIVED from contracts' single declaration, not
@@ -718,6 +719,12 @@ export class UniverseSession {
 
   handle(command:RuntimeCommand):RuntimeResponse[]{
     try{
+      // The worker boundary is a trust boundary. A payload arriving from it is
+      // unknown in reality even though the transport type claims otherwise, so
+      // it is validated before dispatch and before any simulation loop can run.
+      const validation=validateRuntimeCommand(command);
+      if(!validation.ok)return[{type:"ERROR",message:validation.message}];
+      command=validation.command;
       switch(command.type){
         case "CREATE_UNIVERSE":return[{type:"SNAPSHOT",snapshot:this.create(command.config)}];
         case "ADVANCE_TICKS":return[{type:"SNAPSHOT",snapshot:this.advance(command.ticks)}];
@@ -739,6 +746,12 @@ export class UniverseSession {
         case "LOAD_CHECKPOINT":return[{type:"SNAPSHOT",snapshot:this.restore(command.checkpoint)}];
         case "REQUEST_CHECKPOINT":return[{type:"CHECKPOINT",requestId:command.requestId,checkpoint:this.checkpoint()}];
         case "REQUEST_EXPORT":return[{type:"EXPORT",requestId:command.requestId,data:this.exportEvidence()}];
+        // Unreachable while the guard above holds, and kept deliberately: it is
+        // what makes handle total. Without it an unrecognised tag falls out of
+        // the switch and returns undefined, which worker.ts then iterates over,
+        // throwing outside this try/catch and killing the worker.
+        default:
+          return[{type:"ERROR",message:`unsupported command tag: ${JSON.stringify((command as {readonly type:unknown}).type)}`}];
       }
     }catch(error){
       // Attribute errors to the caller when the command carried a requestId.

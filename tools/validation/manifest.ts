@@ -269,6 +269,20 @@ export const UNITS: readonly ValidationUnit[] = [
       "Session lifecycle, forking, and pause gating behave exactly as specified; every named checkpoint migration rule is well-formed, hazard-classified and still matches the code that absorbs it; a save written before entity references carried their kind restores with the same reference count and no guessed namespace, and the current schema refuses that same bare-reference shape; a checkpoint from the maintained save path is accepted; each of the six rejection conditions refuses with the field named; a suppressed major-catalyst cooldown stays suppressed across restore from both the current schema and a real 0.3 save, while a 0.2 save predating the field migrates to the historically correct value; a source-schema preflight on the raw payload accepts each evidenced historical omission for its own schema and refuses every field its writer was required to emit, so a 0.3 save preserves its persisted lastDecisionTick and cannot omit it and a 0.2 save reconstructs the historically absent tick; present wrong-typed, malformed, non-finite, or self-contradicting values are refused at every supported schema across the encoded simulation with its resource, waste, organism, interval and identity state, the observer's detectors, history records and eras, entity references, and decision records, so named historical absence cannot excuse an invalid checked value; a preflight refusal leaves an existing running session unchanged; a preflighted source is then canonicalised into ONE restore representation and that representation is held to the current non-simulation contract before any state becomes live, with the candidate/validated distinction enforced by the compiler rather than by a runtime call; and the Owner-facing supported-save boundary document is generated rather than transcribed, carrying the live current schema version, no supported-version literal in code that could go stale behind it, the two independent schema and engine-version gates named separately, and the canonical ordering the implementation actually performs. export carries a versioned provenance block; dirty build → dirty; undeterminable revision → unknown, never clean.",
   },
   {
+    id: "runtime-boundary",
+    title: "Runtime command and transport boundary",
+    script: "test:runtime-boundary",
+    cls: "deterministic",
+    enforcement: "blocking",
+    mergeGate: true,
+    domains: withApparatus("contracts", "sim-runtime"),
+    needs: [],
+    parallelSafe: true,
+    baselineSeconds: 2,
+    claim:
+      "Malformed, unknown, non-finite, negative, fractional-when-integer, and out-of-range runtime commands are rejected as structured failures before any simulation loop begins; an unsupported command tag can never escape handle as undefined, which is what previously killed the worker with every pending request left unresolved; a rejected command mutates no tick, no biology, and no decision or analysis state, while still releasing the snapshot backpressure depends on; every worker request settles exactly once through a supported terminal outcome; a terminal worker failure or destroy clears every pending request and the pending checkpoint load; and a checkpoint load completes only through its own request identity, so a same-tick, stale, or unrelated live snapshot cannot satisfy it.",
+  },
+  {
     id: "time-controls",
     title: "Speed and time control",
     script: "test:time-controls",
@@ -745,6 +759,7 @@ export const GROUPS: readonly ValidationGroup[] = [
     unitIds: [
       "catalysts",
       "flows",
+      "runtime-boundary",
       "time-controls",
       "landscape",
       "ecology",
@@ -833,8 +848,8 @@ export const GROUPS: readonly ValidationGroup[] = [
   },
   {
     id: "ci-sim-c",
-    title: "Deterministic suites C (niche, ecology)",
-    unitIds: ["niche", "ecology"],
+    title: "Deterministic suites C (niche, ecology, runtime boundary)",
+    unitIds: ["niche", "ecology", "runtime-boundary"],
     ci: true,
   },
   {
