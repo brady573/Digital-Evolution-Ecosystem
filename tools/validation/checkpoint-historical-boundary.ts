@@ -191,6 +191,40 @@ export function testHistoricalCheckpointBoundary(): void {
   assert.equal(oldestRestored.checkpoint().decisions.lastDecisionTick, 0,
     "a pre-decision-system world starts with no pacing history");
 
+  // The assertion above is vacuous: it deletes `decisions` outright, so it would
+  // pass whatever canonicalization does with the block. Preflight only requires
+  // a present `decisions` to be an object, so a 0.1 payload CAN carry one, and
+  // canonicalization is the only place that can honour or discard it. Base
+  // discarded it; canonicalDecisions' own comment says 0.1 "has no history to
+  // read at all". Both must be true of the code.
+  //
+  // The resolution below is deliberately junk: if it is not discarded, the
+  // canonical form is wrong in a way this test will see rather than tolerate.
+  const oldestWithDecisions: any = JSON.parse(JSON.stringify(older));
+  oldestWithDecisions.checkpointSchemaVersion = "0.1";
+  oldestWithDecisions.decisions.pending = {
+    schemaVersion: 1, opportunityId: "offer", policyVersion: "v1",
+    sourceEventId: "event", sourceArcId: null, createdTick: 9,
+    status: "pending", prompt: "Prompt", context: "Context", choices: [],
+  };
+  oldestWithDecisions.decisions.resolutions = [{ not: "a resolution at all" }];
+  const canonicalOldest = canonicalizeRestoreState(oldestWithDecisions, canonicalContext());
+  assert.equal(
+    canonicalOldest.decisions.pending,
+    null,
+    "0.1 predates the decision system, so a pending in a 0.1 payload is not history to read",
+  );
+  assert.deepEqual(
+    canonicalOldest.decisions.resolutions,
+    [],
+    "0.1 predates the decision system, so resolutions in a 0.1 payload are not history to read",
+  );
+  assert.equal(
+    canonicalOldest.decisions.lastDecisionTick,
+    0,
+    "0.1 has no pacing state to reconstruct, even when the payload carries some",
+  );
+
   // Each build since 0.2 wrote both keys even when no decision was pending or
   // resolved. Missing is not the same as the persisted null / empty array.
   for (const [schema, payload] of [
@@ -613,7 +647,8 @@ export function testHistoricalCheckpointBoundary(): void {
   assert.ok(isPlainObjectForTest(decisions.pending), "a 0.2 pending survives canonicalisation");
   assert.equal(decisions.pending.source, "observed_event", "a sourceless 0.2 pending normalises to event provenance");
   assert.equal(decisions.pending.contextSnapshot, null, "0.2's unsaved context is marked unrecorded, not fabricated");
-  assert.ok(isPlainObjectForTest((candidate.analysis as any).dep), "dep is materialised by canonical migration");
+  assert.ok(isPlainObjectForTest((candidate.analysis as any).dep),
+    "a 0.2 payload that already carries dep keeps it");
   assert.ok(isPlainObjectForTest((candidate.analysis as any).niche), "niche is materialised by canonical migration");
 
   // A saved generator version must not win over the running build's.
@@ -681,6 +716,29 @@ export function testHistoricalCheckpointBoundary(): void {
     "the source payload must still be missing its detector sub-state after canonicalisation",
   );
 
+  // ...and the canonical RESULT must have gained one, taken from the context
+  // defaults rather than from whatever an observer constructor happened to hold.
+  // Asserting deepEqual against the context is what makes this non-vacuous: the
+  // fixture has no dep to compare against, so removing the backfill turns these
+  // into `undefined` and fails, rather than leaving a value that matches anyway.
+  const detectorDefaults = canonicalContext().detectorDefaults;
+  const filledDetectors = canonicalizeRestoreState(taggedRefsNoDetectors, canonicalContext());
+  assert.deepEqual(
+    (filledDetectors.analysis as any).dep,
+    detectorDefaults.dep,
+    "an absent dependency-arc sub-state is supplied by the canonical backfill",
+  );
+  assert.deepEqual(
+    (filledDetectors.analysis as any).niche,
+    detectorDefaults.niche,
+    "an absent niche-construction sub-state is supplied by the canonical backfill",
+  );
+  assert.notDeepEqual(
+    (filledDetectors.analysis as any).dep,
+    undefined,
+    "the backfill must produce a value, not merely not-throw",
+  );
+
   const frozenContext = canonicalContext();
   const beforeContext = JSON.stringify(frozenContext);
   canonicalizeRestoreState(historical02 as any, frozenContext);
@@ -727,9 +785,17 @@ export function testHistoricalCheckpointBoundary(): void {
   );
   assert.deepEqual(secondCurrent.decisions, currentFixedPoint.decisions,
     "canonicalising an already-canonical current payload must be a no-op");
+  // Decisions alone is a half answer: the observer layer carries the same
+  // backfills, so a re-canonicalisation that rewrote a detector would not show
+  // up in `decisions` at all.
+  assert.deepEqual(secondCurrent.analysis, currentFixedPoint.analysis,
+    "the canonical observer layer must also be a fixed point on a current payload");
 
-  // 0.1 predates the decision system; the canonical form starts empty.
-  const oldestCandidate = canonicalizeRestoreState(oldest as any, canonicalContext());
+  // 0.1 predates the decision system, so the canonical form starts empty EVEN
+  // WHEN the payload carries a decisions block. `oldest` deletes that block, so
+  // using it here would pass whatever canonicalization did — the assertions must
+  // run against the payload that actually supplies one.
+  const oldestCandidate = canonicalizeRestoreState(oldestWithDecisions as any, canonicalContext());
   const oldestDecisions = oldestCandidate.decisions as any;
   assert.deepEqual(oldestDecisions.resolutions, [], "0.1 starts with no decision history");
   assert.equal(oldestDecisions.pending, null, "0.1 has no pending opportunity");
@@ -823,17 +889,50 @@ export function testHistoricalCheckpointBoundary(): void {
   assert.equal(typeof validated.decisions.resolutions, "object", "and exposes real decision records, not `unknown`");
 
   // Canonical validation must NOT weaken itself for an older source schema.
-  // `currentSchema` identifies the running contract; it is not a mode switch.
-  const oldSchemaCandidate: CanonicalRestoreCandidate = {
-    ...goodCandidate,
-    decisions: { ...decisions, catalystPolicyVersion: "retired-catalog" },
-  };
-  const stillValidated = validateCanonicalRestoreState(oldSchemaCandidate, canonicalContext());
-  assert.equal(
-    stillValidated.decisions.catalystPolicyVersion,
-    "retired-catalog",
-    "canonical validation accepts a persisted generator string whatever its value; it is not a mode switch",
-  );
+  //
+  // The previous version of this test varied a persisted generator STRING, which
+  // proves nothing about validation strength. These assertions vary the input
+  // that could actually select a weaker shape: the source schema the canonical
+  // state was derived from.
+  //
+  // First, structurally: the candidate carries no schema at all, so there is
+  // nothing for the validator to switch on.
+  const derivedFrom02 = canonicalizeRestoreState(older as any, canonicalContext());
+  const derivedFrom04 = canonicalizeRestoreState(session.checkpoint() as any, canonicalContext());
+  for (const [label, candidate] of [["0.2", derivedFrom02], ["0.4", derivedFrom04]] as const) {
+    assert.ok(
+      !("checkpointSchemaVersion" in (candidate as unknown as Record<string, unknown>)),
+      `a candidate derived from ${label} carries no source schema for validation to switch on`,
+    );
+  }
+  // Second, behaviourally, and from the ACCEPTANCE side rather than the rejection
+  // side. A candidate carries no schema, so there is nothing for a mode switch
+  // to branch on; what a source-derived switch or an incomplete migration WOULD
+  // break is a legitimate old save. So: canonical state derived from EVERY
+  // supported source schema must satisfy the CURRENT contract. Removing the
+  // offerTick migration, for instance, leaves a valid 0.2 resolution missing a
+  // field 0.4 requires, and that has to fail here.
+  for (const schema of ["0.1", "0.2", "0.3", "0.4"] as const) {
+    const fixture: any = JSON.parse(JSON.stringify(current));
+    fixture.checkpointSchemaVersion = schema;
+    fixture.decisions.resolutions = [
+      {
+        schemaVersion: 1, opportunityId: "opp-1", commandId: "cmd-1",
+        sourceEventId: "evt-1", choiceId: "choice-1", tick: 8,
+        intervention: null, source: "event_decision", policyVersion: "old-catalog",
+        choiceTitle: "Grow tall", directEffectDescription: "Raises height",
+      },
+    ];
+    const derived = canonicalizeRestoreState(fixture, canonicalContext());
+    assert.ok(
+      !("checkpointSchemaVersion" in (derived as unknown as Record<string, unknown>)),
+      `a ${schema}-derived candidate carries no schema for validation to switch on`,
+    );
+    assert.doesNotThrow(
+      () => validateCanonicalRestoreState(derived, canonicalContext()),
+      `${schema} canonical state must satisfy the CURRENT contract: the migration has to complete it`,
+    );
+  }
 
   // A non-object observer must be refused, not spread into an empty one.
   for (const key of ["analysis", "controlAnalysis"] as const) {

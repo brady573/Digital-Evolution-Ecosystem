@@ -378,7 +378,7 @@ export const CHECKPOINT_MIGRATION_RULES: readonly CheckpointMigrationRule[] = [
     effectiveDefault: "null",
     absorber: "structural-branch",
     omission:
-      "The major-catalyst cooldown did not exist in checkpoint 0.2, so its decisions object carries no value for this field. `null` is the truth about that world: no major catalyst had ever fired. The 0.1 save had no decisions object at all and is documented separately.",
+      "The major-catalyst cooldown did not exist in checkpoint 0.2, so its decisions object carries no value for this field. `null` is the truth about that world: no major catalyst had ever fired. The 0.1 save had no decisions object at all and is documented separately. A 0.2 payload that nonetheless CARRIES this field is also read as `null` rather than taken at face value. That is deliberately NARROWER than the pre-A3.4 code, which accepted any present finite value at 0.2; no 0.2 writer could produce one (see historicalBasis), so the narrowing cannot discard real history, and declining to adopt a cooldown the schema cannot vouch for is safer than inheriting one. It is recorded here so a later reader does not mistake it for an accidental omission.",
     hazard: "load-bearing-dynamics",
     historicalBasis:
       "`lastMajorCatalystTick` was introduced with checkpoint 0.3 in b040b19 on 2026-09-24, alongside the cooldown. The 0.2 decision checkpoint at b39fd46 writes only `pending`, `resolutions` and `policyVersion`. Checkpoint 0.1 predates the entire decisions container; checkpoint 0.3 wrote this field and must preserve it.",
@@ -657,10 +657,26 @@ export const NOT_RECORDED = "Not recorded in this save";
 /**
  * Canonicalise the non-simulation restore layer.
  *
- * Pure: the source is never written to, the context is never written to, and
- * every returned value is freshly constructed. Idempotent, because each
- * backfill is guarded on absence rather than recomputed — a value derived
- * from another field would re-derive on a second pass and quietly change.
+ * NON-MUTATING, precisely: neither `source` nor `context` nor
+ * `context.detectorDefaults` is written to at any point. That is the guarantee,
+ * and it is distinct from referential purity — the returned containers are all
+ * freshly built, but values nested inside them (records, eras, cross, seedbank)
+ * are the SAME objects the caller passed in. Nothing downstream mutates them,
+ * and a caller must not assume otherwise.
+ *
+ * IDEMPOTENT, and not for one uniform reason, so both cases are named rather
+ * than left to the reader:
+ *
+ * - Most backfills are GUARDED ON ABSENCE (`=== undefined` / `??`). They run
+ *   only when the field is missing, so a second pass finds nothing to do.
+ * - `lastDecisionTick` at 0.2 is DETERMINISTIC RECOMPUTATION from the payload's
+ *   own records via `newestKnownDecisionTick`, not a guarded fill. It re-runs on
+ *   every pass. It is stable only because the migration normalises
+ *   `offerTick := tick` and the computation is a `Math.max` over values the
+ *   canonical form no longer changes — so recomputation and idempotence agree.
+ *   If that normalisation ever changes, this is the line that breaks.
+ * - `copy.source` is DERIVED from a sibling field, and is stable because the
+ *   next pass short-circuits on the value it wrote.
  *
  * `experiment` and `control` are deliberately untouched: they stay under
  * sim-core's checkpoint contract, and these types do not claim otherwise.
@@ -708,10 +724,18 @@ const canonicalDecisions = (
 ): DecisionCheckpoint => {
   const source = (isPlainObject(raw) ? raw : {}) as Record<string, unknown>;
   const historical = schema === "0.2";
-  const pending = historical ? historicalPending(source.pending) : normalizePendingDecision(source.pending);
-  const resolutions = Array.isArray(source.resolutions)
-    ? (source.resolutions as unknown[]).map(historical ? historicalResolution : normalizeResolution)
-    : [];
+  // 0.1 predates the decision system. Preflight only requires a PRESENT
+  // `decisions` to be an object, so a 0.1 payload can carry one; nothing in it
+  // was written by a 0.1 build, so none of it is honoured. Base discarded the
+  // block for 0.1, and applying the current normalizers instead would let a
+  // hand-edited or corrupt file resurrect an opportunity the player never made.
+  const preDecisions = schema === "0.1";
+  const pending = preDecisions ? null : historical ? historicalPending(source.pending) : normalizePendingDecision(source.pending);
+  const resolutions = preDecisions
+    ? []
+    : Array.isArray(source.resolutions)
+      ? (source.resolutions as unknown[]).map(historical ? historicalResolution : normalizeResolution)
+      : [];
   // A 0.3 save carries its own pacing state and keeps it; a 0.2 save predates the
   // pacing fields and reconstructs the tick from its own records, with no
   // cooldown to reconstruct because the mechanic did not exist; 0.1 predates
@@ -758,9 +782,26 @@ const nullableTick = (value: unknown): number | null =>
  * canonicalised here and is not represented at all.
  */
 export interface ValidatedCanonicalRestoreState {
-  readonly analysis: unknown;
-  readonly controlAnalysis: unknown | null;
+  readonly analysis: ValidatedObserverCheckpoint;
+  readonly controlAnalysis: ValidatedObserverCheckpoint | null;
   readonly decisions: DecisionCheckpoint;
+}
+
+const VALIDATED_OBSERVER = Symbol("validatedObserver");
+
+/**
+ * An observer checkpoint that has passed the current non-simulation contract.
+ *
+ * A WRAPPER, not an alias. A type alias for `Record<string, unknown>` would be
+ * transparent to the compiler, so deleting the validator call would still
+ * compile and the barrier would be documentation rather than enforcement. Only
+ * {@link validateCanonicalRestoreState} can produce this, and reaching `.state`
+ * requires having it — so the observer layer gets the same compile-time
+ * guarantee `decisions` already had, instead of resting on a runtime call.
+ */
+export interface ValidatedObserverCheckpoint {
+  readonly [VALIDATED_OBSERVER]: true;
+  readonly state: Record<string, unknown>;
 }
 
 /**
@@ -776,6 +817,15 @@ export interface ValidatedCanonicalRestoreState {
  * the source payload declared, because the A3.3 preflight already consumed
  * every source-version difference.
  */
+const validatedObserver = (value: Record<string, unknown>, path: string): ValidatedObserverCheckpoint => {
+  validateObserverCheckpoint(value, path, { requireDetectors: true });
+  validateEntityRefs(value, path, false);
+  // The brand is module-private, so this factory is the only way to obtain the
+  // type. That is what makes "restore cannot consume an unvalidated observer" a
+  // compile-time fact rather than a promise in a comment.
+  return { [VALIDATED_OBSERVER]: true, state: value };
+};
+
 export const validateCanonicalRestoreState = (
   candidate: CanonicalRestoreCandidate,
   context: CanonicalizationContext,
@@ -787,18 +837,12 @@ export const validateCanonicalRestoreState = (
   if (!isPlainObject(analysis)) {
     reject("analysis", "malformed-container", "canonical analysis must be an observer checkpoint object");
   }
-  validateObserverCheckpoint(analysis, "analysis", { requireDetectors: true });
-  validateEntityRefs(analysis as Record<string, unknown>, "analysis", false);
   const controlAnalysis = candidate.controlAnalysis;
   if (controlAnalysis === null) {
     // A null matched control needs no observer state; the pairing rule belongs
     // to the raw payload, where a half-present pair is a source contradiction.
-  } else {
-    if (!isPlainObject(controlAnalysis)) {
-      reject("controlAnalysis", "malformed-container", "canonical control analysis must be an observer checkpoint or null");
-    }
-    validateObserverCheckpoint(controlAnalysis, "controlAnalysis", { requireDetectors: true });
-    validateEntityRefs(controlAnalysis as Record<string, unknown>, "controlAnalysis", false);
+  } else if (!isPlainObject(controlAnalysis)) {
+    reject("controlAnalysis", "malformed-container", "canonical control analysis must be an observer checkpoint or null");
   }
   const decisions = candidate.decisions;
   if (!isPlainObject(decisions)) {
@@ -809,8 +853,8 @@ export const validateCanonicalRestoreState = (
   // did not run, which is a defect here rather than a historical allowance.
   validateDecisionRecords(decisions as Record<string, unknown>, context.currentSchema);
   return {
-    analysis,
-    controlAnalysis,
+    analysis: validatedObserver(analysis, "analysis"),
+    controlAnalysis: controlAnalysis === null ? null : validatedObserver(controlAnalysis, "controlAnalysis"),
     decisions: decisions as unknown as DecisionCheckpoint,
   };
 };
@@ -1681,7 +1725,7 @@ export function validateDecisionRecords(decisions: Record<string, unknown>, sour
     if (pending.contextSnapshot === undefined && sourceSchema !== "0.2") {
       reject("decisions.pending.contextSnapshot", "malformed-container", "this schema wrote the observation context");
     }
-    if (pending.contextSnapshot === null && sourceSchema !== "0.4") {
+    if (pending.contextSnapshot === null && !isCurrentSchema(sourceSchema)) {
       reject("decisions.pending.contextSnapshot", "wrong-type", "only a current re-save may mark legacy context unrecorded");
     }
     if (pending.contextSnapshot !== undefined && pending.contextSnapshot !== null && !isPlainObject(pending.contextSnapshot)) {

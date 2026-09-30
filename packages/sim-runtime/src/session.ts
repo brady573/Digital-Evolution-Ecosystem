@@ -14,14 +14,13 @@ import type {
   RuntimeResponse,
   SupportedUniverseCheckpoint,
   UniverseCheckpoint,
-  UniverseCheckpointV02,
-  UniverseCheckpointV03,
   WorldId,
 } from "@digital-evolution/contracts";
 // Aliased: `renderSnapshot` has a parameter named `worldId`, and the shadow
 // would otherwise hide the constructor that assigns the presentation identity.
 import {
   AFTERMATH_COMPARABLES,
+  CURRENT_SCHEMA,
   decisionCommandId,
   validateCheckpoint,
   canonicalizeRestoreState,
@@ -53,7 +52,14 @@ import {
   selectCatalystWindow,
 } from "@digital-evolution/sim-decisions";
 
-export const CHECKPOINT_SCHEMA_VERSION = "0.4" as const;
+/**
+ * The schema this build writes. DERIVED from contracts' single declaration, not
+ * written inline: `restore` passes this value into canonical validation, so a
+ * literal here and a derived constant there could diverge at the next version
+ * bump — with a 0.4 payload silently falling out of "is current" and losing the
+ * strictest checks. One version bump must move one place.
+ */
+export const CHECKPOINT_SCHEMA_VERSION = CURRENT_SCHEMA as UniverseCheckpoint["checkpointSchemaVersion"];
 
 /**
  * Process-unique universe counter. Presentation identity only: it is
@@ -641,7 +647,7 @@ export class UniverseSession {
     // kind, and each becomes `kind: null` — a real entity of unrecorded kind.
     // Presentation then omits the label rather than guessing a namespace,
     // which is A2's specified behaviour for a kind never recorded.
-    this.#analysis=EcologyObserver.restore(canonical.analysis as any);
+    this.#analysis=EcologyObserver.restore(canonical.analysis.state);
     // Aftermath is deliberately NOT restored. It is evidence held outside the
     // checkpoint, so a restore that carried it would be reconstructing an
     // observation from simulation state alone - exactly what must not happen.
@@ -651,7 +657,7 @@ export class UniverseSession {
     this.#aftermath=null;
     this.#control=checkpoint.control?restoreSimulationCheckpoint(checkpoint.control as any):null;
     this.#controlAnalysis=canonical.controlAnalysis
-      ?EcologyObserver.restore(canonical.controlAnalysis as any)
+      ?EcologyObserver.restore(canonical.controlAnalysis.state)
       :null;
     const decisions=canonical.decisions as DecisionCheckpoint;
     this.#pendingDecision=decisions.pending;

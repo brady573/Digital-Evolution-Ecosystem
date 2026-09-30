@@ -475,10 +475,12 @@ const MIGRATION_ABSORBER_PROBES: Readonly<Record<string, { file: string; probe: 
   "last-decision-tick-reconstructed-from-newest-record": {
     file: "packages/contracts/src/index.ts",
     // Absorber `structural-branch`: for 0.2 the migration computes the value from
-    // the save's own records rather than reading a stored field. The whole
-    // conditional is probed, not just the call, so a rewrite that dropped the
-    // 0.2 reconstruction — or made 0.3 derive instead of preserve — fails here.
-    probe: /schema === "0\.2"\s*\? newestKnownDecisionTick\(pending, resolutions\)/,
+    // the save's own records rather than reading a stored field. The WHOLE
+    // ternary is pinned, arm by arm, exactly as its major-catalyst sibling is.
+    // Pinning only the 0.2 call would survive an arm swap — after which 0.3
+    // derives instead of preserving and 0.2 preserves instead of reconstructing —
+    // which is the precise failure this comment claims to catch.
+    probe: /const lastDecisionTick = isCurrentSchema\(schema\) \|\| schema === "0\.3"\s*\? finiteOrZero\(source\.lastDecisionTick\)\s*:\s*schema === "0\.2"\s*\?\s*newestKnownDecisionTick\(pending, resolutions\)\s*:\s*0;/,
   },
   "major-catalyst-tick-predates-cooldown": {
     file: "packages/contracts/src/index.ts",
