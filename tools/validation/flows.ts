@@ -14,7 +14,7 @@ import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ENGINE_VERSION } from "../../packages/sim-core/src/index.ts";
+import { ENGINE_VERSION, EXPORT_FORMAT_VERSION } from "../../packages/sim-core/src/index.ts";
 import { readInjectedSource, resolveSourceProvenance } from "../../packages/sim-runtime/src/provenance.ts";
 import { CHECKPOINT_SCHEMA_VERSION } from "../../packages/sim-runtime/src/session.ts";
 import { testHistoricalCheckpointBoundary } from "./checkpoint-historical-boundary.ts";
@@ -225,6 +225,11 @@ function testExportProvenanceTriState() {
   assert.equal(unknownDirty.cleanliness, "unknown", "unknown stays unknown even when dirty");
 
   assert.equal(clean.revision.engine_version, ENGINE_VERSION, "the revision carries the running engine version");
+  assert.equal(
+    clean.revision.format_version,
+    EXPORT_FORMAT_VERSION,
+    "the revision carries the maintained export-format version as-is",
+  );
 
   // No build-time injection under tsx: the reader yields the unknown-triggering
   // shape, so a validation run never claims a clean source it cannot determine.
@@ -233,8 +238,9 @@ function testExportProvenanceTriState() {
     { commit: null, dirty: false },
     "without vite defines the injected source reads as undeterminable",
   );
+  const injected = readInjectedSource();
   assert.equal(
-    resolveSourceProvenance(...Object.values(readInjectedSource()) as [string | null, boolean]).cleanliness,
+    resolveSourceProvenance(injected.commit, injected.dirty).cleanliness,
     "unknown",
     "the tsx reader shape resolves to unknown, never clean",
   );

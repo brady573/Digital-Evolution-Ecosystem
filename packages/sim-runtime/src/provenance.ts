@@ -1,5 +1,6 @@
 import type { Cleanliness, SourceProvenance } from "@digital-evolution/contracts";
-import { APP_VERSION, ENGINE_VERSION, EXPORT_FORMAT_VERSION } from "@digital-evolution/sim-core";
+// Constants-only module (no biology): version strings, never the engine.
+import { APP_VERSION, ENGINE_VERSION, EXPORT_FORMAT_VERSION } from "../../sim-core/src/version";
 
 // Build-time injected source facts. Vite replaces these textually via the
 // `define` in apps/explorer/vite.config.ts; the `declare` emits nothing, so
@@ -39,10 +40,10 @@ export function resolveSourceProvenance(commit: string | null, dirty: boolean): 
     revision: {
       engine_version: ENGINE_VERSION,
       app_version: APP_VERSION,
-      // Task 1 types this field as number while version.ts holds the "0.31"
-      // string; coerce numerically so the carried value stays the maintained
-      // export-format version rather than a literal chosen here.
-      format_version: Number(EXPORT_FORMAT_VERSION),
+      // The maintained export-format version passes through as-is (the "0.31"
+      // string experiment.out() emits); the numeric envelope version is the
+      // separate export_format_version: 1 field.
+      format_version: EXPORT_FORMAT_VERSION,
       git_commit: commit,
     },
     cleanliness,

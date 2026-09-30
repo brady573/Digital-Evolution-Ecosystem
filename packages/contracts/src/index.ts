@@ -2304,7 +2304,7 @@ export type Cleanliness = "clean" | "dirty" | "unknown";
 export interface SourceRevision {
   readonly engine_version: string;
   readonly app_version: string;
-  readonly format_version: number;
+  readonly format_version: string;
   readonly git_commit: string | null;
 }
 
