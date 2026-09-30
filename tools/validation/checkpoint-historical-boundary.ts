@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { CHECKPOINT_MIGRATION_RULES, CheckpointRejectionError } from "../../packages/contracts/src/index.ts";
 import type { EngineConfig } from "../../packages/contracts/src/index.ts";
+import {
+  validateDecisionRecords,
+  validateEntityRefs,
+  validateObserverCheckpoint,
+} from "../../packages/contracts/src/index.ts";
 import { UniverseSession } from "../../packages/sim-runtime/src/session.ts";
 
 const config: EngineConfig = {
@@ -12,6 +17,13 @@ const config: EngineConfig = {
 
 /** A 0.3 build wrote this tick; restoring it must not derive another one. */
 export function testHistoricalCheckpointBoundary(): void {
+  // The preflight and A3.4's canonical validation must share one definition of
+  // a valid value. Two definitions would let the boundary lie in two places, so
+  // the shared entry points are named here rather than trusted.
+  assert.equal(typeof validateObserverCheckpoint, "function", "the observer validator is shared, not duplicated");
+  assert.equal(typeof validateDecisionRecords, "function", "the decision validator is shared, not duplicated");
+  assert.equal(typeof validateEntityRefs, "function", "the entity-ref validator is shared, not duplicated");
+
   const reconstructionRule = CHECKPOINT_MIGRATION_RULES.find(
     (rule) => rule.id === "last-decision-tick-reconstructed-from-newest-record",
   );

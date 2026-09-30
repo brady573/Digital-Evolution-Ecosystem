@@ -1054,7 +1054,54 @@ function validateTypedArray(value: unknown, at: string): void {
   });
 }
 
-function validateObserverCheckpoint(value: unknown, path: string, schema: CheckpointSchemaVersion): void {
+/**
+ * Entity references inside a history record.
+ *
+ * A bare finite number is the pre-A2 shape and is historical absence of a
+ * `kind`, not an absent reference; `allowBareNumbers` is true only for a
+ * source-schema preflight on a historical payload. Canonical validation
+ * passes false, because by that point every reference has been migrated to a
+ * typed ref and a bare number means the migration did not run.
+ */
+export function validateEntityRefs(
+  observer: Record<string, unknown>,
+  at: string,
+  allowBareNumbers: boolean,
+): void {
+  if (!Array.isArray(observer.records)) return;
+  observer.records.forEach((raw, i) => {
+    const recordAt = `${at}.records[${i}]`;
+    if (!isPlainObject(raw)) reject(recordAt, "malformed-container", "expected a history record object");
+    if (!Array.isArray(raw.entity_refs)) reject(`${recordAt}.entity_refs`, "malformed-container", "expected an entity reference list");
+    raw.entity_refs.forEach((ref, j) => {
+      const refAt = `${recordAt}.entity_refs[${j}]`;
+      if (typeof ref === "number" && allowBareNumbers) {
+        if (!Number.isFinite(ref)) reject(refAt, "non-finite-numeric", "expected a finite historical entity ID");
+        return;
+      }
+      if (!isPlainObject(ref)) reject(refAt, "malformed-container", "expected a typed reference");
+      if (!isFiniteNumber(ref.id)) reject(`${refAt}.id`, "wrong-type", "expected a finite entity ID");
+      if (ref.kind !== null && ref.kind !== "organism" && ref.kind !== "lineage" && ref.kind !== "clade") {
+        reject(`${refAt}.kind`, "wrong-type", "unknown entity kind");
+      }
+    });
+  });
+}
+
+/**
+ * A3.4 shares this with canonical validation, so it is parameterised by what
+ * the CALLER requires rather than by the payload's declared schema.
+ *
+ * `requireDetectors: false` tolerates `dep`/`niche` absence, and only a
+ * source-schema preflight may ask for that: the historical basis for it is
+ * A3.3's rule table. Canonical validation always passes `true`, because the
+ * canonical layer must carry every key the current contract requires.
+ */
+export function validateObserverCheckpoint(
+  value: unknown,
+  path: string,
+  opts: { readonly requireDetectors: boolean },
+): void {
   if (!isPlainObject(value)) reject(path, "malformed-container", "expected an observer checkpoint");
   const observer = value as Record<string, unknown>;
   const states: Readonly<Record<string, { nullable?: readonly string[]; numbers?: readonly string[]; booleans?: readonly string[]; maps?: readonly string[] }>> = {
@@ -1065,7 +1112,7 @@ function validateObserverCheckpoint(value: unknown, path: string, schema: Checkp
   };
   for (const [name, shape] of Object.entries(states)) {
     const state = observer[name];
-    if (state === undefined && (name === "dep" || name === "niche") && schema !== "0.4") continue;
+    if (state === undefined && (name === "dep" || name === "niche") && !opts.requireDetectors) continue;
     if (!isPlainObject(state)) reject(`${path}.${name}`, "malformed-container", "expected a detector state");
     if (typeof state.id !== "string" || !state.id) reject(`${path}.${name}.id`, "wrong-type", "expected detector identity");
     if (!["absent", "forming", "established", "disrupted", "recovered", "superseded"].includes(state.state as string)) {
@@ -1210,7 +1257,7 @@ export const validateCheckpoint = (checkpoint: unknown): void => {
   if (!isPlainObject(analysis)) {
     reject("analysis", "malformed-container", "every runtime checkpoint wrote an analysis object");
   }
-  validateObserverCheckpoint(analysis, "analysis", schema as CheckpointSchemaVersion);
+  validateObserverCheckpoint(analysis, "analysis", { requireDetectors: (schema as string) === "0.4" });
   if (analysis !== undefined && (analysis as Record<string, unknown>).records !== undefined) {
     if (!Array.isArray((analysis as Record<string, unknown>).records)) {
       reject("analysis.records", "malformed-container", `expected a records array, got ${describe((analysis as Record<string, unknown>).records)}`);
@@ -1224,27 +1271,7 @@ export const validateCheckpoint = (checkpoint: unknown): void => {
       }
     }
   }
-  const validateRefs = (observer: Record<string, unknown>, at: string): void => {
-    if (!Array.isArray(observer.records)) return;
-    observer.records.forEach((raw, i) => {
-      const recordAt = `${at}.records[${i}]`;
-      if (!isPlainObject(raw)) reject(recordAt, "malformed-container", "expected a history record object");
-      if (!Array.isArray(raw.entity_refs)) reject(`${recordAt}.entity_refs`, "malformed-container", "expected an entity reference list");
-      raw.entity_refs.forEach((ref, j) => {
-        const refAt = `${recordAt}.entity_refs[${j}]`;
-        if (typeof ref === "number" && (schema as string) !== "0.4") {
-          if (!Number.isFinite(ref)) reject(refAt, "non-finite-numeric", "expected a finite historical entity ID");
-          return;
-        }
-        if (!isPlainObject(ref)) reject(refAt, "malformed-container", "expected a typed reference");
-        if (!isFiniteNumber(ref.id)) reject(`${refAt}.id`, "wrong-type", "expected a finite entity ID");
-        if (ref.kind !== null && ref.kind !== "organism" && ref.kind !== "lineage" && ref.kind !== "clade") {
-          reject(`${refAt}.kind`, "wrong-type", "unknown entity kind");
-        }
-      });
-    });
-  };
-  if (isPlainObject(analysis)) validateRefs(analysis, "analysis");
+  if (isPlainObject(analysis)) validateEntityRefs(analysis, "analysis", (schema as string) !== "0.4");
   if (checkpoint.control === undefined || (checkpoint.control !== null && !isPlainObject(checkpoint.control))) {
     reject("control", "wrong-type", `expected null or a control checkpoint object, got ${describe(checkpoint.control)}`);
   }
@@ -1259,8 +1286,8 @@ export const validateCheckpoint = (checkpoint: unknown): void => {
   if (isPlainObject(checkpoint.control) && checkpoint.control.engine_version !== checkpoint.engineVersion) {
     reject("control.engine_version", "structural-contradiction", "control and runtime engine versions disagree");
   }
-  if (checkpoint.controlAnalysis !== null) validateObserverCheckpoint(checkpoint.controlAnalysis, "controlAnalysis", schema as CheckpointSchemaVersion);
-  if (isPlainObject(checkpoint.controlAnalysis)) validateRefs(checkpoint.controlAnalysis, "controlAnalysis");
+  if (checkpoint.controlAnalysis !== null) validateObserverCheckpoint(checkpoint.controlAnalysis, "controlAnalysis", { requireDetectors: (schema as string) === "0.4" });
+  if (isPlainObject(checkpoint.controlAnalysis)) validateEntityRefs(checkpoint.controlAnalysis, "controlAnalysis", (schema as string) !== "0.4");
   /**
    * Presence, decided per field by when that field was introduced.
    *
@@ -1327,7 +1354,11 @@ export const validateCheckpoint = (checkpoint: unknown): void => {
  * itself, and would otherwise pass a shape check while describing a decision
  * that never occurred.
  */
-function validateDecisionRecords(decisions: Record<string, unknown>, sourceSchema: CheckpointSchemaVersion): void {
+/**
+ * A3.4 shares this with canonical validation, which passes the current schema
+ * so the same field checks decide validity for a migrated payload.
+ */
+export function validateDecisionRecords(decisions: Record<string, unknown>, sourceSchema: CheckpointSchemaVersion): void {
   // `lastDecisionTick` gates quiet time and `lastMajorCatalystTick` gates the
   // major cooldown, where null reads as "clear". Neither may be coerced: a
   // value substituted for a corrupt one would grant a capability the real
