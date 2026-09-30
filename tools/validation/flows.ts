@@ -694,6 +694,57 @@ function testBoundaryGeneratorIsDerived() {
     "the document's rule count must come from the table, not from prose that a rule edit can invalidate",
   );
 
+  // A3.4 made the canonical ordering structural, so the document must now state
+  // it. It previously DISCLAIMED that ordering while A3.4 was unimplemented; a
+  // generated document that describes the opposite of the code is worse than no
+  // document, so both directions are checked.
+  assert.ok(
+    out.includes("canonical migration") && out.includes("current non-simulation validation"),
+    "the boundary now states the canonical ordering it actually performs",
+  );
+  assert.ok(
+    !out.includes("does not claim canonical"),
+    "the boundary must not still disclaim an ordering it now implements",
+  );
+
+  // The type barrier is only durable while the file that holds it exists AND
+  // keeps asserting. `tools/` is compiled by no tsconfig, which is precisely why
+  // the guard lives under a package `src/`, so its survival has to be checked
+  // from here. The `as any` exclusion matters as much as the file's existence: a
+  // cast would erase the very distinction the directives assert.
+  const typeBarrier = src("packages/sim-runtime/src/canonical-restore-type-boundary.ts");
+  // Each negative statement must be IMMEDIATELY guarded by an @ts-expect-error
+  // directive. Two weaker checks were tried and both failed: counting directives
+  // was satisfied by this file's own prose, and merely locating each statement
+  // passed even after its directive was deleted, because deleting a comment
+  // leaves the code it guarded.
+  for (const statement of [
+    "const notAValidatedState: ValidatedCanonicalRestoreState = candidate;",
+    "const candidateObserver = candidate.analysis.state;",
+    'const candidateDecisions: ValidatedCanonicalRestoreState["decisions"] = candidate.decisions;',
+  ]) {
+    const at = typeBarrier.indexOf(statement);
+    assert.ok(at !== -1, "the committed type barrier must keep its negative assertion: " + statement);
+    const preceding = typeBarrier.slice(Math.max(0, at - 260), at);
+    assert.ok(
+      /@ts-expect-error[^*]*\*\/\s*$/.test(preceding),
+      "the type barrier's negative assertion must be guarded by an @ts-expect-error directive: " + statement,
+    );
+  }
+  assert.ok(
+    typeBarrier.includes("CanonicalRestoreCandidate") && typeBarrier.includes("ValidatedCanonicalRestoreState"),
+    "the type barrier must name both sides of the candidate/validated distinction",
+  );
+  // Comments are stripped first: this file's own prose explains why it avoids
+  // `as any`, and matching the explanation would fail the check it states.
+  const typeBarrierCode = typeBarrier
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/\/\/.*$/gm, "");
+  assert.ok(
+    !/\bas any\b/.test(typeBarrierCode),
+    "the type barrier must not use `as any`; a cast would erase the distinction it exists to assert",
+  );
+
   const heading = out.split("\n").find((l) => l.startsWith("## A valid ") && l.includes("never depends"));
   assert.ok(heading !== undefined, "the document must state the no-current-schema-migration property");
 
