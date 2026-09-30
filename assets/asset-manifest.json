@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "art_direction_brief": "assets/art-direction-brief.md",
-  "note": "This project ships no binary image assets. Every visual is generated at runtime in Canvas 2D, so each entry below is a procedural visual family with a single authoring source. 'status: approved' means the family is implemented, covered by tools/validation/landscape.ts, and visually reviewed in the retained captures under testdata/visual/.",
+  "note": "M4B P0 correction: this project ships 24 bundled family-portrait PNGs (six families x 16/32/64/128, inspection-card art only, offline via Vite) in apps/explorer/src/family-art/, plus procedural runtime visuals generated in Canvas 2D. In-world organism morphology authority is resolved Pixel Phenotype geometry (packages/phenotype), never the portrait PNGs. 'status: approved' means the family is implemented, covered by tools/validation/landscape.ts, and visually reviewed in the retained captures under testdata/visual/. 'status: provisional' means recorded implementation shape pending Owner acceptance — it must not be read as final art direction.",
   "assets": [
     {
       "id": "substrate-field",
@@ -206,6 +206,109 @@
         "in_engine_reviewed": true,
         "technical_checks_passed": true,
         "approved_by": "pending Owner design review (PR #40)"
+      }
+    },
+    {
+      "id": "family-portraits",
+      "role": "CLASS B — family portraits / inspection artwork ONLY. Static bundled PNGs for the Selected-organism details card. Never authoritative for in-world morphology.",
+      "path": "apps/explorer/src/family-art/*.png via apps/explorer/src/familyArt.ts::familyArtwork",
+      "status": "provisional",
+      "scope_note": "Inspection-card art only. In-world organism morphology authority is resolved Pixel Phenotype geometry (packages/phenotype + apps/explorer/src/phenotype.ts). Portraits must never be used as world sprites or as a shortcut for phenotype morphology. Current set may be retained or replaced only with provenance-tracked accepted art — do not read this entry as Owner final-art acceptance.",
+      "technical": {
+        "dimensions": "24 files: six families (blob, segmented, radial, plated, branching, paddled) x 16x16, 32x32, 64x64, 128x128 px; 8-bit/color RGBA, non-interlaced; details card uses 128",
+        "alpha": true,
+        "anchor": "details-card figure, centred",
+        "frames": 1,
+        "filtering": "inspection <img> (browser default smoothing); LOD is an explicit file choice via familyArtwork(family, lod) — never a runtime downscale of the 128 px file, so silhouettes survive per-LOD authoring"
+      },
+      "visual_locks": [
+        "provisional: coherent pixel density and silhouette legibility across families at 16/32/64/128",
+        "dormancy and selection legibility must not rely on hue alone (portraits are family identity only; state channels stay in-world)"
+      ],
+      "source": {
+        "kind": "owner-supplied",
+        "url_or_tool": "Google Drive: Digital Evolution — Unevolved Family Art package, 2026-09-26 (see review folder manifest; recorded in apps/explorer/src/familyArt.ts header)",
+        "creator": "Project Owner (supplied); bundled offline-first by Coding Agent via Vite",
+        "created_at": "2026-09-26",
+        "license": "project-owned",
+        "attribution": "",
+        "prompt_or_source_record": "apps/explorer/src/familyArt.ts; review folder manifest for the Drive package"
+      },
+      "verification": {
+        "native_scale_reviewed": false,
+        "in_engine_reviewed": true,
+        "technical_checks_passed": true,
+        "approved_by": "pending Owner art acceptance — NOT final"
+      }
+    },
+    {
+      "id": "phenotype-textures",
+      "role": "CLASS A — in-world phenotype textures (P0 non-production). Deterministically generated from resolved phenotype geometry; cached GPU presentation artifacts only.",
+      "path": "apps/explorer/src/pixi/phenotypeTextures.ts + apps/explorer/src/pixi/textureCache.ts (P0, non-production boundary); semantics: packages/phenotype/src/renderer.ts::renderPhenotypeGrid; spike: tools/pixi-spike/cache.ts",
+      "status": "provisional",
+      "scope_note": "Production-shaped P0 preparation only — the maintained production World is still Canvas2D (apps/explorer/src/App.tsx WorldCanvas). Textures are presentation cache entries keyed by exact phenotype-grid identity + tier + activity; they carry no biology, RNG, checkpoint, or analysis authority and are never stored in checkpoints.",
+      "technical": {
+        "dimensions": "LOD grids from packages/phenotype LOD_GRID_SIZE: ecosystem 5x5, population 9x9, inspection 13x13 logical pixels, scaled by tier cell size at draw time",
+        "alpha": true,
+        "anchor": "organism world position, centred",
+        "frames": 1,
+        "filtering": "nearest-neighbor (nearest scale mode) for organism pixel textures — preserve clean pixel clusters and silhouettes; no blur/subpixel placement; no smooth downscaling that destroys silhouettes"
+      },
+      "visual_locks": [
+        "exact bitmap-equivalent texture identity (exact key) until current evidence justifies a relaxed key",
+        "movement updates transforms only, never textures",
+        "phenotype/activity/LOD change remaps texture only when needed",
+        "obsolete GPU resources destroyed (bounded lifecycle)",
+        "active/dormant geometry preserved per phenotype renderer"
+      ],
+      "source": {
+        "kind": "authored-in-code",
+        "url_or_tool": "",
+        "creator": "Coding Agent (P0 extraction from the Pixi spike, which consumes phenotype semantics without duplicating them)",
+        "created_at": "2026-09-29",
+        "license": "project-owned",
+        "attribution": "",
+        "prompt_or_source_record": "tools/pixi-spike/cache.ts + view.ts shape; packages/phenotype/src/renderer.ts semantics"
+      },
+      "verification": {
+        "native_scale_reviewed": false,
+        "in_engine_reviewed": false,
+        "technical_checks_passed": true,
+        "approved_by": "pending P1 gate (pre-M7 Tranches A/B/C) — non-production P0, not Owner art acceptance"
+      }
+    },
+    {
+      "id": "pixi-world-layers-p0",
+      "role": "CLASS C/D scaffolding (P0 non-production) — Pixi layer/camera/cache architecture behind a non-production boundary. No production cutover.",
+      "path": "apps/explorer/src/pixi/layers.ts + apps/explorer/src/pixi/assetRegistry.ts + apps/explorer/src/pixi/adapter.ts (P0, not imported by production WorldCanvas)",
+      "status": "provisional",
+      "scope_note": "Defines the production-intended scene order (environment/substrate, analytical field, waste cue, organisms, selection/focus, transient effects), the 600x600 toroidal camera contract, and the asset-class registry. Environment stays procedural from real field state (normal lens may smooth-scale; analytical lenses stay exact/flat); selection/focus stays presentation-only Pixi Graphics or static art. Production World remains Canvas2D until the pre-M7 A/B/C gate releases P1.",
+      "technical": {
+        "dimensions": "world 600x600 toroidal units; uniform zoom only (1.0-3.0); layers are separable Containers in draw order",
+        "alpha": true,
+        "anchor": "world origin, toroidal; camera normalized while panning",
+        "frames": 1,
+        "filtering": "environment: normal lens smooth-scaled (bilinear, as today), analytical lenses unfiltered/exact; organisms: nearest; effects: presentation-only"
+      },
+      "visual_locks": [
+        "no invented biome/elevation/water mechanics",
+        "analytical field views preserve exact meaning (no false smoothing)",
+        "selection stays read-only and non-occluding"
+      ],
+      "source": {
+        "kind": "authored-in-code",
+        "url_or_tool": "",
+        "creator": "Coding Agent (P0)",
+        "created_at": "2026-09-29",
+        "license": "project-owned",
+        "attribution": "",
+        "prompt_or_source_record": "M4B handoff sections 5.2/5.4/6.2; current semantics: apps/explorer/src/App.tsx WorldCanvas + landscape.ts"
+      },
+      "verification": {
+        "native_scale_reviewed": false,
+        "in_engine_reviewed": false,
+        "technical_checks_passed": true,
+        "approved_by": "pending P1 gate (pre-M7 Tranches A/B/C) — non-production P0 architecture, not production acceptance"
       }
     }
   ]
