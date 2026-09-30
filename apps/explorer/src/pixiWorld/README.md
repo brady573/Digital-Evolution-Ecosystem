@@ -28,4 +28,5 @@ Pure parts (`camera`, layer assembly) are asserted by `pnpm test:pixi-p0`
 (§8). DOM/WebGL parts (`textures`, `boot`) are proven by
 `pnpm test:pixi-world` (isolated browser harness: WebGL2 boot, resize,
 nearest mint, texture+source retirement, teardown) — registered as the
-`pixi-world-proof` evidence unit in `tools/validation/manifest.ts`.
+blocking `pixi-world-proof` browser unit in `tools/validation/manifest.ts`,
+retained on CI as `pixi-world-proof-evidence`.
