@@ -119,14 +119,14 @@ export function validateRuntimeCommand(input: unknown): CommandValidation {
       if (typeof input["choiceId"] !== "string") {
         return reject("RESOLVE_EVENT_DECISION.choiceId: expected a string");
       }
-      const requestId = optionalRequestId(input, "RESOLVE_EVENT_DECISION");
-      if (requestId) return requestId;
+      const rejection = optionalRequestId(input, "RESOLVE_EVENT_DECISION");
+      if (rejection) return rejection;
       return accept(input as unknown as RuntimeCommand);
     }
 
     case "ACKNOWLEDGE_AFTERMATH": {
-      const requestId = optionalRequestId(input, "ACKNOWLEDGE_AFTERMATH");
-      if (requestId) return requestId;
+      const rejection = optionalRequestId(input, "ACKNOWLEDGE_AFTERMATH");
+      if (rejection) return rejection;
       return accept(input as unknown as RuntimeCommand);
     }
 

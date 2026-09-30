@@ -198,9 +198,10 @@ export class WorkerRuntimeClient implements RuntimeClient {
     }
     if(response.type==="CHECKPOINT_LOADED"){
       const pendingLoad=this.#pendingLoad;
-      // A reply for an already-settled or superseded load is normal, not an
-      // error: ignore it rather than misattribute it to the live load. A
-      // superseded load's world was announced when it first landed.
+      // A reply that does not match the live load belongs to a settled or
+      // superseded restore, and is dropped rather than misattributed. Its
+      // world is deliberately NOT announced: a restore that was superseded or
+      // failed must not silently swap what the player is looking at.
       if(!pendingLoad||pendingLoad.requestId!==response.requestId)return;
       pendingLoad.resolve(response.snapshot);
       // This reply IS the announcement. The session does not also send a bare
