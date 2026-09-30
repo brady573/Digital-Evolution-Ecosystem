@@ -187,9 +187,12 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
-  # Class D, plus the Class G landscape captures on the same browser
-  # environment. One Chromium install and one preview server serve all three:
-  # splitting them would mean paying that setup again for no additional claim.
+  # Class D blocking browser validation. Visual captures (Class G) run in the
+  # separate `visual` job below on their own runner: a slow or failed capture
+  # must not delay or flip this merge-gating lane, and a software-GL failure
+  # here cannot fail the blocking checks. Each lane pays its own Chromium
+  # setup (~20s) for that isolation; the same-run explorer-dist artifact is
+  # shared, not rebuilt.
   smoke:
     runs-on: ubuntu-latest
     needs: build
@@ -243,9 +246,64 @@ jobs:
         env:
           DEE_BASE_URL: http://127.0.0.1:4173
           DEE_IMPACT_BASE: ${{ env.impact_base }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: validation-summary-${{ github.job }}
+          path: validation-telemetry/summary.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # Class G landscape captures (non-gating human-review evidence). Separate
+  # runner from `smoke` so capture timing can never gate merge readiness.
+  # Shares the same-run explorer-dist artifact; pays its own Chromium setup.
+  # Not in telemetry's needs; failure stays visible via the uploaded artifact.
+  visual:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/setup-project
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: playwright-${{ runner.os }}-
+      - run: pnpm ci:plan ci-visual
+        id: plan
+        env:
+          DEE_IMPACT_BASE: ${{ env.impact_base }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: steps.plan.outputs.ci_visual_has_work == 'true'
+        with:
+          name: explorer-dist
+          path: apps/explorer/dist
+      - run: pnpm exec playwright install --with-deps chromium
+        if: steps.plan.outputs.ci_visual_has_work == 'true'
+      - name: Start preview server for visual captures
+        if: steps.plan.outputs.ci_visual_has_work == 'true'
+        run: |
+          pnpm --filter @digital-evolution/explorer exec vite preview --host 127.0.0.1 --port 4173 >/tmp/digital-evolution-vite.log 2>&1 &
+          ready=0
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:4173 >/dev/null; then ready=1; break; fi
+            sleep 1
+          done
+          if [ "$ready" -ne 1 ]; then
+            echo "::error::vite preview did not become ready on 127.0.0.1:4173"
+            cat /tmp/digital-evolution-vite.log
+            exit 1
+          fi
+      - name: ci-visual
+        run: pnpm ci:shard ci-visual
+        env:
+          DEE_BASE_URL: http://127.0.0.1:4173
+          DEE_IMPACT_BASE: ${{ env.impact_base }}
       - name: Report capture coverage
         if: always()
-        run: cat testdata/visual/MANIFEST.json || echo "no captures, the browser lane had nothing to do for this change"
+        run: cat testdata/visual/MANIFEST.json || echo "no captures, the visual lane had nothing to do for this change"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
@@ -300,12 +358,21 @@ jobs:
           # silently disable the whole feature.
           fetch-depth: 0
       - uses: ./.github/actions/setup-project
+      - run: pnpm ci:plan ci-pixi
+        id: plan
+        env:
+          DEE_IMPACT_BASE: ${{ env.impact_base }}
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        if: steps.plan.outputs.ci_pixi_has_work == 'true'
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: playwright-${{ runner.os }}-
       - run: pnpm exec playwright install --with-deps chromium
+        if: steps.plan.outputs.ci_pixi_has_work == 'true'
+      - name: Pixi lane skipped by impact routing
+        if: steps.plan.outputs.ci_pixi_has_work != 'true'
+        run: echo "::notice title=Pixi lane skipped::No changed file can affect the Pixi spike, so Chromium was not installed and no captures were taken. The required checks are unaffected."
       - run: pnpm ci:shard ci-pixi
         env:
           DEE_IMPACT_BASE: ${{ env.impact_base }}
@@ -325,8 +392,12 @@ jobs:
 
   # Class E. Called as a reusable workflow rather than triggered separately, so
   # the platform evidence is part of this same invocation: it consumes the
-  # explorer-dist artifact this run's `build` job produced, and it cannot start
-  # until the gates below have passed for this exact commit.
+  # explorer-dist artifact this run's `build` job produced for this exact
+  # commit. Packaging starts as soon as the build candidate and the routing
+  # decision exist, in parallel with the remaining merge gates: the APK is
+  # candidate evidence while validation runs, and becomes accepted evidence
+  # for the revision only if the merge-gating product validation succeeds
+  # (see `android_acceptance` below).
   #
   # This replaces a gate that located the product run by SHA and polled for it.
   # That approach failed three different ways in review, and `needs:` states the
@@ -345,6 +416,7 @@ jobs:
     # not shared between jobs. The answer has to travel as a job output.
     outputs:
       android_apk_has_work: ${{ steps.plan.outputs.android_apk_has_work }}
+      android_runtime_has_work: ${{ steps.plan.outputs.android_runtime_has_work }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -363,21 +435,20 @@ jobs:
   android:
     name: android
     needs:
-      - quick
-      - sim-a
-      - sim-b
-      - sim-c
-      - sim-d
       - build
-      - smoke
-      - presentation
       - android_plan
     uses: ./.github/workflows/android.yml
-    # Gated on impact, not on whether the gates above happened to pass. Android
-    # packaging costs ~4m55s and is irrelevant to a change that cannot reach the
-    # packaged application. `if` is evaluated after `needs`, so the gate still
-    # runs first -- the change must be validated before we spend a minute
-    # deciding it does not need packaging.
+    # The impact decision is computed once in `android_plan` above and passed
+    # in: the reusable workflow reuses it instead of recomputing. Manual
+    # dispatches of android.yml (inputs empty) still compute internally.
+    with:
+      android_apk_has_work: ${{ needs.android_plan.outputs.android_apk_has_work }}
+      android_runtime_has_work: ${{ needs.android_plan.outputs.android_runtime_has_work }}
+    # Gated on impact and on the build candidate, not on the merge gates.
+    # Android packaging overlaps the deterministic/browser/presentation lanes:
+    # the APK is candidate evidence until `android_acceptance` (below) confirms
+    # the product gates passed for this revision. `if` is evaluated after
+    # `needs`, so without a build artifact there is nothing to package.
     #
     # The emulator runtime is paused, unconditionally: `android.yml` no longer
     # contains an `emulator-smoke` job, so there is nothing for the caller to
@@ -385,11 +456,19 @@ jobs:
     # question stays with #50 and is not decided here.
     #
     # Not a required check, and not on any required check's critical path, so
-    # skipping it cannot weaken a merge gate.
-    if: ${{ needs.build.result == 'success' && needs.smoke.result == 'success' && needs.android_plan.outputs.android_apk_has_work == 'true' }}
+    # packaging early cannot weaken a merge gate.
+    if: ${{ needs.build.result == 'success' && needs.android_plan.outputs.android_apk_has_work == 'true' }}
 
-  # Collects every runner's summary into one machine-readable file so "what ran,
-  # what was skipped, and what did it cost" is answerable from a single artifact.
+  # Collects every merge-gating runner's summary into one machine-readable file
+  # so "what ran, what was skipped, and what did it cost" is answerable from a
+  # single artifact.
+  #
+  # Only merge-gating jobs are dependencies: quick, sim-a..d, build, smoke
+  # (blocking browser), presentation (blocking contracts including the pixi-spike
+  # unit). Non-gating evidence -- visual captures, pixi captures (job
+  # `pixi-spike` runs shard `ci-pixi`, not unit `pixi-spike`), Android -- runs
+  # in parallel and is NOT awaited. A slow or failed capture must not delay or
+  # flip merge readiness; its failure stays visible in its own artifact.
   #
   # `android` is deliberately NOT a dependency, even though it runs in this same
   # invocation.
@@ -410,7 +489,7 @@ jobs:
   # which is when a skip reason is most worth reading.
   telemetry:
     runs-on: ubuntu-latest
-    needs: [quick, sim-a, sim-b, sim-c, sim-d, build, smoke, presentation, pixi-spike]
+    needs: [quick, sim-a, sim-b, sim-c, sim-d, build, smoke, presentation]
     if: always()
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -430,5 +509,49 @@ jobs:
         with:
           name: validation-summary
           path: validation-telemetry/summary.json
+          if-no-files-found: error
+          retention-days: 14
+
+  # Records whether an early-built APK is accepted evidence for this revision.
+  # The android lane packages the exact candidate while merge gates still run,
+  # so an APK can exist before (or despite) the product verdict. This job turns
+  # that ambiguity into a machine-readable record: accepted is true only when
+  # the APK assembled AND the required product gates passed for this revision.
+  # A failed gate with a built APK yields accepted:false -- visibly unaccepted
+  # evidence, never a product-validation claim.
+  #
+  # Not a required check and depended on by nothing: it observes after the
+  # fact. `if: always()` so the record exists even when a lane failed or the
+  # platform lane was skipped (both read as not accepted).
+  android_acceptance:
+    runs-on: ubuntu-latest
+    needs: [android, telemetry]
+    if: always()
+    steps:
+      - name: Record APK acceptance for this revision
+        env:
+          APK_RESULT: ${{ needs.android.result }}
+          TELEMETRY_RESULT: ${{ needs.telemetry.result }}
+          HEAD_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          accepted=false
+          if [ "$APK_RESULT" = "success" ] && [ "$TELEMETRY_RESULT" = "success" ]; then accepted=true; fi
+          mkdir -p android-acceptance
+          {
+            echo "{"
+            echo "  \"revision\": \"$HEAD_SHA\","
+            echo "  \"run_id\": \"$RUN_ID\","
+            echo "  \"apk\": \"$APK_RESULT\","
+            echo "  \"telemetry\": \"$TELEMETRY_RESULT\","
+            echo "  \"accepted\": $accepted,"
+            echo "  \"note\": \"An APK is accepted evidence for a revision only when the required product gates passed for that revision. accepted:false means candidate-only or absent, never validated.\""
+            echo "}"
+          } > android-acceptance/acceptance.json
+          cat android-acceptance/acceptance.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: android-acceptance
+          path: android-acceptance/acceptance.json
           if-no-files-found: error
           retention-days: 14

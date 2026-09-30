@@ -105,15 +105,21 @@ To see what CI will run, and what each check costs, use `pnpm validation:plan`. 
 
 `pnpm verify` is the blocking **repository** contract: every claim provable in Node at full strength. It is not the whole of CI, by design. The evidence classes are distinct and each needs its own environment:
 
-| Class | Question | Runs in | Gates merges? |
-|---|---|---|---|
-| A `invariant` | Is the repository structurally sound? | `pnpm verify:fast` | yes |
-| B `deterministic` | Is exact supported behaviour still exact? | `pnpm verify:simulation` | yes |
-| C `presentation` | Does the product build, and do presentation contracts hold? | `pnpm verify:presentation` | yes |
-| D `browser` | Does it work in a real browser? | `pnpm verify:browser`, CI | yes |
-| E `platform` | Does the Android packaging integrate? | CI `android` workflow | yes |
-| F `scientific` | What actually happens across seeds and horizons? | `pnpm verify:survey` | no — manual |
-| G `evidence` | Can a human inspect it? | `pnpm verify:evidence`, CI | no — evidence only |
+| Class | Question | Runs in | Lane-blocking? | Merge gate? |
+|---|---|---|---|---|
+| A `invariant` | Is the repository structurally sound? | `pnpm verify:fast` | yes | yes |
+| B `deterministic` | Is exact supported behaviour still exact? | `pnpm verify:simulation` | yes | yes |
+| C `presentation` | Does the product build, and do presentation contracts hold? | `pnpm verify:presentation` | yes | yes |
+| D `browser` | Does it work in a real browser? | `pnpm verify:browser`, CI | yes | yes for blocking units; visual captures no |
+| E `platform` | Does the Android packaging integrate? | CI `android` workflow | yes | no |
+| F `scientific` | What actually happens across seeds and horizons? | `pnpm verify:survey` | no — manual | no |
+| G `evidence` | Can a human inspect it? | `pnpm verify:evidence`, CI | no — evidence only | no |
+
+Lane-blocking means failure fails that validation lane; merge gate means
+successful completion is required for merge readiness (see `mergeGate` in
+`tools/validation/manifest.ts`). Android packaging is blocking but not
+merge-gating: a red APK fails the platform lane without holding up the
+merge-ready result.
 
 The classes are not interchangeable. A Node run cannot prove browser correctness, a single seed cannot prove emergence, and an APK assembling says nothing about behaviour. A check is only ever moved between classes when the claim it proves changes, and that is a design decision rather than a refactor.
 
