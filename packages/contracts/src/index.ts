@@ -2634,7 +2634,9 @@ export type RuntimeCommand =
       readonly requestId?: string;
     }
   | { readonly type: "ACKNOWLEDGE_AFTERMATH"; readonly requestId?: string }
-  | { readonly type: "LOAD_CHECKPOINT"; readonly checkpoint: SupportedUniverseCheckpoint }
+  /** Carries a request id so completion is correlated by identity, never
+   *  inferred from snapshot tick equality. */
+  | { readonly type: "LOAD_CHECKPOINT"; readonly requestId: string; readonly checkpoint: SupportedUniverseCheckpoint }
   | { readonly type: "REQUEST_CHECKPOINT"; readonly requestId: string }
   | { readonly type: "REQUEST_EXPORT"; readonly requestId: string };
 
@@ -2647,6 +2649,12 @@ export type RuntimeResponse =
    *  SNAPSHOT so the awaiting caller can settle: a snapshot alone only notifies
    *  subscribers and would leave the request pending forever. */
   | { readonly type: "AFTERMATH_ACKNOWLEDGED"; readonly requestId: string; readonly snapshot: RenderSnapshot }
+  /** Correlated reply for LOAD_CHECKPOINT. A bare SNAPSHOT cannot settle a load:
+   *  it only notifies subscribers, and matching on snapshot.tick would let any
+   *  live frame at the same tick satisfy the request. The request id is what
+   *  proves which request completed; the carried snapshot's tick proves where
+   *  the world landed. */
+  | { readonly type: "CHECKPOINT_LOADED"; readonly requestId: string; readonly snapshot: RenderSnapshot }
   | { readonly type: "ERROR"; readonly message: string; readonly requestId?: string };
 
 /* ------------------------------------------------------------------ *

@@ -104,6 +104,7 @@ export function validateRuntimeCommand(input: unknown): CommandValidation {
 
     case "LOAD_CHECKPOINT": {
       if (!isObject(input["checkpoint"])) return reject("LOAD_CHECKPOINT.checkpoint: expected an object");
+      if (typeof input["requestId"] !== "string") return reject("LOAD_CHECKPOINT.requestId: expected a string");
       return accept(input as unknown as RuntimeCommand);
     }
 

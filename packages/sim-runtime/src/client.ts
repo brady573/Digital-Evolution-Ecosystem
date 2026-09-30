@@ -29,7 +29,7 @@ export class WorkerRuntimeClient implements RuntimeClient {
   #worker:Worker;
   #listeners=new Set<(snapshot:RenderSnapshot)=>void>();
   #pending=new Map<string,{resolve:(value:any)=>void,reject:(reason?:any)=>void}>();
-  #pendingLoad:{expectedTick:number,resolve:(snapshot:RenderSnapshot)=>void,reject:(reason?:any)=>void,timer:ReturnType<typeof setTimeout>}|null=null;
+  #pendingLoad:{expectedTick:number,requestId:string,resolve:(snapshot:RenderSnapshot)=>void,reject:(reason?:any)=>void,timer:ReturnType<typeof setTimeout>}|null=null;
   #seq=0;
 
   constructor(){
@@ -59,8 +59,15 @@ export class WorkerRuntimeClient implements RuntimeClient {
       this.#pendingLoad=null;
     }
     return new Promise<RenderSnapshot>((resolve,reject)=>{
+      // Correlated by identity, never by tick equality. A requestId is minted
+      // here and matched against the worker's CHECKPOINT_LOADED reply, so an
+      // unrelated live frame at the same tick cannot satisfy this load. Task 4
+      // moves the resolution itself onto the pending-request map; until then
+      // the correlation is carried in the shape the session now guarantees.
+      const requestId=`load-${++this.#seq}`;
       this.#pendingLoad={
         expectedTick:checkpoint.createdTick,
+        requestId,
         resolve:(snapshot)=>{
           if(this.#pendingLoad){clearTimeout(this.#pendingLoad.timer);this.#pendingLoad=null}
           resolve(snapshot);
@@ -71,7 +78,7 @@ export class WorkerRuntimeClient implements RuntimeClient {
         },
         timer:setTimeout(()=>this.#failPendingLoad(new Error(`Restore timed out waiting for tick ${checkpoint.createdTick}`)),LOAD_TIMEOUT_MS),
       };
-      this.command({type:"LOAD_CHECKPOINT",checkpoint});
+      this.command({type:"LOAD_CHECKPOINT",requestId,checkpoint});
     });
   }
 

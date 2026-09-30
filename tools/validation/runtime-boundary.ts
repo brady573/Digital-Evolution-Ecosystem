@@ -13,7 +13,7 @@
  * Run: pnpm test:runtime-boundary
  */
 import assert from "node:assert/strict";
-import type { EngineConfig } from "@digital-evolution/contracts";
+import type { EngineConfig, RenderSnapshot } from "@digital-evolution/contracts";
 import { UniverseSession } from "@digital-evolution/sim-runtime";
 import {
   MAX_EVENT_SCAN_TICKS,
@@ -134,6 +134,9 @@ function testRequiredFieldsAreChecked() {
   rejects({ type: "RESOLVE_EVENT_DECISION", opportunityId: "a" }, "RESOLVE_EVENT_DECISION with no choiceId");
   rejects({ type: "LOAD_CHECKPOINT" }, "LOAD_CHECKPOINT with no checkpoint");
   rejects({ type: "LOAD_CHECKPOINT", checkpoint: "nope" }, "LOAD_CHECKPOINT with a non-object checkpoint");
+  // A load must carry request identity, so completion can never be inferred
+  // from snapshot tick equality.
+  rejects({ type: "LOAD_CHECKPOINT", checkpoint: {} }, "LOAD_CHECKPOINT with no requestId");
   rejects({ type: "REQUEST_CHECKPOINT" }, "REQUEST_CHECKPOINT with no requestId");
   rejects({ type: "REQUEST_EXPORT" }, "REQUEST_EXPORT with no requestId");
 
@@ -203,7 +206,49 @@ function testRefusedCommandLeavesTheSessionWhereItWas() {
   assert.equal(live.snapshot().population, liveSession().snapshot().population, "population is unchanged by refusals");
 }
 
+/**
+ * A load completes through a request-correlated reply, not a bare snapshot.
+ *
+ * Today LOAD_CHECKPOINT has no requestId at all, so there is nothing to
+ * correlate on and the client matches on tick equality instead.
+ */
+function testLoadCompletionIsCorrelatedByRequestId() {
+  const session = liveSession();
+  const live = session.snapshot();
+  const checkpoint = session.checkpoint();
+
+  const responses = session.handle({ type: "LOAD_CHECKPOINT", requestId: "load-7", checkpoint });
+  const correlated = responses.find((r) => r.type === "CHECKPOINT_LOADED");
+  // Guard against the vacuous case: a find() that matches nothing would make
+  // every assertion below silently skip if the reply type were mistyped.
+  assert.ok(correlated, "a load returns a correlated reply, not just a snapshot");
+  assert.notEqual(correlated!.type, "SNAPSHOT", "the correlated reply is not the bare snapshot it replaced");
+  assert.equal(
+    (correlated as { requestId: string }).requestId,
+    "load-7",
+    "the reply carries the request id the caller awaits",
+  );
+  assert.equal(
+    (correlated as { snapshot: RenderSnapshot }).snapshot.tick,
+    live.tick,
+    "the carried snapshot reports where the world landed",
+  );
+  // The render stream is unchanged: subscribers still get a bare snapshot.
+  assert.ok(
+    responses.some((r) => r.type === "SNAPSHOT"),
+    "subscribers are still notified with a snapshot",
+  );
+
+  // An un-correlated command cannot be a load.
+  assert.equal(
+    validateRuntimeCommand({ type: "LOAD_CHECKPOINT", checkpoint }).ok,
+    false,
+    "a load without a request id is refused at the boundary",
+  );
+}
+
 function main() {
+  testLoadCompletionIsCorrelatedByRequestId();
   testUnknownTagIsAStructuredFailure();
   testMalformedPayloadsAreRejected();
   testNumericFieldsAreBoundedIntegers();

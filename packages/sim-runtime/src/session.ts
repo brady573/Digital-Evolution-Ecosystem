@@ -761,7 +761,15 @@ export class UniverseSession {
             ?[{type:"AFTERMATH_ACKNOWLEDGED",requestId:command.requestId,snapshot},{type:"SNAPSHOT",snapshot}]
             :[{type:"SNAPSHOT",snapshot}];
         }
-        case "LOAD_CHECKPOINT":return[{type:"SNAPSHOT",snapshot:this.restore(command.checkpoint)}];
+        case "LOAD_CHECKPOINT":{
+          // restore() is unchanged: A3.3 preflight then A3.4 canonical
+          // validation, in that order, in the same place. A second restore path
+          // for worker convenience is forbidden. The correlated reply is what
+          // lets the awaiting caller settle; the trailing SNAPSHOT keeps the
+          // render stream and Explorer backpressure behaving exactly as before.
+          const snapshot=this.restore(command.checkpoint);
+          return[{type:"CHECKPOINT_LOADED",requestId:command.requestId,snapshot},{type:"SNAPSHOT",snapshot}];
+        }
         case "REQUEST_CHECKPOINT":return[{type:"CHECKPOINT",requestId:command.requestId,checkpoint:this.checkpoint()}];
         case "REQUEST_EXPORT":return[{type:"EXPORT",requestId:command.requestId,data:this.exportEvidence()}];
         // Unreachable while the guard above holds, and kept deliberately: it is
