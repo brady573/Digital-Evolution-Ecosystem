@@ -689,6 +689,21 @@ export const UNITS: readonly ValidationUnit[] = [
     claim:
       "GPU-dependent inspection images for the Pixi spike. Non-gating, because software-GL timing is not a property of the product.",
   },
+  {
+    id: "pixi-world-proof",
+    title: "pixiWorld scaffold browser proof",
+    script: "test:pixi-world",
+    cls: "evidence",
+    enforcement: "evidence",
+    mergeGate: false,
+    domains: withApparatus("contracts", "explorer"),
+    needs: [],
+    parallelSafe: false,
+    artifact: "pixi-world-proof-evidence",
+    baselineSeconds: 90,
+    claim:
+      "The inactive production scaffold boots WebGL2, follows resize, mints nearest-filtered textures, retires texture and source, and tears down. Non-gating lifecycle proof, independent of snapshot binding.",
+  },
 ];
 
 // --- Groups ------------------------------------------------------------------
@@ -781,7 +796,7 @@ export const GROUPS: readonly ValidationGroup[] = [
   {
     id: "evidence",
     title: "Human-review evidence generation",
-    unitIds: ["visual-capture", "pixi-capture"],
+    unitIds: ["visual-capture", "pixi-capture", "pixi-world-proof"],
     ci: false,
   },
   {
@@ -855,7 +870,7 @@ export const GROUPS: readonly ValidationGroup[] = [
   {
     id: "ci-pixi",
     title: "Pixi spike browser evidence",
-    unitIds: ["pixi-capture"],
+    unitIds: ["pixi-capture", "pixi-world-proof"],
     ci: true,
   },
 ];
