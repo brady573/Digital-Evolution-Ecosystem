@@ -17,8 +17,10 @@ migration/validation); M7 investigation work is on hold.
 ## Technology Stack
 
 TypeScript modular monorepo (pnpm workspaces). React + Vite explorer app,
-Canvas 2D production renderer with a PixiJS v8 spike (`tools/pixi-spike`).
-Capacitor Android packaging. No backend, no database, no network at runtime.
+Canvas2D maintained World renderer with PixiJS v8/WebGL2 approved for production,
+a validated spike/P0 preparation path, and an inactive unbound production-shaped
+`apps/explorer/src/pixiWorld` scaffold on main. Capacitor Android packaging.
+No backend, no database, no network at runtime.
 
 ## Architecture
 
@@ -48,8 +50,9 @@ None. Offline-first single-user product; no accounts, no network services.
 ## Important Decisions
 
 - M7 is ON HOLD until the pre-M7 fix gate closes (Tranches A–E + reconciliation).
-- PixiJS v8/WebGL2 approved as the production World renderer; migration follows
-  Tranche A/B contract stabilization.
+- PixiJS v8/WebGL2 approved as the production World renderer; production cutover
+  remains gated by accepted pre-M7 Tranches A/B/C and reconciliation against the
+  stabilized runtime/read-model boundary.
 - `L-` is reserved for genealogical lineage; analytical clades use `C-`.
 - Checkpoint compatibility is an allow-list: only named historical omissions
   migrate; everything else fails explicitly before becoming live state.
@@ -64,15 +67,17 @@ None. Offline-first single-user product; no accounts, no network services.
 All six product feature families exist and run: world lifecycle, deterministic
 engine core, explorer shell + time controls, events/clades/population story,
 experiments + evidence export, waste-field niche-construction slice. Tranche A
-hardening merged: A1 typed read models (`f5641c4`), A2 typed identity +
-namespace (`46ccfe9`), A3.1 migration rule table (`b5c2a36`), A3.2 pre-A2 ref
-migration + table correction (`821dd9f`).
+hardening has merged A1, A2, A3.1, A3.2, and A3.3; PR #70 established the strict
+runtime checkpoint schema 0.4. M4B P0 (PR #71), validation workflow optimization
+(PR #72), and an inactive/unbound production-shaped Pixi scaffold with browser
+proof (PR #73) are merged. The maintained World is still Canvas2D.
 
 ## Current Focus
 
-A3.3 checkpoint rejection + strict 0.4 schema (PR #70, unmerged — design
-acceptance gate §4.7 not yet granted, do not merge). Then A3.4 ordering proof,
-then A4–A6.
+A6 typed EvidenceExport provenance is open as PR #74. Remaining Tranche A work,
+including migrate-then-validate ordering and downstream runtime-boundary units,
+continues against current main. M7 remains on hold, and the merged Pixi scaffold
+does not release the production World cutover gate.
 
 ## Important Constraints
 
@@ -116,4 +121,4 @@ then A4–A6.
 
 ## Last Context Update
 
-2026-09-29 — filled from template; prior "Not defined yet" state retired.
+2026-09-30 — reconciled against current main after PRs #70–#73; PR #74 remains open.
