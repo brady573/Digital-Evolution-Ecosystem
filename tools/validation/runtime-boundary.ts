@@ -267,16 +267,58 @@ function testRejectedCommandMutatesNothingButStillReleasesBackpressure() {
   assert.equal(interpretive(released), beforeInterpretation, "the released snapshot carries unmutated interpretation");
 }
 
-/** A refused command must not have advanced the world, verified through the
- *  session API too - the boundary guard, not only the response array. */
-function testRefusedCommandLeavesTheSessionWhereItWas() {
-  const live = liveSession();
-  const before = live.snapshot().tick;
-  for (const bad of [Number.NaN, -1, 1.5, MAX_SLICE_TICKS + 1]) {
-    live.handle({ type: "ADVANCE_TICKS", ticks: bad });
-    assert.equal(live.snapshot().tick, before, `session did not advance for ticks ${String(bad)}`);
+/**
+ * A refused command reports a structured failure and leaves the world alone.
+ *
+ * The response shape is the load-bearing assertion. "The tick did not move"
+ * alone would pass even with the guard removed, because the pre-existing
+ * coercion already made NaN a no-op (Math.floor(NaN) is NaN, so the loop never
+ * ran) and -1 a no-op (Math.max(0, -1) is 0). Only the ERROR distinguishes
+ * "refused" from "silently ignored", and only a refused count is what keeps an
+ * unbounded count from reaching the loop at all.
+ */
+function testRefusedCommandIsReportedAndLeavesTheSessionWhereItWas() {
+  const cases: [string, number][] = [
+    ["NaN", Number.NaN],
+    ["-1", -1],
+    ["1.5", 1.5],
+    [`${MAX_SLICE_TICKS + 1} (out of range)`, MAX_SLICE_TICKS + 1],
+  ];
+
+  for (const [label, bad] of cases) {
+    const live = liveSession();
+    const before = live.snapshot().tick;
+    const responses = live.handle({ type: "ADVANCE_TICKS", ticks: bad });
+
+    assert.equal(responses[0]!.type, "ERROR", `ticks ${label} is refused with a structured failure`);
+    assert.match(
+      (responses[0] as { message: string }).message,
+      /ADVANCE_TICKS\.ticks/,
+      `ticks ${label} names the offending field`,
+    );
+    assert.equal(live.snapshot().tick, before, `session did not advance for ticks ${label}`);
   }
-  assert.equal(live.snapshot().population, liveSession().snapshot().population, "population is unchanged by refusals");
+
+  // The event-scan path is driven through the same boundary, not only the
+  // validator, so AC2 covers "unbounded loop" for both numeric commands.
+  for (const [label, bad] of [
+    ["NaN", Number.NaN],
+    ["0", 0],
+    ["2.5", 2.5],
+    [`${MAX_EVENT_SCAN_TICKS + 1} (out of range)`, MAX_EVENT_SCAN_TICKS + 1],
+  ] as [string, number][]) {
+    const live = liveSession();
+    const before = live.snapshot().tick;
+    const responses = live.handle({ type: "RUN_TO_NEXT_EVENT", maxTicks: bad });
+
+    assert.equal(responses[0]!.type, "ERROR", `maxTicks ${label} is refused with a structured failure`);
+    assert.match(
+      (responses[0] as { message: string }).message,
+      /RUN_TO_NEXT_EVENT\.maxTicks/,
+      `maxTicks ${label} names the offending field`,
+    );
+    assert.equal(live.snapshot().tick, before, `event scan did not run for maxTicks ${label}`);
+  }
 }
 
 /**
@@ -295,7 +337,13 @@ function testLoadCompletionIsCorrelatedByRequestId() {
   // Guard against the vacuous case: a find() that matches nothing would make
   // every assertion below silently skip if the reply type were mistyped.
   assert.ok(correlated, "a load returns a correlated reply, not just a snapshot");
-  assert.notEqual(correlated!.type, "SNAPSHOT", "the correlated reply is not the bare snapshot it replaced");
+  // The guard above is what makes this non-vacuous: a find() that matched
+  // nothing would let every assertion below skip. `type` cannot be "SNAPSHOT"
+  // inside this branch, so the real risk is the branch not being taken at all.
+  assert.ok(
+    responses.filter((r) => r.type === "SNAPSHOT").length === 1,
+    "the bare snapshot subscribers receive is still exactly one",
+  );
   assert.equal(
     (correlated as { requestId: string }).requestId,
     "load-7",
@@ -561,10 +609,14 @@ async function testFatalWorkerFailureSettlesEverything() {
     // rather than inferred from a late reply being harmless.
     assert.equal(client.pendingRequestCount, 0, `${kind} retains no pending-request entries`);
 
+    // A reply arriving after the fatal event must be inert, not a second
+    // settlement. Asserted via the pending map, not by re-checking `settled`
+    // on a promise that cannot settle twice.
+    assert.equal(client.pendingRequestCount, 0, `${kind} left nothing a late reply could settle`);
     fake.deliver({ type: "CHECKPOINT", requestId: "r-1", checkpoint: {} });
     fake.deliver({ type: "SNAPSHOT", snapshot: replySnapshot(1) });
     await tick();
-    assert.equal(a.state.settled, true, `${kind} leaves no request able to settle twice`);
+    assert.equal(client.pendingRequestCount, 0, `${kind} a late reply creates no new pending entry`);
   }
 }
 
@@ -596,7 +648,7 @@ async function testDestroySettlesAndRetainsNothing() {
   fake.deliver({ type: "CHECKPOINT", requestId: "r-1", checkpoint: {} });
   fake.deliver({ type: "SNAPSHOT", snapshot: replySnapshot(9) });
   await tick();
-  assert.equal(a.state.settled, true, "no request settles twice after destroy");
+  assert.equal(client.pendingRequestCount, 0, "a late reply after destroy creates no pending entry");
 }
 
 /** A structured command failure settles exactly its own request. */
@@ -625,7 +677,7 @@ async function testStructuredFailureSettlesOnlyItsOwnRequest() {
   fake.deliver({ type: "ERROR", message: "nobody is waiting", requestId: "r-does-not-exist" });
   await tick();
   assert.equal(other.state.settled, false, "an error for an unknown request id changes nothing");
-  assert.equal(failing.state.settled, true, "and does not re-settle a settled request");
+  assert.equal(client.pendingRequestCount, 1, "and adds no entry for the unknown id");
 }
 
 /** Normal success still works: a request settles exactly once on its reply. */
@@ -642,7 +694,90 @@ async function testNormalSuccessStillSettles() {
   assert.equal(request.state.value, checkpoint, "and resolves with the payload the worker sent");
 }
 
+/**
+ * A structured failure addressed to a load must reject THAT load, with the
+ * worker's real reason.
+ *
+ * Regression guard. Task 3 made LOAD_CHECKPOINT.requestId required, so a failed
+ * restore's ERROR always carries a requestId. The client tracked the load in
+ * #pendingLoad, not #pending, so the error matched neither branch: it was
+ * dropped, and the load hung for its full 10s timeout before rejecting with
+ * "Restore timed out" instead of the actual reason. Before Task 3 the command
+ * had no requestId, so the no-requestId path was exactly how a failed restore
+ * surfaced its error.
+ */
+async function testAFailedLoadRejectsWithTheWorkersReason() {
+  const fake = new FakeWorker();
+  const client = new WorkerRuntimeClient(() => fake, { requestTimeoutMs: 10_000 });
+  const load = tracked(client.loadCheckpoint(realCheckpoint()));
+  const requestId = (fake.posted.at(-1) as { requestId: string }).requestId;
+
+  fake.deliver({
+    type: "ERROR",
+    requestId,
+    message: "checkpoint rejected: experiment.state.props.resources — expected a finite element",
+  });
+  await tick();
+
+  assert.equal(load.state.settled, true, "a failed load settles rather than hanging");
+  assert.match(
+    String((load.state.error as Error).message),
+    /checkpoint rejected/,
+    "the load rejects with the worker's reason, not a generic timeout",
+  );
+  assert.doesNotMatch(
+    String((load.state.error as Error).message),
+    /timed out/i,
+    "and specifically not the timeout it used to fall back to",
+  );
+}
+
+/**
+ * The inverse: an error belonging to a DIFFERENT request must not fail an
+ * in-flight load. A refused fire-and-forget command produces an error with no
+ * requestId, and that must not be misattributed to a restore.
+ */
+async function testUnrelatedErrorDoesNotFailALoad() {
+  const fake = new FakeWorker();
+  const client = new WorkerRuntimeClient(() => fake, { requestTimeoutMs: 10_000 });
+  const load = tracked(client.loadCheckpoint(realCheckpoint()));
+
+  // A refused ADVANCE_TICKS: rejected at the boundary, reported with no id.
+  fake.deliver({ type: "ERROR", message: "ADVANCE_TICKS.ticks: NaN is not an integer in [0, 2000]" });
+  await tick();
+  assert.equal(load.state.settled, false, "an unrelated request-less error does not fail an in-flight load");
+
+  const requestId = (fake.posted.at(-1) as { requestId: string }).requestId;
+  fake.deliver({ type: "CHECKPOINT_LOADED", requestId, snapshot: snap(3) });
+  await tick();
+  assert.equal(load.state.settled, true, "the load still completes on its own correlated reply");
+}
+
+/**
+ * A fatal worker failure drops subscribers, because a dead worker can never
+ * deliver another snapshot: keeping the listeners would leave the UI holding
+ * subscription objects only a replacement client could satisfy. This is a
+ * behaviour change from the previous code, so it is pinned rather than assumed.
+ */
+async function testFatalFailureDropsSubscribers() {
+  const fake = new FakeWorker();
+  const client = new WorkerRuntimeClient(() => fake, { requestTimeoutMs: 10_000 });
+  const seen: number[] = [];
+  client.subscribe((s) => seen.push(s.tick));
+
+  fake.deliver({ type: "SNAPSHOT", snapshot: snap(1) });
+  assert.deepEqual(seen, [1], "subscribers are notified while the worker lives");
+
+  fake.fail("error", "synthetic error");
+  fake.deliver({ type: "SNAPSHOT", snapshot: snap(2) });
+  await tick();
+  assert.deepEqual(seen, [1], "a snapshot after a fatal failure reaches no subscriber");
+}
+
 async function main() {
+  await testFatalFailureDropsSubscribers();
+  await testAFailedLoadRejectsWithTheWorkersReason();
+  await testUnrelatedErrorDoesNotFailALoad();
   await testNormalSuccessStillSettles();
   await testStructuredFailureSettlesOnlyItsOwnRequest();
   await testEveryRequestHasABoundedLifetime();
@@ -659,7 +794,7 @@ async function main() {
   testNumericFieldsAreBoundedIntegers();
   testRequiredFieldsAreChecked();
   testRejectedCommandMutatesNothingButStillReleasesBackpressure();
-  testRefusedCommandLeavesTheSessionWhereItWas();
+  testRefusedCommandIsReportedAndLeavesTheSessionWhereItWas();
   console.log("runtime boundary validation: PASS");
 }
 

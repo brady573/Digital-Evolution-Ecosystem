@@ -221,18 +221,32 @@ export class WorkerRuntimeClient implements RuntimeClient {
       return;
     }
     if(response.type==="ERROR"){
-      // A fire-and-forget command (e.g. LOAD_CHECKPOINT) reports errors
-      // without a requestId. Attribute such errors to a pending restore so
-      // failures surface explicitly instead of falling back silently.
-      if(!response.requestId)this.#failPendingLoad(new Error(response.message));
+      const failure=new Error(response.message);
+      // Attribute by identity first. A load is tracked in #pendingLoad, not
+      // #pending, and a failed restore's error always carries the load's own
+      // requestId now that the field is required. Looking only in #pending would
+      // drop it, and the load would hang until its timeout reported a generic
+      // "restore timed out" instead of the real reason.
       if(response.requestId){
+        const pendingLoad=this.#pendingLoad;
+        if(pendingLoad&&pendingLoad.requestId===response.requestId){
+          this.#failPendingLoad(failure);
+          return;
+        }
         const pending=this.#pending.get(response.requestId);
         if(pending){
           this.#pending.delete(response.requestId);
           clearTimeout(pending.timer);
-          pending.reject(new Error(response.message));
+          pending.reject(failure);
+          return;
         }
-      }else console.error(response.message);
+        // Addressed to a request that has already settled or been superseded.
+        return;
+      }
+      // No requestId: a fire-and-forget command failed. It belongs to no
+      // request, so it must not be misattributed to an in-flight load; report
+      // it and leave every pending request alone.
+      console.error(response.message);
     }
   }
 }
