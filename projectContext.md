@@ -79,10 +79,11 @@ proof (PR #73) are merged. The maintained World is still Canvas2D.
 
 ## Current Focus
 
-A6 typed EvidenceExport provenance merged as PR #74, and the canonical restore
-ordering unit (A3.4, PR #76) merged after it. Remaining Tranche A work is the
-downstream runtime-boundary units against current main. M7 remains on hold, and
-the merged Pixi scaffold does not release the production World cutover gate.
+A6 typed EvidenceExport provenance merged as PR #74, the canonical restore
+ordering unit (A3.4) as PR #76, and the worker-transport trust boundary (A7,
+issue #54 items 3-5) after it. Remaining Tranche A work is issue #54 item 6 and
+beyond, which needs its own bounded handoff. M7 remains on hold, and the merged
+Pixi scaffold does not release the production World cutover gate.
 
 ## Important Constraints
 
