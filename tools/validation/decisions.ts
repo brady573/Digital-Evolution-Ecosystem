@@ -193,8 +193,8 @@ function testVerticalSliceAndGate() {
   );
   // The policy saw the same context the evidence supports: contextSnapshot must
   // match the triggering observed event, not zeros from a wrong metrics path.
-  const exported = session.exportEvidence() as any;
-  const triggering = (exported.observed_events as any[]).find((e: any) => e.eventId === pending.sourceEventId);
+  const exported = session.exportEvidence();
+  const triggering = exported.observed_events.find((e) => e.eventId === pending.sourceEventId);
   assert.ok(triggering, "triggering observed event is exported");
   assert.equal(
     pending.contextSnapshot.cEnergyShare,
@@ -317,8 +317,8 @@ function testForwardCompatPolicyVersion() {
   assert.equal(natural.policyVersion, DECISION_POLICY_VERSION, "new opportunity stamped current");
   assert.equal(
     natural.contextSnapshot.cEnergyShare,
-    ((session.exportEvidence() as any).observed_events as any[]).find((e: any) => e.eventId === natural.sourceEventId)
-      .evidence.c_energy_share,
+    session.exportEvidence().observed_events.find((e) => e.eventId === natural.sourceEventId)!.evidence
+      .c_energy_share,
     "second context matches its triggering evidence",
   );
   session.resolveEventDecision(natural.opportunityId, "drought-a");
@@ -427,10 +427,10 @@ function testCheckpointRoundTripAndMigration() {
 function testEvidenceSeparation() {
   const { session, pending } = atDecision();
   session.resolveEventDecision(pending.opportunityId, "drought-b");
-  const evidence = session.exportEvidence() as any;
+  const evidence = session.exportEvidence();
   assert.equal(Array.isArray(evidence.observed_events), true, "export includes observed events");
   assert.ok(
-    evidence.observed_events.some((e: any) => e.eventId === pending.sourceEventId),
+    evidence.observed_events.some((e) => e.eventId === pending.sourceEventId),
     "the triggering observed event is exported",
   );
   assert.equal(evidence.player_decisions.resolutions.length, 1, "export includes the player command");
@@ -453,7 +453,7 @@ function testDeterministicReplay() {
     assert.ok(pending, "replay run reached the same decision");
     session.resolveEventDecision(pending.opportunityId, "drought-a");
     session.advance(250);
-    return { session, pending, evidence: session.exportEvidence() as any };
+    return { session, pending, evidence: session.exportEvidence() };
   };
   const a = derive();
   const b = derive();
@@ -465,8 +465,8 @@ function testDeterministicReplay() {
     "same command sequence yields an identical command record",
   );
   assert.equal(
-    JSON.stringify(a.evidence.observed_events.map((e: any) => e.eventId)),
-    JSON.stringify(b.evidence.observed_events.map((e: any) => e.eventId)),
+    JSON.stringify(a.evidence.observed_events.map((e) => e.eventId)),
+    JSON.stringify(b.evidence.observed_events.map((e) => e.eventId)),
     "same observed events in the same order",
   );
   // The replayed trigger must match the fixture-derived decision exactly.

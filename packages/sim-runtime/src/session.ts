@@ -7,6 +7,7 @@ import type {
   DecisionContext,
   DecisionResolution,
   EngineConfig,
+  EvidenceExport,
   InterventionSpec,
   PendingDecision,
   RenderSnapshot,
@@ -51,6 +52,7 @@ import {
   isSupportedIntervention,
   selectCatalystWindow,
 } from "@digital-evolution/sim-decisions";
+import { readInjectedSource, resolveSourceProvenance } from "./provenance";
 
 /**
  * The schema this build writes. DERIVED from contracts' single declaration, not
@@ -672,9 +674,15 @@ export class UniverseSession {
     return this.snapshot();
   }
 
-  exportEvidence(){
+  exportEvidence():EvidenceExport{
     if(!this.#experiment)throw new Error("Universe has not been created");
+    // Envelope first: the engine output spreads flat underneath (its
+    // `format_version` is a different key), so these two added blocks can
+    // never be overwritten by the spread that follows.
+    const injected=readInjectedSource();
     return{
+      export_format_version:1,
+      provenance:resolveSourceProvenance(injected.commit,injected.dirty),
       ...this.#experiment.out(),
       repository_analysis:this.#analysis.export(),
       // Observed evidence and player action stay separate representations.

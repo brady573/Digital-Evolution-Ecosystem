@@ -7,7 +7,7 @@
   },
   "scripts": {
     "typecheck": "pnpm exec tsc -p packages/contracts/tsconfig.json --noEmit --pretty false && pnpm exec tsc -p packages/sim-core/tsconfig.json --noEmit --pretty false && pnpm exec tsc -p packages/sim-analysis/tsconfig.json --noEmit --pretty false && pnpm exec tsc -p packages/sim-decisions/tsconfig.json --noEmit --pretty false && pnpm exec tsc -p packages/sim-runtime/tsconfig.json --noEmit --pretty false && pnpm exec tsc -p packages/phenotype/tsconfig.json --noEmit --pretty false && pnpm exec tsc -p apps/explorer/tsconfig.json --noEmit --pretty false",
-    "build": "pnpm --filter @digital-evolution/explorer build",
+    "build": "pnpm --filter @digital-evolution/explorer build && tsx tools/validation/provenance-build.ts",
     "dev": "pnpm --filter @digital-evolution/explorer dev",
     "verify": "tsx tools/validation/run.ts verify",
     "verify:fast": "tsx tools/validation/run.ts group fast",
@@ -46,6 +46,7 @@
     "test:plated": "tsx tools/plated-proof/validate.ts && tsx tools/plated-proof/geo-validate.ts",
     "test:pixi-spike": "tsx tools/pixi-spike/validate.ts",
     "test:pixi-p0": "tsx tools/validation/pixi-p0.ts",
+    "test:pixi-world": "tsx tools/pixi-world-proof/capture.ts",
     "test:provenance": "tsx tools/validation/provenance.ts",
     "spike:capture": "tsx tools/pixi-spike/capture.ts",
     "spike:dev": "pnpm --filter @digital-evolution/explorer exec vite ../../tools/pixi-spike --port 5193 --strictPort --host 127.0.0.1",

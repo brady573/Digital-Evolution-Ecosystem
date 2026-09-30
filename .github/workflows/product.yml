@@ -249,6 +249,12 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
+          name: pixi-world-proof-evidence
+          path: testdata/pixi-world-proof
+          retention-days: 14
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
           name: validation-summary-${{ github.job }}
           path: validation-telemetry/summary.json
           if-no-files-found: ignore
