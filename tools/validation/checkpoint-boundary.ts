@@ -254,7 +254,7 @@ lines.push(
   `- **What A3.3 proves:** a named historical absence is permitted according to its supported schema; a present value is validated regardless of the schema it arrived under; and a payload the preflight refuses cannot become live simulation state, observer state, or a running session.`,
 );
 lines.push(
-  "- **What this boundary does not claim.** It claims that each persisted field class is either validated by the preflight, covered by a named historical-absence rule, validated by a lower boundary before live state, or deliberately out of scope with the reason stated above. It does not claim canonical `migrate → validate` ordering, which is A3.4's separate structural property, and it does not claim that any particular historical binary's checkpoint opens under the current engine.",
+  "- **What this boundary does not claim.** It claims that each persisted field class is either validated by the preflight, covered by a named historical-absence rule, validated by a lower boundary before live state, or deliberately out of scope with the reason stated above. It now states the ordering A3.4 made true: **source preflight → canonical migration → current non-simulation validation → restore**, and it does not claim that any particular historical binary's checkpoint opens under the current engine.",
 );
 
 if (MIGRATION_RULE_BY_ID.size !== CHECKPOINT_MIGRATION_RULES.length) {
