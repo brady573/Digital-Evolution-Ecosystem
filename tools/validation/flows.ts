@@ -268,6 +268,33 @@ function testExportCarriesProvenance() {
   console.log("export carries provenance: PASS");
 }
 
+/**
+ * A6 pending-decision pin (plan Review-Focus contract): cleanliness is
+ * source-state only. Drive the session — same seed and config as the
+ * decisions suite's fixture derivation, no new fixture — until the pause
+ * gate stops on a real pending decision, then export with no cast. The
+ * export must record the pending decision AND still read as unknown under
+ * tsx: a pending decision never dirties an export.
+ */
+function testExportPendingDecisionStaysUnknown() {
+  const session = new UniverseSession();
+  session.create(config(FIXTURE_SEED));
+  let pending = session.snapshot().pendingDecision;
+  for (let i = 0; i < 30 && !pending; i++) {
+    pending = session.advance(5000).pendingDecision;
+  }
+  assert.ok(pending, "universe reached a pending decision without resolving");
+  const exported: EvidenceExport = session.exportEvidence();
+  assert.ok(exported.player_decisions.pending, "the export records the pending decision");
+  assert.equal(
+    exported.provenance.cleanliness,
+    "unknown",
+    "a pending decision never dirties an export under tsx",
+  );
+  assert.equal(exported.provenance.revision.git_commit, null, "an unknown revision carries a null commit");
+  console.log("export pending decision stays unknown: PASS");
+}
+
 function testProcessActivations() {
   // Stage 2: execution attribution per process. Deterministic across
   // identical runs; all three processes execute in a live world; counts
@@ -1446,4 +1473,5 @@ testBoundaryGeneratorIsDerived();
 testFlowEvidence();
 testExportProvenanceTriState();
 testExportCarriesProvenance();
+testExportPendingDecisionStaysUnknown();
 console.log(`flow validation: PASS (checkpoint schema ${CHECKPOINT_SCHEMA_VERSION}, engine ${ENGINE_VERSION})`);
