@@ -767,8 +767,14 @@ export class UniverseSession {
           // for worker convenience is forbidden. The correlated reply is what
           // lets the awaiting caller settle; the trailing SNAPSHOT keeps the
           // render stream and Explorer backpressure behaving exactly as before.
+          //
+          // One message, not two. postMessage delivers each as its own task, so a
+          // trailing bare SNAPSHOT would reach subscribers AFTER the load's
+          // .then() had run - and Explorer clears its status string on every
+          // snapshot, wiping "Checkpoint restored". The client notifies
+          // subscribers from this one correlated reply instead.
           const snapshot=this.restore(command.checkpoint);
-          return[{type:"CHECKPOINT_LOADED",requestId:command.requestId,snapshot},{type:"SNAPSHOT",snapshot}];
+          return[{type:"CHECKPOINT_LOADED",requestId:command.requestId,snapshot}];
         }
         case "REQUEST_CHECKPOINT":return[{type:"CHECKPOINT",requestId:command.requestId,checkpoint:this.checkpoint()}];
         case "REQUEST_EXPORT":return[{type:"EXPORT",requestId:command.requestId,data:this.exportEvidence()}];

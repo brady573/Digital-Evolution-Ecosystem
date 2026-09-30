@@ -199,9 +199,16 @@ export class WorkerRuntimeClient implements RuntimeClient {
     if(response.type==="CHECKPOINT_LOADED"){
       const pendingLoad=this.#pendingLoad;
       // A reply for an already-settled or superseded load is normal, not an
-      // error: ignore it rather than misattribute it to the live load.
+      // error: ignore it rather than misattribute it to the live load. A
+      // superseded load's world was announced when it first landed.
       if(!pendingLoad||pendingLoad.requestId!==response.requestId)return;
       pendingLoad.resolve(response.snapshot);
+      // This reply IS the announcement. The session does not also send a bare
+      // SNAPSHOT for a restore, because postMessage delivers each message as
+      // its own task: a second delivery would reach subscribers after the load's
+      // .then() had run, and Explorer clears its status string on every snapshot,
+      // wiping "Checkpoint restored".
+      for(const listener of this.#listeners)listener(response.snapshot);
       return;
     }
     if(response.type==="DECISION_RESOLVED"||response.type==="AFTERMATH_ACKNOWLEDGED"){

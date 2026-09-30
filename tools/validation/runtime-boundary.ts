@@ -340,9 +340,12 @@ function testLoadCompletionIsCorrelatedByRequestId() {
   // The guard above is what makes this non-vacuous: a find() that matched
   // nothing would let every assertion below skip. `type` cannot be "SNAPSHOT"
   // inside this branch, so the real risk is the branch not being taken at all.
-  assert.ok(
-    responses.filter((r) => r.type === "SNAPSHOT").length === 1,
-    "the bare snapshot subscribers receive is still exactly one",
+  // A restore announces its world through this reply alone, so no separate bare
+  // snapshot accompanies it.
+  assert.equal(
+    responses.filter((r) => r.type === "SNAPSHOT").length,
+    0,
+    "a restore does not also send a bare snapshot",
   );
   assert.equal(
     (correlated as { requestId: string }).requestId,
@@ -354,11 +357,8 @@ function testLoadCompletionIsCorrelatedByRequestId() {
     live.tick,
     "the carried snapshot reports where the world landed",
   );
-  // The render stream is unchanged: subscribers still get a bare snapshot.
-  assert.ok(
-    responses.some((r) => r.type === "SNAPSHOT"),
-    "subscribers are still notified with a snapshot",
-  );
+  // Subscribers are notified from the client's handling of this reply (see
+  // testARestoreAnnouncesTheWorldExactlyOnce), not from a second response here.
 
   // An un-correlated command cannot be a load.
   assert.equal(
@@ -754,6 +754,38 @@ async function testUnrelatedErrorDoesNotFailALoad() {
 }
 
 /**
+ * A restore delivers the restored world to subscribers exactly once.
+ *
+ * Regression guard for the CI failure on PR #84 (browser-smoke timed out waiting
+ * for "Checkpoint restored"). Cause: postMessage delivers each message as its
+ * own task, so the trailing bare SNAPSHOT ran AFTER the load's .then() had set
+ * the status. Explorer's subscribe callback runs setStatus("") on every snapshot,
+ * so that second delivery wiped "Checkpoint restored" and the UI showed nothing.
+ *
+ * The trailing SNAPSHOT was also redundant: the correlated reply already carries
+ * the same snapshot, and the client resolved the load from it. Now the session
+ * sends only CHECKPOINT_LOADED and the client notifies subscribers from that one
+ * message, so the restore announces the world once and the status survives.
+ */
+async function testARestoreAnnouncesTheWorldExactlyOnce() {
+  const fake = new FakeWorker();
+  const client = new WorkerRuntimeClient(() => fake, { requestTimeoutMs: 10_000 });
+  const seen: number[] = [];
+  client.subscribe((s) => seen.push(s.tick));
+
+  const load = tracked(client.loadCheckpoint(realCheckpoint()));
+  const requestId = (fake.posted.at(-1) as { requestId: string }).requestId;
+
+  // Exactly the single message the worker now posts for a successful restore.
+  fake.deliver({ type: "CHECKPOINT_LOADED", requestId, snapshot: snap(4242) });
+  await tick();
+
+  assert.equal(load.state.settled, true, "the load settles on its correlated reply");
+  assert.equal((load.state.value as RenderSnapshot).tick, 4242, "and resolves to the restored world");
+  assert.deepEqual(seen, [4242], "the restore notifies subscribers exactly once");
+}
+
+/**
  * A fatal worker failure drops subscribers, because a dead worker can never
  * deliver another snapshot: keeping the listeners would leave the UI holding
  * subscription objects only a replacement client could satisfy. This is a
@@ -775,6 +807,7 @@ async function testFatalFailureDropsSubscribers() {
 }
 
 async function main() {
+  await testARestoreAnnouncesTheWorldExactlyOnce();
   await testFatalFailureDropsSubscribers();
   await testAFailedLoadRejectsWithTheWorkersReason();
   await testUnrelatedErrorDoesNotFailALoad();
