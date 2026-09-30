@@ -1,6 +1,7 @@
 import type { Cleanliness, SourceProvenance } from "@digital-evolution/contracts";
-// Constants-only module (no biology): version strings, never the engine.
-import { APP_VERSION, ENGINE_VERSION, EXPORT_FORMAT_VERSION } from "../../sim-core/src/version";
+// Version facts via the package's public constants export (the boundary):
+// values only, never the engine module graph directly.
+import { APP_VERSION, ENGINE_VERSION, EXPORT_FORMAT_VERSION } from "@digital-evolution/sim-core";
 
 // Build-time injected source facts. Vite replaces these textually via the
 // `define` in apps/explorer/vite.config.ts; the `declare` emits nothing, so

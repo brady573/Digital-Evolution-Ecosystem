@@ -430,7 +430,7 @@ export const UNITS: readonly ValidationUnit[] = [
     parallelSafe: false,
     artifact: "explorer-dist",
     baselineSeconds: 1,
-    claim: "The product compiles, and the resulting bundle is the one every browser lane tests.",
+    claim: "The product compiles, the resulting bundle is the one every browser lane tests, and the bundle carries the injected source revision facts (commit literal present, no raw injected identifiers).",
   },
   {
     id: "phenotype",
