@@ -517,20 +517,20 @@ const MIGRATION_ABSORBER_PROBES: Readonly<Record<string, { file: string; probe: 
     probe: /export const migrateEntityRefs = /,
   },
   "analysis-cuse-guild-absent-reads-as-constructor-default": {
-    file: "packages/sim-analysis/src/index.ts",
-    probe: /const observer=new EcologyObserver\(\);[\s\S]{0,120}Object\.assign\(observer,/,
+    file: "packages/contracts/src/index.ts",
+    probe: /for \(const key of \["dep", "niche"\] as const\) \{\s*if \(migrated\[key\] === undefined\) \{\s*migrated\[key\] = /,
   },
   "analysis-niche-construction-absent-reads-as-constructor-default": {
-    file: "packages/sim-analysis/src/index.ts",
-    probe: /const observer=new EcologyObserver\(\);[\s\S]{0,120}Object\.assign\(observer,/,
+    file: "packages/contracts/src/index.ts",
+    probe: /for \(const key of \["dep", "niche"\] as const\) \{\s*if \(migrated\[key\] === undefined\) \{\s*migrated\[key\] = /,
   },
   "control-analysis-cuse-guild-absent": {
-    file: "packages/sim-analysis/src/index.ts",
-    probe: /const observer=new EcologyObserver\(\);[\s\S]{0,120}Object\.assign\(observer,/,
+    file: "packages/contracts/src/index.ts",
+    probe: /controlAnalysis: control === null \|\| control === undefined \? null : canonicalObserver\(control\)/,
   },
   "control-analysis-niche-construction-absent": {
-    file: "packages/sim-analysis/src/index.ts",
-    probe: /const observer=new EcologyObserver\(\);[\s\S]{0,120}Object\.assign\(observer,/,
+    file: "packages/contracts/src/index.ts",
+    probe: /controlAnalysis: control === null \|\| control === undefined \? null : canonicalObserver\(control\)/,
   },
 };
 

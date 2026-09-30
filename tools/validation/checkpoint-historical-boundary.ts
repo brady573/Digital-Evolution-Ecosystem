@@ -933,6 +933,52 @@ export function testHistoricalCheckpointBoundary(): void {
       `even 0.2 cannot save a present invalid ${field}`,
     );
   }
+
+  // --- A3.4 Task 4: who actually absorbs an absent detector sub-state ---------
+  //
+  // The observer constructor may remain an implementation fallback, but a
+  // preflighted payload always reaches the canonicalizer first, so the
+  // constructor is no longer the declared compatibility mechanism. This is the
+  // claim the `absorber` field exists to keep honest, so the mechanism field and
+  // the prose naming a mechanism have to agree.
+  //
+  // The plan's own regex (/freshly constructed observer/) matches nothing in the
+  // current text, which says "a fresh observer" and "freshly constructed dep
+  // state". The pattern below matches what is actually written.
+  for (const id of [
+    "analysis-cuse-guild-absent-reads-as-constructor-default",
+    "analysis-niche-construction-absent-reads-as-constructor-default",
+    "control-analysis-cuse-guild-absent",
+    "control-analysis-niche-construction-absent",
+  ]) {
+    const rule = CHECKPOINT_MIGRATION_RULES.find((r) => r.id === id);
+    assert.ok(rule, `${id} is a declared migration rule`);
+    assert.equal(
+      rule.absorber,
+      "inline-backfill",
+      `${id} declares the canonical migration as its absorber, not the observer constructor`,
+    );
+    // `omission` is where the mechanism is explained, so it must name the new
+    // supplier. `effectiveDefault` states the VALUE, so it is only required not
+    // to still attribute that value to the constructor.
+    assert.match(rule.omission, /canonical/i, `${id}.omission names the canonical migration as the supplier`);
+    for (const [field, prose] of [["effectiveDefault", rule.effectiveDefault], ["omission", rule.omission]] as const) {
+      assert.doesNotMatch(
+        prose,
+        /fresh observer|freshly constructed|constructs a fresh|clones the analysis observer/i,
+        `${id}.${field} must not attribute the default to the constructor or a clone`,
+      );
+    }
+    // The evidence must survive the mechanism change untouched.
+    assert.ok(rule.historicalBasis.length > 0, `${id} keeps its historical basis`);
+    assert.ok(rule.appliesToSchemas.length > 0, `${id} keeps its scope`);
+    assert.ok(rule.hazard, `${id} keeps its hazard`);
+  }
+  assert.equal(
+    CHECKPOINT_MIGRATION_RULES.length,
+    18,
+    "moving four rules between absorber classes must not change the rule count",
+  );
 }
 
 if (process.argv[1]?.endsWith("checkpoint-historical-boundary.ts")) {
