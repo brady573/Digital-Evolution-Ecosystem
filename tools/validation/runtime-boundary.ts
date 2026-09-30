@@ -27,6 +27,11 @@ import {
 
 const FIXTURE_SEED = 20260930;
 
+/** One engine fixture, built once. A fresh universe per call is the obvious
+ *  choice and costs ~1s each on this device; nothing here mutates the engine, so
+ *  the checkpoints and snapshots are shared read-only. */
+let cached: {session:UniverseSession;checkpoint:unknown;snapshot:ReturnType<UniverseSession["snapshot"]>}|null=null;
+
 const config = (seed: number): EngineConfig => ({
   seed,
   start: 0.58,
@@ -102,6 +107,20 @@ const liveSession = () => {
   const session = new UniverseSession();
   session.handle({ type: "CREATE_UNIVERSE", config: config(FIXTURE_SEED) });
   return session;
+};
+
+/**
+ * A shared engine fixture: a live session that has advanced far enough to have a
+ * non-trivial checkpoint. Restoring it in the client tests is a client concern;
+ * the session's own state is never mutated by them.
+ */
+const engineFixture = () => {
+  if (!cached) {
+    const session = liveSession();
+    session.advance(20);
+    cached = { session, checkpoint: session.checkpoint(), snapshot: session.snapshot() };
+  }
+  return cached;
 };
 
 /**
@@ -362,12 +381,8 @@ function tracked<T>(promise: Promise<T>) {
 /** Yield the microtask queue so promise callbacks have run. */
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
-/** A real checkpoint payload to restore, taken from a live session. */
-const realCheckpoint = () => {
-  const session = liveSession();
-  session.advance(20);
-  return session.checkpoint();
-};
+/** A real checkpoint payload to restore, taken from a live engine. */
+const realCheckpoint = () => engineFixture().checkpoint;
 
 /**
  * A same-tick snapshot that is not the correlated reply must not complete a

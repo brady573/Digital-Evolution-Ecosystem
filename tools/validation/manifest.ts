@@ -278,7 +278,11 @@ export const UNITS: readonly ValidationUnit[] = [
     domains: withApparatus("contracts", "sim-runtime"),
     needs: [],
     parallelSafe: true,
-    baselineSeconds: 2,
+    // Measured on the dev worktree, not estimated. The suite's own work is
+    // ~350ms; the rest is tsx startup plus module resolution for the engine,
+    // which no test-side change removes. ci-sim-c was 184s, so this is ~0.2%
+    // of the shard and nowhere near the 278s ci-sim-a critical path.
+    baselineSeconds: 11,
     claim:
       "Malformed, unknown, non-finite, negative, fractional-when-integer, and out-of-range runtime commands are rejected as structured failures before any simulation loop begins; an unsupported command tag can never escape handle as undefined, which is what previously killed the worker with every pending request left unresolved; a rejected command mutates no tick, no biology, and no decision or analysis state, while still releasing the snapshot backpressure depends on; every worker request settles exactly once through a supported terminal outcome; a terminal worker failure or destroy clears every pending request and the pending checkpoint load; and a checkpoint load completes only through its own request identity, so a same-tick, stale, or unrelated live snapshot cannot satisfy it.",
   },
