@@ -27,6 +27,17 @@ import {
 import { lodTierForZoom } from "../../packages/phenotype/src/model.ts";
 import { churnState, designFixture, engineLikeFixture, evolveFixture } from "../pixi-spike/cache.ts";
 import { describeTexture, exactTextureKey, gridBits } from "../../apps/explorer/src/pixi/phenotypeTextures.ts";
+import { createWorldLayers } from "../../apps/explorer/src/pixiWorld/layers.ts";
+import { LAYER_ORDER as P0_LAYER_ORDER } from "../../apps/explorer/src/pixi/layers.ts";
+import { LAYER_ORDER as PW_LAYER_ORDER } from "../../apps/explorer/src/pixiWorld/layers.ts";
+import {
+  screenToWorld,
+  viewScale,
+  visibleWindow,
+  worldToScreen,
+  wrapCoord as pwWrapCoord,
+  wrapDelta as pwWrapDelta,
+} from "../../apps/explorer/src/pixiWorld/camera.ts";
 import { PhenotypeTextureCache } from "../../apps/explorer/src/pixi/textureCache.ts";
 import {
   LAYER_ORDER,
@@ -201,6 +212,89 @@ function traitsForAxes(mob: number, sen: number, met: number, spec: number) {
   const adapterSrc = readFileSync(join(pixiDir, "adapter.ts"), "utf8");
   assert.ok(!/interface\s+\w*(Checkpoint|Command|EngineConfig|Universe)\w*/.test(adapterSrc), "adapter must not declare new contracts types");
   console.log(`p0 isolation: PASS (${sources.length} modules sim-free/pixi-free; App.tsx has no pixi/ import and stays Canvas2D)`);
+}
+
+// 8. P1 rendering-only scaffold: production location, inactive, unbound.
+{
+  // Camera parity: same wrap/zoom primitives as the P0 contract...
+  assert.equal(pwWrapDelta(10, 590), 20);
+  assert.equal(pwWrapDelta(590, 10), -20);
+  assert.equal(pwWrapDelta(0, 600), 0);
+  assert.equal(pwWrapCoord(-10), 590);
+  // ...plus projection that round-trips exactly (zoom never changes feel).
+  for (const cam of [{ x: 300, y: 300 }, { x: 5, y: 595 }, { x: 0, y: 0 }]) {
+    for (const [vw, vh] of [[390, 844], [1280, 900], [720, 720]] as const) {
+      for (const zoom of [1, 2, 3]) {
+        const s = viewScale(vw, vh, zoom);
+        for (const [wx, wy] of [[10, 590], [300, 300], [599.9, 0.1], [0, 600]] as const) {
+          const p = worldToScreen(wx, wy, cam, s, vw, vh);
+          const back = screenToWorld(p.x, p.y, { left: 0, top: 0, width: vw, height: vh }, cam, s);
+          // Toroidal identity: same point, or the same point one period over.
+          assert.ok(Math.abs(back.x - wx) < 1e-9 || Math.abs(Math.abs(back.x - wx) - 600) < 1e-9,
+            `round-trip x ${wx}->${back.x}`);
+          assert.ok(Math.abs(back.y - wy) < 1e-9 || Math.abs(Math.abs(back.y - wy) - 600) < 1e-9,
+            `round-trip y ${wy}->${back.y}`);
+        }
+        const vis = visibleWindow(vw, vh, s);
+        assert.equal(vis.w, vw / s);
+        assert.equal(vis.h, vh / s);
+      }
+    }
+  }
+  // Spot-check the App.tsx fit rule: portrait fits by height, wide fits min.
+  assert.equal(viewScale(390, 844, 1), 844 / 600);
+  assert.equal(viewScale(1280, 900, 1), 900 / 600);
+  assert.equal(viewScale(720, 720, 9), viewScale(720, 720, 3), "zoom clamps to 3.0");
+  // Zoom must actually scale: proportionality defeats a zoom-ignoring
+  // implementation, which would still pass the spots, the clamp equality,
+  // and every round-trip above (both directions share one scale).
+  assert.equal(viewScale(720, 720, 2), 2 * viewScale(720, 720, 1), "zoom scales the view");
+  console.log("p1 camera: PASS (wrap parity, exact projection round-trip, App fit rule, zoom clamp + scale)");
+
+  // Layer assembly absorbs the P0 order: same constant, Containers in order.
+  // The expected order is pinned as a literal here (not re-imported), so a
+  // P0 order change cannot propagate silently to both sides of the check.
+  const PINNED_ORDER = [
+    "environment",
+    "analytical-field",
+    "waste-cue",
+    "organisms",
+    "selection-focus",
+    "effects",
+  ] as const;
+  assert.deepEqual([...PW_LAYER_ORDER], [...PINNED_ORDER], "production order matches the pinned contract");
+  assert.deepEqual([...P0_LAYER_ORDER], [...PINNED_ORDER], "P0 order matches the pinned contract");
+  const first = createWorldLayers();
+  assert.deepEqual(first.root.children.map((c) => c.label), [...PINNED_ORDER]);
+  assert.equal(first.root.label, "world");
+  const second = createWorldLayers();
+  assert.ok(second.root !== first.root && second.layers.organisms !== first.layers.organisms,
+    "layer assembly builds fresh objects per call (no shared GPU state)");
+  console.log("p1 layers: PASS (6 ordered labeled Containers, fresh per boot, order absorbed from P0)");
+
+  // Static guards over the production scaffold: unbound and inactive.
+  const pwDir = join(root, "apps/explorer/src/pixiWorld");
+  const pwSources = readdirSync(pwDir).filter((f) => f.endsWith(".ts"));
+  assert.ok(pwSources.length >= 3, `expect >=3 pixiWorld modules (got ${pwSources.length})`);
+  for (const f of pwSources) {
+    const src = readFileSync(join(pwDir, f), "utf8");
+    assert.ok(!/from\s+["'][^"']*sim-core|from\s+["'][^"']*sim-runtime/.test(src),
+      `pixiWorld/${f} must not import simulation packages`);
+    assert.ok(!src.includes("RenderSnapshot") && !/from\s+["']@digital-evolution\/contracts["']/.test(src),
+      `pixiWorld/${f} must not bind the read-model contract (gated on Tranche B)`);
+  }
+  const texSrc = readFileSync(join(pwDir, "textures.ts"), "utf8");
+  assert.ok(texSrc.includes('scaleMode = "nearest"'), "phenotype uploads stay nearest-filtered");
+  assert.ok(texSrc.includes("destroy(true)"), "retirement must destroy the texture source too (AC-P7)");
+  const bootSrc = readFileSync(join(pwDir, "boot.ts"), "utf8");
+  assert.ok(bootSrc.includes('preference: "webgl"'), "production boot pins the WebGL family");
+  assert.ok(bootSrc.includes("getContext(") && bootSrc.includes("webgl2"), "production boot proves its backend");
+  assert.ok(bootSrc.includes("app.destroy()"), "production boot disposes GPU resources");
+  assert.ok(!bootSrc.includes("RenderSnapshot"), "production boot takes no snapshot");
+  const appSrc = readFileSync(join(root, "apps/explorer/src/App.tsx"), "utf8");
+  assert.ok(!appSrc.includes("pixiWorld"), "App.tsx must not import pixiWorld (no cutover)");
+  assert.ok(appSrc.includes('canvas.getContext("2d")'), "production World stays Canvas2D");
+  console.log(`p1 scaffold: PASS (${pwSources.length} modules sim-free, read-model-unbound, inactive)`);
 }
 
 // 7. Scale measurements: exact-key cache over 50/250/1000/3000 (+ engine-like 1000).

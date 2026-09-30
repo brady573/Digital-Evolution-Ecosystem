@@ -1,0 +1,168 @@
+/**
+ * pixiWorld browser proof: serves the inactive production scaffold entry,
+ * drives boot/resize/mint/retire/teardown via the exposed __pixiworld
+ * handle (string-form evaluates only), and records backend evidence.
+ *
+ * Run: pnpm test:pixi-world
+ * Writes: testdata/pixi-world-proof/ (manifest.json; gitignored, CI artifact)
+ *
+ * Asserts (Owner review on PR #73):
+ * - bootPixiWorld() initializes; reported backend is actually WebGL2;
+ * - host resize reaches the renderer/canvas;
+ * - textureFromBits() mints a nearest-filtered population-tier texture;
+ * - destroyTexture() retires texture AND source (AC-P7: no indefinite leak);
+ * - destroy() removes the canvas and releases renderer resources.
+ * Independent of live RenderSnapshot/runtime binding; the maintained World
+ * stays Canvas2D (this page never touches App.tsx).
+ *
+ * Browser WebGL required. Fails LOUDLY (non-zero exit) when the backend is
+ * not WebGL2. Headless SwiftShader presents no pixels on-device, but every
+ * assertion here is state-based (flags, sizes, labels), never pixel-based,
+ * so software GL proves the full lifecycle.
+ */
+import assert from "node:assert/strict";
+import { spawn, type ChildProcess } from "node:child_process";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { chromium } from "playwright";
+
+const here = dirname(fileURLToPath(import.meta.url));
+const repo = join(here, "..", "..");
+const OUT = join(repo, "testdata", "pixi-world-proof");
+mkdirSync(OUT, { recursive: true });
+
+const pixiVersion: string = JSON.parse(
+  readFileSync(join(repo, "node_modules", "pixi.js", "package.json"), "utf8"),
+).version as string;
+
+const PORT = 5194;
+const BASE = `http://127.0.0.1:${PORT}/`;
+
+function startServer(): ChildProcess {
+  const child = spawn(
+    "pnpm", ["--filter", "@digital-evolution/explorer", "exec", "vite",
+      join(repo, "tools", "pixi-world-proof"), "--port", String(PORT), "--strictPort",
+      "--host", "127.0.0.1"],
+    { cwd: repo, stdio: ["ignore", "pipe", "pipe"] },
+  );
+  return child;
+}
+
+async function waitForServer(): Promise<void> {
+  for (let i = 0; i < 40; i++) {
+    try {
+      const res = await fetch(BASE);
+      if (res.ok) return;
+    } catch { /* not up yet */ }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  throw new Error(`pixi-world proof server did not start at ${BASE}`);
+}
+
+async function main(): Promise<void> {
+  const server = startServer();
+  let failed = "";
+  const evidence: Record<string, unknown> = {};
+  try {
+    await waitForServer();
+    const browser = await chromium.launch({
+      args: ["--enable-unsafe-swiftshader"],
+    });
+    const version = browser.version();
+    const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+    const errors: string[] = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    try {
+      await page.goto(BASE, { waitUntil: "networkidle" });
+      await page.locator("#stats").waitFor();
+      await page.waitForFunction(
+        "window.__pixiworldReady === true",
+        null, { timeout: 30000 },
+      );
+
+      // 1. Boot + backend.
+      const stats = await page.evaluate("window.__pixiworld.stats()") as {
+        backend: string; canvasW: number; canvasH: number; layers: string[];
+      };
+      evidence.boot = stats;
+      console.log(`boot: backend=${stats.backend} canvas=${stats.canvasW}x${stats.canvasH}`);
+      assert.ok(stats.backend.includes("webgl2:yes"), `backend is ${stats.backend}, not WebGL2`);
+      assert.deepEqual(stats.layers, [
+        "environment", "analytical-field", "waste-cue",
+        "organisms", "selection-focus", "effects",
+      ]);
+      assert.equal(stats.canvasW, 600);
+      assert.equal(stats.canvasH, 600);
+
+      // 2. Host resize reaches the renderer.
+      await page.evaluate("window.__pixiworld.setStageSize(800, 500)");
+      await page.waitForFunction(
+        "window.__pixiworld.stats().canvasW === 800",
+        null, { timeout: 10000 },
+      );
+      const resized = await page.evaluate("window.__pixiworld.stats()") as {
+        canvasW: number; canvasH: number;
+      };
+      evidence.resize = resized;
+      assert.equal(resized.canvasW, 800);
+      assert.equal(resized.canvasH, 500);
+      console.log(`resize: host 800x500 -> canvas ${resized.canvasW}x${resized.canvasH}`);
+
+      // 3. Mint: real phenotype geometry, nearest-filtered.
+      const minted = await page.evaluate("window.__pixiworld.mintProbe()") as {
+        w: number; h: number; scaleMode: string;
+      };
+      evidence.mint = minted;
+      assert.equal(minted.w, 9, "population-tier texture width");
+      assert.equal(minted.h, 9, "population-tier texture height");
+      assert.equal(minted.scaleMode, "nearest", "phenotype textures stay nearest-filtered");
+      console.log(`mint: ${minted.w}x${minted.h} scaleMode=${minted.scaleMode}`);
+
+      // 4. Retire: texture AND source destroyed (AC-P7).
+      const retired = await page.evaluate("window.__pixiworld.destroyProbe()") as {
+        texDestroyed: boolean; srcDestroyed: boolean;
+      };
+      evidence.retire = retired;
+      assert.equal(retired.texDestroyed, true, "retired texture destroyed");
+      assert.equal(retired.srcDestroyed, true, "retired texture source destroyed");
+      console.log(`retire: texture destroyed=${retired.texDestroyed}, source destroyed=${retired.srcDestroyed}`);
+
+      // 5. Teardown: canvas removed.
+      const gone = await page.evaluate("window.__pixiworld.teardown()");
+      assert.equal(gone, true, "destroy() must remove the canvas");
+      evidence.teardown = { canvasRemoved: gone };
+      console.log("teardown: canvas removed");
+
+      assert.ok(errors.length === 0, `page errors: ${errors.join("; ")}`);
+    } finally {
+      await page.close().catch(() => undefined);
+    }
+    await Promise.race([
+      browser.close().catch(() => undefined),
+      new Promise((r) => setTimeout(r, 15000)),
+    ]);
+    const manifest = {
+      pixiVersion, browser: `chromium/${version}`, baseUrl: BASE,
+      generatedAt: new Date().toISOString(), pageErrors: errors, evidence,
+    };
+    writeFileSync(join(OUT, "manifest.json"), JSON.stringify(manifest, null, 2));
+    console.log(`pixiWorld browser proof -> ${OUT}`);
+  } catch (e) {
+    failed = e instanceof Error ? e.message : String(e);
+    try {
+      writeFileSync(join(OUT, "FAILURE.txt"), failed + "\n");
+    } catch { /* best effort */ }
+    console.error(`pixiWorld browser proof FAILED: ${failed}`);
+    process.exitCode = 1;
+  } finally {
+    try {
+      server.kill("SIGKILL");
+    } catch { /* already gone */ }
+  }
+  process.exit(process.exitCode ?? 0);
+}
+
+// Entry point (no top-level await: the repo root is CommonJS-typed, and
+// tsx compiles .ts by nearest package.json — keep this file CJS-safe).
+void main();

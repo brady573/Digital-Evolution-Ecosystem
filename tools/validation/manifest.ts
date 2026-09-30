@@ -689,6 +689,21 @@ export const UNITS: readonly ValidationUnit[] = [
     claim:
       "GPU-dependent inspection images for the Pixi spike. Non-gating, because software-GL timing is not a property of the product.",
   },
+  {
+    id: "pixi-world-proof",
+    title: "pixiWorld scaffold browser proof",
+    script: "test:pixi-world",
+    cls: "browser",
+    enforcement: "blocking",
+    mergeGate: true,
+    domains: withApparatus("contracts", "explorer"),
+    needs: [],
+    parallelSafe: false,
+    artifact: "pixi-world-proof-evidence",
+    baselineSeconds: 5,
+    claim:
+      "The inactive production scaffold boots WebGL2, follows resize, mints nearest-filtered textures, retires texture and source, and tears down. State-based and timing/pixel independent, so software-GL execution proves the lifecycle.",
+  },
 ];
 
 // --- Groups ------------------------------------------------------------------
@@ -752,7 +767,7 @@ export const GROUPS: readonly ValidationGroup[] = [
   {
     id: "browser",
     title: "Browser and runtime behaviour",
-    unitIds: ["browser-smoke", "mobile-ui"],
+    unitIds: ["browser-smoke", "mobile-ui", "pixi-world-proof"],
     ci: false,
   },
   // Platform units are addressed as two routing groups rather than one, because
@@ -843,7 +858,7 @@ export const GROUPS: readonly ValidationGroup[] = [
   {
     id: "ci-browser",
     title: "Browser and mobile UI (blocking)",
-    unitIds: ["browser-smoke", "mobile-ui"],
+    unitIds: ["browser-smoke", "mobile-ui", "pixi-world-proof"],
     ci: true,
   },
   {
