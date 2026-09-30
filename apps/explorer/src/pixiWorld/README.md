@@ -11,7 +11,7 @@ the Canvas2D `WorldCanvas`.
 |---|---|---|
 | `camera.ts` | Toroidal camera contract: wrap math, uniform zoom, world↔screen projection, visible-window reporting. Pure — Node-tested for parity with `App.tsx`. | none |
 | `layers.ts` | Scene-layer `Container` assembly in `LAYER_ORDER` (later = on top). Absorbs the P0 order — the single source stays `../pixi/layers`. | pixi.js `Container` only (headless-safe) |
-| `textures.ts` | Phenotype bitmap → GPU `Texture` upload with nearest scale mode. Mirrors the spike's `textureFromBits`; caller owns color/alpha. | DOM canvas + WebGL (browser CI) |
+| `textures.ts` | Phenotype bitmap → GPU `Texture` upload with nearest scale mode. Mirrors the spike's `textureFromBits`; caller owns color/alpha; retirement destroys texture **and** source (AC-P7). | DOM canvas + WebGL (browser proof) |
 | `boot.ts` | `Application` boot (WebGL preference, genuine backend probe), host-following resize, dispose. Takes no snapshot. | DOM + WebGL (browser CI) |
 
 ## Forbidden in this directory (still gated on Tranche B + reconciliation)
@@ -25,5 +25,7 @@ the Canvas2D `WorldCanvas`.
 ## Coverage
 
 Pure parts (`camera`, layer assembly) are asserted by `pnpm test:pixi-p0`
-(§8). DOM/WebGL parts (`textures`, `boot`) are covered by typecheck plus
-browser capture evidence on CI — same policy as the spike.
+(§8). DOM/WebGL parts (`textures`, `boot`) are proven by
+`pnpm test:pixi-world` (isolated browser harness: WebGL2 boot, resize,
+nearest mint, texture+source retirement, teardown) — registered as the
+`pixi-world-proof` evidence unit in `tools/validation/manifest.ts`.

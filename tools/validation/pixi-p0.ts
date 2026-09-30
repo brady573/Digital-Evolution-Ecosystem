@@ -285,6 +285,7 @@ function traitsForAxes(mob: number, sen: number, met: number, spec: number) {
   }
   const texSrc = readFileSync(join(pwDir, "textures.ts"), "utf8");
   assert.ok(texSrc.includes('scaleMode = "nearest"'), "phenotype uploads stay nearest-filtered");
+  assert.ok(texSrc.includes("destroy(true)"), "retirement must destroy the texture source too (AC-P7)");
   const bootSrc = readFileSync(join(pwDir, "boot.ts"), "utf8");
   assert.ok(bootSrc.includes('preference: "webgl"'), "production boot pins the WebGL family");
   assert.ok(bootSrc.includes("getContext(") && bootSrc.includes("webgl2"), "production boot proves its backend");

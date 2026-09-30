@@ -18,7 +18,7 @@ export interface PhenotypeBitmap {
   readonly size: number;
 }
 
-/** Mint one nearest-filtered GPU texture from grid bits. Caller destroys it. */
+/** Mint one nearest-filtered GPU texture from grid bits. Caller retires it. */
 export function textureFromBits(bits: string, size: number, fill = "#e6f2ea"): Texture {
   if (bits.length !== size * size) throw new Error(`bitmap mismatch: ${bits.length} bits for ${size}x${size}`);
   const cv = document.createElement("canvas");
@@ -36,7 +36,12 @@ export function textureFromBits(bits: string, size: number, fill = "#e6f2ea"): T
   return tex;
 }
 
-/** Destroy a minted texture, freeing GPU memory. removeChild alone never does. */
+/**
+ * Retire a minted texture, freeing GPU memory AND its one-off canvas source.
+ * `destroy(true)` matters: these sources exist only for one texture, so
+ * retiring the texture without its source would leak GPU backing resources
+ * indefinitely (production acceptance AC-P7). removeChild alone never frees.
+ */
 export function destroyTexture(tex: Texture): void {
-  tex.destroy();
+  tex.destroy(true);
 }
