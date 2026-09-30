@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { UniverseSession } from "../../packages/sim-runtime/src/session.ts";
-import type { EngineConfig, FlowFacts } from "../../packages/contracts/src/index.ts";
+import type { EngineConfig, EvidenceExport, FlowFacts } from "../../packages/contracts/src/index.ts";
 import {
   CHECKPOINT_MIGRATION_RULES,
   CheckpointRejectionError,
@@ -14,7 +14,8 @@ import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ENGINE_VERSION } from "../../packages/sim-core/src/index.ts";
+import { ENGINE_VERSION, EXPORT_FORMAT_VERSION } from "../../packages/sim-core/src/index.ts";
+import { readInjectedSource, resolveSourceProvenance } from "../../packages/sim-runtime/src/provenance.ts";
 import { CHECKPOINT_SCHEMA_VERSION } from "../../packages/sim-runtime/src/session.ts";
 import { testHistoricalCheckpointBoundary } from "./checkpoint-historical-boundary.ts";
 
@@ -183,14 +184,119 @@ function testFlowEvidence() {
   assert.equal(evidence.flows.tick, records[0].tick, "facts stamped at the event tick");
   assert.ok(Array.isArray(evidence.flows.lineages), "facts carry lineage attribution");
   // Decision evidence stays scalar: flows must not leak into the choice path.
-  const observed = session.exportEvidence() as any;
-  for (const e of observed.observed_events as any[]) {
+  const observed = session.exportEvidence();
+  for (const e of observed.observed_events) {
     assert.ok(
       Object.values(e.evidence).every((v) => typeof v === "number" || typeof v === "string" || typeof v === "boolean"),
       "ObservedEvent evidence stays scalar",
     );
   }
   console.log("flow evidence separation: PASS");
+}
+
+/**
+ * A6 export provenance: tri-state cleanliness (Decision 4 §A6). Pure
+ * resolution, no session: a known commit on a clean tree is clean; a dirty
+ * tree is dirty (the commit is still recorded); a null commit is unknown —
+ * never silently clean, even when dirty is false.
+ */
+function testExportProvenanceTriState() {
+  const clean = resolveSourceProvenance("0123456789abcdef0123456789abcdef01234567", false);
+  assert.equal(clean.cleanliness, "clean", "a known commit on a clean tree is clean");
+  assert.equal(
+    clean.revision.git_commit,
+    "0123456789abcdef0123456789abcdef01234567",
+    "the clean revision records its commit",
+  );
+
+  const dirty = resolveSourceProvenance("0123456789abcdef0123456789abcdef01234567", true);
+  assert.equal(dirty.cleanliness, "dirty", "a dirty tree is dirty");
+  assert.equal(
+    dirty.revision.git_commit,
+    "0123456789abcdef0123456789abcdef01234567",
+    "a dirty build still records its commit",
+  );
+
+  const unknown = resolveSourceProvenance(null, false);
+  assert.equal(unknown.cleanliness, "unknown", "no determinable revision is unknown, never clean");
+  assert.equal(unknown.revision.git_commit, null, "an unknown revision carries a null commit");
+
+  const unknownDirty = resolveSourceProvenance(null, true);
+  assert.equal(unknownDirty.cleanliness, "unknown", "unknown stays unknown even when dirty");
+
+  const emptyCommit = resolveSourceProvenance("", false);
+  assert.equal(emptyCommit.cleanliness, "unknown", "an empty-string commit is unknown, never clean");
+  assert.equal(emptyCommit.revision.git_commit, null, "an empty string never masquerades as a revision");
+
+  assert.equal(clean.revision.engine_version, ENGINE_VERSION, "the revision carries the running engine version");
+  assert.equal(
+    clean.revision.format_version,
+    EXPORT_FORMAT_VERSION,
+    "the revision carries the maintained export-format version as-is",
+  );
+
+  // No build-time injection under tsx: the reader yields the unknown-triggering
+  // shape, so a validation run never claims a clean source it cannot determine.
+  assert.deepEqual(
+    readInjectedSource(),
+    { commit: null, dirty: false },
+    "without vite defines the injected source reads as undeterminable",
+  );
+  const injected = readInjectedSource();
+  assert.equal(
+    resolveSourceProvenance(injected.commit, injected.dirty).cleanliness,
+    "unknown",
+    "the tsx reader shape resolves to unknown, never clean",
+  );
+  console.log("export provenance tri-state: PASS");
+}
+
+/**
+ * A6 session integration: the live export carries the envelope and the
+ * provenance block with no cast. Under tsx there are no build defines, so
+ * the export must read as unknown — never clean — with a null commit and
+ * the running engine version.
+ */
+function testExportCarriesProvenance() {
+  const session = new UniverseSession();
+  session.create(config(FIXTURE_SEED));
+  const exported: EvidenceExport = session.exportEvidence();
+  assert.equal(exported.export_format_version, 1, "the export carries the numeric envelope version");
+  assert.equal(exported.provenance.cleanliness, "unknown", "a tsx-produced export is unknown, never clean");
+  assert.equal(exported.provenance.revision.git_commit, null, "an unknown revision carries a null commit");
+  assert.equal(
+    exported.provenance.revision.engine_version,
+    ENGINE_VERSION,
+    "the export provenance carries the running engine version",
+  );
+  console.log("export carries provenance: PASS");
+}
+
+/**
+ * A6 pending-decision pin (plan Review-Focus contract): cleanliness is
+ * source-state only. Drive the session — same seed and config as the
+ * decisions suite's fixture derivation, no new fixture — until the pause
+ * gate stops on a real pending decision, then export with no cast. The
+ * export must record the pending decision AND still read as unknown under
+ * tsx: a pending decision never dirties an export.
+ */
+function testExportPendingDecisionStaysUnknown() {
+  const session = new UniverseSession();
+  session.create(config(FIXTURE_SEED));
+  let pending = session.snapshot().pendingDecision;
+  for (let i = 0; i < 30 && !pending; i++) {
+    pending = session.advance(5000).pendingDecision;
+  }
+  assert.ok(pending, "universe reached a pending decision without resolving");
+  const exported: EvidenceExport = session.exportEvidence();
+  assert.ok(exported.player_decisions.pending, "the export records the pending decision");
+  assert.equal(
+    exported.provenance.cleanliness,
+    "unknown",
+    "a pending decision never dirties an export under tsx",
+  );
+  assert.equal(exported.provenance.revision.git_commit, null, "an unknown revision carries a null commit");
+  console.log("export pending decision stays unknown: PASS");
 }
 
 function testProcessActivations() {
@@ -1369,4 +1475,7 @@ testCheckpointMigrationRuleTable();
 testBoundaryGeneratorIsDerived();
 
 testFlowEvidence();
+testExportProvenanceTriState();
+testExportCarriesProvenance();
+testExportPendingDecisionStaysUnknown();
 console.log(`flow validation: PASS (checkpoint schema ${CHECKPOINT_SCHEMA_VERSION}, engine ${ENGINE_VERSION})`);

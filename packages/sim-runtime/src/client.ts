@@ -1,5 +1,6 @@
 import type {
   EngineConfig,
+  EvidenceExport,
   RenderSnapshot,
   RuntimeCommand,
   RuntimeResponse,
@@ -12,7 +13,7 @@ export interface RuntimeClient {
   subscribe(listener: (snapshot: RenderSnapshot) => void): () => void;
   loadCheckpoint(checkpoint: SupportedUniverseCheckpoint): Promise<RenderSnapshot>;
   requestCheckpoint(): Promise<UniverseCheckpoint>;
-  requestExport(): Promise<unknown>;
+  requestExport(): Promise<EvidenceExport>;
   /** Resolves the pending opportunity; rejects on validation failure. */
   resolveEventDecision(opportunityId: string, choiceId: string): Promise<RenderSnapshot>;
   /** Acknowledges the aftermath impact state, moving it to observation so the
@@ -86,7 +87,7 @@ export class WorkerRuntimeClient implements RuntimeClient {
   }
 
   requestExport(){
-    return this.#request<unknown>("REQUEST_EXPORT");
+    return this.#request<EvidenceExport>("REQUEST_EXPORT");
   }
 
   destroy(){

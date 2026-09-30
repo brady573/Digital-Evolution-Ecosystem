@@ -236,7 +236,7 @@ function runSingleAnalysisAuthority(){
   session.create(cfg as any);
   session.advance(1200);
   assert.equal((session.simulation as any).observer,undefined,"session experiment carries no internal observer");
-  const evidence=session.exportEvidence() as any;
+  const evidence=session.exportEvidence();
   assert.ok(!("ecology_observer" in evidence),"evidence no longer embeds the internal observer export");
   assert.ok(evidence.repository_analysis,"sim-analysis remains the sole interpretation export");
   assert.ok(Array.isArray(evidence.observed_events),"observed events still exported");
