@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { UniverseSession } from "../../packages/sim-runtime/src/session.ts";
-import type { EngineConfig, FlowFacts } from "../../packages/contracts/src/index.ts";
+import type { EngineConfig, EvidenceExport, FlowFacts } from "../../packages/contracts/src/index.ts";
 import {
   CHECKPOINT_MIGRATION_RULES,
   CheckpointRejectionError,
@@ -184,8 +184,8 @@ function testFlowEvidence() {
   assert.equal(evidence.flows.tick, records[0].tick, "facts stamped at the event tick");
   assert.ok(Array.isArray(evidence.flows.lineages), "facts carry lineage attribution");
   // Decision evidence stays scalar: flows must not leak into the choice path.
-  const observed = session.exportEvidence() as any;
-  for (const e of observed.observed_events as any[]) {
+  const observed = session.exportEvidence();
+  for (const e of observed.observed_events) {
     assert.ok(
       Object.values(e.evidence).every((v) => typeof v === "number" || typeof v === "string" || typeof v === "boolean"),
       "ObservedEvent evidence stays scalar",
@@ -245,6 +245,27 @@ function testExportProvenanceTriState() {
     "the tsx reader shape resolves to unknown, never clean",
   );
   console.log("export provenance tri-state: PASS");
+}
+
+/**
+ * A6 session integration: the live export carries the envelope and the
+ * provenance block with no cast. Under tsx there are no build defines, so
+ * the export must read as unknown — never clean — with a null commit and
+ * the running engine version.
+ */
+function testExportCarriesProvenance() {
+  const session = new UniverseSession();
+  session.create(config(FIXTURE_SEED));
+  const exported: EvidenceExport = session.exportEvidence();
+  assert.equal(exported.export_format_version, 1, "the export carries the numeric envelope version");
+  assert.equal(exported.provenance.cleanliness, "unknown", "a tsx-produced export is unknown, never clean");
+  assert.equal(exported.provenance.revision.git_commit, null, "an unknown revision carries a null commit");
+  assert.equal(
+    exported.provenance.revision.engine_version,
+    ENGINE_VERSION,
+    "the export provenance carries the running engine version",
+  );
+  console.log("export carries provenance: PASS");
 }
 
 function testProcessActivations() {
@@ -1424,4 +1445,5 @@ testBoundaryGeneratorIsDerived();
 
 testFlowEvidence();
 testExportProvenanceTriState();
+testExportCarriesProvenance();
 console.log(`flow validation: PASS (checkpoint schema ${CHECKPOINT_SCHEMA_VERSION}, engine ${ENGINE_VERSION})`);

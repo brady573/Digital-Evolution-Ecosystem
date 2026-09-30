@@ -2342,8 +2342,14 @@ export interface MatchedControl {
 export interface EvidenceExport {
   readonly export_format_version: 1;
   readonly provenance: SourceProvenance;
-  // A6 narrowing: next step — experiment interiors have no contract type yet.
-  readonly experiment: unknown;
+  // A6 narrowing: the experiment engine output rides flat in the payload
+  // (spread of experiment.out(), preserved byte-for-byte, so there is no
+  // `experiment` key). Only the flat keys the validation suite reads are
+  // declared; the rest stay undeclared until experiment interiors gain a
+  // contract type. Raw engine metrics stay untyped here by design, matching
+  // MatchedControl above: RenderMetrics deliberately covers presentation only.
+  readonly tick: number;
+  readonly current_metrics: unknown;
   readonly repository_analysis: AnalysisState;
   readonly observed_events: readonly ObservedEvent[];
   readonly player_decisions: PlayerDecisions;

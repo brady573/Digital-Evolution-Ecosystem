@@ -482,7 +482,7 @@ function testCatalystEvidenceAndReplay() {
     const window = session.advance(120_000).pendingDecision as CatalystOpportunity;
     session.resolveEventDecision(window.opportunityId, choice);
     session.advance(250);
-    return session.exportEvidence() as any;
+    return session.exportEvidence();
   };
   const a = run("drought-a");
   const b = run("drought-a");
