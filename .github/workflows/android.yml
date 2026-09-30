@@ -15,6 +15,17 @@ name: android
 # is an artifact of the same workflow invocation.
 on:
   workflow_call:
+    inputs:
+      android_apk_has_work:
+        description: "Precomputed impact decision from the caller (true/false). Empty means compute internally (manual dispatch)."
+        required: false
+        type: string
+        default: ""
+      android_runtime_has_work:
+        description: "Precomputed runtime impact decision from the caller (true/false). Empty means compute internally."
+        required: false
+        type: string
+        default: ""
   workflow_dispatch:
 
 # The caller already scopes this to contents: read. Declared here so a manual
@@ -24,14 +35,17 @@ permissions:
   contents: read
 
 # This workflow proves platform facts. It does not re-prove that the repository
-# is sound: the product gates it is called after have already done that for this
-# commit, and the caller only invokes it once they pass. The previous version
-# ran `pnpm verify` here as well, which cost 1158s of a 1451s job to assemble an
-# APK that takes 39s.
+# is sound and it does not wait for that proof: the caller invokes it as soon
+# as the build candidate and the routing decision exist, in parallel with the
+# merge gates. The APK is therefore candidate evidence until the product gates
+# pass for the same revision (the caller's `android_acceptance` job records
+# that). The previous version ran `pnpm verify` here as well, which cost 1158s
+# of a 1451s job to assemble an APK that takes 39s.
 #
 # The evidence ladder stays explicit:
 #
-#   1. explorer-dist is the bundle the browser lane passed against
+#   1. explorer-dist is this run's exact build candidate (browser validation
+#      may still be running against the same bundle)
 #   2. the checked-in android/ project matches it            (android-sync)
 #   3. a debug APK is produced                              (android-assemble)
 #   4. Android's own static analysis passes                 (android-lint)
@@ -70,12 +84,25 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      # Skipped when the caller already computed impact: the decision arrives
+      # via workflow_call inputs, so reinstalling the project only to recompute
+      # it would be the duplicate planning this lane exists to remove.
       - uses: ./.github/actions/setup-project
+        if: inputs.android_apk_has_work == ''
       - name: Plan the Android lane
         id: plan
         env:
           DEE_IMPACT_BASE: ${{ env.impact_base }}
-        run: pnpm ci:plan android-apk android-runtime
+          PRECOMPUTED_APK: ${{ inputs.android_apk_has_work }}
+          PRECOMPUTED_RUNTIME: ${{ inputs.android_runtime_has_work }}
+        run: |
+          if [ -n "$PRECOMPUTED_APK" ]; then
+            echo "Using caller-provided Android impact decision; no recomputation."
+            echo "android_apk_has_work=$PRECOMPUTED_APK" >> "$GITHUB_OUTPUT"
+            echo "android_runtime_has_work=$PRECOMPUTED_RUNTIME" >> "$GITHUB_OUTPUT"
+          else
+            pnpm ci:plan android-apk android-runtime
+          fi
 
   # Gated on impact. Android packaging and the emulator smoke cost ~4m55s and
   # ~16m respectively, and neither is relevant to a change that cannot reach the

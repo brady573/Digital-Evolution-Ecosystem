@@ -46,7 +46,6 @@
     "test:plated": "tsx tools/plated-proof/validate.ts && tsx tools/plated-proof/geo-validate.ts",
     "test:pixi-spike": "tsx tools/pixi-spike/validate.ts",
     "test:pixi-p0": "tsx tools/validation/pixi-p0.ts",
-    "test:washout-reliance": "tsx tools/validation/washout-reliance.ts",
     "test:provenance": "tsx tools/validation/provenance.ts",
     "spike:capture": "tsx tools/pixi-spike/capture.ts",
     "spike:dev": "pnpm --filter @digital-evolution/explorer exec vite ../../tools/pixi-spike --port 5193 --strictPort --host 127.0.0.1",

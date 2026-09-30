@@ -18,15 +18,19 @@
  * class without the claim changing, and a claim may not be proven by a class
  * that cannot see it.
  *
- * | Class | Question it answers | Environment | Blocking? |
- * |---|---|---|---|
- * | `invariant`     | Is the repository structurally sound? | Node | yes |
- * | `deterministic` | Is exact supported behaviour still exact? | Node | yes |
- * | `presentation`  | Does the product build and do its presentation contracts hold? | Node | yes |
- * | `browser`       | Does it behave correctly in an actual browser? | Chromium | yes |
- * | `platform`      | Does the Android packaging integrate? | Android SDK / emulator | yes |
- * | `scientific`    | What actually happens across seeds and horizons? | Node, long | manual |
- * | `evidence`      | Can a human inspect the result? | Chromium | no |
+ * | Class | Question it answers | Environment | Lane-blocking? | Merge gate? |
+ * |---|---|---|---|---|
+ * | `invariant`     | Is the repository structurally sound? | Node | yes | yes |
+ * | `deterministic` | Is exact supported behaviour still exact? | Node | yes | yes |
+ * | `presentation`  | Does the product build and do its presentation contracts hold? | Node | yes | yes |
+ * | `browser`       | Does it behave correctly in an actual browser? | Chromium | yes | yes for blocking units; captures no |
+ * | `platform`      | Does the Android packaging integrate? | Android SDK / emulator | yes | no |
+ * | `scientific`    | What actually happens across seeds and horizons? | Node, long | manual | no |
+ * | `evidence`      | Can a human inspect the result? | Chromium | no | no |
+ *
+ * Lane-blocking (the `enforcement` field) says whether failure fails the
+ * lane; merge gate (the `mergeGate` field) says whether success is required
+ * for merge readiness. Platform packaging is blocking but not merge-gating.
  *
  * The classes are not interchangeable. `deterministic` may not be used to claim
  * browser correctness, `scientific` may not be used to claim exactness, and
@@ -51,11 +55,16 @@
  * ## `baselineSeconds`
  *
  * Measured on CI runner `ubuntu-latest`, not estimated, and used to balance
- * shards. Sources are runs 36363857021, 36371082202, and 36372216402.
+ * shards. Sources are runs 36580426436, 36516033777, and 36508723384
+ * (medians; refreshed 2026-09-29 after flows/possibility/decisions drifted).
  *
  * Two caveats worth knowing. A unit's cost varies run to run on a shared
- * runner -- `flows` measured 123s then 81s, `decisions` 73s then 50s -- so a
- * single measurement is a sample, not a constant. And the shared GitHub runner
+ * runner -- `flows` measured 164s then 149s twice (median 149, was 81),
+ * `dependency-possibility` 99s/93s/93s (median 94, was 58), `decisions`
+ * 75s/79s/77s (median 77, was 50) -- so a single measurement is a sample,
+ * not a constant. Cheap units were overestimated the other way (`typecheck`
+ * 1.3s vs 10, `build` 0.6s vs 12, `phenotype` 0.7s vs 10) and are now medians
+ * too. And the shared GitHub runner
  * is not the device: `dependency-tradeoff` measured 275s on CI against a
  * device-derived guess of 180s, while its sibling `dependency-possibility` went
  * the other way, 107s guessed, 58s measured. The two are therefore kept in
@@ -132,6 +141,15 @@ export interface ValidationUnit {
   readonly script: string | null;
   readonly cls: EvidenceClass;
   readonly enforcement: Enforcement;
+  /**
+   * Whether successful completion is required for merge readiness.
+   *
+   * Distinct from `enforcement`: `enforcement` says whether failure fails
+   * this unit/lane, `mergeGate` says whether success is required to merge.
+   * Platform packaging is `blocking` (its lane fails on failure) but not
+   * merge-gating; evidence captures are neither.
+   */
+  readonly mergeGate: boolean;
   /** Repository areas whose change forces this unit. See module notes. */
   readonly domains: Domain[];
   /** Unit ids that must pass before this one is meaningful. */
@@ -166,10 +184,11 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "typecheck",
     cls: "invariant",
     enforcement: "blocking",
+    mergeGate: true,
     domains: CODE,
     needs: [],
     parallelSafe: true,
-    baselineSeconds: 10,
+    baselineSeconds: 1,
     claim: "Every package still typechecks against the shared contracts.",
   },
   {
@@ -178,6 +197,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:migration",
     cls: "invariant",
     enforcement: "blocking",
+    mergeGate: true,
     domains: CODE,
     needs: [],
     parallelSafe: true,
@@ -192,6 +212,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:validation-arch",
     cls: "invariant",
     enforcement: "blocking",
+    mergeGate: true,
     // The apparatus, the shared vocabulary whose contract it proves, and the
     // documentation that describes it. It is cheap, and a change to any of those
     // is exactly when the claim "this repository's validation contract holds"
@@ -212,10 +233,11 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:decisions",
     cls: "deterministic",
     enforcement: "blocking",
+    mergeGate: true,
     domains: withApparatus("contracts", "sim-core", "sim-decisions", "sim-runtime", "explorer"),
     needs: [],
     parallelSafe: true,
-    baselineSeconds: 50,
+    baselineSeconds: 77,
     claim:
       "Events still map to exactly the same offered choices as before, and an entity reference whose kind was never recorded yields no L- or C- claim rather than a guessed one.",
   },
@@ -225,6 +247,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:catalysts",
     cls: "deterministic",
     enforcement: "blocking",
+    mergeGate: true,
     domains: withApparatus("contracts", "sim-core", "sim-decisions", "sim-runtime", "explorer"),
     needs: [],
     parallelSafe: true,
@@ -237,10 +260,11 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:flows",
     cls: "deterministic",
     enforcement: "blocking",
+    mergeGate: true,
     domains: withApparatus("contracts", "sim-core", "sim-analysis", "sim-decisions", "sim-runtime", "explorer"),
     needs: [],
     parallelSafe: true,
-    baselineSeconds: 81,
+    baselineSeconds: 149,
     claim:
       "Session lifecycle, forking, and pause gating behave exactly as specified; every named checkpoint migration rule is well-formed, hazard-classified and still matches the code that absorbs it; a save written before entity references carried their kind restores with the same reference count and no guessed namespace, and the current schema refuses that same bare-reference shape; a checkpoint from the maintained save path is accepted; each of the six rejection conditions refuses with the field named; a suppressed major-catalyst cooldown stays suppressed across restore from both the current schema and a real 0.3 save, while a 0.2 save predating the field migrates to the historically correct value; a source-schema preflight on the raw payload accepts each evidenced historical omission for its own schema and refuses every field its writer was required to emit, so a 0.3 save preserves its persisted lastDecisionTick and cannot omit it and a 0.2 save reconstructs the historically absent tick; present wrong-typed, malformed, non-finite, or self-contradicting values are refused at every supported schema across the encoded simulation with its resource, waste, organism, interval and identity state, the observer's detectors, history records and eras, entity references, and decision records, so named historical absence cannot excuse an invalid checked value; a preflight refusal leaves an existing running session unchanged; and the Owner-facing supported-save boundary document is generated rather than transcribed, carrying the live current schema version, no supported-version literal in code that could go stale behind it, and the two independent schema and engine-version gates named separately.",
   },
@@ -250,10 +274,11 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:time-controls",
     cls: "deterministic",
     enforcement: "blocking",
+    mergeGate: true,
     domains: withApparatus("contracts", "sim-core", "sim-runtime", "explorer"),
     needs: [],
     parallelSafe: true,
-    baselineSeconds: 20,
+    baselineSeconds: 26,
     claim: "Playback speed changes advance exactly the tick counts they claim.",
   },
   {
@@ -262,6 +287,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:landscape",
     cls: "deterministic",
     enforcement: "blocking",
+    mergeGate: true,
     domains: withApparatus("contracts", "sim-core", "explorer"),
     needs: [],
     parallelSafe: true,
@@ -274,6 +300,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:ecology",
     cls: "deterministic",
     enforcement: "blocking",
+    mergeGate: true,
     domains: withApparatus("contracts", "sim-core"),
     needs: [],
     parallelSafe: true,
@@ -286,6 +313,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:niche",
     cls: "deterministic",
     enforcement: "blocking",
+    mergeGate: true,
     domains: withApparatus("contracts", "sim-core", "sim-analysis", "sim-runtime"),
     needs: [],
     parallelSafe: true,
@@ -299,6 +327,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:aftermath",
     cls: "deterministic",
     enforcement: "blocking",
+    mergeGate: true,
     domains: withApparatus("contracts", "sim-core", "sim-decisions", "sim-runtime", "explorer"),
     needs: [],
     parallelSafe: false,
@@ -326,6 +355,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:dependency:fast",
     cls: "deterministic",
     enforcement: "blocking",
+    mergeGate: true,
     domains: withApparatus("contracts", "sim-core", "sim-decisions", "sim-runtime"),
     needs: [],
     parallelSafe: true,
@@ -339,6 +369,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:dependency:arc",
     cls: "deterministic",
     enforcement: "blocking",
+    mergeGate: true,
     domains: withApparatus("contracts", "sim-core", "sim-decisions", "sim-runtime"),
     needs: [],
     parallelSafe: true,
@@ -352,10 +383,11 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:dependency:possibility",
     cls: "deterministic",
     enforcement: "blocking",
+    mergeGate: true,
     domains: withApparatus("contracts", "sim-core", "sim-decisions", "sim-runtime"),
     needs: [],
     parallelSafe: true,
-    baselineSeconds: 58,
+    baselineSeconds: 94,
     claim: "Cross-feeding is genuinely possible across seeds, not just in one lucky world.",
   },
   {
@@ -364,6 +396,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:dependency:tradeoff",
     cls: "deterministic",
     enforcement: "blocking",
+    mergeGate: true,
     domains: withApparatus("contracts", "sim-core", "sim-decisions", "sim-runtime"),
     needs: [],
     parallelSafe: true,
@@ -376,6 +409,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:dependency:washout",
     cls: "deterministic",
     enforcement: "blocking",
+    mergeGate: true,
     domains: withApparatus("contracts", "sim-core", "sim-decisions", "sim-runtime"),
     needs: [],
     parallelSafe: true,
@@ -390,11 +424,12 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "build",
     cls: "presentation",
     enforcement: "blocking",
+    mergeGate: true,
     domains: CODE,
     needs: [],
     parallelSafe: false,
     artifact: "explorer-dist",
-    baselineSeconds: 12,
+    baselineSeconds: 1,
     claim: "The product compiles, and the resulting bundle is the one every browser lane tests.",
   },
   {
@@ -403,10 +438,11 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:phenotype",
     cls: "presentation",
     enforcement: "blocking",
+    mergeGate: true,
     domains: withApparatus("contracts", "phenotype", "explorer"),
     needs: [],
     parallelSafe: true,
-    baselineSeconds: 10,
+    baselineSeconds: 1,
     claim: "A genotype maps to the same phenotype, in Node and in the world model alike.",
   },
   {
@@ -415,6 +451,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:art-review",
     cls: "presentation",
     enforcement: "blocking",
+    mergeGate: true,
     domains: withApparatus("contracts", "phenotype", "explorer"),
     needs: [],
     parallelSafe: true,
@@ -426,6 +463,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:plated",
     cls: "presentation",
     enforcement: "blocking",
+    mergeGate: true,
     domains: withApparatus("contracts", "phenotype", "explorer"),
     needs: [],
     parallelSafe: true,
@@ -438,6 +476,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:pixi-spike",
     cls: "presentation",
     enforcement: "blocking",
+    mergeGate: true,
     domains: withApparatus("contracts", "explorer"),
     needs: [],
     parallelSafe: true,
@@ -450,6 +489,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:pixi-p0",
     cls: "presentation",
     enforcement: "blocking",
+    mergeGate: true,
     domains: withApparatus("contracts", "phenotype", "explorer"),
     needs: [],
     parallelSafe: true,
@@ -465,6 +505,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:browser",
     cls: "browser",
     enforcement: "blocking",
+    mergeGate: true,
     domains: withApparatus("contracts", "sim-core", "sim-decisions", "sim-runtime", "phenotype", "explorer", "android"),
     needs: ["build"],
     parallelSafe: false,
@@ -478,6 +519,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:mobile-ui",
     cls: "browser",
     enforcement: "blocking",
+    mergeGate: true,
     domains: withApparatus("contracts", "sim-core", "sim-decisions", "sim-runtime", "phenotype", "explorer", "android"),
     needs: ["build"],
     parallelSafe: false,
@@ -492,6 +534,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: null,
     cls: "platform",
     enforcement: "blocking",
+    mergeGate: false,
     // sim-core is here because a biology change alters the bundle this platform
     // packages. Android proves packaging and launch, but it is still packaging
     // *something*, and that something must be the validated product.
@@ -506,6 +549,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: null,
     cls: "platform",
     enforcement: "blocking",
+    mergeGate: false,
     // sim-core is here because a biology change alters the bundle this platform
     // packages. Android proves packaging and launch, but it is still packaging
     // *something*, and that something must be the validated product.
@@ -522,6 +566,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: null,
     cls: "platform",
     enforcement: "blocking",
+    mergeGate: false,
     // sim-core is here because a biology change alters the bundle this platform
     // packages. Android proves packaging and launch, but it is still packaging
     // *something*, and that something must be the validated product.
@@ -537,6 +582,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: null,
     cls: "platform",
     enforcement: "blocking",
+    mergeGate: false,
     // PAUSED. The emulator lane cannot currently boot reliably: four samples
     // ran 487s, 789s, 828s (action gave up), and ~1150s of a 1200s budget with
     // the device unusable afterwards, and two of four runs failed. A lane that
@@ -563,6 +609,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:survey",
     cls: "scientific",
     enforcement: "manual",
+    mergeGate: false,
     domains: withApparatus("contracts", "sim-core"),
     needs: [],
     parallelSafe: true,
@@ -576,6 +623,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:niche-survey",
     cls: "scientific",
     enforcement: "manual",
+    mergeGate: false,
     domains: withApparatus("contracts", "sim-core", "sim-analysis"),
     needs: [],
     parallelSafe: true,
@@ -588,6 +636,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:washout-reliance",
     cls: "scientific",
     enforcement: "manual",
+    mergeGate: false,
     domains: withApparatus("contracts", "sim-core", "sim-decisions"),
     needs: [],
     parallelSafe: true,
@@ -600,6 +649,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:provenance",
     cls: "scientific",
     enforcement: "manual",
+    mergeGate: false,
     domains: withApparatus("contracts", "sim-core"),
     needs: [],
     parallelSafe: true,
@@ -615,6 +665,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "test:visual",
     cls: "evidence",
     enforcement: "evidence",
+    mergeGate: false,
     domains: withApparatus("contracts", "sim-core", "phenotype", "explorer", "android"),
     needs: ["build"],
     parallelSafe: false,
@@ -629,6 +680,7 @@ export const UNITS: readonly ValidationUnit[] = [
     script: "spike:capture",
     cls: "evidence",
     enforcement: "evidence",
+    mergeGate: false,
     domains: withApparatus("contracts", "explorer"),
     needs: [],
     parallelSafe: false,
@@ -790,8 +842,14 @@ export const GROUPS: readonly ValidationGroup[] = [
   },
   {
     id: "ci-browser",
-    title: "Browser, mobile UI, and landscape captures",
-    unitIds: ["browser-smoke", "mobile-ui", "visual-capture"],
+    title: "Browser and mobile UI (blocking)",
+    unitIds: ["browser-smoke", "mobile-ui"],
+    ci: true,
+  },
+  {
+    id: "ci-visual",
+    title: "Landscape visual evidence (non-gating)",
+    unitIds: ["visual-capture"],
     ci: true,
   },
   {
