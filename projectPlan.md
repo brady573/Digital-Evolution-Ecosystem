@@ -14,10 +14,11 @@ before M7 may resume.
 
 ## Current Focus
 
-Tranche A hardening: A1, A2, A3.1, A3.2 merged; A3.3 (checkpoint rejection +
-strict schema 0.4) open as PR #70, unmerged pending design acceptance. M7
-investigation work is on hold until the full gate closes with explicit
-activation.
+Tranche A hardening: A1, A2, A3.1, A3.2, and A3.3 are merged; PR #70
+established the strict runtime checkpoint schema 0.4. A6 typed EvidenceExport
+provenance is open as PR #74 while the remaining Tranche A units continue under
+the accepted dependency rules. M7 investigation work remains on hold until the
+full pre-M7 gate closes with explicit activation.
 
 ## Structured Requirements
 
@@ -189,7 +190,8 @@ activation.
 - Phenotype / current-state / analysis layers stay separate through migration
 - Rendering never consumes simulation RNG; phenotype stays presentation-only
 - Microscopic-habitat metaphor (substrate-scale cues, no macro-landscape imagery)
-- Status: validated prototype in tools/pixi-spike; broad World migration to follow
+- Status: validated spike/P0 preparation plus an inactive unbound production-shaped
+  scaffold are merged; maintained World cutover has not occurred
 
 ### REQ-M4-001
 
@@ -238,7 +240,7 @@ activation.
 - Status: Implemented
 - Description: World-first layout, bounded speeds, immersive presentation
 - Dependencies: Feature 2
-- Implementation Notes: PixiJS v8/WebGL2 approved for production World migration (Tranche D), after contract stabilization
+- Implementation Notes: PixiJS v8/WebGL2 approved for production World migration (Tranche D). PRs #71 and #73 provide preparation/scaffold evidence; maintained Canvas2D World cutover still waits on accepted pre-M7 A/B/C and read-model/runtime stabilization
 
 ### Feature 4 — Events, clades, and population story
 
@@ -254,7 +256,7 @@ activation.
 - Status: Implemented
 - Description: Interventions, lazy forks, structured exports
 - Dependencies: Features 2, 4
-- Implementation Notes: Typed `EvidenceExport` with revision/cleanliness provenance is Tranche A unit A6 (not started)
+- Implementation Notes: Typed `EvidenceExport` with revision/cleanliness provenance is Tranche A unit A6; implementation is open as PR #74 and is not treated as merged evidence until accepted
 
 ### Feature 6 — Niche-construction slice
 

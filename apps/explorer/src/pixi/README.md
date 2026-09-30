@@ -20,6 +20,10 @@ until the pre-M7 Tranches A/B/C gate releases P1.
 
 - No `sim-core` / `sim-runtime` imports anywhere in this directory (renderer is presentation-only).
 - No phenotype selection/hysteresis reimplementation: consume `ResolvedPhenotype` from `packages/phenotype` / `apps/explorer/src/phenotype.ts`.
+- P1 production modules (`../pixiWorld/`) may absorb this directory's pure
+  helpers (layer order, camera math, key descriptors) by import — that is the
+  prep paying off, not a boundary violation. `App.tsx` activation of any of
+  it stays gated (P1.6, after Tranches A/B/C + reconciliation).
 - Exact bitmap-equivalent texture identity only. A relaxed cache key needs current evidence it merges no meaningful visual states.
 - Nearest-neighbor filtering for organism pixel textures; analytical field views stay exact/flat (never smoothed).
 - Offline-first: no runtime network asset loading.

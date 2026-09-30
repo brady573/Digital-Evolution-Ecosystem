@@ -18,10 +18,12 @@ unit/CI shard the manifest routes for the diff.
 - API Tests: typed contract boundaries (`typecheck`, `test:validation-arch`);
   no network API exists (offline-first)
 - UI Tests: browser class — `test:browser` (smoke), `test:mobile-ui`
-  (phone/tablet/desktop viewports)
+  (phone/tablet/desktop viewports), and `test:pixi-world` (inactive production
+  scaffold lifecycle/correctness)
 - End-to-End Tests: CI shards (`quick`, `sim-*`, `build`, `presentation`,
-  `smoke`, `android/*`); evidence class (`visual-capture`, `pixi-capture`)
-  is non-gating human-review material
+  `smoke`, `android/*`); `pixi-world-proof` is blocking browser evidence,
+  while human-review captures such as `visual-capture` and `pixi-capture`
+  remain non-gating evidence
 
 ## Feature Test Cases
 
@@ -38,7 +40,7 @@ authoritative for what is actually evidenced.
 |---|---|---|---|
 | TC-SIM-001 | Determinism + parity (REQ-SIM-001) | Identical commands reproduce identical state; checkpoint parity holds | Covered by `test:migration`, `test:flows` |
 | TC-SIM-002 | Authority boundaries (REQ-SIM-003) | sim-core carries no internal observer; analysis never mutates biology | Covered by `test:migration` (single-analysis-authority) |
-| TC-SIM-003 | Checkpoint migration + rejection (REQ-SIM-001) | Named historical omissions migrate; invalid payloads fail explicitly pre-live-state | Covered by `test:flows` (A3.3 in PR #70) |
+| TC-SIM-003 | Checkpoint migration + rejection (REQ-SIM-001) | Named historical omissions migrate; invalid payloads fail explicitly pre-live-state | Covered by `test:flows`; A3.3 merged in PR #70 |
 
 ### Feature: Events, clades, decisions
 
@@ -54,6 +56,7 @@ authoritative for what is actually evidenced.
 |---|---|---|---|
 | TC-UX-001 | Browser smoke (REQ-UX-001) | Worker, canvas, control surface function in a real browser | Covered by `test:browser` |
 | TC-UX-002 | Mobile layouts (REQ-UX-001) | Phone/tablet/desktop viewports usable | Covered by `test:mobile-ui` |
+| TC-GRAPH-001 | Inactive Pixi scaffold lifecycle (REQ-GRAPH-001) | WebGL2 scaffold boots, resizes, uploads nearest textures, retires resources, and tears down without production World activation | Covered by blocking `test:pixi-world` / `pixi-world-proof` |
 
 ## Bugs / Failed Tests
 
