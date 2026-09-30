@@ -15,6 +15,7 @@ import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ENGINE_VERSION } from "../../packages/sim-core/src/index.ts";
+import { readInjectedSource, resolveSourceProvenance } from "../../packages/sim-runtime/src/provenance.ts";
 import { CHECKPOINT_SCHEMA_VERSION } from "../../packages/sim-runtime/src/session.ts";
 import { testHistoricalCheckpointBoundary } from "./checkpoint-historical-boundary.ts";
 
@@ -191,6 +192,53 @@ function testFlowEvidence() {
     );
   }
   console.log("flow evidence separation: PASS");
+}
+
+/**
+ * A6 export provenance: tri-state cleanliness (Decision 4 §A6). Pure
+ * resolution, no session: a known commit on a clean tree is clean; a dirty
+ * tree is dirty (the commit is still recorded); a null commit is unknown —
+ * never silently clean, even when dirty is false.
+ */
+function testExportProvenanceTriState() {
+  const clean = resolveSourceProvenance("0123456789abcdef0123456789abcdef01234567", false);
+  assert.equal(clean.cleanliness, "clean", "a known commit on a clean tree is clean");
+  assert.equal(
+    clean.revision.git_commit,
+    "0123456789abcdef0123456789abcdef01234567",
+    "the clean revision records its commit",
+  );
+
+  const dirty = resolveSourceProvenance("0123456789abcdef0123456789abcdef01234567", true);
+  assert.equal(dirty.cleanliness, "dirty", "a dirty tree is dirty");
+  assert.equal(
+    dirty.revision.git_commit,
+    "0123456789abcdef0123456789abcdef01234567",
+    "a dirty build still records its commit",
+  );
+
+  const unknown = resolveSourceProvenance(null, false);
+  assert.equal(unknown.cleanliness, "unknown", "no determinable revision is unknown, never clean");
+  assert.equal(unknown.revision.git_commit, null, "an unknown revision carries a null commit");
+
+  const unknownDirty = resolveSourceProvenance(null, true);
+  assert.equal(unknownDirty.cleanliness, "unknown", "unknown stays unknown even when dirty");
+
+  assert.equal(clean.revision.engine_version, ENGINE_VERSION, "the revision carries the running engine version");
+
+  // No build-time injection under tsx: the reader yields the unknown-triggering
+  // shape, so a validation run never claims a clean source it cannot determine.
+  assert.deepEqual(
+    readInjectedSource(),
+    { commit: null, dirty: false },
+    "without vite defines the injected source reads as undeterminable",
+  );
+  assert.equal(
+    resolveSourceProvenance(...Object.values(readInjectedSource()) as [string | null, boolean]).cleanliness,
+    "unknown",
+    "the tsx reader shape resolves to unknown, never clean",
+  );
+  console.log("export provenance tri-state: PASS");
 }
 
 function testProcessActivations() {
@@ -1369,4 +1417,5 @@ testCheckpointMigrationRuleTable();
 testBoundaryGeneratorIsDerived();
 
 testFlowEvidence();
+testExportProvenanceTriState();
 console.log(`flow validation: PASS (checkpoint schema ${CHECKPOINT_SCHEMA_VERSION}, engine ${ENGINE_VERSION})`);
