@@ -48,6 +48,8 @@
     "test:pixi-p0": "tsx tools/validation/pixi-p0.ts",
     "test:pixi-world": "tsx tools/pixi-world-proof/capture.ts",
     "test:provenance": "tsx tools/validation/provenance.ts",
+    "test:broad-ecology-022": "tsx tools/validation/broad-ecology-022.ts",
+    "test:broad-ecology-022-summary": "tsx tools/validation/broad-ecology-022-summary.ts",
     "spike:capture": "tsx tools/pixi-spike/capture.ts",
     "spike:dev": "pnpm --filter @digital-evolution/explorer exec vite ../../tools/pixi-spike --port 5193 --strictPort --host 127.0.0.1",
     "test:dependency:possibility": "tsx tools/validation/dependency.ts -- --skip-policy --only=possibility",
