@@ -47,6 +47,18 @@ export const MATRIX_SEEDS = [
 export const BROAD022_HORIZON = 250000;
 export const BROAD022_STRIDE = 5000;
 
+// Task 3 matched-assay anchors (plan verbatim): fork at tick 60000 (washout
+// SETTLE_TICKS mature-community anchor), branch 30000 ticks to separate the
+// immediate mechanical effect at +1000 from the later ecological response at
+// +30000. Disturbance assays run on fresh sessions only; the baseline 32 runs
+// are never forked or intervened.
+export const DISTURB_FORK_TICK = 60000;
+export const DISTURB_IMMEDIATE_TICK = 61000;
+export const DISTURB_LATE_TICK = 90000;
+
+// Disturbance assay seed set (plan verbatim): the first 4 matrix seeds.
+export const DISTURBANCE_SEEDS = [24681357, 821947219, 3543950664, 111111111];
+
 export function horizon(): number {
   return BROAD022_HORIZON;
 }
@@ -481,6 +493,119 @@ export function labelNiche(
   return "no-response";
 }
 
+// Task 3: clade turnover summary. The per-sample clade/lineage time-series
+// itself is the Task 2 `lineages_active/effective`, `clades_active/effective`
+// sample fields (fail-closed null when unobserved); no duplicate `cladeSeries`
+// array is retained, per the artifact-size Review Focus. What Task 3 adds is
+// the terminal turnover read below: max + final richness plus
+// replacement/collapse/recovery verdicts from record/series evidence only, so
+// a single end-of-run richness count is never the only clade evidence.
+//
+// A verdict is `false` only when there was something to judge (records and/or
+// a usable series with no event); it is `"not-observed"` where the series
+// cannot distinguish (no records at all and fewer than 2 non-null clade
+// samples) rather than a forced label. Descriptive, never causal.
+export type Broad022TurnoverVerdict = boolean | "not-observed";
+
+export interface Broad022CladeTurnover {
+  /** Max `clades_active` over samples (null when never observed). */
+  everActiveMax: number | null;
+  /** Last sample's `clades_active` (null when unobserved). */
+  finalActive: number | null;
+  /** Leading-lineage change across cuse/niche records (lineage entity-ref
+   *  IDs in tick order; >1 distinct ID means the attributed lineage turned
+   *  over). "not-observed" when no cuse/niche record names a lineage. */
+  replacementsObserved: Broad022TurnoverVerdict;
+  /** Observer `disrupted`/`superseded` record, or a series wipe (non-null
+   *  richness >= 1 followed later by non-null 0; extinction-driven zeros
+   *  count, with extinction itself recorded separately in terminal). */
+  collapseObserved: Broad022TurnoverVerdict;
+  /** Observer `recovered` record, or a series rebound (>= 1 after a wipe). */
+  recoveryObserved: Broad022TurnoverVerdict;
+}
+
+/** Minimal record view the turnover summary reads (full in-memory records;
+ *  only scalar headers are retained on the run). */
+export interface Broad022TurnoverRecord {
+  kind: unknown;
+  phase: unknown;
+  tick: unknown;
+  entity_refs?: unknown;
+}
+
+/**
+ * Derive the clade turnover summary from the measured sample series plus the
+ * observed full records. Pure over its inputs: no simulation access, no
+ * mutation, safe to unit-probe.
+ */
+export function summarizeClades(
+  samples: Broad022Sample[],
+  records: Broad022TurnoverRecord[],
+): Broad022CladeTurnover {
+  const actives: number[] = [];
+  for (const s of samples) {
+    const a = s.clades_active;
+    if (typeof a === "number" && Number.isFinite(a)) actives.push(a);
+  }
+  const everActiveMax = actives.length > 0 ? Math.max(...actives) : null;
+  const last = samples.length > 0 ? samples[samples.length - 1]!.clades_active : null;
+  const finalActive = typeof last === "number" && Number.isFinite(last) ? last : null;
+  // Leading-lineage identities across cuse/niche records, tick-ordered.
+  const ordered = [...records].sort((a, b) =>
+    typeof a.tick === "number" && typeof b.tick === "number" ? a.tick - b.tick : 0,
+  );
+  const lineageIds: number[] = [];
+  for (const r of ordered) {
+    if (r.kind !== "cuse" && r.kind !== "niche") continue;
+    const refs = (r as { entity_refs?: unknown }).entity_refs;
+    if (!Array.isArray(refs)) continue;
+    for (const ref of refs) {
+      if (
+        ref !== null &&
+        typeof ref === "object" &&
+        (ref as { kind?: unknown }).kind === "lineage" &&
+        typeof (ref as { id?: unknown }).id === "number" &&
+        Number.isFinite((ref as { id?: unknown }).id)
+      ) {
+        lineageIds.push((ref as { id: number }).id);
+      }
+    }
+  }
+  const replacementsObserved: Broad022TurnoverVerdict =
+    lineageIds.length === 0 ? "not-observed" : new Set(lineageIds).size > 1;
+  let disrupted = false;
+  let recovered = false;
+  for (const r of records) {
+    if (r.phase === "disrupted" || r.phase === "superseded") disrupted = true;
+    else if (r.phase === "recovered") recovered = true;
+  }
+  let seenPositive = false;
+  let wipe = false;
+  let rebound = false;
+  for (const s of samples) {
+    const a = s.clades_active;
+    if (typeof a !== "number" || !Number.isFinite(a)) continue;
+    if (a >= 1) {
+      if (wipe) rebound = true;
+      seenPositive = true;
+    } else if (seenPositive) {
+      wipe = true;
+    }
+  }
+  const noSignal = records.length === 0 && actives.length < 2;
+  const collapseObserved: Broad022TurnoverVerdict =
+    disrupted || wipe ? true : noSignal ? "not-observed" : false;
+  const recoveryObserved: Broad022TurnoverVerdict =
+    recovered || rebound ? true : noSignal ? "not-observed" : false;
+  return {
+    everActiveMax,
+    finalActive,
+    replacementsObserved,
+    collapseObserved,
+    recoveryObserved,
+  };
+}
+
 export interface Broad022Run {
   archetype: Broad022Archetype;
   seed: number;
@@ -504,6 +629,7 @@ export interface Broad022Run {
     extinctTick: number | null;
     outcome: unknown;
     labels: Broad022Labels;
+    clades: Broad022CladeTurnover;
   };
   // Scalar-only record headers (washout v3 precedent: no nested evidence
   // frames). entityRefKinds names what each tagged ref denotes so a consumer
@@ -588,6 +714,7 @@ function surveyRun(
     crossfeeding: labelCrossfeeding(samples, fullRecords),
     niche: labelNiche(samples, fullRecords),
   };
+  const clades = summarizeClades(samples, fullRecords);
   return {
     archetype,
     seed,
@@ -611,8 +738,121 @@ function surveyRun(
       extinctTick,
       outcome: str(tm.ecological_outcome),
       labels,
+      clades,
     },
     records,
+  };
+}
+
+export interface Broad022DisturbancePair {
+  tick: number;
+  live: number | null;
+  control: number | null;
+  liveA: number | null;
+  controlA: number | null;
+}
+
+export interface Broad022DisturbanceLate extends Broad022DisturbancePair {
+  liveOutcome: string | null;
+  controlOutcome: string | null;
+}
+
+// Matched droughtA disturbance pair (Task 3). Top-level live/control
+// population + outcome names follow the ecology-survey precedent (late-pair
+// values); the nested immediate/late pairs carry the checkable +1000/+30000
+// ticks. `diverged` is a matched comparison only — live A-stock below control
+// A-stock at the late pair — descriptive, never causal.
+export interface Broad022Disturbance {
+  archetype: Broad022Archetype;
+  seed: number;
+  forkTick: number;
+  forkPopulation: number;
+  livePopulation: number | null;
+  controlPopulation: number | null;
+  liveOutcome: string | null;
+  controlOutcome: string | null;
+  immediate: Broad022DisturbancePair;
+  late: Broad022DisturbanceLate;
+  diverged: boolean;
+  commands: string[];
+}
+
+function readDisturbancePair(snap: any): Broad022DisturbancePair {
+  const liveM: any = snap.metrics ?? {};
+  const ctrl: any = snap.control ?? null;
+  const ctrlM: any = ctrl?.metrics ?? {};
+  return {
+    tick: snap.tick,
+    live: num(snap.population),
+    control: ctrl ? num(ctrl.population) : null,
+    liveA: num(liveM.nutrient_field?.a),
+    controlA: num(ctrlM.nutrient_field?.a),
+  };
+}
+
+/**
+ * One matched droughtA assay on a fresh session: settle to the fork anchor,
+ * fork-before-intervene always, then read the immediate (+1000, mechanical)
+ * and late (+30000, ecological) live/control pairs. The baseline 32 runs are
+ * never forked or intervened; this session is assay-local and discarded.
+ */
+export function assayDisturbance(
+  archetype: Broad022Archetype,
+  seed: number,
+): Broad022Disturbance {
+  const session = new UniverseSession();
+  session.create(config(seed, archetype));
+  const commands: string[] = [`create:${archetype}/${seed}`];
+  const fromF = session.snapshot().tick;
+  settleTo(session, DISTURB_FORK_TICK, commands);
+  commands.push(`advance:${session.snapshot().tick - fromF}:${fromF}->${session.snapshot().tick}`);
+  // Boundary gate: settleTo leaves a decision pending when it fires exactly
+  // at the target tick, and intervene() refuses under a pending choice. The
+  // same no-op keep-watching policy as the baseline keeps assay ticks real.
+  let pre: any = session.snapshot();
+  if (pre.pendingDecision) {
+    session.resolveEventDecision(pre.pendingDecision.opportunityId, "keep-watching");
+    commands.push(`resolve:${pre.pendingDecision.opportunityId}:keep-watching`);
+    pre = session.snapshot();
+  }
+  session.createControlFork();
+  commands.push(`fork:${pre.tick}`);
+  const fork: any = session.snapshot();
+  session.intervene("droughtA");
+  commands.push(`intervene:droughtA@${fork.tick}`);
+  const fromI = session.snapshot().tick;
+  settleTo(session, DISTURB_IMMEDIATE_TICK, commands);
+  commands.push(`advance:${session.snapshot().tick - fromI}:${fromI}->${session.snapshot().tick}`);
+  const immediateSnap: any = session.snapshot();
+  const immediate = readDisturbancePair(immediateSnap);
+  const fromL = immediateSnap.tick;
+  settleTo(session, DISTURB_LATE_TICK, commands);
+  commands.push(`advance:${session.snapshot().tick - fromL}:${fromL}->${session.snapshot().tick}`);
+  const lateSnap: any = session.snapshot();
+  const lateM: any = lateSnap.metrics ?? {};
+  const lateCtrlM: any = lateSnap.control?.metrics ?? {};
+  const late: Broad022DisturbanceLate = {
+    ...readDisturbancePair(lateSnap),
+    liveOutcome: str(lateM.ecological_outcome),
+    controlOutcome: str(lateCtrlM.ecological_outcome),
+  };
+  // `false` covers both "no divergence" and "stocks unobserved" (the retained
+  // stocks show which); Task 4 must check nulls before reading a finding.
+  const diverged =
+    late.liveA !== null && late.controlA !== null ? late.liveA < late.controlA : false;
+  return {
+    archetype,
+    seed,
+    forkTick: fork.tick,
+    forkPopulation: num(fork.population) ?? 0,
+    livePopulation: late.live,
+    controlPopulation: late.control,
+    liveOutcome: late.liveOutcome,
+    controlOutcome: late.controlOutcome,
+    immediate,
+    late,
+    diverged,
+    commands,
   };
 }
 
@@ -633,13 +873,14 @@ function selfcheck(): void {
   assert(MATRIX_ARCHETYPES.length === 4, `MATRIX_ARCHETYPES.length === ${MATRIX_ARCHETYPES.length}`);
   assert(horizon() === 250000, `horizon() === ${horizon()}`);
   assert(sampleStride() === 5000, `sampleStride() === ${sampleStride()}`);
+  assert(DISTURB_FORK_TICK === 60000, `DISTURB_FORK_TICK === ${DISTURB_FORK_TICK}`);
+  assert(DISTURB_IMMEDIATE_TICK - DISTURB_FORK_TICK === 1000, "immediate pair at +1000");
+  assert(DISTURB_LATE_TICK - DISTURB_FORK_TICK === 30000, "late pair at +30000");
+  assert(DISTURBANCE_SEEDS.length === 4, `DISTURBANCE_SEEDS.length === ${DISTURBANCE_SEEDS.length}`);
   console.log("broad-ecology-022 selfcheck: PASS");
 }
 
 function runSurvey(): void {
-  if (process.argv.includes("--disturbance")) {
-    throw new Error("broad-ecology-022: --disturbance lands in Task 3 (not implemented in the Task 1 scaffold)");
-  }
   const TICKS = Math.max(1000, Math.floor(Number(arg("ticks", String(BROAD022_HORIZON)))));
   const OUT = arg("out", "testdata/broad-ecology-0.22.json");
   const archetypes = arg("archetypes", MATRIX_ARCHETYPES.join(","))
@@ -667,14 +908,15 @@ function runSurvey(): void {
     archetypes,
     seeds,
     runs: [],
+    disturbance: [],
   };
 
   // Resume: completed (archetype, seed) rows in an existing artifact are
   // kept when it belongs to this engine and horizon, so a killed run can be
   // re-invoked to finish only the missing rows. A row counts as completed
   // when it reached the requested ticks or went extinct, AND carries the
-  // Task 2 terminal labels (Task 1 scaffold rows predate them and are
-  // re-run deterministically to gain full capture).
+  // Task 2 terminal labels plus the Task 3 clade turnover (earlier-schema
+  // rows predate them and are re-run deterministically to gain full capture).
   try {
     const prior = JSON.parse(readFileSync(OUT, "utf8"));
     if (
@@ -683,10 +925,21 @@ function runSurvey(): void {
       Array.isArray(prior.runs)
     ) {
       const kept = prior.runs.filter(
-        (r: any) => r && r.terminal && r.terminal.labels && (r.terminal.tick >= TICKS || r.terminal.extinct || r.terminal.population === 0),
+        (r: any) => r && r.terminal && r.terminal.labels && r.terminal.clades && (r.terminal.tick >= TICKS || r.terminal.extinct || r.terminal.population === 0),
       );
       result.runs = kept;
       console.log(`resuming: ${kept.length} rows already retained`);
+      // Disturbance pairs are carried across invocations either way, so a
+      // baseline-only re-run never wipes retained pairs. A pair counts as
+      // completed when its late (+30000) pair is present.
+      const keptDist = Array.isArray(prior.disturbance)
+        ? prior.disturbance.filter(
+            (d: any) =>
+              d && typeof d.forkTick === "number" && d.late && typeof d.late.tick === "number" && d.late.tick >= DISTURB_LATE_TICK,
+          )
+        : [];
+      result.disturbance = keptDist;
+      if (keptDist.length > 0) console.log(`resuming: ${keptDist.length} disturbance rows already retained`);
     }
   } catch {
     /* fresh run */
@@ -709,7 +962,38 @@ function runSurvey(): void {
     }
   }
   writeResult(OUT, result);
+  if (process.argv.includes("--disturbance")) {
+    runDisturbanceSection(OUT, result, archetypes, seeds);
+  }
+  writeResult(OUT, result);
   console.log(`broad ecology 0.22 survey: DONE -> ${OUT}`);
+}
+
+function runDisturbanceSection(OUT: string, result: any, archetypes: Broad022Archetype[], seeds: number[]): void {
+  // Matched droughtA assays for the requested archetypes x the requested
+  // seeds intersected with the 4-seed assay set (full run: 4x4 = 16 pairs).
+  // Each assay settles a FRESH session; the baseline runs above are never
+  // forked or intervened. Resume-safe like baseline rows.
+  const assaySeeds = seeds.filter((s) => DISTURBANCE_SEEDS.includes(s));
+  if (assaySeeds.length === 0) {
+    console.log("disturbance: no requested seed is in the 4-seed assay set, skipping");
+    return;
+  }
+  const done = new Set((result.disturbance as any[]).map((d: any) => `${d.archetype}/${d.seed}`));
+  for (const archetype of archetypes) {
+    for (const seed of assaySeeds) {
+      if (done.has(`${archetype}/${seed}`)) {
+        console.log(`disturbance/${archetype}/${seed}: already retained, skipping`);
+        continue;
+      }
+      const row = assayDisturbance(archetype, seed);
+      (result.disturbance as any[]).push(row);
+      writeResult(OUT, result);
+      console.log(
+        `disturbance/${archetype}/${seed}: fork ${row.forkTick} pop ${row.forkPopulation}, immediate live ${row.immediate.live} vs control ${row.immediate.control}, late live ${row.late.live} vs control ${row.late.control}, diverged=${row.diverged}`,
+      );
+    }
+  }
 }
 
 const invokedAsScript =
@@ -729,7 +1013,7 @@ if (invokedAsScript) {
     runSurvey();
   } else {
     console.error(
-      "usage: tsx tools/validation/broad-ecology-022.ts -- [--selfcheck | --ticks=N --out=PATH --archetypes=A,.. --seeds=S,..]",
+      "usage: tsx tools/validation/broad-ecology-022.ts -- [--selfcheck | --ticks=N --out=PATH --archetypes=A,.. --seeds=S,.. [--disturbance]]",
     );
     process.exitCode = 2;
   }
