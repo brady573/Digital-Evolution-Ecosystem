@@ -400,7 +400,7 @@ function generate(inPath: string, outPath: string, tablesPath: string, spotcheck
       engineMatch: artifact.engine === ENGINE_VERSION,
       horizon: artifact.horizon ?? BROAD022_HORIZON,
       sampleStride: artifact.sampleStride ?? BROAD022_STRIDE,
-      horizonJustification: artifact.horizon ?? null,
+      horizonJustification: artifact.horizonJustification ?? null,
       runCount: runs.length,
       disturbanceCount: disturbanceRows.length,
     },
