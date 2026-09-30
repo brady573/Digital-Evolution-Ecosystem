@@ -35,14 +35,17 @@ permissions:
   contents: read
 
 # This workflow proves platform facts. It does not re-prove that the repository
-# is sound: the product gates it is called after have already done that for this
-# commit, and the caller only invokes it once they pass. The previous version
-# ran `pnpm verify` here as well, which cost 1158s of a 1451s job to assemble an
-# APK that takes 39s.
+# is sound and it does not wait for that proof: the caller invokes it as soon
+# as the build candidate and the routing decision exist, in parallel with the
+# merge gates. The APK is therefore candidate evidence until the product gates
+# pass for the same revision (the caller's `android_acceptance` job records
+# that). The previous version ran `pnpm verify` here as well, which cost 1158s
+# of a 1451s job to assemble an APK that takes 39s.
 #
 # The evidence ladder stays explicit:
 #
-#   1. explorer-dist is the bundle the browser lane passed against
+#   1. explorer-dist is this run's exact build candidate (browser validation
+#      may still be running against the same bundle)
 #   2. the checked-in android/ project matches it            (android-sync)
 #   3. a debug APK is produced                              (android-assemble)
 #   4. Android's own static analysis passes                 (android-lint)
