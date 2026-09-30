@@ -717,13 +717,31 @@ export class UniverseSession {
     return renderSnapshot(this.#experiment,this.#analysis,this.#control,this.#pendingDecision,this.#decisionResolutions,this.#worldId,this.#aftermath);
   }
 
+  /**
+   * The current world, or null when no universe exists yet. Used to answer a
+   * refused command without mutating anything: it reports, it does not act.
+   */
+  #currentOrNull():RenderSnapshot|null{
+    try{return this.snapshot()}catch{return null}
+  }
+
   handle(command:RuntimeCommand):RuntimeResponse[]{
     try{
       // The worker boundary is a trust boundary. A payload arriving from it is
       // unknown in reality even though the transport type claims otherwise, so
       // it is validated before dispatch and before any simulation loop can run.
       const validation=validateRuntimeCommand(command);
-      if(!validation.ok)return[{type:"ERROR",message:validation.message}];
+      if(!validation.ok){
+        // A refused command must not mutate anything, but Explorer clears its
+        // advanceDebt backpressure flag only inside the subscribe callback, so a
+        // rejection that emitted no SNAPSHOT would wedge the time controls
+        // permanently. The echoed snapshot reports the world unchanged; it
+        // grants no authority and advances nothing.
+        const echoed=this.#currentOrNull();
+        return echoed
+          ?[{type:"ERROR",message:validation.message},{type:"SNAPSHOT",snapshot:echoed}]
+          :[{type:"ERROR",message:validation.message}];
+      }
       command=validation.command;
       switch(command.type){
         case "CREATE_UNIVERSE":return[{type:"SNAPSHOT",snapshot:this.create(command.config)}];
