@@ -693,16 +693,16 @@ export const UNITS: readonly ValidationUnit[] = [
     id: "pixi-world-proof",
     title: "pixiWorld scaffold browser proof",
     script: "test:pixi-world",
-    cls: "evidence",
-    enforcement: "evidence",
-    mergeGate: false,
+    cls: "browser",
+    enforcement: "blocking",
+    mergeGate: true,
     domains: withApparatus("contracts", "explorer"),
     needs: [],
     parallelSafe: false,
     artifact: "pixi-world-proof-evidence",
-    baselineSeconds: 90,
+    baselineSeconds: 5,
     claim:
-      "The inactive production scaffold boots WebGL2, follows resize, mints nearest-filtered textures, retires texture and source, and tears down. Non-gating lifecycle proof, independent of snapshot binding.",
+      "The inactive production scaffold boots WebGL2, follows resize, mints nearest-filtered textures, retires texture and source, and tears down. State-based and timing/pixel independent, so software-GL execution proves the lifecycle.",
   },
 ];
 
@@ -767,7 +767,7 @@ export const GROUPS: readonly ValidationGroup[] = [
   {
     id: "browser",
     title: "Browser and runtime behaviour",
-    unitIds: ["browser-smoke", "mobile-ui"],
+    unitIds: ["browser-smoke", "mobile-ui", "pixi-world-proof"],
     ci: false,
   },
   // Platform units are addressed as two routing groups rather than one, because
@@ -796,7 +796,7 @@ export const GROUPS: readonly ValidationGroup[] = [
   {
     id: "evidence",
     title: "Human-review evidence generation",
-    unitIds: ["visual-capture", "pixi-capture", "pixi-world-proof"],
+    unitIds: ["visual-capture", "pixi-capture"],
     ci: false,
   },
   {
@@ -858,7 +858,7 @@ export const GROUPS: readonly ValidationGroup[] = [
   {
     id: "ci-browser",
     title: "Browser and mobile UI (blocking)",
-    unitIds: ["browser-smoke", "mobile-ui"],
+    unitIds: ["browser-smoke", "mobile-ui", "pixi-world-proof"],
     ci: true,
   },
   {
@@ -870,7 +870,7 @@ export const GROUPS: readonly ValidationGroup[] = [
   {
     id: "ci-pixi",
     title: "Pixi spike browser evidence",
-    unitIds: ["pixi-capture", "pixi-world-proof"],
+    unitIds: ["pixi-capture"],
     ci: true,
   },
 ];
