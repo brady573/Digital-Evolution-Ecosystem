@@ -17,7 +17,9 @@ declare const __DEE_GIT_DIRTY__: boolean | undefined;
  */
 export function readInjectedSource(): { commit: string | null; dirty: boolean } {
   const commit =
-    typeof __DEE_GIT_COMMIT__ === "undefined" || __DEE_GIT_COMMIT__ === null
+    typeof __DEE_GIT_COMMIT__ === "undefined" ||
+    __DEE_GIT_COMMIT__ == null ||
+    __DEE_GIT_COMMIT__ === ""
       ? null
       : __DEE_GIT_COMMIT__;
   const dirty = typeof __DEE_GIT_DIRTY__ === "undefined" ? false : __DEE_GIT_DIRTY__;
@@ -32,8 +34,11 @@ export function readInjectedSource(): { commit: string | null; dirty: boolean } 
  * known clean revision satisfies exact-source mapping.
  */
 export function resolveSourceProvenance(commit: string | null, dirty: boolean): SourceProvenance {
+  // Defense-in-depth: an empty string is not a revision — normalize it to
+  // null so it resolves unknown, never clean, and never lands in git_commit.
+  const resolved = commit == null || commit === "" ? null : commit;
   let cleanliness: Cleanliness;
-  if (commit === null) cleanliness = "unknown";
+  if (resolved === null) cleanliness = "unknown";
   else if (dirty) cleanliness = "dirty";
   else cleanliness = "clean";
   return {
@@ -44,7 +49,7 @@ export function resolveSourceProvenance(commit: string | null, dirty: boolean): 
       // string experiment.out() emits); the numeric envelope version is the
       // separate export_format_version: 1 field.
       format_version: EXPORT_FORMAT_VERSION,
-      git_commit: commit,
+      git_commit: resolved,
     },
     cleanliness,
   };

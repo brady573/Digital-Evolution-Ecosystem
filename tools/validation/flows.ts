@@ -224,6 +224,10 @@ function testExportProvenanceTriState() {
   const unknownDirty = resolveSourceProvenance(null, true);
   assert.equal(unknownDirty.cleanliness, "unknown", "unknown stays unknown even when dirty");
 
+  const emptyCommit = resolveSourceProvenance("", false);
+  assert.equal(emptyCommit.cleanliness, "unknown", "an empty-string commit is unknown, never clean");
+  assert.equal(emptyCommit.revision.git_commit, null, "an empty string never masquerades as a revision");
+
   assert.equal(clean.revision.engine_version, ENGINE_VERSION, "the revision carries the running engine version");
   assert.equal(
     clean.revision.format_version,
