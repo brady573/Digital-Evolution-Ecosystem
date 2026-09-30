@@ -2,11 +2,14 @@ import assert from "node:assert/strict";
 import { CHECKPOINT_MIGRATION_RULES, CheckpointRejectionError } from "../../packages/contracts/src/index.ts";
 import type { EngineConfig } from "../../packages/contracts/src/index.ts";
 import {
+  canonicalizeRestoreState,
+  validateCanonicalRestoreState,
   validateDecisionRecords,
   validateEntityRefs,
   validateObserverCheckpoint,
 } from "../../packages/contracts/src/index.ts";
-import { UniverseSession } from "../../packages/sim-runtime/src/session.ts";
+import type { CanonicalizationContext, CanonicalRestoreCandidate } from "../../packages/contracts/src/index.ts";
+import { CHECKPOINT_SCHEMA_VERSION, UniverseSession } from "../../packages/sim-runtime/src/session.ts";
 
 const config: EngineConfig = {
   seed: 24681357, start: 0.58, prod: 0.77, cap: 360, pop: 30, div: 0.35,
@@ -14,6 +17,34 @@ const config: EngineConfig = {
   cat: "global", st: null, resource_model: "definition_driven_substances",
   resource_grid: 60, enable_byproduct: true, enable_dormancy: true, study: true,
 };
+
+/**
+ * A context of the shape sim-runtime supplies. Written out literally here
+ * rather than obtained from a running session, because the point of the test
+ * is that canonicalisation is a pure function of (source, context) — building
+ * the context must not touch RNG, simulation or observer state, and a literal
+ * makes that structural rather than incidental.
+ */
+const canonicalContext = (): CanonicalizationContext => ({
+  policyVersion: "events-0.1.0",
+  catalystPolicyVersion: "catalysts-0.1.0",
+  currentSchema: CHECKPOINT_SCHEMA_VERSION,
+  detectorDefaults: {
+    dep: {
+      id: "eco-cuse-1", state: "absent", candidateSince: null, lowSince: null,
+      establishedTick: null, estScav: 0, baselineProduced: 0, topConsumer: null,
+      topConsumerShare: 0,
+    },
+    niche: {
+      id: "eco-niche-1", state: "absent", candidateSince: null, shiftSince: null,
+      lowSince: null, establishedTick: null, baseWaste: 0, baseTol: 0, baseCu: 0,
+      baseExposed: 0, estWaste: 0, estExposed: 0, wasDisrupted: false,
+    },
+  },
+});
+
+const isPlainObjectForTest = (v: unknown): boolean =>
+  v !== null && typeof v === "object" && !Array.isArray(v);
 
 /** A 0.3 build wrote this tick; restoring it must not derive another one. */
 export function testHistoricalCheckpointBoundary(): void {
@@ -564,6 +595,272 @@ export function testHistoricalCheckpointBoundary(): void {
       `present invalid ${field} is rejected even on a historically optional control observer`,
     );
   }
+  // --- A3.4: canonicalisation ------------------------------------------------
+  //
+  // Canonicalisation is a pure function of (source, context). Every assertion
+  // below is about that function alone; no session is involved, because a
+  // restore would hide exactly the property being tested here.
+  const candidate = canonicalizeRestoreState(historical02 as any, canonicalContext());
+  const decisions = candidate.decisions as any;
+  assert.equal(decisions.lastDecisionTick, 9, "0.2 pacing reconstructs from the newest tick its own records carry, not the oldest");
+  assert.equal(decisions.lastMajorCatalystTick, null, "0.2 predates the cooldown entirely");
+  assert.equal(decisions.policyVersion, "events-0.1.0", "generator versions come from the running build, never the save");
+  assert.equal(decisions.catalystPolicyVersion, "catalysts-0.1.0", "both catalogs, not just the event one");
+  assert.equal(decisions.resolutions[0].choiceTitle, "Not recorded in this save", "0.2 wording is marked unrecorded, not invented");
+  assert.equal(decisions.resolutions[0].directEffectDescription, "Not recorded in this save");
+  assert.equal(decisions.resolutions[0].offerTick, 8, "0.2 offer tick derives from the resolution's own tick");
+  assert.equal(decisions.resolutions[0].catalystId, null, "0.2 predates catalyst decisions");
+  assert.ok(isPlainObjectForTest(decisions.pending), "a 0.2 pending survives canonicalisation");
+  assert.equal(decisions.pending.source, "observed_event", "a sourceless 0.2 pending normalises to event provenance");
+  assert.equal(decisions.pending.contextSnapshot, null, "0.2's unsaved context is marked unrecorded, not fabricated");
+  assert.ok(isPlainObjectForTest((candidate.analysis as any).dep), "dep is materialised by canonical migration");
+  assert.ok(isPlainObjectForTest((candidate.analysis as any).niche), "niche is materialised by canonical migration");
+
+  // A saved generator version must not win over the running build's.
+  const staleGenerator = JSON.parse(JSON.stringify(historical02)) as any;
+  staleGenerator.decisions.policyVersion = "retired-catalog";
+  staleGenerator.decisions.catalystPolicyVersion = "retired-catalysts";
+  assert.equal(
+    (canonicalizeRestoreState(staleGenerator, canonicalContext()).decisions as any).policyVersion,
+    "events-0.1.0",
+    "a retired saved catalog version must not generate future opportunities",
+  );
+
+  // Purity: neither the source payload nor the supplied context is written to.
+  // Purity is asserted over the WHOLE source payload, not one convenient field.
+  // A single-field check would pass even if the decisions object were aliased
+  // and rewritten elsewhere.
+  //
+  // It runs on a PRISTINE copy. Re-using the shared fixture here compares a
+  // payload after N canonicalisations against the same payload after N
+  // canonicalisations, and a first-pass mutation would already be present on
+  // both sides — the check could never fail. Verified: an in-place
+  // `normalizeResolution` slipped past this until the source was made fresh.
+  const pristine = JSON.parse(JSON.stringify(historical02));
+  const beforeWholeSource = JSON.stringify(pristine);
+  canonicalizeRestoreState(pristine as any, canonicalContext());
+  assert.equal(
+    JSON.stringify(pristine),
+    beforeWholeSource,
+    "canonicalisation must leave an untouched source payload byte-identical",
+  );
+  assert.equal((pristine.decisions as any).lastDecisionTick, undefined, "and specifically must not write the pacing tick into it");
+  assert.equal(
+    (pristine.decisions as any).resolutions[0].offerTick,
+    undefined,
+    "nor backfill an offer tick into the caller's own resolution record",
+  );
+  const savedVersion = historical02.decisions.policyVersion;
+  assert.ok(typeof savedVersion === "string" && savedVersion.length > 0, "the source fixture did carry a saved generator version");
+  assert.notEqual(savedVersion, "events-0.1.0", "otherwise this purity check would prove nothing");
+
+  // Purity must hold for the shape that actually took the fast path: entity
+  // refs already tagged, so `migrateAnalysisEntityRefs` returns the SAME object
+  // reference rather than a copy. Writing the detectors into that reference
+  // mutates the caller's payload, which is a real defect and not a theoretical
+  // one — it is the late-0.3 shape (tagged refs, no detector sub-state).
+  const taggedRefsNoDetectors: any = JSON.parse(JSON.stringify(current));
+  taggedRefsNoDetectors.checkpointSchemaVersion = "0.3";
+  delete taggedRefsNoDetectors.analysis.dep;
+  delete taggedRefsNoDetectors.analysis.niche;
+  assert.ok(
+    taggedRefsNoDetectors.analysis.records.every((r: any) =>
+      (r.entity_refs as unknown[]).every((ref) => ref !== null && typeof ref === "object")),
+    "this fixture must have ALREADY-TAGGED refs, or it would not exercise the aliasing path",
+  );
+  const beforeAnalysis = JSON.stringify(taggedRefsNoDetectors.analysis);
+  canonicalizeRestoreState(taggedRefsNoDetectors, canonicalContext());
+  assert.equal(
+    JSON.stringify(taggedRefsNoDetectors.analysis),
+    beforeAnalysis,
+    "canonicalisation must not write into the caller's analysis object when refs are already migrated",
+  );
+  assert.equal(
+    (taggedRefsNoDetectors.analysis as any).dep,
+    undefined,
+    "the source payload must still be missing its detector sub-state after canonicalisation",
+  );
+
+  const frozenContext = canonicalContext();
+  const beforeContext = JSON.stringify(frozenContext);
+  canonicalizeRestoreState(historical02 as any, frozenContext);
+  assert.equal(JSON.stringify(frozenContext), beforeContext, "canonicalisation must not mutate the supplied context or its defaults");
+
+  // Idempotence, at the SAME schema. A second pass that relabels the payload to
+  // the current schema would flip the historical branch off and never re-run the
+  // backfills under test, which is exactly where a recompute-on-second-pass bug
+  // would hide. So the schema is held at 0.2 and the canonical output is fed
+  // back as a 0.2 source.
+  const again02 = canonicalizeRestoreState(
+    {
+      ...historical02,
+      checkpointSchemaVersion: "0.2",
+      analysis: candidate.analysis,
+      decisions: candidate.decisions,
+    } as any,
+    canonicalContext(),
+  );
+  assert.deepEqual(again02.decisions, candidate.decisions,
+    "a second 0.2 canonicalisation must not change any backfilled value");
+  assert.deepEqual(again02.analysis, candidate.analysis,
+    "a second 0.2 canonicalisation must not change the analysis layer");
+  // The offered tick is derived from another field, so this is the case where a
+  // recompute-on-second-pass bug would actually show up.
+  assert.equal(
+    (again02.decisions as any).resolutions[0].offerTick,
+    decisions.resolutions[0].offerTick,
+    "a derived backfill must not re-derive to a different value",
+  );
+  // And a third pass, to catch a two-cycle that converges only on the second.
+  const third02 = canonicalizeRestoreState(
+    { ...historical02, checkpointSchemaVersion: "0.2", analysis: again02.analysis, decisions: again02.decisions } as any,
+    canonicalContext(),
+  );
+  assert.deepEqual(third02.decisions, again02.decisions, "a third pass must be stable too, not alternating");
+
+  // Separately: a current-schema source must also be a fixed point, because a
+  // world re-saved by the running build and restored again is the common case.
+  const currentFixedPoint = canonicalizeRestoreState(current, canonicalContext());
+  const secondCurrent = canonicalizeRestoreState(
+    { ...current, analysis: currentFixedPoint.analysis, decisions: currentFixedPoint.decisions } as any,
+    canonicalContext(),
+  );
+  assert.deepEqual(secondCurrent.decisions, currentFixedPoint.decisions,
+    "canonicalising an already-canonical current payload must be a no-op");
+
+  // 0.1 predates the decision system; the canonical form starts empty.
+  const oldestCandidate = canonicalizeRestoreState(oldest as any, canonicalContext());
+  const oldestDecisions = oldestCandidate.decisions as any;
+  assert.deepEqual(oldestDecisions.resolutions, [], "0.1 starts with no decision history");
+  assert.equal(oldestDecisions.pending, null, "0.1 has no pending opportunity");
+  assert.equal(oldestDecisions.lastDecisionTick, 0, "0.1 pacing starts at 0");
+  assert.equal(oldestDecisions.lastMajorCatalystTick, null, "0.1 has never fired a catalyst");
+
+  // A 0.3 payload keeps its own pacing rather than having it re-derived.
+  const preserved03 = canonicalizeRestoreState(original as any, canonicalContext());
+  assert.equal(
+    (preserved03.decisions as any).lastDecisionTick,
+    17,
+    "a 0.3 save's own pacing tick must survive canonicalisation, not be re-derived",
+  );
+
+  // The detector backfill must reach the restored world. This asserts the
+  // OUTCOME, not the path: `EcologyObserver.restore` Object.assigns over a
+  // fresh observer, so an absent sub-state would take the constructor default
+  // even if the canonical layer were ignored — and the constructor default is
+  // the same value the context supplies. No behavioural test can separate the
+  // two.
+  //
+  // The wiring is therefore guaranteed structurally, not by this assertion:
+  // sim-runtime no longer imports `migrateAnalysisEntityRefs` at all, so the
+  // bypass path cannot be written without adding an import back. This test
+  // pins the consequence a player would see — a pre-detector save still opens
+  // with a well-formed detector rather than an undefined one.
+  const noDetectors: any = JSON.parse(JSON.stringify(current));
+  noDetectors.checkpointSchemaVersion = "0.3";
+  delete noDetectors.analysis.dep;
+  delete noDetectors.analysis.niche;
+  const liveRestored = new UniverseSession();
+  liveRestored.restore(noDetectors);
+  const liveDep = (liveRestored.analysis as any).dep;
+  assert.ok(isPlainObjectForTest(liveDep), "a pre-detector save restores with a materialised C-use sub-state");
+  assert.equal(liveDep.id, "eco-cuse-1", "the materialised sub-state is the observer's declared initial state");
+  assert.equal(liveDep.state, "absent", "a detector that never fired is absent, not established");
+  assert.equal(liveDep.estScav, 0, "and carries the declared initial counters");
+  assert.equal((liveRestored.analysis as any).niche.id, "eco-niche-1", "the niche sub-state is materialised too");
+
+  // controlAnalysis is null for a world with no fork, and is canonicalised in
+  // its own right when one exists.
+  assert.equal(candidate.controlAnalysis, null, "a world with no matched control has no control analysis to canonicalise");
+  // --- A3.4 Task 3: canonical validation as a narrowing boundary ------------
+  //
+  // The whole reason the candidate is a separate type: a rule whose canonical
+  // default the current contract rejects must be CAUGHT here, not loaded. If
+  // canonicalization returned a trusted type, the compiler would be asserting
+  // the conclusion this validator exists to test.
+  const goodCandidate = candidate as CanonicalRestoreCandidate;
+  const badPacing: CanonicalRestoreCandidate = {
+    ...goodCandidate,
+    decisions: { ...decisions, lastDecisionTick: "not a tick" },
+  };
+  assert.throws(
+    () => validateCanonicalRestoreState(badPacing, canonicalContext()),
+    (e: unknown) => e instanceof CheckpointRejectionError && e.field === "decisions.lastDecisionTick",
+    "a canonical pacing value the current contract rejects is refused, not defaulted",
+  );
+  const badWording: CanonicalRestoreCandidate = {
+    ...goodCandidate,
+    decisions: { ...decisions, resolutions: [{ ...decisions.resolutions[0], choiceTitle: 42 }] },
+  };
+  assert.throws(
+    () => validateCanonicalRestoreState(badWording, canonicalContext()),
+    (e: unknown) => e instanceof CheckpointRejectionError && e.field === "decisions.resolutions[0].choiceTitle",
+    "a canonical resolution with invalid wording is refused even though the field may be absent historically",
+  );
+  const missingDetector: CanonicalRestoreCandidate = {
+    ...goodCandidate,
+    analysis: (() => { const a = JSON.parse(JSON.stringify(candidate.analysis)); delete a.dep; return a; })(),
+  };
+  assert.throws(
+    () => validateCanonicalRestoreState(missingDetector, canonicalContext()),
+    (e: unknown) => e instanceof CheckpointRejectionError && e.field === "analysis.dep",
+    "the current contract requires a detector the canonical layer is missing",
+  );
+  const badDetector: CanonicalRestoreCandidate = {
+    ...goodCandidate,
+    analysis: { ...(JSON.parse(JSON.stringify(candidate.analysis))), dep: "not a state" },
+  };
+  assert.throws(
+    () => validateCanonicalRestoreState(badDetector, canonicalContext()),
+    (e: unknown) => e instanceof CheckpointRejectionError && e.field === "analysis.dep",
+    "a present but non-object detector is refused in the canonical layer too",
+  );
+
+  // The validator is a NARROWING boundary: it returns the validated type, so a
+  // caller cannot skip the check by ignoring a return value.
+  const validated = validateCanonicalRestoreState(goodCandidate, canonicalContext());
+  assert.equal(validated.decisions.lastDecisionTick, 9, "a good candidate narrows to the validated state");
+  assert.equal(typeof validated.decisions.resolutions, "object", "and exposes real decision records, not `unknown`");
+
+  // Canonical validation must NOT weaken itself for an older source schema.
+  // `currentSchema` identifies the running contract; it is not a mode switch.
+  const oldSchemaCandidate: CanonicalRestoreCandidate = {
+    ...goodCandidate,
+    decisions: { ...decisions, catalystPolicyVersion: "retired-catalog" },
+  };
+  const stillValidated = validateCanonicalRestoreState(oldSchemaCandidate, canonicalContext());
+  assert.equal(
+    stillValidated.decisions.catalystPolicyVersion,
+    "retired-catalog",
+    "canonical validation accepts a persisted generator string whatever its value; it is not a mode switch",
+  );
+
+  // A non-object observer must be refused, not spread into an empty one.
+  for (const key of ["analysis", "controlAnalysis"] as const) {
+    const degenerate: any = JSON.parse(JSON.stringify(historical02));
+    degenerate[key] = null;
+    const result = canonicalizeRestoreState(degenerate, canonicalContext());
+    assert.equal(result[key], null, `a null ${key} must stay null, not become an empty object`);
+  }
+  const forked = new UniverseSession();
+  forked.create(config);
+  forked.createControlFork();
+  const forkCandidate = canonicalizeRestoreState(forked.checkpoint() as any, canonicalContext());
+  assert.ok(isPlainObjectForTest(forkCandidate.controlAnalysis), "a forked world's control analysis is canonicalised too");
+  assert.ok(isPlainObjectForTest((forkCandidate.controlAnalysis as any).dep), "the matched observer's dep is materialised as well");
+
+  // The same aliasing check for the matched-control observer.
+  const forkPurity: any = JSON.parse(JSON.stringify(forked.checkpoint()));
+  delete forkPurity.controlAnalysis.dep;
+  delete forkPurity.controlAnalysis.niche;
+  const beforeControl = JSON.stringify(forkPurity.controlAnalysis);
+  canonicalizeRestoreState(forkPurity, canonicalContext());
+  assert.equal(
+    JSON.stringify(forkPurity.controlAnalysis),
+    beforeControl,
+    "the matched observer must not be written into either",
+  );
+
   const invalidContext = JSON.parse(JSON.stringify(historical02));
   invalidContext.decisions.pending.contextSnapshot = "corrupt";
   assert.throws(

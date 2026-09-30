@@ -23,10 +23,12 @@ import type {
 import {
   AFTERMATH_COMPARABLES,
   decisionCommandId,
-  migrateAnalysisEntityRefs,
   validateCheckpoint,
+  canonicalizeRestoreState,
+  validateCanonicalRestoreState,
   worldId as toWorldId,
 } from "@digital-evolution/contracts";
+import type { CanonicalizationContext } from "@digital-evolution/contracts";
 import {
   ENGINE_VERSION,
   EVENT_STRIDE,
@@ -154,57 +156,25 @@ function renderSnapshot(sim:any,analysis:EcologyObserver,control:any|null,pendin
 }
 
 /**
- * A persisted pending decision replays exactly as stored: never re-evaluated
- * against a newer catalog, which could silently substitute choices. Pre-source
- * 0.2 saves carry no `source` field; a `sourceEventId` can only mean an
- * observed-event decision, so normalize it explicitly rather than guessing.
- * Anything else unrecognized restores as no pending decision.
+ * The trusted, running-build values canonicalisation needs.
+ *
+ * Built from the owning modules rather than from any save, and read-only: the
+ * observer is constructed fresh and only its declared initial detector state is
+ * read out of it. No RNG is consumed and no session state is touched, so
+ * obtaining this cannot perturb a replay.
  */
-function normalizePendingDecision(raw:unknown):PendingDecision|null{
-  if(!raw||typeof raw!=="object")return null;
-  const copy=JSON.parse(JSON.stringify(raw));
-  if(copy.source==="world_catalyst"||copy.source==="observed_event")return copy as PendingDecision;
-  if(typeof copy.sourceEventId==="string"){copy.source="observed_event";return copy as PendingDecision}
-  return null;
-}
-
-const NOT_RECORDED="Not recorded in this save";
-function normalizeHistoricalPending(raw:unknown):PendingDecision|null{
-  const pending=normalizePendingDecision(raw);
-  if(!pending)return null;
-  const copy={...pending} as Record<string,unknown>;
-  if(copy.contextSnapshot===undefined)copy.contextSnapshot=null;
-  return copy as unknown as PendingDecision;
-}
-
-function normalizeResolution(raw:any):DecisionResolution{
-  const copy=JSON.parse(JSON.stringify(raw));
-  // Backfill for 0.2 records, which predate these fields: the resolution tick
-  // is the best available offer estimate, and no 0.2 record came from a
-  // catalyst window (they did not exist).
-  if(copy.offerTick===undefined)copy.offerTick=copy.tick;
-  if(copy.catalystId===undefined)copy.catalystId=null;
-  return copy as DecisionResolution;
-}
-function normalizeHistoricalResolution(raw:any):DecisionResolution{
-  const copy=normalizeResolution(raw);
+const canonicalizationContext = (): CanonicalizationContext => {
+  const observer = new EcologyObserver();
   return {
-    ...copy,
-    choiceTitle:copy.choiceTitle??NOT_RECORDED,
-    directEffectDescription:copy.directEffectDescription??NOT_RECORDED,
+    policyVersion: DECISION_POLICY_VERSION,
+    catalystPolicyVersion: CATALYST_POLICY_VERSION,
+    currentSchema: CHECKPOINT_SCHEMA_VERSION,
+    detectorDefaults: {
+      dep: JSON.parse(JSON.stringify(observer.dep)),
+      niche: JSON.parse(JSON.stringify(observer.niche)),
+    },
   };
-}
-
-/** Newest decision tick known to a migrated checkpoint, or 0 when none. */
-function newestKnownDecisionTick(pending:PendingDecision|null,resolutions:readonly DecisionResolution[]):number{
-  let newest=0;
-  if(pending&&typeof pending.createdTick==="number")newest=Math.max(newest,pending.createdTick);
-  for(const r of resolutions){
-    if(r&&typeof r.tick==="number")newest=Math.max(newest,r.tick);
-    if(r&&typeof (r as any).offerTick==="number")newest=Math.max(newest,(r as any).offerTick);
-  }
-  return newest;
-}
+};
 
 export class UniverseSession {
   #experiment:any|null=null;
@@ -644,23 +614,34 @@ export class UniverseSession {
     // wiring attempt did exactly that, and the pre-A2 length test caught it.
     validateCheckpoint(checkpoint);
     if(checkpoint.engineVersion!==ENGINE_VERSION)throw new Error(`Checkpoint engine ${checkpoint.engineVersion} does not match ${ENGINE_VERSION}`);
-    const migrated={
-      ...checkpoint,
-      analysis:migrateAnalysisEntityRefs(checkpoint.analysis),
-      controlAnalysis:migrateAnalysisEntityRefs(checkpoint.controlAnalysis),
-    };
-    const schema=(migrated as any)?.checkpointSchemaVersion;
     // A restore is a new displayed world, not the old one continued: hand out
     // a fresh presentation identity so rendering inertia cannot carry over.
+    // One canonical restore representation for every supported schema, produced
+    // by the same pure migration regardless of which writer wrote the save.
+    // The per-schema branches that used to live here are gone: 0.2's
+    // reconstruction and 0.3's preservation are now properties of the
+    // migration, not of the restore call site.
+    //
+    // The ANALYSIS layer comes from the same canonical object rather than from a
+    // separately migrated one. Migrating here as well would run the reference
+    // migration twice and leave the canonical detector backfill with no effect
+    // on any restored world, while the rules describing it stayed green.
+    const context=canonicalizationContext();
+    // The canonicalizer returns a runtime-untrusted CANDIDATE. Nothing may
+    // consume it: the validator is a narrowing boundary, so the value restore
+    // uses is only reachable by having passed the current non-simulation
+    // contract. A rule whose canonical default the current contract rejects
+    // therefore fails here instead of loading.
+    const canonical=validateCanonicalRestoreState(canonicalizeRestoreState(checkpoint,context),context);
     this.#worldId=toWorldId(++worldIdCounter);
     this.#experiment=restoreSimulationCheckpoint(checkpoint.experiment as any);
-    // Migrate before the observer sees the payload. A save written before A2
-    // holds bare numbers where a ref now carries its kind, and each becomes
-    // `kind: null` — a real entity of unrecorded kind. Presentation then omits
-    // the label rather than guessing a namespace, which is A2's specified
-    // behaviour for a kind that was never recorded. Unusable entries are left
-    // in place for validation to reject, not dropped here.
-    this.#analysis=EcologyObserver.restore(migrated.analysis as any);
+    // The observer sees the canonical layer: references migrated, and detector
+    // sub-states materialised where the writer could not have emitted them. A
+    // save written before A2 holds bare numbers where a ref now carries its
+    // kind, and each becomes `kind: null` — a real entity of unrecorded kind.
+    // Presentation then omits the label rather than guessing a namespace,
+    // which is A2's specified behaviour for a kind never recorded.
+    this.#analysis=EcologyObserver.restore(canonical.analysis as any);
     // Aftermath is deliberately NOT restored. It is evidence held outside the
     // checkpoint, so a restore that carried it would be reconstructing an
     // observation from simulation state alone - exactly what must not happen.
@@ -669,62 +650,16 @@ export class UniverseSession {
     // baseline across a save is a later, separate contract.
     this.#aftermath=null;
     this.#control=checkpoint.control?restoreSimulationCheckpoint(checkpoint.control as any):null;
-    this.#controlAnalysis=checkpoint.controlAnalysis
-      ?EcologyObserver.restore(migrated.controlAnalysis as any)
+    this.#controlAnalysis=canonical.controlAnalysis
+      ?EcologyObserver.restore(canonical.controlAnalysis as any)
       :null;
-    if(schema==="0.4"){
-      const decisions=(checkpoint as UniverseCheckpoint).decisions;
-      this.#pendingDecision=normalizePendingDecision(decisions?.pending);
-      this.#decisionResolutions=Array.isArray(decisions?.resolutions)
-        ?decisions.resolutions.map(normalizeResolution)
-        :[];
-      this.#policyVersion=DECISION_POLICY_VERSION;
-      this.#catalystPolicyVersion=CATALYST_POLICY_VERSION;
-      this.#lastDecisionTick=typeof decisions?.lastDecisionTick==="number"?decisions.lastDecisionTick:0;
-      this.#lastMajorCatalystTick=typeof decisions?.lastMajorCatalystTick==="number"?decisions.lastMajorCatalystTick:null;
-    }else if(schema==="0.3"||schema==="0.2"){
-      // Both older branches normalize pending decisions and resolutions, but
-      // only 0.2 reconstructs the pacing tick. Checkpoint 0.3 wrote its tick;
-      // that persisted value must survive rather than becoming an estimate.
-      const decisions=(checkpoint as UniverseCheckpointV03).decisions;
-      const pending=schema==="0.2"?normalizeHistoricalPending(decisions?.pending):normalizePendingDecision(decisions?.pending);
-      const resolutions=Array.isArray(decisions?.resolutions)
-        ?(decisions.resolutions as any[]).map(schema==="0.2"?normalizeHistoricalResolution:normalizeResolution)
-        :[];
-      this.#pendingDecision=pending;
-      this.#decisionResolutions=resolutions;
-      // Generator versions are always the running code's, for both catalogs.
-      this.#policyVersion=DECISION_POLICY_VERSION;
-      this.#catalystPolicyVersion=CATALYST_POLICY_VERSION;
-      this.#lastDecisionTick=schema==="0.3"
-        ?decisions.lastDecisionTick
-        :newestKnownDecisionTick(pending,resolutions);
-      // 0.3 and 0.2 differ here, and the difference is historical fact rather
-      // than a shared convention. 0.3 wrote this field — b040b19's decision
-      // checkpoint assigns it — so discarding it now would silence a real
-      // cooldown: `null` reads as "clear", and a world restored from a 0.3 save
-      // would permit a major catalyst the save itself recorded as suppressed.
-      // 0.2 predates the field entirely (zero occurrences in b39fd46), so
-      // absence there is the truth about that world and `null` is the
-      // historically correct value rather than a permissive one.
-      //
-      // 0.3's own restore discarded this value on purpose — its comment read
-      // "pacing state restarts ... with a clear cooldown". That convention is
-      // deliberately reversed here: a world whose cooldown is running should
-      // not come back eligible for the catalyst the cooldown was suppressing,
-      // and a save that loads and then behaves differently is worse than one
-      // that refuses, because the player cannot tell which happened.
-      const major=decisions?.lastMajorCatalystTick;
-      this.#lastMajorCatalystTick=
-        typeof major==="number"&&Number.isFinite(major)?major:null;
-    }else{
-      this.#pendingDecision=null;
-      this.#decisionResolutions=[];
-      this.#policyVersion=DECISION_POLICY_VERSION;
-      this.#catalystPolicyVersion=CATALYST_POLICY_VERSION;
-      this.#lastDecisionTick=0;
-      this.#lastMajorCatalystTick=null;
-    }
+    const decisions=canonical.decisions as DecisionCheckpoint;
+    this.#pendingDecision=decisions.pending;
+    this.#decisionResolutions=[...decisions.resolutions] as DecisionResolution[];
+    this.#policyVersion=decisions.policyVersion;
+    this.#catalystPolicyVersion=decisions.catalystPolicyVersion;
+    this.#lastDecisionTick=decisions.lastDecisionTick;
+    this.#lastMajorCatalystTick=decisions.lastMajorCatalystTick;
     // A restored pending opportunity is replayed as-is: never re-evaluated
     // against the current catalog, which could silently substitute choices.
     this.#observedThrough=this.#analysis.observedEvents().length;

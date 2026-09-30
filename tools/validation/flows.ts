@@ -473,45 +473,44 @@ const MIGRATION_ABSORBER_PROBES: Readonly<Record<string, { file: string; probe: 
     probe: /Q\(o\.cu\|\|0,0,1\.5\)\/1\.5/,
   },
   "last-decision-tick-reconstructed-from-newest-record": {
-    file: "packages/sim-runtime/src/session.ts",
-    // Absorber `structural-branch`: for 0.2 the legacy branch computes the value
-    // from the save's own records rather than reading a stored field. The whole
+    file: "packages/contracts/src/index.ts",
+    // Absorber `structural-branch`: for 0.2 the migration computes the value from
+    // the save's own records rather than reading a stored field. The whole
     // conditional is probed, not just the call, so a rewrite that dropped the
     // 0.2 reconstruction — or made 0.3 derive instead of preserve — fails here.
-    probe: /schema==="0\.3"\s*\?decisions\.lastDecisionTick\s*:newestKnownDecisionTick\(pending,resolutions\)/,
+    probe: /schema === "0\.2"\s*\? newestKnownDecisionTick\(pending, resolutions\)/,
   },
   "major-catalyst-tick-predates-cooldown": {
-    file: "packages/sim-runtime/src/session.ts",
-    // Absorber `structural-branch`: the legacy branch reads the field, and a
-    // payload that predates the field falls to the canonical value. Probed
-    // against the same expression the branch actually uses, so a rewrite that
-    // drops the fallback fails here rather than silently re-allowing a
-    // dynamics-gating default.
-    probe: /typeof major==="number"&&Number\.isFinite\(major\)\?major:null;/,
+    file: "packages/contracts/src/index.ts",
+    // Absorber `structural-branch`: a payload that predates the cooldown falls to
+    // null, and null reads as "clear". Probed against the expression the
+    // migration actually uses, so a rewrite that drops the pre-cooldown absence
+    // fails here rather than silently re-allowing a dynamics-gating default.
+    probe: /const lastMajorCatalystTick = isCurrentSchema\(schema\) \|\| schema === "0\.3"\s*\? nullableTick\(source\.lastMajorCatalystTick\)\s*: null;/,
   },
   "pending-decision-source-backfilled-from-event": {
-    file: "packages/sim-runtime/src/session.ts",
-    probe: /copy\.source="observed_event"/,
+    file: "packages/contracts/src/index.ts",
+    probe: /copy\.source = "observed_event"/,
   },
   "decision-resolution-offer-tick-backfilled-from-tick": {
-    file: "packages/sim-runtime/src/session.ts",
-    probe: /if\(copy\.offerTick===undefined\)copy\.offerTick=copy\.tick;/,
+    file: "packages/contracts/src/index.ts",
+    probe: /if \(copy\.offerTick === undefined\) copy\.offerTick = copy\.tick;/,
   },
   "decision-resolution-catalyst-id-reads-as-null": {
-    file: "packages/sim-runtime/src/session.ts",
-    probe: /if\(copy\.catalystId===undefined\)copy\.catalystId=null;/,
+    file: "packages/contracts/src/index.ts",
+    probe: /if \(copy\.catalystId === undefined\) copy\.catalystId = null;/,
   },
   "pending-observation-not-recorded-in-02": {
-    file: "packages/sim-runtime/src/session.ts",
-    probe: /if\(copy\.contextSnapshot===undefined\)copy\.contextSnapshot=null;/,
+    file: "packages/contracts/src/index.ts",
+    probe: /if \(copy\.contextSnapshot === undefined\) copy\.contextSnapshot = null;/,
   },
   "resolution-choice-title-not-recorded-in-02": {
-    file: "packages/sim-runtime/src/session.ts",
-    probe: /choiceTitle:copy\.choiceTitle\?\?NOT_RECORDED/,
+    file: "packages/contracts/src/index.ts",
+    probe: /choiceTitle: copy\.choiceTitle \?\? NOT_RECORDED/,
   },
   "resolution-direct-effect-not-recorded-in-02": {
-    file: "packages/sim-runtime/src/session.ts",
-    probe: /directEffectDescription:copy\.directEffectDescription\?\?NOT_RECORDED/,
+    file: "packages/contracts/src/index.ts",
+    probe: /directEffectDescription: copy\.directEffectDescription \?\? NOT_RECORDED/,
   },
   "entity-refs-bare-numbers-mean-unrecorded-kind": {
     file: "packages/contracts/src/index.ts",
