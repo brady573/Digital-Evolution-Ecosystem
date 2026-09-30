@@ -20,6 +20,10 @@ import {
   validateRuntimeCommand,
 } from "../../packages/sim-runtime/src/command-validation.ts";
 import { MAX_SLICE_TICKS } from "../../packages/sim-runtime/src/speed.ts";
+import {
+  WorkerRuntimeClient,
+  type WorkerLike,
+} from "../../packages/sim-runtime/src/client.ts";
 
 const FIXTURE_SEED = 20260930;
 
@@ -42,6 +46,56 @@ const config = (seed: number): EngineConfig => ({
   enable_byproduct: true,
   enable_dormancy: true,
 });
+
+/**
+ * A scriptable stand-in for the real Worker.
+ *
+ * Issue #54 item 4 requires the transport be injectable "enough to test failure
+ * behavior without a browser crash harness". This is that harness: it records
+ * what the client posts and lets a test deliver a message, an error, or a
+ * messageerror on demand.
+ */
+class FakeWorker implements WorkerLike {
+  readonly posted: unknown[] = [];
+  #terminated = false;
+  readonly #listeners = new Map<string, ((event: never) => void)[]>();
+
+  postMessage(message: unknown): void {
+    this.posted.push(message);
+  }
+
+  terminate(): void {
+    this.#terminated = true;
+  }
+
+  get terminated(): boolean {
+    return this.#terminated;
+  }
+
+  addEventListener(type: string, listener: (event: never) => void): void {
+    const existing = this.#listeners.get(type) ?? [];
+    existing.push(listener);
+    this.#listeners.set(type, existing);
+  }
+
+  /** Deliver a worker response as if it had arrived from the real transport. */
+  deliver(data: unknown): void {
+    for (const listener of this.#listeners.get("message") ?? []) {
+      (listener as (event: { data: unknown }) => void)({ data });
+    }
+  }
+
+  /** Raise a synthetic transport failure of the given kind. */
+  fail(kind: "error" | "messageerror", detail: string): void {
+    for (const listener of this.#listeners.get(kind) ?? []) {
+      (listener as (event: unknown) => void)({ message: detail, kind });
+    }
+  }
+
+  listenerCount(type: string): number {
+    return (this.#listeners.get(type) ?? []).length;
+  }
+}
 
 /** A live session, created through the command boundary under test. */
 const liveSession = () => {
@@ -247,7 +301,43 @@ function testLoadCompletionIsCorrelatedByRequestId() {
   );
 }
 
+/**
+ * The injected transport is actually used, and injection changes no behaviour.
+ *
+ * This is a refactor with no behaviour change, so the proof is that commands
+ * reach the injected transport and that the no-argument construction path is
+ * untouched. There is deliberately no runtime instantiation of the default path
+ * here: Node has no Worker global, so that path is covered by typecheck
+ * (App.tsx:477 constructs the client with no argument) and by the browser lane.
+ */
+function testTransportIsInjectable() {
+  const fake = new FakeWorker();
+  const client = new WorkerRuntimeClient(() => fake);
+  // `create` goes out as a command, so the two must be observed separately: a
+  // transport that silently swallowed posts would satisfy a one-command check.
+  client.create(config(FIXTURE_SEED));
+  client.advance(5);
+  assert.deepEqual(
+    fake.posted,
+    [
+      { type: "CREATE_UNIVERSE", config: config(FIXTURE_SEED) },
+      { type: "ADVANCE_TICKS", ticks: 5 },
+    ],
+    "commands reach the injected transport, in order, unaltered",
+  );
+  assert.equal(fake.posted.length, 2, "every command is forwarded exactly once");
+  assert.equal(client instanceof WorkerRuntimeClient, true, "injection does not change the type");
+
+  // Every listener the client needs must be registered through the seam, so a
+  // later task can drive failure without a browser.
+  for (const kind of ["message", "error"] as const) {
+    assert.ok(fake.listenerCount(kind) > 0, `the client registers a ${kind} listener on the injected transport`);
+  }
+  assert.equal(fake.terminated, false, "the client has not terminated the injected transport");
+}
+
 function main() {
+  testTransportIsInjectable();
   testLoadCompletionIsCorrelatedByRequestId();
   testUnknownTagIsAStructuredFailure();
   testMalformedPayloadsAreRejected();

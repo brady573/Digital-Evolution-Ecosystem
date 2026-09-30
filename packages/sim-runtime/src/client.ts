@@ -8,6 +8,21 @@ import type {
   UniverseCheckpoint,
 } from "@digital-evolution/contracts";
 
+/**
+ * The slice of Worker this client actually uses.
+ *
+ * Issue #54 item 4 requires the transport be injectable enough to prove
+ * failure behaviour without a browser crash harness. Node has no Worker global,
+ * so without this the entire settlement contract would be untestable there.
+ */
+export interface WorkerLike {
+  postMessage(message:unknown):void;
+  terminate():void;
+  addEventListener(type:"message"|"error"|"messageerror",listener:(event:never)=>void):void;
+}
+
+export type WorkerFactory=()=>WorkerLike;
+
 export interface RuntimeClient {
   command(command: RuntimeCommand): void;
   subscribe(listener: (snapshot: RenderSnapshot) => void): () => void;
@@ -32,8 +47,12 @@ export class WorkerRuntimeClient implements RuntimeClient {
   #pendingLoad:{expectedTick:number,requestId:string,resolve:(snapshot:RenderSnapshot)=>void,reject:(reason?:any)=>void,timer:ReturnType<typeof setTimeout>}|null=null;
   #seq=0;
 
-  constructor(){
-    this.#worker=new Worker(new URL("./worker.ts",import.meta.url),{type:"module",name:"digital-evolution-sim"});
+  constructor(factory?:WorkerFactory){
+    this.#worker=(factory?.()??new Worker(new URL("./worker.ts",import.meta.url),{type:"module",name:"digital-evolution-sim"}))as unknown as Worker;
+    this.#register();
+  }
+
+  #register(){
     this.#worker.addEventListener("message",(event:MessageEvent<RuntimeResponse>)=>this.#receive(event.data));
     this.#worker.addEventListener("error",(event)=>console.error("Simulation worker error",event));
   }
