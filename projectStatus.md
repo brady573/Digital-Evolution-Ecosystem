@@ -10,9 +10,10 @@ Bounded independent preparation may proceed where the accepted handoffs allow it
 
 ## Current Phase
 
-Tranche A continues after the A3.3 checkpoint-boundary merge. PR #74 (A6 typed
-EvidenceExport provenance) is open on current main while the remaining Tranche A
-work continues under the accepted dependency and reconciliation rules.
+Tranche A continues on current main after the A3.4 canonical restore merge
+(PR #76). A6 typed EvidenceExport provenance merged as PR #74. The remaining
+Tranche A units are the downstream runtime-boundary work, under the accepted
+dependency and reconciliation rules.
 
 ## Completed
 
@@ -25,12 +26,16 @@ work continues under the accepted dependency and reconciliation rules.
 - M4B P0 asset/provenance reconciliation + Pixi preparation — PR #71 merged
 - Validation workflow critical-path optimization — PR #72 merged
 - Inactive, unbound production-shaped Pixi scaffold + browser proof — PR #73 merged
+- A6 typed EvidenceExport with revision/cleanliness provenance — PR #74 merged
+- A3.4 canonical restore state — PR #76 merged (`91ec38b`). One canonical
+  representation validated against the current non-simulation contract before
+  any restored state becomes live, with the candidate/validated boundary
+  enforced by the compiler and equivalence evidence in three tiers.
 
 ## In Progress
 
-- A6 typed EvidenceExport with revision/cleanliness provenance — PR #74 open
-- Remaining Tranche A hardening, including migrate-then-validate ordering and
-  downstream runtime-boundary work, against the active pre-M7 handoff
+- Remaining Tranche A hardening: downstream runtime-boundary work against the
+  active pre-M7 handoff
 - Issue #54 production-hardening chain remains open
 
 ## Blocked
@@ -43,8 +48,29 @@ work continues under the accepted dependency and reconciliation rules.
 - Android runtime emulator evidence remains paused/unreliable under issue #50;
   APK packaging evidence must not be described as runtime validation.
 
+## Parallel-Authorized (Owner decision 2026-09-30)
+
+Gate removals only — all other sequencing stands. Load-bearing gates
+unchanged: P1 binding after Tranche B read-model stabilization (issue #54),
+A4–A6 after A3's contracts. The A3.4-after-A3.3-spec-acceptance gate is
+satisfied: A3.4 merged as PR #76.
+
+- P1 rendering-only slices (camera/torus math, layer scaffolding, texture
+  pipeline, perf instrumentation): may proceed in parallel, including in
+  production location. Still forbidden: snapshot-shape binding, worker
+  protocol/client changes, Canvas2D removal, any production cutover.
+- A6 typed EvidenceExport: may proceed in parallel with A3.4 (export path
+  is disjoint from checkpoint restore; A3.4 spec declares exports out
+  of scope).
+- Surveys, A2 evidence-trail filing, doc fixes: may proceed anytime
+  (non-gating by evidence class).
+
 ## Recently Completed
 
+- PR #76 merged the A3.4 canonical restore layer: source preflight, canonical
+  migration, then validation against the current non-simulation contract before
+  restore. Restored state cannot bypass the validator, and that boundary is
+  compiler-enforced.
 - PR #73 merged the inactive/unbound Pixi production scaffold and made its
   browser correctness proof blocking/merge-gating. This is preparation, not
   production World cutover.
@@ -52,9 +78,9 @@ work continues under the accepted dependency and reconciliation rules.
 
 ## Next Recommended Task
 
-Finish/review the open A6 work and continue the remaining Tranche A units from
-the active pre-M7 handoff against current main. Do not treat repository slice
-labels for Pixi preparation as release of the production cutover gate.
+Continue the remaining Tranche A runtime-boundary units from the active pre-M7
+handoff against current main. Do not treat repository slice labels for Pixi
+preparation as release of the production cutover gate.
 
 ## Last Updated
 

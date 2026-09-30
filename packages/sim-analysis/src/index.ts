@@ -349,7 +349,15 @@ export class EcologyObserver {
     return JSON.parse(JSON.stringify({cross:this.cross,seedbank:this.seedbank,era:this.era,dep:this.dep,niche:this.niche,records:this.records,eras:this.eras}));
   }
 
-  static restore(state:any){
+  /**
+   * Rebuild an observer from a checkpoint object.
+   *
+   * Typed rather than `any`, deliberately: this is the boundary an unvalidated
+   * checkpoint would arrive at, and `any` here would swallow the guarantee that
+   * canonical state must pass `validateCanonicalRestoreState` first. Passing the
+   * wrapper type instead of its `.state` is now a compile error.
+   */
+  static restore(state:Record<string,unknown>){
     const observer=new EcologyObserver();
     Object.assign(observer,JSON.parse(JSON.stringify(state)));
     return observer;

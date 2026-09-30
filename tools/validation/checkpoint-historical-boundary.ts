@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
-import { CHECKPOINT_MIGRATION_RULES, CheckpointRejectionError } from "../../packages/contracts/src/index.ts";
+import { CHECKPOINT_MIGRATION_RULES, CheckpointRejectionError, NOT_RECORDED } from "../../packages/contracts/src/index.ts";
 import type { EngineConfig } from "../../packages/contracts/src/index.ts";
-import { UniverseSession } from "../../packages/sim-runtime/src/session.ts";
+import {
+  canonicalizeRestoreState,
+  validateCanonicalRestoreState,
+  validateDecisionRecords,
+  validateEntityRefs,
+  validateObserverCheckpoint,
+} from "../../packages/contracts/src/index.ts";
+import type { CanonicalizationContext, CanonicalRestoreCandidate } from "../../packages/contracts/src/index.ts";
+import { CHECKPOINT_SCHEMA_VERSION, UniverseSession } from "../../packages/sim-runtime/src/session.ts";
 
 const config: EngineConfig = {
   seed: 24681357, start: 0.58, prod: 0.77, cap: 360, pop: 30, div: 0.35,
@@ -10,8 +18,43 @@ const config: EngineConfig = {
   resource_grid: 60, enable_byproduct: true, enable_dormancy: true, study: true,
 };
 
+/**
+ * A context of the shape sim-runtime supplies. Written out literally here
+ * rather than obtained from a running session, because the point of the test
+ * is that canonicalisation is a pure function of (source, context) — building
+ * the context must not touch RNG, simulation or observer state, and a literal
+ * makes that structural rather than incidental.
+ */
+const canonicalContext = (): CanonicalizationContext => ({
+  policyVersion: "events-0.1.0",
+  catalystPolicyVersion: "catalysts-0.1.0",
+  currentSchema: CHECKPOINT_SCHEMA_VERSION,
+  detectorDefaults: {
+    dep: {
+      id: "eco-cuse-1", state: "absent", candidateSince: null, lowSince: null,
+      establishedTick: null, estScav: 0, baselineProduced: 0, topConsumer: null,
+      topConsumerShare: 0,
+    },
+    niche: {
+      id: "eco-niche-1", state: "absent", candidateSince: null, shiftSince: null,
+      lowSince: null, establishedTick: null, baseWaste: 0, baseTol: 0, baseCu: 0,
+      baseExposed: 0, estWaste: 0, estExposed: 0, wasDisrupted: false,
+    },
+  },
+});
+
+const isPlainObjectForTest = (v: unknown): boolean =>
+  v !== null && typeof v === "object" && !Array.isArray(v);
+
 /** A 0.3 build wrote this tick; restoring it must not derive another one. */
 export function testHistoricalCheckpointBoundary(): void {
+  // The preflight and A3.4's canonical validation must share one definition of
+  // a valid value. Two definitions would let the boundary lie in two places, so
+  // the shared entry points are named here rather than trusted.
+  assert.equal(typeof validateObserverCheckpoint, "function", "the observer validator is shared, not duplicated");
+  assert.equal(typeof validateDecisionRecords, "function", "the decision validator is shared, not duplicated");
+  assert.equal(typeof validateEntityRefs, "function", "the entity-ref validator is shared, not duplicated");
+
   const reconstructionRule = CHECKPOINT_MIGRATION_RULES.find(
     (rule) => rule.id === "last-decision-tick-reconstructed-from-newest-record",
   );
@@ -147,6 +190,40 @@ export function testHistoricalCheckpointBoundary(): void {
   oldestRestored.restore(oldest);
   assert.equal(oldestRestored.checkpoint().decisions.lastDecisionTick, 0,
     "a pre-decision-system world starts with no pacing history");
+
+  // The assertion above is vacuous: it deletes `decisions` outright, so it would
+  // pass whatever canonicalization does with the block. Preflight only requires
+  // a present `decisions` to be an object, so a 0.1 payload CAN carry one, and
+  // canonicalization is the only place that can honour or discard it. Base
+  // discarded it; canonicalDecisions' own comment says 0.1 "has no history to
+  // read at all". Both must be true of the code.
+  //
+  // The resolution below is deliberately junk: if it is not discarded, the
+  // canonical form is wrong in a way this test will see rather than tolerate.
+  const oldestWithDecisions: any = JSON.parse(JSON.stringify(older));
+  oldestWithDecisions.checkpointSchemaVersion = "0.1";
+  oldestWithDecisions.decisions.pending = {
+    schemaVersion: 1, opportunityId: "offer", policyVersion: "v1",
+    sourceEventId: "event", sourceArcId: null, createdTick: 9,
+    status: "pending", prompt: "Prompt", context: "Context", choices: [],
+  };
+  oldestWithDecisions.decisions.resolutions = [{ not: "a resolution at all" }];
+  const canonicalOldest = canonicalizeRestoreState(oldestWithDecisions, canonicalContext());
+  assert.equal(
+    canonicalOldest.decisions.pending,
+    null,
+    "0.1 predates the decision system, so a pending in a 0.1 payload is not history to read",
+  );
+  assert.deepEqual(
+    canonicalOldest.decisions.resolutions,
+    [],
+    "0.1 predates the decision system, so resolutions in a 0.1 payload are not history to read",
+  );
+  assert.equal(
+    canonicalOldest.decisions.lastDecisionTick,
+    0,
+    "0.1 has no pacing state to reconstruct, even when the payload carries some",
+  );
 
   // Each build since 0.2 wrote both keys even when no decision was pending or
   // resolved. Missing is not the same as the persisted null / empty array.
@@ -552,6 +629,337 @@ export function testHistoricalCheckpointBoundary(): void {
       `present invalid ${field} is rejected even on a historically optional control observer`,
     );
   }
+  // --- A3.4: canonicalisation ------------------------------------------------
+  //
+  // Canonicalisation is a pure function of (source, context). Every assertion
+  // below is about that function alone; no session is involved, because a
+  // restore would hide exactly the property being tested here.
+  const candidate = canonicalizeRestoreState(historical02 as any, canonicalContext());
+  const decisions = candidate.decisions as any;
+  assert.equal(decisions.lastDecisionTick, 9, "0.2 pacing reconstructs from the newest tick its own records carry, not the oldest");
+  assert.equal(decisions.lastMajorCatalystTick, null, "0.2 predates the cooldown entirely");
+  assert.equal(decisions.policyVersion, "events-0.1.0", "generator versions come from the running build, never the save");
+  assert.equal(decisions.catalystPolicyVersion, "catalysts-0.1.0", "both catalogs, not just the event one");
+  assert.equal(decisions.resolutions[0].choiceTitle, "Not recorded in this save", "0.2 wording is marked unrecorded, not invented");
+  assert.equal(decisions.resolutions[0].directEffectDescription, "Not recorded in this save");
+  assert.equal(decisions.resolutions[0].offerTick, 8, "0.2 offer tick derives from the resolution's own tick");
+  assert.equal(decisions.resolutions[0].catalystId, null, "0.2 predates catalyst decisions");
+  assert.ok(isPlainObjectForTest(decisions.pending), "a 0.2 pending survives canonicalisation");
+  assert.equal(decisions.pending.source, "observed_event", "a sourceless 0.2 pending normalises to event provenance");
+  assert.equal(decisions.pending.contextSnapshot, null, "0.2's unsaved context is marked unrecorded, not fabricated");
+  assert.ok(isPlainObjectForTest((candidate.analysis as any).dep),
+    "a 0.2 payload that already carries dep keeps it");
+  assert.ok(isPlainObjectForTest((candidate.analysis as any).niche), "niche is materialised by canonical migration");
+
+  // A saved generator version must not win over the running build's.
+  const staleGenerator = JSON.parse(JSON.stringify(historical02)) as any;
+  staleGenerator.decisions.policyVersion = "retired-catalog";
+  staleGenerator.decisions.catalystPolicyVersion = "retired-catalysts";
+  assert.equal(
+    (canonicalizeRestoreState(staleGenerator, canonicalContext()).decisions as any).policyVersion,
+    "events-0.1.0",
+    "a retired saved catalog version must not generate future opportunities",
+  );
+
+  // Purity: neither the source payload nor the supplied context is written to.
+  // Purity is asserted over the WHOLE source payload, not one convenient field.
+  // A single-field check would pass even if the decisions object were aliased
+  // and rewritten elsewhere.
+  //
+  // It runs on a PRISTINE copy. Re-using the shared fixture here compares a
+  // payload after N canonicalisations against the same payload after N
+  // canonicalisations, and a first-pass mutation would already be present on
+  // both sides — the check could never fail. Verified: an in-place
+  // `normalizeResolution` slipped past this until the source was made fresh.
+  const pristine = JSON.parse(JSON.stringify(historical02));
+  const beforeWholeSource = JSON.stringify(pristine);
+  canonicalizeRestoreState(pristine as any, canonicalContext());
+  assert.equal(
+    JSON.stringify(pristine),
+    beforeWholeSource,
+    "canonicalisation must leave an untouched source payload byte-identical",
+  );
+  assert.equal((pristine.decisions as any).lastDecisionTick, undefined, "and specifically must not write the pacing tick into it");
+  assert.equal(
+    (pristine.decisions as any).resolutions[0].offerTick,
+    undefined,
+    "nor backfill an offer tick into the caller's own resolution record",
+  );
+  const savedVersion = historical02.decisions.policyVersion;
+  assert.ok(typeof savedVersion === "string" && savedVersion.length > 0, "the source fixture did carry a saved generator version");
+  assert.notEqual(savedVersion, "events-0.1.0", "otherwise this purity check would prove nothing");
+
+  // Purity must hold for the shape that actually took the fast path: entity
+  // refs already tagged, so `migrateAnalysisEntityRefs` returns the SAME object
+  // reference rather than a copy. Writing the detectors into that reference
+  // mutates the caller's payload, which is a real defect and not a theoretical
+  // one — it is the late-0.3 shape (tagged refs, no detector sub-state).
+  const taggedRefsNoDetectors: any = JSON.parse(JSON.stringify(current));
+  taggedRefsNoDetectors.checkpointSchemaVersion = "0.3";
+  delete taggedRefsNoDetectors.analysis.dep;
+  delete taggedRefsNoDetectors.analysis.niche;
+  assert.ok(
+    taggedRefsNoDetectors.analysis.records.every((r: any) =>
+      (r.entity_refs as unknown[]).every((ref) => ref !== null && typeof ref === "object")),
+    "this fixture must have ALREADY-TAGGED refs, or it would not exercise the aliasing path",
+  );
+  const beforeAnalysis = JSON.stringify(taggedRefsNoDetectors.analysis);
+  canonicalizeRestoreState(taggedRefsNoDetectors, canonicalContext());
+  assert.equal(
+    JSON.stringify(taggedRefsNoDetectors.analysis),
+    beforeAnalysis,
+    "canonicalisation must not write into the caller's analysis object when refs are already migrated",
+  );
+  assert.equal(
+    (taggedRefsNoDetectors.analysis as any).dep,
+    undefined,
+    "the source payload must still be missing its detector sub-state after canonicalisation",
+  );
+
+  // ...and the canonical RESULT must have gained one, taken from the context
+  // defaults rather than from whatever an observer constructor happened to hold.
+  // Asserting deepEqual against the context is what makes this non-vacuous: the
+  // fixture has no dep to compare against, so removing the backfill turns these
+  // into `undefined` and fails, rather than leaving a value that matches anyway.
+  const detectorDefaults = canonicalContext().detectorDefaults;
+  const filledDetectors = canonicalizeRestoreState(taggedRefsNoDetectors, canonicalContext());
+  assert.deepEqual(
+    (filledDetectors.analysis as any).dep,
+    detectorDefaults.dep,
+    "an absent dependency-arc sub-state is supplied by the canonical backfill",
+  );
+  assert.deepEqual(
+    (filledDetectors.analysis as any).niche,
+    detectorDefaults.niche,
+    "an absent niche-construction sub-state is supplied by the canonical backfill",
+  );
+  assert.notDeepEqual(
+    (filledDetectors.analysis as any).dep,
+    undefined,
+    "the backfill must produce a value, not merely not-throw",
+  );
+
+  const frozenContext = canonicalContext();
+  const beforeContext = JSON.stringify(frozenContext);
+  canonicalizeRestoreState(historical02 as any, frozenContext);
+  assert.equal(JSON.stringify(frozenContext), beforeContext, "canonicalisation must not mutate the supplied context or its defaults");
+
+  // Idempotence, at the SAME schema. A second pass that relabels the payload to
+  // the current schema would flip the historical branch off and never re-run the
+  // backfills under test, which is exactly where a recompute-on-second-pass bug
+  // would hide. So the schema is held at 0.2 and the canonical output is fed
+  // back as a 0.2 source.
+  const again02 = canonicalizeRestoreState(
+    {
+      ...historical02,
+      checkpointSchemaVersion: "0.2",
+      analysis: candidate.analysis,
+      decisions: candidate.decisions,
+    } as any,
+    canonicalContext(),
+  );
+  assert.deepEqual(again02.decisions, candidate.decisions,
+    "a second 0.2 canonicalisation must not change any backfilled value");
+  assert.deepEqual(again02.analysis, candidate.analysis,
+    "a second 0.2 canonicalisation must not change the analysis layer");
+  // The offered tick is derived from another field, so this is the case where a
+  // recompute-on-second-pass bug would actually show up.
+  assert.equal(
+    (again02.decisions as any).resolutions[0].offerTick,
+    decisions.resolutions[0].offerTick,
+    "a derived backfill must not re-derive to a different value",
+  );
+  // And a third pass, to catch a two-cycle that converges only on the second.
+  const third02 = canonicalizeRestoreState(
+    { ...historical02, checkpointSchemaVersion: "0.2", analysis: again02.analysis, decisions: again02.decisions } as any,
+    canonicalContext(),
+  );
+  assert.deepEqual(third02.decisions, again02.decisions, "a third pass must be stable too, not alternating");
+
+  // Separately: a current-schema source must also be a fixed point, because a
+  // world re-saved by the running build and restored again is the common case.
+  const currentFixedPoint = canonicalizeRestoreState(current, canonicalContext());
+  const secondCurrent = canonicalizeRestoreState(
+    { ...current, analysis: currentFixedPoint.analysis, decisions: currentFixedPoint.decisions } as any,
+    canonicalContext(),
+  );
+  assert.deepEqual(secondCurrent.decisions, currentFixedPoint.decisions,
+    "canonicalising an already-canonical current payload must be a no-op");
+  // Decisions alone is a half answer: the observer layer carries the same
+  // backfills, so a re-canonicalisation that rewrote a detector would not show
+  // up in `decisions` at all.
+  assert.deepEqual(secondCurrent.analysis, currentFixedPoint.analysis,
+    "the canonical observer layer must also be a fixed point on a current payload");
+
+  // 0.1 predates the decision system, so the canonical form starts empty EVEN
+  // WHEN the payload carries a decisions block. `oldest` deletes that block, so
+  // using it here would pass whatever canonicalization did — the assertions must
+  // run against the payload that actually supplies one.
+  const oldestCandidate = canonicalizeRestoreState(oldestWithDecisions as any, canonicalContext());
+  const oldestDecisions = oldestCandidate.decisions as any;
+  assert.deepEqual(oldestDecisions.resolutions, [], "0.1 starts with no decision history");
+  assert.equal(oldestDecisions.pending, null, "0.1 has no pending opportunity");
+  assert.equal(oldestDecisions.lastDecisionTick, 0, "0.1 pacing starts at 0");
+  assert.equal(oldestDecisions.lastMajorCatalystTick, null, "0.1 has never fired a catalyst");
+
+  // A 0.3 payload keeps its own pacing rather than having it re-derived.
+  const preserved03 = canonicalizeRestoreState(original as any, canonicalContext());
+  assert.equal(
+    (preserved03.decisions as any).lastDecisionTick,
+    17,
+    "a 0.3 save's own pacing tick must survive canonicalisation, not be re-derived",
+  );
+
+  // The detector backfill must reach the restored world. This asserts the
+  // OUTCOME, not the path: `EcologyObserver.restore` Object.assigns over a
+  // fresh observer, so an absent sub-state would take the constructor default
+  // even if the canonical layer were ignored — and the constructor default is
+  // the same value the context supplies. No behavioural test can separate the
+  // two.
+  //
+  // The wiring is therefore guaranteed structurally, not by this assertion:
+  // sim-runtime no longer imports `migrateAnalysisEntityRefs` at all, so the
+  // bypass path cannot be written without adding an import back. This test
+  // pins the consequence a player would see — a pre-detector save still opens
+  // with a well-formed detector rather than an undefined one.
+  const noDetectors: any = JSON.parse(JSON.stringify(current));
+  noDetectors.checkpointSchemaVersion = "0.3";
+  delete noDetectors.analysis.dep;
+  delete noDetectors.analysis.niche;
+  const liveRestored = new UniverseSession();
+  liveRestored.restore(noDetectors);
+  const liveDep = (liveRestored.analysis as any).dep;
+  assert.ok(isPlainObjectForTest(liveDep), "a pre-detector save restores with a materialised C-use sub-state");
+  assert.equal(liveDep.id, "eco-cuse-1", "the materialised sub-state is the observer's declared initial state");
+  assert.equal(liveDep.state, "absent", "a detector that never fired is absent, not established");
+  assert.equal(liveDep.estScav, 0, "and carries the declared initial counters");
+  assert.equal((liveRestored.analysis as any).niche.id, "eco-niche-1", "the niche sub-state is materialised too");
+
+  // controlAnalysis is null for a world with no fork, and is canonicalised in
+  // its own right when one exists.
+  assert.equal(candidate.controlAnalysis, null, "a world with no matched control has no control analysis to canonicalise");
+  // --- A3.4 Task 3: canonical validation as a narrowing boundary ------------
+  //
+  // The whole reason the candidate is a separate type: a rule whose canonical
+  // default the current contract rejects must be CAUGHT here, not loaded. If
+  // canonicalization returned a trusted type, the compiler would be asserting
+  // the conclusion this validator exists to test.
+  const goodCandidate = candidate as CanonicalRestoreCandidate;
+  const badPacing: CanonicalRestoreCandidate = {
+    ...goodCandidate,
+    decisions: { ...decisions, lastDecisionTick: "not a tick" },
+  };
+  assert.throws(
+    () => validateCanonicalRestoreState(badPacing, canonicalContext()),
+    (e: unknown) => e instanceof CheckpointRejectionError && e.field === "decisions.lastDecisionTick",
+    "a canonical pacing value the current contract rejects is refused, not defaulted",
+  );
+  const badWording: CanonicalRestoreCandidate = {
+    ...goodCandidate,
+    decisions: { ...decisions, resolutions: [{ ...decisions.resolutions[0], choiceTitle: 42 }] },
+  };
+  assert.throws(
+    () => validateCanonicalRestoreState(badWording, canonicalContext()),
+    (e: unknown) => e instanceof CheckpointRejectionError && e.field === "decisions.resolutions[0].choiceTitle",
+    "a canonical resolution with invalid wording is refused even though the field may be absent historically",
+  );
+  const missingDetector: CanonicalRestoreCandidate = {
+    ...goodCandidate,
+    analysis: (() => { const a = JSON.parse(JSON.stringify(candidate.analysis)); delete a.dep; return a; })(),
+  };
+  assert.throws(
+    () => validateCanonicalRestoreState(missingDetector, canonicalContext()),
+    (e: unknown) => e instanceof CheckpointRejectionError && e.field === "analysis.dep",
+    "the current contract requires a detector the canonical layer is missing",
+  );
+  const badDetector: CanonicalRestoreCandidate = {
+    ...goodCandidate,
+    analysis: { ...(JSON.parse(JSON.stringify(candidate.analysis))), dep: "not a state" },
+  };
+  assert.throws(
+    () => validateCanonicalRestoreState(badDetector, canonicalContext()),
+    (e: unknown) => e instanceof CheckpointRejectionError && e.field === "analysis.dep",
+    "a present but non-object detector is refused in the canonical layer too",
+  );
+
+  // The validator is a NARROWING boundary: it returns the validated type, so a
+  // caller cannot skip the check by ignoring a return value.
+  const validated = validateCanonicalRestoreState(goodCandidate, canonicalContext());
+  assert.equal(validated.decisions.lastDecisionTick, 9, "a good candidate narrows to the validated state");
+  assert.equal(typeof validated.decisions.resolutions, "object", "and exposes real decision records, not `unknown`");
+
+  // Canonical validation must NOT weaken itself for an older source schema.
+  //
+  // The previous version of this test varied a persisted generator STRING, which
+  // proves nothing about validation strength. These assertions vary the input
+  // that could actually select a weaker shape: the source schema the canonical
+  // state was derived from.
+  //
+  // First, structurally: the candidate carries no schema at all, so there is
+  // nothing for the validator to switch on.
+  const derivedFrom02 = canonicalizeRestoreState(older as any, canonicalContext());
+  const derivedFrom04 = canonicalizeRestoreState(session.checkpoint() as any, canonicalContext());
+  for (const [label, candidate] of [["0.2", derivedFrom02], ["0.4", derivedFrom04]] as const) {
+    assert.ok(
+      !("checkpointSchemaVersion" in (candidate as unknown as Record<string, unknown>)),
+      `a candidate derived from ${label} carries no source schema for validation to switch on`,
+    );
+  }
+  // Second, behaviourally, and from the ACCEPTANCE side rather than the rejection
+  // side. A candidate carries no schema, so there is nothing for a mode switch
+  // to branch on; what a source-derived switch or an incomplete migration WOULD
+  // break is a legitimate old save. So: canonical state derived from EVERY
+  // supported source schema must satisfy the CURRENT contract. Removing the
+  // offerTick migration, for instance, leaves a valid 0.2 resolution missing a
+  // field 0.4 requires, and that has to fail here.
+  for (const schema of ["0.1", "0.2", "0.3", "0.4"] as const) {
+    const fixture: any = JSON.parse(JSON.stringify(current));
+    fixture.checkpointSchemaVersion = schema;
+    fixture.decisions.resolutions = [
+      {
+        schemaVersion: 1, opportunityId: "opp-1", commandId: "cmd-1",
+        sourceEventId: "evt-1", choiceId: "choice-1", tick: 8,
+        intervention: null, source: "event_decision", policyVersion: "old-catalog",
+        choiceTitle: "Grow tall", directEffectDescription: "Raises height",
+      },
+    ];
+    const derived = canonicalizeRestoreState(fixture, canonicalContext());
+    assert.ok(
+      !("checkpointSchemaVersion" in (derived as unknown as Record<string, unknown>)),
+      `a ${schema}-derived candidate carries no schema for validation to switch on`,
+    );
+    assert.doesNotThrow(
+      () => validateCanonicalRestoreState(derived, canonicalContext()),
+      `${schema} canonical state must satisfy the CURRENT contract: the migration has to complete it`,
+    );
+  }
+
+  // A non-object observer must be refused, not spread into an empty one.
+  for (const key of ["analysis", "controlAnalysis"] as const) {
+    const degenerate: any = JSON.parse(JSON.stringify(historical02));
+    degenerate[key] = null;
+    const result = canonicalizeRestoreState(degenerate, canonicalContext());
+    assert.equal(result[key], null, `a null ${key} must stay null, not become an empty object`);
+  }
+  const forked = new UniverseSession();
+  forked.create(config);
+  forked.createControlFork();
+  const forkCandidate = canonicalizeRestoreState(forked.checkpoint() as any, canonicalContext());
+  assert.ok(isPlainObjectForTest(forkCandidate.controlAnalysis), "a forked world's control analysis is canonicalised too");
+  assert.ok(isPlainObjectForTest((forkCandidate.controlAnalysis as any).dep), "the matched observer's dep is materialised as well");
+
+  // The same aliasing check for the matched-control observer.
+  const forkPurity: any = JSON.parse(JSON.stringify(forked.checkpoint()));
+  delete forkPurity.controlAnalysis.dep;
+  delete forkPurity.controlAnalysis.niche;
+  const beforeControl = JSON.stringify(forkPurity.controlAnalysis);
+  canonicalizeRestoreState(forkPurity, canonicalContext());
+  assert.equal(
+    JSON.stringify(forkPurity.controlAnalysis),
+    beforeControl,
+    "the matched observer must not be written into either",
+  );
+
   const invalidContext = JSON.parse(JSON.stringify(historical02));
   invalidContext.decisions.pending.contextSnapshot = "corrupt";
   assert.throws(
@@ -624,9 +1032,365 @@ export function testHistoricalCheckpointBoundary(): void {
       `even 0.2 cannot save a present invalid ${field}`,
     );
   }
+
+  // --- A3.4 Task 4: who actually absorbs an absent detector sub-state ---------
+  //
+  // The observer constructor may remain an implementation fallback, but a
+  // preflighted payload always reaches the canonicalizer first, so the
+  // constructor is no longer the declared compatibility mechanism. This is the
+  // claim the `absorber` field exists to keep honest, so the mechanism field and
+  // the prose naming a mechanism have to agree.
+  //
+  // The plan's own regex (/freshly constructed observer/) matches nothing in the
+  // current text, which says "a fresh observer" and "freshly constructed dep
+  // state". The pattern below matches what is actually written.
+  for (const id of [
+    "analysis-cuse-guild-absent-reads-as-constructor-default",
+    "analysis-niche-construction-absent-reads-as-constructor-default",
+    "control-analysis-cuse-guild-absent",
+    "control-analysis-niche-construction-absent",
+  ]) {
+    const rule = CHECKPOINT_MIGRATION_RULES.find((r) => r.id === id);
+    assert.ok(rule, `${id} is a declared migration rule`);
+    assert.equal(
+      rule.absorber,
+      "inline-backfill",
+      `${id} declares the canonical migration as its absorber, not the observer constructor`,
+    );
+    // `omission` is where the mechanism is explained, so it must name the new
+    // supplier. `effectiveDefault` states the VALUE, so it is only required not
+    // to still attribute that value to the constructor.
+    assert.match(rule.omission, /canonical/i, `${id}.omission names the canonical migration as the supplier`);
+    for (const [field, prose] of [["effectiveDefault", rule.effectiveDefault], ["omission", rule.omission]] as const) {
+      assert.doesNotMatch(
+        prose,
+        /fresh observer|freshly constructed|constructs a fresh|clones the analysis observer/i,
+        `${id}.${field} must not attribute the default to the constructor or a clone`,
+      );
+    }
+    // The evidence must survive the mechanism change untouched.
+    assert.ok(rule.historicalBasis.length > 0, `${id} keeps its historical basis`);
+    assert.ok(rule.appliesToSchemas.length > 0, `${id} keeps its scope`);
+    assert.ok(rule.hazard, `${id} keeps its hazard`);
+  }
+  assert.equal(
+    CHECKPOINT_MIGRATION_RULES.length,
+    18,
+    "moving four rules between absorber classes must not change the rule count",
+  );
+
+  testRestoreEquivalenceTiers();
+}
+
+/**
+ * TASK 5 — equivalence evidence in three tiers, kept in its own entry point so
+ * the distinction between a preservation control and historical evidence is
+ * visible in the file, and so the tiers can be exercised in isolation.
+ */
+export function testRestoreEquivalenceTiers(): void {
+  const session = new UniverseSession();
+  session.create(config);
+  session.advance(20);
+
+// ===========================================================================
+// TASK 5: EQUIVALENCE EVIDENCE, IN THREE TIERS
+//
+// The product risk: canonical validation could end up STRICTER than the
+// historical contract, silently making a world that used to load unloadable.
+// Implementation alone cannot show that did not happen, so each supported save
+// shape is restored and compared against state that must survive.
+//
+// TIER 1 IS A PRESERVATION CONTROL, NOT HISTORICAL EVIDENCE. A current save
+// relabelled 0.3 was never written by a 0.3 build; it shows only that the
+// historical path is not a bypass around the canonical pipeline. What 0.3
+// actually wrote is tier 2; what 0.1/0.2 could carry is tier 3.
+// ===========================================================================
+
+// One content-rich source, so every tier compares REAL state. The observer
+// only logs records after genuine divergence, which is far too expensive to
+// arrange here, so records and a decision history are injected in the same
+// shapes the validators already accept (see the withRecord fixture above). An
+// equality check over an empty world passes no matter what the migration does.
+const tierSource: any = JSON.parse(JSON.stringify(session.checkpoint()));
+tierSource.analysis.records = [
+  {
+    id: "rec-a", arc_id: "arc-1", kind: "trait", tick: 12, phase: "settled",
+    title: "Height", summary: "Grew taller", level: "minor", evidence: {},
+    entity_refs: [{ id: 7, kind: "organism", tick: 11, title: "Height" }],
+  },
+  {
+    id: "rec-b", arc_id: "arc-2", kind: "trait", tick: 14, phase: "settled",
+    title: "Depth", summary: "Grew deeper", level: "minor", evidence: {},
+    entity_refs: [],
+  },
+];
+tierSource.decisions.pending = {
+  schemaVersion: 1, opportunityId: "tier-offer", policyVersion: "tier-catalog",
+  source: "observed_event", sourceEventId: "tier-event", sourceArcId: null,
+  createdTick: 12, status: "pending", prompt: "Grow?", context: "ctx",
+  contextSnapshot: { note: "seen" }, choices: [],
+};
+tierSource.decisions.resolutions = [{
+  schemaVersion: 1, opportunityId: "tier-done", commandId: "tier-cmd",
+  sourceEventId: "tier-event", choiceId: "tier-choice", tick: 14,
+  intervention: null, source: "event_decision", policyVersion: "tier-catalog",
+  choiceTitle: "Grow tall", directEffectDescription: "Raises height",
+  offerTick: 12, catalystId: null,
+}];
+tierSource.decisions.lastDecisionTick = 9;
+
+/**
+ * Runtime state with the one INTENTIONALLY fresh dimension removed.
+ *
+ * `worldId` is presentation identity, minted per create/restore and documented
+ * as not part of the checkpoint or of replay. Everything else is biological or
+ * persisted state, so an equality here is a real claim; only `worldId` is
+ * excluded, by name, rather than by normalising whatever else differs.
+ */
+const meaningfulSnapshot = (w: UniverseSession): Record<string, unknown> => {
+  const s = JSON.parse(JSON.stringify(w.snapshot())) as Record<string, unknown>;
+  delete s.worldId;
+  return s;
+};
+const meaningfulCheckpoint = (w: UniverseSession): Record<string, unknown> =>
+  JSON.parse(JSON.stringify(w.checkpoint()));
+const restoredFrom = (payload: unknown): UniverseSession => {
+  const w = new UniverseSession();
+  w.restore(payload as never);
+  return w;
+};
+
+// The reference world, and the guard that this tier is not vacuous.
+const tierReference = restoredFrom(tierSource);
+assert.equal(
+  tierReference.checkpoint().analysis.records.length,
+  2,
+  "tier fixture sanity: the reference world must carry the injected observation history",
+);
+assert.ok(
+  tierReference.snapshot().tick > 0,
+  "tier fixture sanity: the reference world must be past tick 0, or there is no history to preserve",
+);
+
+// --- TIER 1: preservation control (NOT historical evidence) ----------------
+// Compared on BOTH restored runtime state and the re-saved checkpoint. An
+// analysis-only comparison would pass while the simulation layer diverged,
+// which is the wider risk.
+for (const label of ["0.4", "0.3"] as const) {
+  const control: any = JSON.parse(JSON.stringify(tierSource));
+  control.checkpointSchemaVersion = label;
+  const restoredControl = restoredFrom(control);
+  assert.deepEqual(
+    meaningfulSnapshot(restoredControl),
+    meaningfulSnapshot(tierReference),
+    `preservation control: a ${label}-labelled current save restores to identical runtime state (only worldId excluded)`,
+  );
+  assert.deepEqual(
+    meaningfulCheckpoint(restoredControl),
+    meaningfulCheckpoint(tierReference),
+    `preservation control: a ${label}-labelled current save re-saves as an identical current-schema checkpoint`,
+  );
+}
+
+// --- TIER 2: writer-shaped 0.3 -------------------------------------------
+// Two real shapes, because 0.3 spanned several writer builds. Each field
+// deleted below was emitted by a LATER 0.3 build than the one named, so each
+// fixture is a shape a genuine 0.3 writer produced.
+for (const [label, absent] of [["early 0.3", ["pc", "to", "cu"]], ["late 0.3", []]] as const) {
+  const historical: any = JSON.parse(JSON.stringify(tierSource));
+  historical.checkpointSchemaVersion = "0.3";
+  for (const field of absent) {
+    for (const o of historical.experiment.state.props.o) delete o[field];
+  }
+  if (label === "early 0.3") {
+    // b040b19 wrote none of these; 3ddb287 / af9ad23 / afbccfc added them.
+    delete historical.experiment.state.props.lineageInterval;
+    delete historical.experiment.state.props.lastLineageFlows;
+    delete historical.analysis.dep;
+    delete historical.analysis.niche;
+    for (const r of historical.analysis.records) {
+      r.entity_refs = r.entity_refs.map((ref: any) => (ref !== null ? ref.id : null));
+    }
+  }
+  const restoredWorld = restoredFrom(historical);
+  assert.equal(
+    restoredWorld.checkpoint().checkpointSchemaVersion,
+    CHECKPOINT_SCHEMA_VERSION,
+    `${label}: historical evidence, not a control — it re-saves into the running build's current schema`,
+  );
+  // Dimensions a 0.3 writer DID persist, and which must survive.
+  const reSaved = restoredWorld.checkpoint() as any;
+  assert.equal(
+    reSaved.analysis.records.length,
+    2,
+    `${label}: observation history survives at full length`,
+  );
+  assert.equal(
+    reSaved.decisions.resolutions.length,
+    1,
+    `${label}: the resolved decision history survives`,
+  );
+  assert.equal(
+    reSaved.decisions.lastDecisionTick,
+    9,
+    `${label}: 0.3 wrote the pacing tick, so it is preserved rather than recomputed`,
+  );
+  assert.equal(
+    reSaved.decisions.pending.source,
+    "observed_event",
+    `${label}: a pending opportunity survives with its provenance`,
+  );
+  // And the shape an EARLY 0.3 writer could not emit must be reconstructed.
+  if (label === "early 0.3") {
+    assert.ok(
+      isPlainObjectForTest(reSaved.analysis.dep) && isPlainObjectForTest(reSaved.analysis.niche),
+      `${label}: detector sub-states a 0.3 writer could not emit are restored`,
+    );
+    assert.ok(
+      reSaved.analysis.records.every((r: any) =>
+        r.entity_refs.every((ref: any) => ref === null || typeof ref === "object"),
+      ),
+      `${label}: pre-A2 bare references arrive tagged, never as bare numbers`,
+    );
+  }
+}
+
+// --- TIER 3: bounded 0.1/0.2 equivalence ----------------------------------
+// "Did not throw" and a finite tick are NOT evidence. Each schema is compared
+// over the dimensions its writers COULD persist, and the later fields they
+// could not represent are named as excluded — so a regression that loses real
+// history fails, while a field those writers never held does not read as one
+// that was lost.
+const olderShape = (schema: "0.2" | "0.1"): any => {
+  const p = JSON.parse(JSON.stringify(tierSource));
+  p.checkpointSchemaVersion = schema;
+  // Detectors postdate 0.2 (3ddb287 / af9ad23).
+  delete p.analysis.dep;
+  delete p.analysis.niche;
+  if (schema === "0.1") {
+    // 0.1 predates the entire decisions container.
+    delete p.decisions;
+    return p;
+  }
+  // 0.2: the cooldown, the catalyst catalog and the stored pacing tick all
+  // postdate it, and provenance on a pending postdates it too.
+  delete p.decisions.lastMajorCatalystTick;
+  delete p.decisions.catalystPolicyVersion;
+  delete p.decisions.lastDecisionTick;
+  delete p.decisions.pending.source;
+  delete p.decisions.pending.contextSnapshot;
+  for (const r of p.decisions.resolutions) {
+    delete r.choiceTitle;
+    delete r.directEffectDescription;
+    delete r.offerTick;
+    delete r.catalystId;
+  }
+  return p;
+};
+// The 0.1 shape used in the loop below deletes the decisions container, which
+// is what a real 0.1 writer did — so it cannot detect a migration that honoured
+// a decisions block, because there is none. The adversarial case is a 0.1
+// payload that CARRIES one: a hand-edited or corrupt file must not resurrect an
+// opportunity no 0.1 build ever made. That is what this proves.
+const oldestWithDecisions: any = olderShape("0.1");
+oldestWithDecisions.decisions = JSON.parse(JSON.stringify(tierSource.decisions));
+const restoredOldest = restoredFrom(oldestWithDecisions);
+const oldestReSaved = restoredOldest.checkpoint() as any;
+assert.equal(
+  oldestReSaved.decisions.pending,
+  null,
+  "0.1 EXCLUDES decisions entirely: a decisions block a 0.1 writer could not emit is discarded, not honoured",
+);
+assert.deepEqual(
+  oldestReSaved.decisions.resolutions,
+  [],
+  "0.1 EXCLUDES decisions entirely: resolutions a 0.1 writer could not emit are discarded, not honoured",
+);
+assert.equal(
+  oldestReSaved.analysis.records.length,
+  2,
+  "0.1: discarding the decisions block must not cost the observation history",
+);
+
+for (const [schema, payload] of [["0.2", olderShape("0.2")], ["0.1", olderShape("0.1")]] as const) {
+  const restoredWorld = restoredFrom(payload);
+  const reSaved = restoredWorld.checkpoint() as any;
+  assert.equal(
+    reSaved.checkpointSchemaVersion,
+    CHECKPOINT_SCHEMA_VERSION,
+    `${schema}: re-saves into the running build's current schema`,
+  );
+  // SURVIVES: persisted by every schema from 0.1 onward.
+  assert.deepEqual(
+    reSaved.experiment.state,
+    payload.experiment.state,
+    `${schema}: the persisted simulation state survives restoration`,
+  );
+  assert.equal(
+    reSaved.analysis.records.length,
+    2,
+    `${schema}: the observation history survives at full length`,
+  );
+  assert.ok(
+    isPlainObjectForTest(reSaved.analysis.dep) && isPlainObjectForTest(reSaved.analysis.niche),
+    `${schema}: detector sub-states are reconstructed from the declared defaults`,
+  );
+  if (schema === "0.2") {
+    // SURVIVES: the decision system existed at 0.2.
+    assert.ok(
+      isPlainObjectForTest(reSaved.decisions.pending),
+      "0.2: a pending opportunity survives, not silently dropped",
+    );
+    assert.equal(
+      reSaved.decisions.pending.source,
+      "observed_event",
+      "0.2: a pending with no stored provenance is rebuilt from its own event id",
+    );
+    assert.equal(
+      reSaved.decisions.resolutions.length,
+      1,
+      "0.2: the resolved decision history survives at full length",
+    );
+    assert.equal(
+      reSaved.decisions.resolutions[0].choiceTitle,
+      NOT_RECORDED,
+      "0.2: wording this schema never stored is marked unrecorded, not invented",
+    );
+    assert.equal(
+      reSaved.decisions.lastDecisionTick,
+      14,
+      "0.2: pacing reconstructs from the save's own records, so a live cooldown is not reset",
+    );
+    // EXCLUDED: 0.2 predates the major-catalyst cooldown, so it carried no
+    // value for it and must not be read as one.
+    assert.equal(
+      reSaved.decisions.lastMajorCatalystTick,
+      null,
+      "0.2 EXCLUDES the major-catalyst cooldown: the mechanic did not exist to be persisted",
+    );
+  } else {
+    // EXCLUDED: 0.1 predates the entire decision system, so an empty result is
+    // correct rather than a loss.
+    assert.equal(
+      reSaved.decisions.pending,
+      null,
+      "0.1 EXCLUDES the whole decision system, which it predates: pending",
+    );
+    assert.deepEqual(
+      reSaved.decisions.resolutions,
+      [],
+      "0.1 EXCLUDES the whole decision system, which it predates: resolutions",
+    );
+    assert.equal(
+      reSaved.decisions.lastDecisionTick,
+      0,
+      "0.1 EXCLUDES pacing: there is no decision history to reconstruct it from",
+    );
+  }
+}
 }
 
 if (process.argv[1]?.endsWith("checkpoint-historical-boundary.ts")) {
-  testHistoricalCheckpointBoundary();
-  console.log("historical checkpoint boundary: PASS");
+testHistoricalCheckpointBoundary();
+console.log("historical checkpoint boundary: PASS");
 }

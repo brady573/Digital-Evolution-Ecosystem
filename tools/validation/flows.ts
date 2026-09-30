@@ -579,65 +579,66 @@ const MIGRATION_ABSORBER_PROBES: Readonly<Record<string, { file: string; probe: 
     probe: /Q\(o\.cu\|\|0,0,1\.5\)\/1\.5/,
   },
   "last-decision-tick-reconstructed-from-newest-record": {
-    file: "packages/sim-runtime/src/session.ts",
-    // Absorber `structural-branch`: for 0.2 the legacy branch computes the value
-    // from the save's own records rather than reading a stored field. The whole
-    // conditional is probed, not just the call, so a rewrite that dropped the
-    // 0.2 reconstruction — or made 0.3 derive instead of preserve — fails here.
-    probe: /schema==="0\.3"\s*\?decisions\.lastDecisionTick\s*:newestKnownDecisionTick\(pending,resolutions\)/,
+    file: "packages/contracts/src/index.ts",
+    // Absorber `structural-branch`: for 0.2 the migration computes the value from
+    // the save's own records rather than reading a stored field. The WHOLE
+    // ternary is pinned, arm by arm, exactly as its major-catalyst sibling is.
+    // Pinning only the 0.2 call would survive an arm swap — after which 0.3
+    // derives instead of preserving and 0.2 preserves instead of reconstructing —
+    // which is the precise failure this comment claims to catch.
+    probe: /const lastDecisionTick = isCurrentSchema\(schema\) \|\| schema === "0\.3"\s*\? finiteOrZero\(source\.lastDecisionTick\)\s*:\s*schema === "0\.2"\s*\?\s*newestKnownDecisionTick\(pending, resolutions\)\s*:\s*0;/,
   },
   "major-catalyst-tick-predates-cooldown": {
-    file: "packages/sim-runtime/src/session.ts",
-    // Absorber `structural-branch`: the legacy branch reads the field, and a
-    // payload that predates the field falls to the canonical value. Probed
-    // against the same expression the branch actually uses, so a rewrite that
-    // drops the fallback fails here rather than silently re-allowing a
-    // dynamics-gating default.
-    probe: /typeof major==="number"&&Number\.isFinite\(major\)\?major:null;/,
+    file: "packages/contracts/src/index.ts",
+    // Absorber `structural-branch`: a payload that predates the cooldown falls to
+    // null, and null reads as "clear". Probed against the expression the
+    // migration actually uses, so a rewrite that drops the pre-cooldown absence
+    // fails here rather than silently re-allowing a dynamics-gating default.
+    probe: /const lastMajorCatalystTick = isCurrentSchema\(schema\) \|\| schema === "0\.3"\s*\? nullableTick\(source\.lastMajorCatalystTick\)\s*: null;/,
   },
   "pending-decision-source-backfilled-from-event": {
-    file: "packages/sim-runtime/src/session.ts",
-    probe: /copy\.source="observed_event"/,
+    file: "packages/contracts/src/index.ts",
+    probe: /copy\.source = "observed_event"/,
   },
   "decision-resolution-offer-tick-backfilled-from-tick": {
-    file: "packages/sim-runtime/src/session.ts",
-    probe: /if\(copy\.offerTick===undefined\)copy\.offerTick=copy\.tick;/,
+    file: "packages/contracts/src/index.ts",
+    probe: /if \(copy\.offerTick === undefined\) copy\.offerTick = copy\.tick;/,
   },
   "decision-resolution-catalyst-id-reads-as-null": {
-    file: "packages/sim-runtime/src/session.ts",
-    probe: /if\(copy\.catalystId===undefined\)copy\.catalystId=null;/,
+    file: "packages/contracts/src/index.ts",
+    probe: /if \(copy\.catalystId === undefined\) copy\.catalystId = null;/,
   },
   "pending-observation-not-recorded-in-02": {
-    file: "packages/sim-runtime/src/session.ts",
-    probe: /if\(copy\.contextSnapshot===undefined\)copy\.contextSnapshot=null;/,
+    file: "packages/contracts/src/index.ts",
+    probe: /if \(copy\.contextSnapshot === undefined\) copy\.contextSnapshot = null;/,
   },
   "resolution-choice-title-not-recorded-in-02": {
-    file: "packages/sim-runtime/src/session.ts",
-    probe: /choiceTitle:copy\.choiceTitle\?\?NOT_RECORDED/,
+    file: "packages/contracts/src/index.ts",
+    probe: /choiceTitle: copy\.choiceTitle \?\? NOT_RECORDED/,
   },
   "resolution-direct-effect-not-recorded-in-02": {
-    file: "packages/sim-runtime/src/session.ts",
-    probe: /directEffectDescription:copy\.directEffectDescription\?\?NOT_RECORDED/,
+    file: "packages/contracts/src/index.ts",
+    probe: /directEffectDescription: copy\.directEffectDescription \?\? NOT_RECORDED/,
   },
   "entity-refs-bare-numbers-mean-unrecorded-kind": {
     file: "packages/contracts/src/index.ts",
     probe: /export const migrateEntityRefs = /,
   },
   "analysis-cuse-guild-absent-reads-as-constructor-default": {
-    file: "packages/sim-analysis/src/index.ts",
-    probe: /const observer=new EcologyObserver\(\);[\s\S]{0,120}Object\.assign\(observer,/,
+    file: "packages/contracts/src/index.ts",
+    probe: /for \(const key of \["dep", "niche"\] as const\) \{\s*if \(migrated\[key\] === undefined\) \{\s*migrated\[key\] = /,
   },
   "analysis-niche-construction-absent-reads-as-constructor-default": {
-    file: "packages/sim-analysis/src/index.ts",
-    probe: /const observer=new EcologyObserver\(\);[\s\S]{0,120}Object\.assign\(observer,/,
+    file: "packages/contracts/src/index.ts",
+    probe: /for \(const key of \["dep", "niche"\] as const\) \{\s*if \(migrated\[key\] === undefined\) \{\s*migrated\[key\] = /,
   },
   "control-analysis-cuse-guild-absent": {
-    file: "packages/sim-analysis/src/index.ts",
-    probe: /const observer=new EcologyObserver\(\);[\s\S]{0,120}Object\.assign\(observer,/,
+    file: "packages/contracts/src/index.ts",
+    probe: /controlAnalysis: control === null \|\| control === undefined \? null : canonicalObserver\(control\)/,
   },
   "control-analysis-niche-construction-absent": {
-    file: "packages/sim-analysis/src/index.ts",
-    probe: /const observer=new EcologyObserver\(\);[\s\S]{0,120}Object\.assign\(observer,/,
+    file: "packages/contracts/src/index.ts",
+    probe: /controlAnalysis: control === null \|\| control === undefined \? null : canonicalObserver\(control\)/,
   },
 };
 
@@ -797,6 +798,57 @@ function testBoundaryGeneratorIsDerived() {
   assert.ok(
     out.includes(`(${CHECKPOINT_MIGRATION_RULES.length} rules)`),
     "the document's rule count must come from the table, not from prose that a rule edit can invalidate",
+  );
+
+  // A3.4 made the canonical ordering structural, so the document must now state
+  // it. It previously DISCLAIMED that ordering while A3.4 was unimplemented; a
+  // generated document that describes the opposite of the code is worse than no
+  // document, so both directions are checked.
+  assert.ok(
+    out.includes("canonical migration") && out.includes("current non-simulation validation"),
+    "the boundary now states the canonical ordering it actually performs",
+  );
+  assert.ok(
+    !out.includes("does not claim canonical"),
+    "the boundary must not still disclaim an ordering it now implements",
+  );
+
+  // The type barrier is only durable while the file that holds it exists AND
+  // keeps asserting. `tools/` is compiled by no tsconfig, which is precisely why
+  // the guard lives under a package `src/`, so its survival has to be checked
+  // from here. The `as any` exclusion matters as much as the file's existence: a
+  // cast would erase the very distinction the directives assert.
+  const typeBarrier = src("packages/sim-runtime/src/canonical-restore-type-boundary.ts");
+  // Each negative statement must be IMMEDIATELY guarded by an @ts-expect-error
+  // directive. Two weaker checks were tried and both failed: counting directives
+  // was satisfied by this file's own prose, and merely locating each statement
+  // passed even after its directive was deleted, because deleting a comment
+  // leaves the code it guarded.
+  for (const statement of [
+    "const notAValidatedState: ValidatedCanonicalRestoreState = candidate;",
+    "const candidateObserver = candidate.analysis.state;",
+    'const candidateDecisions: ValidatedCanonicalRestoreState["decisions"] = candidate.decisions;',
+  ]) {
+    const at = typeBarrier.indexOf(statement);
+    assert.ok(at !== -1, "the committed type barrier must keep its negative assertion: " + statement);
+    const preceding = typeBarrier.slice(Math.max(0, at - 260), at);
+    assert.ok(
+      /@ts-expect-error[^*]*\*\/\s*$/.test(preceding),
+      "the type barrier's negative assertion must be guarded by an @ts-expect-error directive: " + statement,
+    );
+  }
+  assert.ok(
+    typeBarrier.includes("CanonicalRestoreCandidate") && typeBarrier.includes("ValidatedCanonicalRestoreState"),
+    "the type barrier must name both sides of the candidate/validated distinction",
+  );
+  // Comments are stripped first: this file's own prose explains why it avoids
+  // `as any`, and matching the explanation would fail the check it states.
+  const typeBarrierCode = typeBarrier
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/\/\/.*$/gm, "");
+  assert.ok(
+    !/\bas any\b/.test(typeBarrierCode),
+    "the type barrier must not use `as any`; a cast would erase the distinction it exists to assert",
   );
 
   const heading = out.split("\n").find((l) => l.startsWith("## A valid ") && l.includes("never depends"));

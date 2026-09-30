@@ -378,7 +378,7 @@ export const CHECKPOINT_MIGRATION_RULES: readonly CheckpointMigrationRule[] = [
     effectiveDefault: "null",
     absorber: "structural-branch",
     omission:
-      "The major-catalyst cooldown did not exist in checkpoint 0.2, so its decisions object carries no value for this field. `null` is the truth about that world: no major catalyst had ever fired. The 0.1 save had no decisions object at all and is documented separately.",
+      "The major-catalyst cooldown did not exist in checkpoint 0.2, so its decisions object carries no value for this field. `null` is the truth about that world: no major catalyst had ever fired. The 0.1 save had no decisions object at all and is documented separately. A 0.2 payload that nonetheless CARRIES this field is also read as `null` rather than taken at face value. That is deliberately NARROWER than the pre-A3.4 code, which accepted any present finite value at 0.2; no 0.2 writer could produce one (see historicalBasis), so the narrowing cannot discard real history, and declining to adopt a cooldown the schema cannot vouch for is safer than inheriting one. It is recorded here so a later reader does not mistake it for an accidental omission.",
     hazard: "load-bearing-dynamics",
     historicalBasis:
       "`lastMajorCatalystTick` was introduced with checkpoint 0.3 in b040b19 on 2026-09-24, alongside the cooldown. The 0.2 decision checkpoint at b39fd46 writes only `pending`, `resolutions` and `policyVersion`. Checkpoint 0.1 predates the entire decisions container; checkpoint 0.3 wrote this field and must preserve it.",
@@ -456,10 +456,10 @@ export const CHECKPOINT_MIGRATION_RULES: readonly CheckpointMigrationRule[] = [
     id: "analysis-cuse-guild-absent-reads-as-constructor-default",
     path: "analysis.dep",
     appliesToSchemas: PRE_CURRENT_SCHEMAS,
-    effectiveDefault: "the freshly constructed observer's own initial state",
-    absorber: "constructor-default",
+    effectiveDefault: "the observer's declared initial state",
+    absorber: "inline-backfill",
     omission:
-      "The C-use guild's dependency-arc sub-state. Restore constructs a fresh observer and overwrites only the keys the payload carries, so an absent sub-state keeps its declared initial value. A detector that has not yet fired genuinely has no sub-state, which is different from one that fired and lost its record.",
+      "The C-use guild's dependency-arc sub-state. The canonical migration writes the observer's declared initial state for any detector key the payload omits, so an absent sub-state reads as that default rather than as whatever the constructor happened to hold. A detector that has not yet fired genuinely has no sub-state, which is different from one that fired and lost its record.",
     rejects:
       "A present non-object sub-state is not covered by this rule and is refused before `Object.assign` can write it into live observer state. This is a container check, not exhaustive validation of nested observer values.",
     hazard: "load-bearing-dynamics",
@@ -472,10 +472,10 @@ export const CHECKPOINT_MIGRATION_RULES: readonly CheckpointMigrationRule[] = [
     id: "analysis-niche-construction-absent-reads-as-constructor-default",
     path: "analysis.niche",
     appliesToSchemas: PRE_CURRENT_SCHEMAS,
-    effectiveDefault: "the freshly constructed observer's own initial state",
-    absorber: "constructor-default",
+    effectiveDefault: "the observer's declared initial state",
+    absorber: "inline-backfill",
     omission:
-      "The niche-construction sub-state, arriving later than the C-use guild and therefore separately absent from different saves. Same absorber and same reasoning as the C-use rule: a detector that has not fired has no sub-state.",
+      "The niche-construction sub-state, arriving later than the C-use guild and therefore separately absent from different saves. Same absorber and same reasoning as the C-use rule: the canonical migration supplies the observer's declared initial state, and a detector that has not fired has no sub-state.",
     rejects:
       "A present non-object sub-state is refused before `Object.assign` for the same reason as the C-use guild. Nested observer values are not exhaustively validated here.",
     hazard: "load-bearing-dynamics",
@@ -488,9 +488,9 @@ export const CHECKPOINT_MIGRATION_RULES: readonly CheckpointMigrationRule[] = [
     id: "control-analysis-cuse-guild-absent",
     path: "controlAnalysis.dep",
     appliesToSchemas: PRE_CURRENT_SCHEMAS,
-    effectiveDefault: "the matched observer's freshly constructed dep state",
-    absorber: "constructor-default",
-    omission: "A fork clones the analysis observer and checkpoints it in controlAnalysis. A fork made before the C-use detector existed could not write dep, just as the live observer could not.",
+    effectiveDefault: "the matched observer's declared initial dep state",
+    absorber: "inline-backfill",
+    omission: "A fork's controlAnalysis is the analysis observer's own checkpoint, filled by the same canonical migration rather than by a separate construction. A fork made before the C-use detector existed could not write dep, just as the live observer could not.",
     rejects: "A present non-object dep in the matched observer is refused before Object.assign can write it, for the same reason as the live C-use guild.",
     hazard: "load-bearing-display",
     historicalBasis: "d86ddfe and b040b19 write controlAnalysis as the fork observer checkpoint, whose checkpoint did not write dep until 3ddb287 under schema 0.3.",
@@ -499,9 +499,9 @@ export const CHECKPOINT_MIGRATION_RULES: readonly CheckpointMigrationRule[] = [
     id: "control-analysis-niche-construction-absent",
     path: "controlAnalysis.niche",
     appliesToSchemas: PRE_CURRENT_SCHEMAS,
-    effectiveDefault: "the matched observer's freshly constructed niche state",
-    absorber: "constructor-default",
-    omission: "A fork clones the analysis observer and checkpoints it in controlAnalysis. A fork made before the niche detector existed could not write niche, independently of whether it already wrote dep.",
+    effectiveDefault: "the matched observer's declared initial niche state",
+    absorber: "inline-backfill",
+    omission: "A fork's controlAnalysis is the analysis observer's own checkpoint, filled by the same canonical migration rather than by a separate construction. A fork made before the niche detector existed could not write niche, independently of whether it already wrote dep.",
     rejects: "A present non-object niche in the matched observer is refused before Object.assign, for the same reason as the live niche rule.",
     hazard: "load-bearing-display",
     historicalBasis: "d86ddfe and b040b19 write controlAnalysis as the fork observer checkpoint, whose checkpoint did not write niche until af9ad23 under schema 0.3.",
@@ -605,6 +605,320 @@ export const migrateAnalysisEntityRefs = (analysis: unknown): unknown => {
 };
 
 
+/**
+ * Running-build values canonicalisation needs, supplied by the caller.
+ *
+ * contracts cannot import sim-decisions for the generator versions, nor
+ * sim-analysis for what an empty detector looks like, and must not reverse
+ * either package direction. Ownership stays where it belongs and the values
+ * cross as data.
+ *
+ * Every field is supplied by trusted running code, never by the payload being
+ * canonicalised. A save that could influence its own migration would make
+ * migration a bypass, and a saved generator version must never win over the
+ * running build's — applying a retired catalog to a current world is exactly
+ * what Decision 2 forbids.
+ */
+export interface CanonicalizationContext {
+  /** Running-build event-decision catalog version. */
+  readonly policyVersion: string;
+  /** Running-build catalyst catalog version. */
+  readonly catalystPolicyVersion: string;
+  /**
+   * The running build's current checkpoint schema, used for canonical metadata
+   * and assertions. It is NOT a validation-mode switch: the canonical layer is
+   * validated against one current contract regardless of what this says.
+   */
+  readonly currentSchema: CheckpointSchemaVersion;
+  /**
+   * The observer's declared initial detector state, owned by sim-analysis and
+   * passed as values. Read-only: canonicalisation copies rather than adopts.
+   */
+  readonly detectorDefaults: Readonly<Record<"dep" | "niche", unknown>>;
+}
+
+/**
+ * What canonicalisation produced, and what it does NOT claim.
+ *
+ * The shape is materialised, but every nested value is runtime-untrusted: no
+ * migration rule has been checked against the current contract yet. If this
+ * were typed as the canonical state, the type system would assert the very
+ * conclusion the validator exists to test.
+ */
+export interface CanonicalRestoreCandidate {
+  readonly analysis: unknown;
+  readonly controlAnalysis: unknown | null;
+  readonly decisions: unknown;
+}
+
+/** The marker a pre-0.3 save gets where it never stored the wording itself. */
+export const NOT_RECORDED = "Not recorded in this save";
+
+/**
+ * Canonicalise the non-simulation restore layer.
+ *
+ * NON-MUTATING, precisely: neither `source` nor `context` nor
+ * `context.detectorDefaults` is written to at any point. That is the guarantee,
+ * and it is distinct from referential purity — the returned containers are all
+ * freshly built, but values nested inside them (records, eras, cross, seedbank)
+ * are the SAME objects the caller passed in. Nothing downstream mutates them,
+ * and a caller must not assume otherwise.
+ *
+ * IDEMPOTENT, and not for one uniform reason, so both cases are named rather
+ * than left to the reader:
+ *
+ * - Most backfills are GUARDED ON ABSENCE (`=== undefined` / `??`). They run
+ *   only when the field is missing, so a second pass finds nothing to do.
+ * - `lastDecisionTick` at 0.2 is DETERMINISTIC RECOMPUTATION from the payload's
+ *   own records via `newestKnownDecisionTick`, not a guarded fill. It re-runs on
+ *   every pass. It is stable only because the migration normalises
+ *   `offerTick := tick` and the computation is a `Math.max` over values the
+ *   canonical form no longer changes — so recomputation and idempotence agree.
+ *   If that normalisation ever changes, this is the line that breaks.
+ * - `copy.source` is DERIVED from a sibling field, and is stable because the
+ *   next pass short-circuits on the value it wrote.
+ *
+ * `experiment` and `control` are deliberately untouched: they stay under
+ * sim-core's checkpoint contract, and these types do not claim otherwise.
+ */
+export const canonicalizeRestoreState = (
+  source: SupportedUniverseCheckpoint,
+  context: CanonicalizationContext,
+): CanonicalRestoreCandidate => {
+  const schema = (source as { readonly checkpointSchemaVersion: CheckpointSchemaVersion }).checkpointSchemaVersion;
+  const canonicalObserver = (raw: unknown): unknown => {
+    // `migrateAnalysisEntityRefs` returns a non-object unchanged, and spreading
+    // `null` would silently yield `{}` — a null observer becoming an empty one
+    // rather than being refused. The preflight makes that unreachable through
+    // restore, but this is an exported function, so it is stated here.
+    if (!isPlainObject(raw)) return raw;
+    // `migrateAnalysisEntityRefs` returns the SAME reference when no record
+    // changed — which is the common case for an already-migrated payload. So
+    // this spread is not defensive tidiness, it is what keeps canonicalisation
+    // pure: without it, writing the detectors below mutates the caller's
+    // payload for every late-0.3 save (tagged refs, no detector sub-state).
+    const migrated = { ...(migrateAnalysisEntityRefs(raw) as Record<string, unknown>) };
+    // A detector that has not fired genuinely has no sub-state. Filling it from
+    // the observer's declared initial state preserves that meaning, now
+    // produced explicitly rather than left to a constructor that could not be
+    // named as the compatibility mechanism.
+    for (const key of ["dep", "niche"] as const) {
+      if (migrated[key] === undefined) {
+        migrated[key] = JSON.parse(JSON.stringify(context.detectorDefaults[key]));
+      }
+    }
+    return migrated;
+  };
+  const control = (source as { readonly controlAnalysis: unknown }).controlAnalysis;
+  return {
+    analysis: canonicalObserver(source.analysis),
+    controlAnalysis: control === null || control === undefined ? null : canonicalObserver(control),
+    decisions: canonicalDecisions(schema, (source as { readonly decisions?: unknown }).decisions, context),
+  };
+};
+
+const canonicalDecisions = (
+  schema: CheckpointSchemaVersion,
+  raw: unknown,
+  context: CanonicalizationContext,
+): DecisionCheckpoint => {
+  const source = (isPlainObject(raw) ? raw : {}) as Record<string, unknown>;
+  const historical = schema === "0.2";
+  // 0.1 predates the decision system. Preflight only requires a PRESENT
+  // `decisions` to be an object, so a 0.1 payload can carry one; nothing in it
+  // was written by a 0.1 build, so none of it is honoured. Base discarded the
+  // block for 0.1, and applying the current normalizers instead would let a
+  // hand-edited or corrupt file resurrect an opportunity the player never made.
+  const preDecisions = schema === "0.1";
+  const pending = preDecisions ? null : historical ? historicalPending(source.pending) : normalizePendingDecision(source.pending);
+  const resolutions = preDecisions
+    ? []
+    : Array.isArray(source.resolutions)
+      ? (source.resolutions as unknown[]).map(historical ? historicalResolution : normalizeResolution)
+      : [];
+  // A 0.3 save carries its own pacing state and keeps it; a 0.2 save predates the
+  // pacing fields and reconstructs the tick from its own records, with no
+  // cooldown to reconstruct because the mechanic did not exist; 0.1 predates
+  // the decision system and therefore has no history to read at all.
+  //
+  // `context.currentSchema` is deliberately NOT consulted for VALIDATION here.
+  // It identifies the running contract for metadata and diagnostics; the
+  // source-version differences were already consumed by the A3.3 preflight, and
+  // branching on it to choose what to accept would be the validation-mode
+  // switch the design forbids. The running schema is read from the single
+  // derived declaration instead, so a version bump moves one place.
+  const lastDecisionTick = isCurrentSchema(schema) || schema === "0.3"
+    ? finiteOrZero(source.lastDecisionTick)
+    : schema === "0.2"
+      ? newestKnownDecisionTick(pending, resolutions)
+      : 0;
+  const lastMajorCatalystTick = isCurrentSchema(schema) || schema === "0.3"
+    ? nullableTick(source.lastMajorCatalystTick)
+    : null;
+  return {
+    pending,
+    resolutions,
+    // Always the running build's: a saved version identifies the generator that
+    // produced that record, not the one that should offer future decisions.
+    policyVersion: context.policyVersion,
+    catalystPolicyVersion: context.catalystPolicyVersion,
+    lastDecisionTick,
+    lastMajorCatalystTick,
+  };
+};
+
+const finiteOrZero = (value: unknown): number =>
+  typeof value === "number" && Number.isFinite(value) ? value : 0;
+
+const nullableTick = (value: unknown): number | null =>
+  typeof value === "number" && Number.isFinite(value) ? value : null;
+
+/**
+ * A canonical restore representation that has satisfied the CURRENT
+ * non-simulation restore contract.
+ *
+ * Only {@link validateCanonicalRestoreState} can produce this type. It is
+ * deliberately narrower than a checkpoint: the encoded simulation was not
+ * canonicalised here and is not represented at all.
+ */
+export interface ValidatedCanonicalRestoreState {
+  readonly analysis: ValidatedObserverCheckpoint;
+  readonly controlAnalysis: ValidatedObserverCheckpoint | null;
+  readonly decisions: DecisionCheckpoint;
+}
+
+const VALIDATED_OBSERVER = Symbol("validatedObserver");
+
+/**
+ * An observer checkpoint that has passed the current non-simulation contract.
+ *
+ * A WRAPPER, not an alias. A type alias for `Record<string, unknown>` would be
+ * transparent to the compiler, so deleting the validator call would still
+ * compile and the barrier would be documentation rather than enforcement. Only
+ * {@link validateCanonicalRestoreState} can produce this, and reaching `.state`
+ * requires having it — so the observer layer gets the same compile-time
+ * guarantee `decisions` already had, instead of resting on a runtime call.
+ */
+export interface ValidatedObserverCheckpoint {
+  readonly [VALIDATED_OBSERVER]: true;
+  readonly state: Record<string, unknown>;
+}
+
+/**
+ * Narrowing boundary: returns the validated state, or throws.
+ *
+ * Returning rather than asserting matters. A caller cannot skip the check by
+ * ignoring a return value, and `restore` cannot consume a
+ * {@link CanonicalRestoreCandidate} where this type is required.
+ *
+ * `context` supplies the running schema so this package never names a version
+ * literal, and it is used for that purpose ONLY. It selects no validation
+ * shape: the canonical layer is checked against one current contract whatever
+ * the source payload declared, because the A3.3 preflight already consumed
+ * every source-version difference.
+ */
+const validatedObserver = (value: Record<string, unknown>, path: string): ValidatedObserverCheckpoint => {
+  validateObserverCheckpoint(value, path, { requireDetectors: true });
+  validateEntityRefs(value, path, false);
+  // The brand is module-private, so this factory is the only way to obtain the
+  // type. That is what makes "restore cannot consume an unvalidated observer" a
+  // compile-time fact rather than a promise in a comment.
+  return { [VALIDATED_OBSERVER]: true, state: value };
+};
+
+export const validateCanonicalRestoreState = (
+  candidate: CanonicalRestoreCandidate,
+  context: CanonicalizationContext,
+): ValidatedCanonicalRestoreState => {
+  if (!isPlainObject(candidate)) {
+    reject("(candidate)", "malformed-container", "expected a canonical restore candidate object");
+  }
+  const analysis = candidate.analysis;
+  if (!isPlainObject(analysis)) {
+    reject("analysis", "malformed-container", "canonical analysis must be an observer checkpoint object");
+  }
+  const controlAnalysis = candidate.controlAnalysis;
+  if (controlAnalysis === null) {
+    // A null matched control needs no observer state; the pairing rule belongs
+    // to the raw payload, where a half-present pair is a source contradiction.
+  } else if (!isPlainObject(controlAnalysis)) {
+    reject("controlAnalysis", "malformed-container", "canonical control analysis must be an observer checkpoint or null");
+  }
+  const decisions = candidate.decisions;
+  if (!isPlainObject(decisions)) {
+    reject("decisions", "malformed-container", "canonical decisions must be a decision checkpoint object");
+  }
+  // Bare numbers were the pre-A2 shape, and canonicalisation has already
+  // migrated them by this point — so one that survives means the migration
+  // did not run, which is a defect here rather than a historical allowance.
+  validateDecisionRecords(decisions as Record<string, unknown>, context.currentSchema);
+  return {
+    analysis: validatedObserver(analysis, "analysis"),
+    controlAnalysis: controlAnalysis === null ? null : validatedObserver(controlAnalysis, "controlAnalysis"),
+    decisions: decisions as unknown as DecisionCheckpoint,
+  };
+};
+
+/**
+ * A persisted pending decision replays exactly as stored: never re-evaluated
+ * against a newer catalog, which could silently substitute choices. A pre-0.3
+ * pending carries no `source`, and a `sourceEventId` can only mean an
+ * observed-event decision, so it is named rather than guessed.
+ */
+function normalizePendingDecision(raw: unknown): PendingDecision | null {
+  if (!isPlainObject(raw)) return null;
+  const copy = JSON.parse(JSON.stringify(raw)) as Record<string, unknown>;
+  if (copy.source === "world_catalyst" || copy.source === "observed_event") return copy as unknown as PendingDecision;
+  if (typeof copy.sourceEventId === "string") {
+    copy.source = "observed_event";
+    return copy as unknown as PendingDecision;
+  }
+  return null;
+}
+
+function historicalPending(raw: unknown): PendingDecision | null {
+  const pending = normalizePendingDecision(raw);
+  if (!pending) return null;
+  const copy = { ...(pending as unknown as Record<string, unknown>) };
+  // The 0.2 writer kept the prompt and choices but not the bounded observation,
+  // so null records the absence of evidence rather than inventing a measure.
+  if (copy.contextSnapshot === undefined) copy.contextSnapshot = null;
+  return copy as unknown as PendingDecision;
+}
+
+function normalizeResolution(raw: unknown): DecisionResolution {
+  const copy = JSON.parse(JSON.stringify(raw)) as Record<string, unknown>;
+  if (copy.offerTick === undefined) copy.offerTick = copy.tick;
+  if (copy.catalystId === undefined) copy.catalystId = null;
+  return copy as unknown as DecisionResolution;
+}
+
+function historicalResolution(raw: unknown): DecisionResolution {
+  const copy = normalizeResolution(raw) as unknown as Record<string, unknown>;
+  return {
+    ...copy,
+    choiceTitle: copy.choiceTitle ?? NOT_RECORDED,
+    directEffectDescription: copy.directEffectDescription ?? NOT_RECORDED,
+  } as unknown as DecisionResolution;
+}
+
+/** Newest decision tick a migrated checkpoint actually records, or 0 when none. */
+function newestKnownDecisionTick(
+  pending: PendingDecision | null,
+  resolutions: readonly DecisionResolution[],
+): number {
+  let newest = 0;
+  const created = (pending as unknown as { readonly createdTick?: unknown } | null)?.createdTick;
+  if (typeof created === "number") newest = Math.max(newest, created);
+  for (const record of resolutions) {
+    const tick = (record as unknown as { readonly tick?: unknown } | null)?.tick;
+    const offer = (record as unknown as { readonly offerTick?: unknown } | null)?.offerTick;
+    if (typeof tick === "number") newest = Math.max(newest, tick);
+    if (typeof offer === "number") newest = Math.max(newest, offer);
+  }
+  return newest;
+}
+
 /* ------------------------------------------------------------------ *
  * Checkpoint rejection.
  *
@@ -703,6 +1017,21 @@ const describe = (v: unknown): string => (v === null ? "null" : Array.isArray(v)
  * shape of rot this generator exists to prevent.
  */
 export const SUPPORTED_SCHEMAS: readonly CheckpointSchemaVersion[] = ["0.1", "0.2", "0.3", "0.4"];
+
+/**
+ * The newest supported schema, which is the one the running build writes.
+ *
+ * Derived rather than written as a literal. `0.4` written inline is correct
+ * today and silently wrong at the next version bump — the rot the standing
+ * decisions forbid — and a schema bump should move exactly one place. The list
+ * is ordered oldest to newest, so its last entry is the current one.
+ */
+export const CURRENT_SCHEMA: CheckpointSchemaVersion = SUPPORTED_SCHEMAS[
+  SUPPORTED_SCHEMAS.length - 1
+] as CheckpointSchemaVersion;
+
+/** Whether a declared schema is the running build's. */
+export const isCurrentSchema = (schema: string): boolean => schema === CURRENT_SCHEMA;
 
 const CHECKPOINT_TAGS: readonly string[] = [
   "simulation",
@@ -1054,7 +1383,54 @@ function validateTypedArray(value: unknown, at: string): void {
   });
 }
 
-function validateObserverCheckpoint(value: unknown, path: string, schema: CheckpointSchemaVersion): void {
+/**
+ * Entity references inside a history record.
+ *
+ * A bare finite number is the pre-A2 shape and is historical absence of a
+ * `kind`, not an absent reference; `allowBareNumbers` is true only for a
+ * source-schema preflight on a historical payload. Canonical validation
+ * passes false, because by that point every reference has been migrated to a
+ * typed ref and a bare number means the migration did not run.
+ */
+export function validateEntityRefs(
+  observer: Record<string, unknown>,
+  at: string,
+  allowBareNumbers: boolean,
+): void {
+  if (!Array.isArray(observer.records)) return;
+  observer.records.forEach((raw, i) => {
+    const recordAt = `${at}.records[${i}]`;
+    if (!isPlainObject(raw)) reject(recordAt, "malformed-container", "expected a history record object");
+    if (!Array.isArray(raw.entity_refs)) reject(`${recordAt}.entity_refs`, "malformed-container", "expected an entity reference list");
+    raw.entity_refs.forEach((ref, j) => {
+      const refAt = `${recordAt}.entity_refs[${j}]`;
+      if (typeof ref === "number" && allowBareNumbers) {
+        if (!Number.isFinite(ref)) reject(refAt, "non-finite-numeric", "expected a finite historical entity ID");
+        return;
+      }
+      if (!isPlainObject(ref)) reject(refAt, "malformed-container", "expected a typed reference");
+      if (!isFiniteNumber(ref.id)) reject(`${refAt}.id`, "wrong-type", "expected a finite entity ID");
+      if (ref.kind !== null && ref.kind !== "organism" && ref.kind !== "lineage" && ref.kind !== "clade") {
+        reject(`${refAt}.kind`, "wrong-type", "unknown entity kind");
+      }
+    });
+  });
+}
+
+/**
+ * A3.4 shares this with canonical validation, so it is parameterised by what
+ * the CALLER requires rather than by the payload's declared schema.
+ *
+ * `requireDetectors: false` tolerates `dep`/`niche` absence, and only a
+ * source-schema preflight may ask for that: the historical basis for it is
+ * A3.3's rule table. Canonical validation always passes `true`, because the
+ * canonical layer must carry every key the current contract requires.
+ */
+export function validateObserverCheckpoint(
+  value: unknown,
+  path: string,
+  opts: { readonly requireDetectors: boolean },
+): void {
   if (!isPlainObject(value)) reject(path, "malformed-container", "expected an observer checkpoint");
   const observer = value as Record<string, unknown>;
   const states: Readonly<Record<string, { nullable?: readonly string[]; numbers?: readonly string[]; booleans?: readonly string[]; maps?: readonly string[] }>> = {
@@ -1065,7 +1441,7 @@ function validateObserverCheckpoint(value: unknown, path: string, schema: Checkp
   };
   for (const [name, shape] of Object.entries(states)) {
     const state = observer[name];
-    if (state === undefined && (name === "dep" || name === "niche") && schema !== "0.4") continue;
+    if (state === undefined && (name === "dep" || name === "niche") && !opts.requireDetectors) continue;
     if (!isPlainObject(state)) reject(`${path}.${name}`, "malformed-container", "expected a detector state");
     if (typeof state.id !== "string" || !state.id) reject(`${path}.${name}.id`, "wrong-type", "expected detector identity");
     if (!["absent", "forming", "established", "disrupted", "recovered", "superseded"].includes(state.state as string)) {
@@ -1195,7 +1571,7 @@ export const validateCheckpoint = (checkpoint: unknown): void => {
   // 0.3 introduced both pacing fields, and the current schema still writes
   // them even when the cooldown value is null. Only 0.2 can reconstruct the
   // decision tick or read the pre-cooldown absence as null.
-  if (schema === "0.3" || schema === "0.4") {
+  if (schema === "0.3" || isCurrentSchema(schema as string)) {
     const pacing = decisions as Record<string, unknown>;
     for (const field of ["lastDecisionTick", "lastMajorCatalystTick"] as const) {
       if (pacing[field] === undefined) {
@@ -1210,7 +1586,7 @@ export const validateCheckpoint = (checkpoint: unknown): void => {
   if (!isPlainObject(analysis)) {
     reject("analysis", "malformed-container", "every runtime checkpoint wrote an analysis object");
   }
-  validateObserverCheckpoint(analysis, "analysis", schema as CheckpointSchemaVersion);
+  validateObserverCheckpoint(analysis, "analysis", { requireDetectors: isCurrentSchema(schema as string) });
   if (analysis !== undefined && (analysis as Record<string, unknown>).records !== undefined) {
     if (!Array.isArray((analysis as Record<string, unknown>).records)) {
       reject("analysis.records", "malformed-container", `expected a records array, got ${describe((analysis as Record<string, unknown>).records)}`);
@@ -1224,27 +1600,7 @@ export const validateCheckpoint = (checkpoint: unknown): void => {
       }
     }
   }
-  const validateRefs = (observer: Record<string, unknown>, at: string): void => {
-    if (!Array.isArray(observer.records)) return;
-    observer.records.forEach((raw, i) => {
-      const recordAt = `${at}.records[${i}]`;
-      if (!isPlainObject(raw)) reject(recordAt, "malformed-container", "expected a history record object");
-      if (!Array.isArray(raw.entity_refs)) reject(`${recordAt}.entity_refs`, "malformed-container", "expected an entity reference list");
-      raw.entity_refs.forEach((ref, j) => {
-        const refAt = `${recordAt}.entity_refs[${j}]`;
-        if (typeof ref === "number" && (schema as string) !== "0.4") {
-          if (!Number.isFinite(ref)) reject(refAt, "non-finite-numeric", "expected a finite historical entity ID");
-          return;
-        }
-        if (!isPlainObject(ref)) reject(refAt, "malformed-container", "expected a typed reference");
-        if (!isFiniteNumber(ref.id)) reject(`${refAt}.id`, "wrong-type", "expected a finite entity ID");
-        if (ref.kind !== null && ref.kind !== "organism" && ref.kind !== "lineage" && ref.kind !== "clade") {
-          reject(`${refAt}.kind`, "wrong-type", "unknown entity kind");
-        }
-      });
-    });
-  };
-  if (isPlainObject(analysis)) validateRefs(analysis, "analysis");
+  if (isPlainObject(analysis)) validateEntityRefs(analysis, "analysis", !isCurrentSchema(schema as string));
   if (checkpoint.control === undefined || (checkpoint.control !== null && !isPlainObject(checkpoint.control))) {
     reject("control", "wrong-type", `expected null or a control checkpoint object, got ${describe(checkpoint.control)}`);
   }
@@ -1259,8 +1615,8 @@ export const validateCheckpoint = (checkpoint: unknown): void => {
   if (isPlainObject(checkpoint.control) && checkpoint.control.engine_version !== checkpoint.engineVersion) {
     reject("control.engine_version", "structural-contradiction", "control and runtime engine versions disagree");
   }
-  if (checkpoint.controlAnalysis !== null) validateObserverCheckpoint(checkpoint.controlAnalysis, "controlAnalysis", schema as CheckpointSchemaVersion);
-  if (isPlainObject(checkpoint.controlAnalysis)) validateRefs(checkpoint.controlAnalysis, "controlAnalysis");
+  if (checkpoint.controlAnalysis !== null) validateObserverCheckpoint(checkpoint.controlAnalysis, "controlAnalysis", { requireDetectors: isCurrentSchema(schema as string) });
+  if (isPlainObject(checkpoint.controlAnalysis)) validateEntityRefs(checkpoint.controlAnalysis, "controlAnalysis", !isCurrentSchema(schema as string));
   /**
    * Presence, decided per field by when that field was introduced.
    *
@@ -1327,7 +1683,11 @@ export const validateCheckpoint = (checkpoint: unknown): void => {
  * itself, and would otherwise pass a shape check while describing a decision
  * that never occurred.
  */
-function validateDecisionRecords(decisions: Record<string, unknown>, sourceSchema: CheckpointSchemaVersion): void {
+/**
+ * A3.4 shares this with canonical validation, which passes the current schema
+ * so the same field checks decide validity for a migrated payload.
+ */
+export function validateDecisionRecords(decisions: Record<string, unknown>, sourceSchema: CheckpointSchemaVersion): void {
   // `lastDecisionTick` gates quiet time and `lastMajorCatalystTick` gates the
   // major cooldown, where null reads as "clear". Neither may be coerced: a
   // value substituted for a corrupt one would grant a capability the real
@@ -1365,7 +1725,7 @@ function validateDecisionRecords(decisions: Record<string, unknown>, sourceSchem
     if (pending.contextSnapshot === undefined && sourceSchema !== "0.2") {
       reject("decisions.pending.contextSnapshot", "malformed-container", "this schema wrote the observation context");
     }
-    if (pending.contextSnapshot === null && sourceSchema !== "0.4") {
+    if (pending.contextSnapshot === null && !isCurrentSchema(sourceSchema)) {
       reject("decisions.pending.contextSnapshot", "wrong-type", "only a current re-save may mark legacy context unrecorded");
     }
     if (pending.contextSnapshot !== undefined && pending.contextSnapshot !== null && !isPlainObject(pending.contextSnapshot)) {
