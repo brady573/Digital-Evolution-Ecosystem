@@ -12,11 +12,13 @@
  * longer instantiated or advanced; sim-analysis owns interpretation and reads
  * immutable facts via observerSnapshot(). The class stays only to decode old
  * checkpoints. Parity proves zero biological change.
+ * impl: REQ-SIM-003 (sim-analysis owns interpretation; biology stays in sim-core).
  */
 import type { EngineConfig, FlowFacts, IntervalFlowFacts } from "@digital-evolution/contracts";
 import { APP_VERSION, ENGINE_VERSION, EXPORT_FORMAT_VERSION as EXPORT_VERSION } from "./version";
 const Q=(v:number,a:number,b:number):number=>Math.max(a,Math.min(b,v));
 const A=(a:number[]):number=>a.length?a.reduce((s,v)=>s+v,0)/a.length:0;
+// impl: REQ-SIM-001 (seeded deterministic RNG streams)
 /** Seeded callable RNG stream with serializable state (legacy extraction; new code prefers DeterministicRng). */
 interface LegacyRng{():number;getState():number;setState(v:number):void}
 const R=(s:number):LegacyRng=>{let a=s>>>0;let f=(()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}) as LegacyRng;f.getState=()=>a>>>0;f.setState=(v:number)=>{a=v>>>0};return f};
@@ -30,16 +32,20 @@ const C_BYPRODUCT_YIELD=.32,C_ENERGY_YIELD=9,C_DECAY_RATE=.00022,C_DIFFUSION_RAT
  * the burden curve (exposure = wf/(wf+HALF_SAT)), not a half-life: passive
  * loss over time is WASTE_DECAY (per-tick exponential rate).
  */
+// impl: REQ-SLICE-002 (Slice 2 waste-field calibration)
 const WASTE_YIELD=.15,WASTE_CAP_FRACTION=.25,WASTE_DIFFUSION=.20,WASTE_DECAY=.0001,WASTE_HALF_SAT=.3,WASTE_BURDEN_MAX=.45,WASTE_TOL_EFFICACY=.75,WASTE_TOL_COST=.001,CU_STANDING=.0015,CU_ACTIVE=.6,CU_RATE=.09;
 const H01=(seed:number,id:number,salt=0):number=>{let x=(seed^(Math.imul(id+salt,0x9E3779B1)))>>>0;x^=x>>>16;x=Math.imul(x,0x7FEB352D);x^=x>>>15;x=Math.imul(x,0x846CA68B);x^=x>>>16;return(x>>>0)/4294967296};
 const C_ACCESS=(bu:number):number=>{let v=Q(bu,0,1.5);return v<=0?0:(v*v)/(v*v+.1024)};
 const BUC=(bu:number):number=>BU_MAINT_COST*bu*bu;
 const T:Record<string,[string,number,number,string]>={speed:['sp',.25,4,'Movement speed'],sensing:['se',10,180,'Nutrient-sensing range'],metabolism:['me',.04,.5,'Baseline energy use'],reproduction:['rp',55,220,'Energy needed to reproduce'],diet:['di',-1.5,1.5,'Nutrient tendency'],habitat:['ha',-1.5,1.5,'Home-zone preference'],byproduct_use:['bu',0,1.5,'Byproduct use'],dormancy_response:['dr',0,1.5,'Dormancy response'],tolerance:['to',0,1.5,'Waste tolerance'],cleanup:['cu',0,1.5,'Waste cleanup']};
+// impl: REQ-SIM-002 (evolvable trait set incl. cross-feeding and dormancy)
 const STUDY_TRAITS=['speed','sensing','metabolism','reproduction','habitat','byproduct_use','dormancy_response','tolerance','cleanup'];
+// impl: REQ-CLADE-001 (clade persistence thresholds)
 const STRAT_CUT=.25,REALIZED_CUT=.70,REALIZED_MIN_GAIN=45,PART_MIN=.12,PART_WINDOW=25000,PART_PERSIST=.8,PART_COVER=.65,ALIGN_MIN=.55,RECOVERY_HOLD=5000,EVENT_STRIDE=251,FOUNDER_MATURITY_MIN=450,FOUNDER_MATURITY_SPAN=650,OFFSPRING_MATURITY_MIN=700,OFFSPRING_MATURITY_SPAN=500,REPRO_COOLDOWN=450,CLADE_MIN_PEAK=10,CLADE_MIN_AGE=3000;
 const F=(n:number):string=>`L-${String(n).padStart(4,'0')}`;
 const B=():Record<string,[number,number]>=>Object.fromEntries(Object.keys(T).map(k=>[k,[0,0]])) as Record<string,[number,number]>;
 /** Per-stride biological interval counters (births, deaths, resource flows, dormancy transitions). */
+// impl: REQ-POP-001 (birth/death/flow counters drive emergent population arcs)
 interface LineageDelta{consumedA:number;consumedB:number;consumedC:number;energyA:number;energyB:number;energyC:number;producedC:number;births:number;deaths:number;wasteProduced:number;wasteRemoved:number;burdenEnergy:number;cleanupEnergy:number;cleanupExec:number}
 interface Interval{births:number;deaths:number;mutation_attempts:number;effective_mutations:number;resources_spawned:number;resources_suppressed:number;resources_consumed:number;spawned_a:number;spawned_b:number;consumed_a:number;consumed_b:number;consumed_c:number;produced_c:number;decayed_c:number;energy_a:number;energy_b:number;energy_c:number;repro_supported_a:number;repro_supported_b:number;repro_supported_mixed:number;repro_supported_c:number;dormancy_entries:number;wakes:number;wake_clades:Record<string,number>;proc_exec_a:number;proc_exec_b:number;proc_exec_c:number;produced_w:number;removed_w:number;decayed_w:number;burden_energy:number;cleanup_energy:number;cleanup_exec:number;[k:string]:number|Record<string,number>}
 const I=():Interval=>({births:0,deaths:0,mutation_attempts:0,effective_mutations:0,resources_spawned:0,resources_suppressed:0,resources_consumed:0,spawned_a:0,spawned_b:0,consumed_a:0,consumed_b:0,consumed_c:0,produced_c:0,decayed_c:0,energy_a:0,energy_b:0,energy_c:0,repro_supported_a:0,repro_supported_b:0,repro_supported_mixed:0,repro_supported_c:0,dormancy_entries:0,wakes:0,wake_clades:{},proc_exec_a:0,proc_exec_b:0,proc_exec_c:0,produced_w:0,removed_w:0,decayed_w:0,burden_energy:0,cleanup_energy:0,cleanup_exec:0});

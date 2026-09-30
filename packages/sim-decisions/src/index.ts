@@ -30,6 +30,7 @@ const nutrientDisturbance = (
   mode: "global_crash" | "drought_a" | "drought_b",
 ): InterventionSpec => ({ schemaVersion: 1, kind: "nutrient_disturbance", mode });
 
+// impl: REQ-EVENT-002 (decision opportunities are read-only; leave-unchanged always offered)
 /** Leave-unchanged is always offered and is always first. */
 const keepWatching: DecisionChoice = {
   choiceId: "keep-watching",

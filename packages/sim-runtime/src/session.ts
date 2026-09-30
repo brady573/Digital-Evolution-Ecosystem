@@ -15,6 +15,7 @@ import type {
   SupportedUniverseCheckpoint,
   UniverseCheckpoint,
   UniverseCheckpointV02,
+  UniverseCheckpointV03,
   WorldId,
 } from "@digital-evolution/contracts";
 // Aliased: `renderSnapshot` has a parameter named `worldId`, and the shadow
@@ -23,6 +24,7 @@ import {
   AFTERMATH_COMPARABLES,
   decisionCommandId,
   migrateAnalysisEntityRefs,
+  validateCheckpoint,
   worldId as toWorldId,
 } from "@digital-evolution/contracts";
 import {
@@ -49,7 +51,7 @@ import {
   selectCatalystWindow,
 } from "@digital-evolution/sim-decisions";
 
-export const CHECKPOINT_SCHEMA_VERSION = "0.3" as const;
+export const CHECKPOINT_SCHEMA_VERSION = "0.4" as const;
 
 /**
  * Process-unique universe counter. Presentation identity only: it is
@@ -166,6 +168,15 @@ function normalizePendingDecision(raw:unknown):PendingDecision|null{
   return null;
 }
 
+const NOT_RECORDED="Not recorded in this save";
+function normalizeHistoricalPending(raw:unknown):PendingDecision|null{
+  const pending=normalizePendingDecision(raw);
+  if(!pending)return null;
+  const copy={...pending} as Record<string,unknown>;
+  if(copy.contextSnapshot===undefined)copy.contextSnapshot=null;
+  return copy as unknown as PendingDecision;
+}
+
 function normalizeResolution(raw:any):DecisionResolution{
   const copy=JSON.parse(JSON.stringify(raw));
   // Backfill for 0.2 records, which predate these fields: the resolution tick
@@ -173,8 +184,15 @@ function normalizeResolution(raw:any):DecisionResolution{
   // catalyst window (they did not exist).
   if(copy.offerTick===undefined)copy.offerTick=copy.tick;
   if(copy.catalystId===undefined)copy.catalystId=null;
-  if(copy.source===undefined)copy.source="event_decision";
   return copy as DecisionResolution;
+}
+function normalizeHistoricalResolution(raw:any):DecisionResolution{
+  const copy=normalizeResolution(raw);
+  return {
+    ...copy,
+    choiceTitle:copy.choiceTitle??NOT_RECORDED,
+    directEffectDescription:copy.directEffectDescription??NOT_RECORDED,
+  };
 }
 
 /** Newest decision tick known to a migrated checkpoint, or 0 when none. */
@@ -439,6 +457,7 @@ export class UniverseSession {
     return this.snapshot();
   }
 
+  // impl: REQ-EXP-001 (lazy matched-control fork; interventions apply env-only effects)
   createControlFork(){
     if(!this.#experiment)throw new Error("Universe has not been created");
     if(!this.#control){
@@ -601,7 +620,7 @@ export class UniverseSession {
   }
 
   /**
-   * Restore schema 0.3 exactly. Older schemas migrate forward explicitly:
+   * Restore schema 0.4 exactly. Older schemas migrate forward explicitly:
    * - 0.2: same simulation/analysis/control state; pending normalizes (a
    *   sourceless pending with a sourceEventId is an event decision);
    *   resolutions backfill offerTick/catalystId; pacing state restarts from
@@ -611,9 +630,26 @@ export class UniverseSession {
    * resolutions keep their own embedded versions.
    */
   restore(checkpoint:SupportedUniverseCheckpoint){
-    const schema=(checkpoint as any)?.checkpointSchemaVersion;
-    if(schema!=="0.1"&&schema!=="0.2"&&schema!=="0.3")throw new Error(`Unsupported runtime checkpoint schema: ${String(schema)}`);
+    // Refusal happens before anything is applied, so a rejected payload never
+    // becomes live state — and before any sim-core call, so the simulation is
+    // never handed a value it would have to partially apply.
+    //
+    // Source-schema preflight examines the raw payload: only historically
+    // evidenced absent fields and pre-A2 bare refs may reach reconstruction.
+    // Canonical migrate-then-validate is the separate A3.4 contract.
+    //
+    // `migrateAnalysisEntityRefs` takes an analysis payload, not a checkpoint:
+    // it was written and tested against one, and handing it a checkpoint makes
+    // it look for `records` at the top level, find none, and no-op. The first
+    // wiring attempt did exactly that, and the pre-A2 length test caught it.
+    validateCheckpoint(checkpoint);
     if(checkpoint.engineVersion!==ENGINE_VERSION)throw new Error(`Checkpoint engine ${checkpoint.engineVersion} does not match ${ENGINE_VERSION}`);
+    const migrated={
+      ...checkpoint,
+      analysis:migrateAnalysisEntityRefs(checkpoint.analysis),
+      controlAnalysis:migrateAnalysisEntityRefs(checkpoint.controlAnalysis),
+    };
+    const schema=(migrated as any)?.checkpointSchemaVersion;
     // A restore is a new displayed world, not the old one continued: hand out
     // a fresh presentation identity so rendering inertia cannot carry over.
     this.#worldId=toWorldId(++worldIdCounter);
@@ -624,7 +660,7 @@ export class UniverseSession {
     // the label rather than guessing a namespace, which is A2's specified
     // behaviour for a kind that was never recorded. Unusable entries are left
     // in place for validation to reject, not dropped here.
-    this.#analysis=EcologyObserver.restore(migrateAnalysisEntityRefs(checkpoint.analysis));
+    this.#analysis=EcologyObserver.restore(migrated.analysis as any);
     // Aftermath is deliberately NOT restored. It is evidence held outside the
     // checkpoint, so a restore that carried it would be reconstructing an
     // observation from simulation state alone - exactly what must not happen.
@@ -634,9 +670,9 @@ export class UniverseSession {
     this.#aftermath=null;
     this.#control=checkpoint.control?restoreSimulationCheckpoint(checkpoint.control as any):null;
     this.#controlAnalysis=checkpoint.controlAnalysis
-      ?EcologyObserver.restore(migrateAnalysisEntityRefs(checkpoint.controlAnalysis))
+      ?EcologyObserver.restore(migrated.controlAnalysis as any)
       :null;
-    if(schema==="0.3"){
+    if(schema==="0.4"){
       const decisions=(checkpoint as UniverseCheckpoint).decisions;
       this.#pendingDecision=normalizePendingDecision(decisions?.pending);
       this.#decisionResolutions=Array.isArray(decisions?.resolutions)
@@ -646,19 +682,41 @@ export class UniverseSession {
       this.#catalystPolicyVersion=CATALYST_POLICY_VERSION;
       this.#lastDecisionTick=typeof decisions?.lastDecisionTick==="number"?decisions.lastDecisionTick:0;
       this.#lastMajorCatalystTick=typeof decisions?.lastMajorCatalystTick==="number"?decisions.lastMajorCatalystTick:null;
-    }else if(schema==="0.2"){
-      const decisions=(checkpoint as UniverseCheckpointV02).decisions;
-      const pending=normalizePendingDecision(decisions?.pending);
+    }else if(schema==="0.3"||schema==="0.2"){
+      // Both older branches normalize pending decisions and resolutions, but
+      // only 0.2 reconstructs the pacing tick. Checkpoint 0.3 wrote its tick;
+      // that persisted value must survive rather than becoming an estimate.
+      const decisions=(checkpoint as UniverseCheckpointV03).decisions;
+      const pending=schema==="0.2"?normalizeHistoricalPending(decisions?.pending):normalizePendingDecision(decisions?.pending);
       const resolutions=Array.isArray(decisions?.resolutions)
-        ?(decisions.resolutions as any[]).map(normalizeResolution)
+        ?(decisions.resolutions as any[]).map(schema==="0.2"?normalizeHistoricalResolution:normalizeResolution)
         :[];
       this.#pendingDecision=pending;
       this.#decisionResolutions=resolutions;
       // Generator versions are always the running code's, for both catalogs.
       this.#policyVersion=DECISION_POLICY_VERSION;
       this.#catalystPolicyVersion=CATALYST_POLICY_VERSION;
-      this.#lastDecisionTick=newestKnownDecisionTick(pending,resolutions);
-      this.#lastMajorCatalystTick=null;
+      this.#lastDecisionTick=schema==="0.3"
+        ?decisions.lastDecisionTick
+        :newestKnownDecisionTick(pending,resolutions);
+      // 0.3 and 0.2 differ here, and the difference is historical fact rather
+      // than a shared convention. 0.3 wrote this field — b040b19's decision
+      // checkpoint assigns it — so discarding it now would silence a real
+      // cooldown: `null` reads as "clear", and a world restored from a 0.3 save
+      // would permit a major catalyst the save itself recorded as suppressed.
+      // 0.2 predates the field entirely (zero occurrences in b39fd46), so
+      // absence there is the truth about that world and `null` is the
+      // historically correct value rather than a permissive one.
+      //
+      // 0.3's own restore discarded this value on purpose — its comment read
+      // "pacing state restarts ... with a clear cooldown". That convention is
+      // deliberately reversed here: a world whose cooldown is running should
+      // not come back eligible for the catalyst the cooldown was suppressing,
+      // and a save that loads and then behaves differently is worse than one
+      // that refuses, because the player cannot tell which happened.
+      const major=decisions?.lastMajorCatalystTick;
+      this.#lastMajorCatalystTick=
+        typeof major==="number"&&Number.isFinite(major)?major:null;
     }else{
       this.#pendingDecision=null;
       this.#decisionResolutions=[];

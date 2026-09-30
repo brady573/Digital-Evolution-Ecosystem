@@ -99,6 +99,8 @@ Validation is defined in exactly one place: `tools/validation/manifest.ts`. Ever
 
 Single-unit escape hatches exist for iterating on one check (`pnpm test:ecology`, `pnpm test:browser`, `pnpm test:migration`, and the rest in `package.json`). They are not the completion contract: running one proves one claim, and `pnpm verify` proves the set.
 
+**A handoff's validation list is a floor, not a substitute.** Bounded handoffs name the checks that are *focused* on the work unit — the ones a reviewer most needs to see run. They are not the repository's blocking contract, and they are usually shorter than it. Completion requires both: the handoff's named checks, **and** every blocking unit and CI shard the manifest routes for the actual diff. Learned the hard way in Tranche A: a handoff's list omitted `test:catalysts` and `test:aftermath`, treating that list as exhaustive skipped both locally, and CI's `sim-d` shard failed on a stale assertion in `catalysts.ts` that a local run had structurally could not reach. The manifest and the shards it defines remain authoritative; the handoff list narrows attention, it does not bound it.
+
 To see what CI will run, and what each check costs, use `pnpm validation:plan`. To see what a diff requires, use `pnpm validation:check` for the architecture gate and `pnpm ci:group <shard> --dry-run` to list a shard.
 
 ### What `pnpm verify` does and does not include

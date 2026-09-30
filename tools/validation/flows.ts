@@ -3,15 +3,20 @@ import { UniverseSession } from "../../packages/sim-runtime/src/session.ts";
 import type { EngineConfig, FlowFacts } from "../../packages/contracts/src/index.ts";
 import {
   CHECKPOINT_MIGRATION_RULES,
+  CheckpointRejectionError,
   MIGRATION_RULE_BY_ID,
   migrateEntityRefs,
+  SUPPORTED_SCHEMAS,
   typedRefs,
+  validateCheckpoint,
 } from "../../packages/contracts/src/index.ts";
 import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ENGINE_VERSION } from "../../packages/sim-core/src/index.ts";
 import { CHECKPOINT_SCHEMA_VERSION } from "../../packages/sim-runtime/src/session.ts";
+import { testHistoricalCheckpointBoundary } from "./checkpoint-historical-boundary.ts";
 
 /**
  * Issue #30 Phase B1: authoritative biological flow facts. sim-core credits
@@ -149,6 +154,12 @@ function testFlowCheckpoint() {
   for (const o of organisms) delete o.pc;
   delete legacy.experiment.state.props.lastLineageFlows;
   delete legacy.experiment.state.props.lineageInterval;
+  assert.throws(
+    () => new UniverseSession().restore(JSON.parse(JSON.stringify(legacy))),
+    (error: unknown) => error instanceof CheckpointRejectionError && error.field === "experiment.state.props.o[0].pc",
+    "the maintained current schema cannot use an older build's missing production counters",
+  );
+  legacy.checkpointSchemaVersion = "0.3";
   const aged = new UniverseSession();
   aged.restore(legacy);
   settle(aged, aged.snapshot().tick + 1000);
@@ -447,6 +458,37 @@ const MIGRATION_ABSORBER_PROBES: Readonly<Record<string, { file: string; probe: 
     file: "packages/sim-core/src/engine.ts",
     probe: /this\.lineageInterval\|\|new Map\(\)/,
   },
+  "organism-waste-tolerance-reads-as-zero": {
+    file: "packages/sim-core/src/engine.ts",
+    // Absorber `live-step-guard`: the biological step clamps an absent trait
+    // to zero. Probed against that clamp, so a rewrite that stopped treating
+    // absence as no-tolerance would fail here rather than silently changing
+    // waste exposure physiology.
+    probe: /Q\(o\.to\|\|0,0,1\.5\)/,
+  },
+  "organism-waste-cleanup-reads-as-zero": {
+    file: "packages/sim-core/src/engine.ts",
+    // Absorber `live-step-guard`: the cleanup process derives its access from
+    // the trait, so an absent one means the process cannot execute.
+    probe: /Q\(o\.cu\|\|0,0,1\.5\)\/1\.5/,
+  },
+  "last-decision-tick-reconstructed-from-newest-record": {
+    file: "packages/sim-runtime/src/session.ts",
+    // Absorber `structural-branch`: for 0.2 the legacy branch computes the value
+    // from the save's own records rather than reading a stored field. The whole
+    // conditional is probed, not just the call, so a rewrite that dropped the
+    // 0.2 reconstruction — or made 0.3 derive instead of preserve — fails here.
+    probe: /schema==="0\.3"\s*\?decisions\.lastDecisionTick\s*:newestKnownDecisionTick\(pending,resolutions\)/,
+  },
+  "major-catalyst-tick-predates-cooldown": {
+    file: "packages/sim-runtime/src/session.ts",
+    // Absorber `structural-branch`: the legacy branch reads the field, and a
+    // payload that predates the field falls to the canonical value. Probed
+    // against the same expression the branch actually uses, so a rewrite that
+    // drops the fallback fails here rather than silently re-allowing a
+    // dynamics-gating default.
+    probe: /typeof major==="number"&&Number\.isFinite\(major\)\?major:null;/,
+  },
   "pending-decision-source-backfilled-from-event": {
     file: "packages/sim-runtime/src/session.ts",
     probe: /copy\.source="observed_event"/,
@@ -459,28 +501,64 @@ const MIGRATION_ABSORBER_PROBES: Readonly<Record<string, { file: string; probe: 
     file: "packages/sim-runtime/src/session.ts",
     probe: /if\(copy\.catalystId===undefined\)copy\.catalystId=null;/,
   },
-  "decision-resolution-source-reads-as-event-decision": {
+  "pending-observation-not-recorded-in-02": {
     file: "packages/sim-runtime/src/session.ts",
-    probe: /if\(copy\.source===undefined\)copy\.source="event_decision";/,
+    probe: /if\(copy\.contextSnapshot===undefined\)copy\.contextSnapshot=null;/,
   },
-  "matched-control-absent-reads-as-null": {
+  "resolution-choice-title-not-recorded-in-02": {
     file: "packages/sim-runtime/src/session.ts",
-    probe: /checkpoint\.control\?restoreSimulationCheckpoint/,
+    probe: /choiceTitle:copy\.choiceTitle\?\?NOT_RECORDED/,
+  },
+  "resolution-direct-effect-not-recorded-in-02": {
+    file: "packages/sim-runtime/src/session.ts",
+    probe: /directEffectDescription:copy\.directEffectDescription\?\?NOT_RECORDED/,
   },
   "entity-refs-bare-numbers-mean-unrecorded-kind": {
     file: "packages/contracts/src/index.ts",
     probe: /export const migrateEntityRefs = /,
   },
-  "analysis-substate-absent-reads-as-constructor-default": {
+  "analysis-cuse-guild-absent-reads-as-constructor-default": {
+    file: "packages/sim-analysis/src/index.ts",
+    probe: /const observer=new EcologyObserver\(\);[\s\S]{0,120}Object\.assign\(observer,/,
+  },
+  "analysis-niche-construction-absent-reads-as-constructor-default": {
+    file: "packages/sim-analysis/src/index.ts",
+    probe: /const observer=new EcologyObserver\(\);[\s\S]{0,120}Object\.assign\(observer,/,
+  },
+  "control-analysis-cuse-guild-absent": {
+    file: "packages/sim-analysis/src/index.ts",
+    probe: /const observer=new EcologyObserver\(\);[\s\S]{0,120}Object\.assign\(observer,/,
+  },
+  "control-analysis-niche-construction-absent": {
     file: "packages/sim-analysis/src/index.ts",
     probe: /const observer=new EcologyObserver\(\);[\s\S]{0,120}Object\.assign\(observer,/,
   },
 };
 
-const SPLIT_RULE_IDS = ["matched-control-absent-reads-as-null", "analysis-substate-absent-reads-as-constructor-default"];
+/** The schema the maintained save path writes. No rule may tolerate an
+ *  omission in it: that is the whole point of the 0.4 split. */
+const CURRENT_SCHEMA = CHECKPOINT_SCHEMA_VERSION;
+
+// Rules that tolerate a historical absence in one place while the same field
+// may also be refused: a whole rule needs no `rejects`, a half rule must say
+// what it refuses. The two controlAnalysis detector rules are whole rules in
+// their own right (the fork observer's constructor default is the absorber),
+// but the source-schema preflight refuses a *present* malformed value there
+// just as it does for the live observer, so the refusal is recorded for them
+// too rather than left implicit.
+const SPLIT_RULE_IDS = [
+  "analysis-cuse-guild-absent-reads-as-constructor-default",
+  "analysis-niche-construction-absent-reads-as-constructor-default",
+  "control-analysis-cuse-guild-absent",
+  "control-analysis-niche-construction-absent",
+  "pending-observation-not-recorded-in-02",
+];
 
 function testCheckpointMigrationRuleTable() {
-  const schemas = ["0.1", "0.2", "0.3"];
+  // Every version the contract knows, so a rule scoped to 0.4 — which no
+  // absence tolerance may be — is still a *valid* value here and has to be
+  // caught by the no-crossing assertion below rather than by the whitelist.
+  const schemas = ["0.1", "0.2", "0.3", "0.4"];
   const absorbers = [
     "live-step-guard",
     "nullable-field",
@@ -495,10 +573,28 @@ function testCheckpointMigrationRuleTable() {
     seen.add(rule.id);
     assert.ok(rule.id.length > 3, `migration rule needs a real id: ${JSON.stringify(rule.id)}`);
     assert.ok(rule.path.length > 0, `${rule.id} must state where the field lives`);
+    // A rule must name a supported build that could have written the shape.
+    // "The restore code currently tolerates it" is not a basis, and the whole
+    // point of 0.4 is that the two are no longer the same claim.
+    assert.ok(
+      typeof rule.historicalBasis === "string" && rule.historicalBasis.length > 40,
+      `${rule.id} must name concrete evidence that a supported build wrote this shape`,
+    );
+    assert.doesNotMatch(
+      rule.historicalBasis,
+      /currently tolerates|restore code|happens to/i,
+      `${rule.id} cites present-day tolerance instead of history, which is not a basis`,
+    );
     assert.ok(rule.appliesToSchemas.length > 0, `${rule.id} must name at least one schema`);
     for (const schema of rule.appliesToSchemas) {
       assert.ok(schemas.includes(schema), `${rule.id} names unknown schema ${schema}`);
     }
+    // No absence tolerance may cross into the current schema: a 0.4 save is
+    // written by the build that requires these fields, so it may not omit them.
+    assert.ok(
+      !rule.appliesToSchemas.includes(CURRENT_SCHEMA),
+      `${rule.id} tolerates its omission in ${CURRENT_SCHEMA}, but the current schema requires it`,
+    );
     assert.ok(absorbers.includes(rule.absorber), `${rule.id} names unknown absorber ${rule.absorber}`);
     assert.ok(
       rule.effectiveDefault.length > 0,
@@ -511,6 +607,26 @@ function testCheckpointMigrationRuleTable() {
     );
     // A half rule must say what it refuses, or the absence-tolerance reads as
     // blanket tolerance. A whole rule needs no `rejects`.
+    // §4.5: every rule states what its omission can affect, and a rule that can
+    // affect the world must justify why its default is safe anyway. Without
+    // this, "we default it" is the whole record and a later reader inherits the
+    // default without the reasoning that made it acceptable.
+    assert.ok(
+      ["inert", "load-bearing-display", "load-bearing-dynamics"].includes(rule.hazard),
+      `${rule.id} must declare one of the three hazard kinds, got ${String(rule.hazard)}`,
+    );
+    if (rule.hazard === "load-bearing-dynamics") {
+      assert.ok(
+        typeof rule.dynamicsJustification === "string" && rule.dynamicsJustification.length > 40,
+        `${rule.id} gates the world, so it must justify why its default preserves behaviour rather than granting a capability`,
+      );
+    } else {
+      assert.equal(
+        rule.dynamicsJustification,
+        undefined,
+        `${rule.id} does not gate the world, so a dynamics justification would be claiming a hazard it does not have`,
+      );
+    }
     if (SPLIT_RULE_IDS.includes(rule.id)) {
       assert.ok(
         typeof rule.rejects === "string" && rule.rejects.length > 40,
@@ -547,6 +663,111 @@ function testCheckpointMigrationRuleTable() {
     "the by-id index and the rule list must not drift apart",
   );
   console.log(`checkpoint migration rule table: PASS (${CHECKPOINT_MIGRATION_RULES.length} rules)`);
+}
+
+/**
+ * The supported-save document must stay derived from the table.
+ *
+ * The generator refuses to run when it names a supported schema version in
+ * code, but a self-check nobody executes proves nothing: the boundary is
+ * presented to the Owner between runs, so the failure would land on the
+ * decision rather than on the build. This executes it from a routed unit, and
+ * separately asserts the printed heading carries the live current version and
+ * no historical one — so the rot is caught at the output even if the source
+ * scan is bypassed.
+ */
+function testBoundaryGeneratorIsDerived() {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const result = spawnSync(join(here, "..", "..", "node_modules", ".bin", "tsx"), [join(here, "checkpoint-boundary.ts")], {
+    encoding: "utf8",
+  });
+  assert.equal(
+    result.status,
+    0,
+    `the boundary generator refused to run, so the supported-save document cannot be produced:\n${result.stderr}`,
+  );
+  const out = result.stdout;
+
+  assert.ok(
+    out.includes(`(${CHECKPOINT_MIGRATION_RULES.length} rules)`),
+    "the document's rule count must come from the table, not from prose that a rule edit can invalidate",
+  );
+
+  const heading = out.split("\n").find((l) => l.startsWith("## A valid ") && l.includes("never depends"));
+  assert.ok(heading !== undefined, "the document must state the no-current-schema-migration property");
+
+  // A generated document that states the opposite of the code is worse than no
+  // document, so the asymmetry proof is checked against the field the suite
+  // actually proves it with. When the negative control moved to `analysis.dep`
+  // this line kept naming `analysis.records` as tolerated at the historical
+  // schema — which that same change had just made refused at every schema. The
+  // prose outlived the behaviour it described, and only diffing against the
+  // previous artifact caught it.
+  // The document must not claim a completeness it does not have. Restore sets
+  // values for state no save format ever carried — a 0.1 world's absent
+  // decision system, and the running build's policy versions. Those are
+  // deliberately not absence-compatibility rules, and the document has to say
+  // so, or "everything not listed here is refused" reads as a claim that
+  // unlisted defaults do not exist.
+  assert.ok(
+    out.includes("### What the rules do not cover"),
+    "the document must state what its rules do not cover, so its completeness claim is bounded",
+  );
+  assert.ok(
+    !out.includes("Everything not listed here is refused") &&
+      !out.includes("not yet an exhaustive schema validator") &&
+      out.includes("the only authorized historical omissions"),
+    "the boundary must state the closed check set, not a claim of exhaustive validation it does not provide",
+  );
+  assert.ok(
+    out.includes("source-schema preflight") && out.includes("A3.4") && !out.includes("migration runs before validation"),
+    "the generated boundary must describe raw-source preflight and reserve canonical ordering for A3.4",
+  );
+  assert.ok(
+    out.includes("Two independent gates") && out.includes("no save-preservation promise"),
+    "the boundary must separate schema validity from engine-version compatibility",
+  );
+  assert.ok(
+    out.includes("deliberately outside this preflight") && !/not yet inventoried|remains to be inventoried/i.test(out),
+    "every out-of-scope field class must be named with a reason, and none may remain un-inventoried",
+  );
+  assert.ok(
+    out.includes("oldest world had no decision subsystem") &&
+      out.includes("even when saved versions are present"),
+    "the uncovered section must distinguish absent old subsystems from saved generator versions that are intentionally replaced",
+  );
+
+  // A3.3 proves three narrow properties. It does not prove canonical
+  // migrate-then-validate ordering: pre-A2 entity migration runs before
+  // validation, but other historical reconstruction happens later in `restore`.
+  // Claiming the ordering here would assert a property the code does not have.
+  assert.ok(
+    !/Migration runs before validation/.test(out),
+    "the document must not claim migrate-before-validate ordering; A3.3 does not prove it",
+  );
+  assert.ok(
+    out.includes("What A3.3 proves"),
+    "the document must state the properties A3.3 actually proves",
+  );
+
+  const asymmetry = out.split("\n").find((l) => l.startsWith("3. **The asymmetry"));
+  assert.ok(asymmetry !== undefined, "the document must state the absence/invalidity asymmetry");
+  assert.equal(
+    asymmetry.match(/`analysis\.([a-z_]+)`/)?.[1],
+    "dep",
+    "the asymmetry proof must name the sub-state the suite actually proves it with",
+  );
+  assert.ok(
+    heading.includes(CURRENT_SCHEMA),
+    `the property heading must name the live current schema ${CURRENT_SCHEMA}, got: ${heading}`,
+  );
+  for (const historical of SUPPORTED_SCHEMAS.filter((s) => s !== CURRENT_SCHEMA)) {
+    assert.ok(
+      !heading.includes(historical),
+      `the property heading names historical schema ${historical}, which is rot: it was correct until the version moved`,
+    );
+  }
+  console.log("boundary generator is derived: PASS (no supported-version literal, heading carries current schema)");
 }
 
 testFlowDeterminism();
@@ -611,6 +832,11 @@ function testPreA2EntityRefMigration() {
   session.create(config(FIXTURE_SEED));
   settle(session, 20000);
   const saved: any = JSON.parse(JSON.stringify(session.checkpoint()));
+  // A pre-A2 reference list is a 0.3 save, because A2 changed the persisted
+  // shape without bumping the schema. Relabelling a current save's stripped
+  // refs as current would describe a shape the current writer never emitted,
+  // and the source-schema preflight refuses exactly that.
+  saved.checkpointSchemaVersion = "0.3";
 
   const taggedCount = saved.analysis.records
     .flatMap((r: any) => r.entity_refs as any[])
@@ -622,6 +848,16 @@ function testPreA2EntityRefMigration() {
     r.entity_refs = (r.entity_refs as any[]).map((ref: any) => ref.id);
   }
   const originals: number[][] = saved.analysis.records.map((r: any) => [...r.entity_refs]);
+
+  // The same payload as the current schema must be refused: bare IDs are the
+  // historically absent shape, not an alternative encoding of a current one.
+  const asCurrent = JSON.parse(JSON.stringify(saved));
+  asCurrent.checkpointSchemaVersion = CHECKPOINT_SCHEMA_VERSION;
+  assert.throws(
+    () => new UniverseSession().restore(asCurrent),
+    (error: unknown) => error instanceof CheckpointRejectionError,
+    "a current save may not carry pre-A2 bare entity references",
+  );
 
   const aged = new UniverseSession();
   aged.restore(saved);
@@ -651,41 +887,486 @@ function testPreA2EntityRefMigration() {
   }
   assert.ok(compared > 0, "the comparison above actually ran");
 
-  // The engine's own output is incidental here — in 20k ticks it may name one
-  // entity or several. So the dedup case is stated explicitly on the restore
-  // path, with a record whose bare numbers repeat a lineage. A migration that
-  // rebuilt each ref as a fresh object and deduped by reference would leave
-  // all three entries, which is the A2 failure exactly.
-  saved.analysis.records.push({
-    id: "synthetic-duplicate-refs-established-1",
-    arc_id: "synthetic",
-    kind: "cuse",
-    tick: 1,
-    phase: "established",
-    title: "synthetic",
-    summary: "synthetic",
-    level: "major",
-    evidence: {},
-    entity_refs: [9, 9, 7],
-  });
-  const dup = new UniverseSession();
-  dup.restore(saved);
-  const dupRef = ((dup.analysis as any).records as any[]).at(-1).entity_refs as any[];
-  assert.equal(dupRef.length, 2, "a repeated bare lineage collapses to one ref, by value not by identity");
-  assert.deepEqual(
-    dupRef,
-    [{ kind: null, id: 9 }, { kind: null, id: 7 }],
-    "the collapsed ref keeps the first occurrence's order and an unrecorded kind",
+  /**
+   * The fixture's own references are incidental — in 20k ticks the engine may
+   * name one entity or several, and this run happened to name exactly one. A
+   * proof that shrinks with the fixture is a vacuous proof, so the invariant
+   * that actually regressed in A2 is stated here on an explicit reference set
+   * through the real restore path, independent of whatever the engine emitted.
+   *
+   * A2 broke because the migration constructed a fresh object per element and
+   * deduplicated by object identity, so a lineage named by two lists survived
+   * twice. Identity dedup fails on BARE numbers (each becomes a distinct
+   * object) and on TAGGED refs (each arrives as a distinct object). Both shapes
+   * are asserted, together with the case identity dedup gets wrong in the
+   * opposite direction: one numeric id carrying two different kinds must stay
+   * two references.
+   */
+  const REFERENCE_CASES: readonly {
+    readonly label: string;
+    readonly refs: readonly unknown[];
+    readonly expected: readonly unknown[];
+  }[] = [
+    {
+      label: "bare: a repeated lineage collapses, first-occurrence order kept",
+      refs: [9, 9, 7],
+      expected: [{ kind: null, id: 9 }, { kind: null, id: 7 }],
+    },
+    {
+      label: "bare: interleaved repeats collapse by value, not adjacency",
+      refs: [4, 9, 4, 9, 9, 2],
+      expected: [{ kind: null, id: 4 }, { kind: null, id: 9 }, { kind: null, id: 2 }],
+    },
+    {
+      label: "tagged: a repeated (kind, id) pair collapses",
+      refs: [
+        { kind: "lineage", id: 3 },
+        { kind: "lineage", id: 3 },
+        { kind: "organism", id: 3 },
+      ],
+      expected: [{ kind: "lineage", id: 3 }, { kind: "organism", id: 3 }],
+    },
+    {
+      label: "distinct kinds of one numeric id stay distinct references",
+      refs: [
+        { kind: "lineage", id: 5 },
+        { kind: "clade", id: 5 },
+        { kind: "organism", id: 5 },
+        { kind: "lineage", id: 5 },
+      ],
+      expected: [
+        { kind: "lineage", id: 5 },
+        { kind: "clade", id: 5 },
+        { kind: "organism", id: 5 },
+      ],
+    },
+    {
+      label: "an unrecorded kind is a real reference, not an absent one",
+      refs: [{ kind: null, id: 8 }, { kind: null, id: 8 }, { kind: "lineage", id: 8 }],
+      expected: [{ kind: null, id: 8 }, { kind: "lineage", id: 8 }],
+    },
+    {
+      label: "a single reference passes through unchanged",
+      refs: [12],
+      expected: [{ kind: null, id: 12 }],
+    },
+  ];
+
+  for (const [index, testCase] of REFERENCE_CASES.entries()) {
+    const payload: any = JSON.parse(JSON.stringify(saved));
+    payload.analysis.records.push({
+      id: `deterministic-ref-case-${index}`,
+      arc_id: "deterministic",
+      kind: "reference-case",
+      tick: 1,
+      phase: "established",
+      title: "synthetic",
+      summary: "synthetic",
+      level: "major",
+      evidence: {},
+      entity_refs: testCase.refs,
+    });
+    const restoredCase = new UniverseSession();
+    restoredCase.restore(payload);
+    const migratedCase = ((restoredCase.analysis as any).records as any[]).at(-1).entity_refs as any[];
+    // The exact expected list catches both directions: dropping an entry
+    // shortens it, failing to collapse lengthens it.
+    assert.deepEqual(
+      migratedCase,
+      testCase.expected,
+      `reference migration on the restore path — ${testCase.label}`,
+    );
+  }
+  assert.ok(
+    REFERENCE_CASES.filter((c) => c.refs.length > 1).length >= 4,
+    "the reference cases include several multi-reference inputs, not only single-element lists",
   );
   console.log(
-    `pre-A2 entity_refs migration: PASS (${compared} real refs length-preserved, duplicate case collapsed)`,
+    `pre-A2 entity_refs migration: PASS (${compared} fixture refs length-preserved, ${REFERENCE_CASES.length} deterministic reference cases)`,
   );
 }
 
 
+/**
+ * A3.3, built before the rejection conditions on purpose.
+ *
+ * Every other new check asks "is a corrupt value refused?". This one asks the
+ * question none of them can: **what does the world do when nothing refuses
+ * it?** A default that is merely wrong is a truthfulness defect the player
+ * might notice. A default that reads as "clear" is a dynamics change, and it
+ * is silent.
+ *
+ * The case is `lastMajorCatalystTick`. `isMajorCooldownClear` is
+ * `lastMajorCatalystTick === null || tick - lastMajorCatalystTick >= 25_000`,
+ * so `null` does not mean unknown — it means *no major catalyst has ever
+ * fired*, which grants a major catalyst the real cooldown would have
+ * suppressed. A corrupt value therefore restores into a world that quietly
+ * diverges, and a save that refuses to load would at least have been legible.
+ *
+ * Two assertions, because they are different claims:
+ *
+ *   (a) preservation — a real, recent cooldown survives the round trip, so
+ *       validation cannot cost a correctly-saved world its own history.
+ *   (b) refusal — a corrupt value is refused, not coerced to the permissive
+ *       end of the range. (b) is the one that fails before A3.3 and passes
+ *       after it.
+ */
+const cooldownBlocked = (session: UniverseSession): boolean =>
+  session
+    .describeCatalystEligibility()
+    .diagnoses.some((d) => d.reasons.includes("major-catalyst cooldown has not elapsed"));
+
+function testCooldownPreservationAcrossRestore() {
+  const session = new UniverseSession();
+  session.create(config(FIXTURE_SEED));
+  settle(session, 20000);
+
+  // (a) A genuine, recent cooldown. The saved tick is well inside the 25_000
+  // window, so the major cooldown is still running and must still be running
+  // after a round trip through the hardened boundary.
+  const saved: any = JSON.parse(JSON.stringify(session.checkpoint()));
+  saved.decisions.lastMajorCatalystTick = saved.decisions.lastDecisionTick;
+  const at = saved.decisions.lastMajorCatalystTick as number;
+  assert.ok(
+    saved.decisions.lastDecisionTick - at < 25_000,
+    "the saved cooldown is inside its window, so this save is a suppressed one",
+  );
+
+  const restored = new UniverseSession();
+  restored.restore(saved);
+  assert.ok(
+    cooldownBlocked(restored),
+    "a suppressed major cooldown stays suppressed across restore (preservation)",
+  );
+
+  // The discriminator, and it is the hazard stated as a fact: `null` is a
+  // *legal* value for this field meaning "no major catalyst has ever fired",
+  // and it reads as cooldown-clear. So the assertion above discriminates on the
+  // value rather than on eligibility, and the reason a corrupt value must not be
+  // coerced to `null` is visible in two lines of test.
+  const neverFired: any = JSON.parse(JSON.stringify(saved));
+  neverFired.decisions.lastMajorCatalystTick = null;
+  const clear = new UniverseSession();
+  clear.restore(neverFired);
+  assert.ok(
+    !cooldownBlocked(clear),
+    'a null lastMajorCatalystTick reads as "never fired" and is therefore clear, not blocked',
+  );
+
+  // (b) The absence-of-refusal case. A wrong-typed value is not an elapsed
+  // cooldown and not an absent one; it is corrupt. It must be refused. Before
+  // A3.3 this restores as `null`, which reads as "clear", and the suppressed
+  // cooldown below silently disappears.
+  const corrupt: any = JSON.parse(JSON.stringify(saved));
+  corrupt.decisions.lastMajorCatalystTick = "not a tick";
+  assert.throws(
+    () => new UniverseSession().restore(corrupt),
+    (error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      assert.match(
+        message,
+        /lastMajorCatalystTick/,
+        `the error must name the field, got: ${message}`,
+      );
+      return true;
+    },
+    "a corrupt lastMajorCatalystTick is refused, not defaulted to the permissive end",
+  );
+
+  // (c) A real 0.3 save. 0.3 wrote this field — `b040b19`'s decision checkpoint
+  // assigns it — so discarding it on restore is a restore defect, not a
+  // historical absence, and no migration rule is warranted. The failure mode
+  // is that `null` reads as cooldown-clear, so a suppressed cooldown silently
+  // re-enables a major catalyst after the restore.
+  const legacy: any = JSON.parse(JSON.stringify(saved));
+  legacy.checkpointSchemaVersion = "0.3";
+  const atLegacy = legacy.decisions.lastMajorCatalystTick as number;
+  assert.equal(
+    atLegacy,
+    at,
+    "the 0.3 payload carries the same recorded cooldown, so 0.3 wrote the field",
+  );
+  const legacyRestored = new UniverseSession();
+  legacyRestored.restore(legacy);
+  assert.ok(
+    cooldownBlocked(legacyRestored),
+    "a 0.3 save with an active major-catalyst cooldown restores with the cooldown still active",
+  );
+
+  // (d) The same field, present but wrong-typed, refused at 0.3 too. The
+  // version split governs absence; it must not become a licence to accept a
+  // corrupt value from an older schema.
+  const legacyCorrupt: any = JSON.parse(JSON.stringify(legacy));
+  legacyCorrupt.decisions.lastMajorCatalystTick = "not a tick";
+  assert.throws(
+    () => new UniverseSession().restore(legacyCorrupt),
+    (error: unknown) =>
+      error instanceof CheckpointRejectionError && error.field === "decisions.lastMajorCatalystTick",
+    "a corrupt lastMajorCatalystTick in a 0.3 save is refused, not cleared to the permissive end",
+  );
+
+  // (e) A 0.2 save predates the field — zero occurrences in `b39fd46`. Absence
+  // there is historical fact, so it migrates to the canonical value, and
+  // "never fired" is the truth about a 0.2 world because the mechanic did not
+  // exist yet.
+  //
+  // The payload must actually be 0.2-shaped, not a relabelled current save.
+  // 0.2 predates catalyst windows and the catalyst catalog version, so a
+  // genuine 0.2 world has neither a catalyst resolution nor the version keys
+  // that arrived with 0.3. Relabelling a current save kept those keys and the
+  // preflight correctly refused a shape no 0.2 build ever wrote.
+  const older: any = JSON.parse(JSON.stringify(legacy));
+  older.checkpointSchemaVersion = "0.2";
+  older.decisions.resolutions = older.decisions.resolutions.filter(
+    (r: any) => r.source === "event_decision",
+  );
+  if (older.decisions.pending?.source === "world_catalyst") older.decisions.pending = null;
+  delete older.decisions.lastMajorCatalystTick;
+  delete older.decisions.lastDecisionTick;
+  delete older.decisions.catalystPolicyVersion;
+  for (const r of older.decisions.resolutions) {
+    delete r.catalystId;
+    delete r.offerTick;
+    delete r.choiceTitle;
+    delete r.directEffectDescription;
+  }
+  if (older.decisions.pending) {
+    delete older.decisions.pending.source;
+    delete older.decisions.pending.contextSnapshot;
+  }
+  const olderRestored = new UniverseSession();
+  olderRestored.restore(older);
+  assert.ok(
+    !cooldownBlocked(olderRestored),
+    "a 0.2 save predating the field migrates to clear, which is historically correct rather than permissive",
+  );
+
+  console.log("major-catalyst cooldown preservation: PASS (0.4, 0.3, and 0.2-absence)");
+}
+
+
+/**
+ * A3.3 step 3: prove the validator on its own, before it is wired.
+ *
+ * These run against `validateCheckpoint` directly rather than through
+ * `restore`, so a failure here is the validator's and not the wiring's. The
+ * current-save round trip (§4.4) is the one that matters most: it is the only
+ * check that can catch a condition broad enough to refuse a save the current
+ * build itself produced.
+ */
+const rejected = (payload: any): CheckpointRejectionError => {
+  try {
+    validateCheckpoint(payload);
+  } catch (error) {
+    assert.ok(error instanceof CheckpointRejectionError, `expected a typed rejection, got ${String(error)}`);
+    return error;
+  }
+  assert.fail("expected the checkpoint to be refused");
+};
+
+function testCheckpointRejectionConditions() {
+  const session = new UniverseSession();
+  session.create(config(FIXTURE_SEED));
+  settle(session, 20000);
+  const good: any = JSON.parse(JSON.stringify(session.checkpoint()));
+
+  // The positive case first: a real save must survive, or nothing below means
+  // anything. This is the current-save round trip, through the maintained path.
+  validateCheckpoint(good);
+  assert.ok(true, "a checkpoint from the maintained save path is accepted");
+
+  // wrong-type
+  for (const [field, corrupt, reason] of [
+    ["decisions.lastMajorCatalystTick", "not a tick", "wrong-type"],
+    ["decisions.lastDecisionTick", "soon", "wrong-type"],
+    ["decisions.pending", "gate", "wrong-type"],
+    ["control", 42, "wrong-type"],
+  ] as const) {
+    const bad = JSON.parse(JSON.stringify(good));
+    const parts = field.split(".");
+    let target: any = bad;
+    for (const part of parts.slice(0, -1)) target = target[part];
+    target[parts[parts.length - 1]!] = corrupt;
+    const error = rejected(bad);
+    assert.equal(error.field, field, `the error must name ${field}`);
+    assert.equal(error.reason, reason, `${field} must fail as ${reason}`);
+  }
+
+  // malformed-container
+  for (const [field, corrupt] of [
+    ["decisions.resolutions", { not: "an array" }],
+    ["decisions", "not an object"],
+    ["analysis.records", { not: "an array" }],
+    ["experiment", null],
+  ] as const) {
+    const bad = JSON.parse(JSON.stringify(good));
+    const parts = field.split(".");
+    let target: any = bad;
+    for (const part of parts.slice(0, -1)) target = target[part];
+    target[parts[parts.length - 1]!] = corrupt;
+    const error = rejected(bad);
+    assert.equal(error.field, field, `the error must name ${field}`);
+    assert.equal(error.reason, "malformed-container", `${field} must fail as malformed-container`);
+  }
+
+  // non-finite-numeric, via the decision ticks that gate the world
+  for (const value of [NaN, Infinity, -Infinity]) {
+    const bad = JSON.parse(JSON.stringify(good));
+    bad.decisions.lastMajorCatalystTick = value;
+    const error = rejected(bad);
+    assert.equal(error.field, "decisions.lastMajorCatalystTick");
+    assert.equal(error.reason, "non-finite-numeric", `a non-finite tick must be refused, got ${value}`);
+    // The player-facing text exists for every reason and never leaks the field
+    // name, the quoted value, or the reason code into the surface.
+    assert.ok(error.playerMessage.length > 0, "every refusal carries player-facing text");
+    assert.doesNotMatch(
+      error.playerMessage,
+      /lastMajorCatalystTick|non-finite-numeric|NaN|Infinity/,
+      `player text must not be developer text: ${error.playerMessage}`,
+    );
+  }
+
+  // unsupported-version
+  for (const version of ["0.5", "1.0", "", null, 3]) {
+    const bad = JSON.parse(JSON.stringify(good));
+    bad.checkpointSchemaVersion = version;
+    const error = rejected(bad);
+    assert.equal(error.field, "checkpointSchemaVersion");
+    assert.equal(error.reason, "unsupported-version", `schema ${JSON.stringify(version)} must be refused`);
+  }
+
+  // unsupported-tag — the condition with no existing throw behind it. Before
+  // this, an unrecognised tag decoded as a plain object and was accepted.
+  const badTag = JSON.parse(JSON.stringify(good));
+  badTag.experiment.__digital_evolution_type = "not-a-real-tag";
+  const tagError = rejected(badTag);
+  assert.equal(tagError.reason, "unsupported-tag");
+  assert.match(tagError.message, /not-a-real-tag/);
+
+  // structural-contradiction: a resolution whose parts disagree — here a
+  // non-string opportunityId, a null commandId, a string tick and a source the
+  // schema does not know. Refusing a value that is internally inconsistent,
+  // rather than a value of the wrong type.
+  const contradiction = JSON.parse(JSON.stringify(good));
+  contradiction.decisions.resolutions = [
+    { opportunityId: 1, commandId: null, tick: "later", source: "from_the_future" },
+  ];
+  const contradictionError = rejected(contradiction);
+  assert.equal(contradictionError.reason, "structural-contradiction");
+  // Named to the exact part, not just the array element: an error that says
+  // "resolutions[0]" leaves the reader to guess which field contradicted itself.
+  assert.equal(
+    contradictionError.field,
+    "decisions.resolutions[0].opportunityId",
+    "the error must name the exact part that contradicts itself",
+  );
+  assert.match(contradictionError.message, /structural-contradiction/);
+
+  // The oldest schema predates the entire decision system.
+  const legacy: any = JSON.parse(JSON.stringify(good));
+  legacy.checkpointSchemaVersion = "0.1";
+  delete legacy.decisions;
+  validateCheckpoint(legacy);
+  assert.ok(true, "a 0.1 save without a decisions object is still accepted");
+
+  // --- The negative control -------------------------------------------------
+  //
+  // `analysis.records` was written by every schema and cannot demonstrate
+  // historical absence. Check that both 0.3 and 0.4 refuse its omission;
+  // `analysis.dep` below demonstrates the genuine version-scoped asymmetry.
+  const missingRecords = (schema: string): any => {
+    const bad = JSON.parse(JSON.stringify(good));
+    bad.checkpointSchemaVersion = schema;
+    delete bad.analysis.records;
+    return bad;
+  };
+  // The other axis, and the one the version split does not test. A rule
+  // governs *absence*; it says nothing about whether a value that is present
+  // is valid. A version-scoped absence check alone stayed green while a
+  // malformed historical payload loaded.
+  // A field covered by a rule must be *absent* and load; the same field
+  // *present with a wrong type* must be refused at every supported schema.
+  // This container exists in 0.2 as well as 0.3 and 0.4; older resolution
+  // records have different fields, but a non-array container is invalid in all
+  // three. The oldest schema predates the entire decision system.
+  for (const schema of ["0.2", "0.3", "0.4"]) {
+    const wrongTyped: any = JSON.parse(JSON.stringify(good));
+    wrongTyped.checkpointSchemaVersion = schema;
+    wrongTyped.decisions.resolutions = "not an array";
+    const error = rejected(wrongTyped);
+    assert.equal(
+      error.field,
+      "decisions.resolutions",
+      `a present-but-malformed value must be refused at ${schema}, not tolerated because ${schema} may omit the field`,
+    );
+    assert.equal(error.reason, "malformed-container");
+  }
+
+  // The asymmetry, restated against a field whose history actually supports
+  // it. `analysis.records` is written by every checkpoint build since d86ddfe,
+  // so a save omitting it is malformed at 0.3 too and is refused at both. The
+  // version split is therefore NOT "0.3 may omit what 0.4 requires" in general:
+  // it is scoped per field, by when that field was introduced.
+  const missingRecordsAt03 = rejected(missingRecords("0.3"));
+  assert.equal(
+    missingRecordsAt03.field,
+    "analysis.records",
+    "0.3 wrote analysis.records, so a 0.3 save omitting it is malformed rather than historical",
+  );
+
+  // `analysis.dep` (the C-use guild) arrived in 3ddb287 on 2026-09-25, after
+  // the 0.3 bump, so a 0.3 save may genuinely omit it. That is the real
+  // version-scoped absence, and it is the case the version split exists for.
+  const missingDep = (schema: string): any => {
+    const payload = JSON.parse(JSON.stringify(good));
+    payload.checkpointSchemaVersion = schema;
+    delete payload.analysis.dep;
+    return payload;
+  };
+  validateCheckpoint(missingDep("0.3"));
+  assert.ok(
+    true,
+    "a 0.3 save omitting the post-0.3 C-use sub-state loads, because no 0.3 build wrote it",
+  );
+  const depAsCurrent = rejected(missingDep("0.4"));
+  assert.equal(
+    depAsCurrent.field,
+    "analysis.dep",
+    "a current save may not omit the C-use sub-state, so no rule may tolerate its absence there",
+  );
+
+  const asCurrent = rejected(missingRecords("0.4"));
+  assert.equal(
+    asCurrent.field,
+    "analysis.records",
+    "a current save may not omit a field every supported schema wrote",
+  );
+  assert.equal(asCurrent.reason, "malformed-container");
+
+  // The same asymmetry, reached through a real restore rather than the
+  // validator, so the ordering in `restore` is what is under test. `dep` is
+  // the field whose absence is genuinely historical at 0.3.
+  const realCurrent = new UniverseSession();
+  assert.throws(
+    () => realCurrent.restore(missingDep("0.4")),
+    (error: unknown) => error instanceof CheckpointRejectionError && error.field === "analysis.dep",
+    "restore refuses a current save missing the C-use sub-state",
+  );
+  const realLegacy = new UniverseSession();
+  realLegacy.restore(missingDep("0.3"));
+  assert.ok(true, "restore still accepts the 0.3 form of that same payload");
+
+  console.log("checkpoint rejection conditions: PASS (6 conditions)");
+}
+
+
 testFlowCheckpoint();
+testCheckpointRejectionConditions();
+testCooldownPreservationAcrossRestore();
+testHistoricalCheckpointBoundary();
 testPreA2EntityRefMigration();
 testCheckpointMigrationRuleTable();
+testBoundaryGeneratorIsDerived();
 
 testFlowEvidence();
 console.log(`flow validation: PASS (checkpoint schema ${CHECKPOINT_SCHEMA_VERSION}, engine ${ENGINE_VERSION})`);

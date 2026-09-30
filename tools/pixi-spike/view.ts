@@ -1,3 +1,4 @@
+// impl: REQ-GRAPH-001 (validated prototype for the adopted PixiJS production backend)
 /**
  * Pixi spike browser view: texture-backed organism rendering.
  *

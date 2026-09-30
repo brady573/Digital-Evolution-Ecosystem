@@ -22,7 +22,7 @@ import type {
   SupportedUniverseCheckpoint,
   UniverseCheckpoint,
 } from "../../packages/contracts/src/index.ts";
-import { typedRefs } from "../../packages/contracts/src/index.ts";
+import { CheckpointRejectionError, typedRefs } from "../../packages/contracts/src/index.ts";
 import { ENGINE_VERSION, EVENT_STRIDE } from "../../packages/sim-core/src/index.ts";
 import { UniverseSession, CHECKPOINT_SCHEMA_VERSION } from "../../packages/sim-runtime/src/session.ts";
 import {
@@ -403,9 +403,20 @@ function testCheckpointRoundTripAndMigration() {
   assert.equal(migratedSnapshot.pendingDecision, null, "migrated restore has no pending opportunity");
   assert.deepEqual(migrated.decisionResolutions, [], "migrated restore has an empty command history");
   assert.equal(migrated.advance(5).tick, savedPending.createdTick + 5, "migrated checkpoint is fully usable");
+  // A3.3: the refusal is unchanged, but the error is now the typed one that
+  // names the field and the reason, per the A3.3 error shape. This asserts the
+  // same refusal *more* precisely than the old message regex did — the field,
+  // the reason, and the offending value are all pinned — rather than accepting
+  // whatever string happens to come out.
   assert.throws(
     () => migrated.restore({ ...legacyCheckpoint, checkpointSchemaVersion: "9.9" } as any),
-    /Unsupported runtime checkpoint schema/,
+    (error: unknown) => {
+      assert.ok(error instanceof CheckpointRejectionError, `expected a typed rejection, got ${String(error)}`);
+      assert.equal(error.field, "checkpointSchemaVersion");
+      assert.equal(error.reason, "unsupported-version");
+      assert.match(error.message, /9\.9/, "the refusal must quote the value it refused");
+      return true;
+    },
     "unknown schema refused rather than guessed",
   );
   console.log("checkpoint round-trip + migration: PASS");
