@@ -33,6 +33,29 @@ const isIntegerIn = (value: unknown, min: number, max: number): value is number 
 const INTERVENTIONS = ["global", "droughtA", "droughtB"] as const;
 
 /**
+ * An optional requestId is optional, not unvalidated.
+ *
+ * RESOLVE_EVENT_DECISION and ACKNOWLEDGE_AFTERMATH declare `requestId?: string`.
+ * Absence is legitimate — those are the fire-and-forget forms. A PRESENT
+ * non-string is not: the session would echo it in a typed acknowledgement while
+ * the client keys its pending map by string, so the reply could never correlate
+ * and the request would wait for its timeout instead of settling.
+ *
+ * Returns a rejection to short-circuit, or null when the field is fine.
+ */
+const optionalRequestId = (
+  input: Record<string, unknown>,
+  tag: string,
+): CommandValidation | null => {
+  const value = input["requestId"];
+  if (value === undefined) return null;
+  if (typeof value !== "string") {
+    return reject(`${tag}.requestId: expected a string when present, got ${JSON.stringify(value) ?? "null"}`);
+  }
+  return null;
+};
+
+/**
  * Validate an untrusted worker/runtime command payload.
  *
  * The worker boundary is a trust boundary: a payload arriving from it is
@@ -96,11 +119,16 @@ export function validateRuntimeCommand(input: unknown): CommandValidation {
       if (typeof input["choiceId"] !== "string") {
         return reject("RESOLVE_EVENT_DECISION.choiceId: expected a string");
       }
+      const requestId = optionalRequestId(input, "RESOLVE_EVENT_DECISION");
+      if (requestId) return requestId;
       return accept(input as unknown as RuntimeCommand);
     }
 
-    case "ACKNOWLEDGE_AFTERMATH":
+    case "ACKNOWLEDGE_AFTERMATH": {
+      const requestId = optionalRequestId(input, "ACKNOWLEDGE_AFTERMATH");
+      if (requestId) return requestId;
       return accept(input as unknown as RuntimeCommand);
+    }
 
     case "LOAD_CHECKPOINT": {
       if (!isObject(input["checkpoint"])) return reject("LOAD_CHECKPOINT.checkpoint: expected an object");

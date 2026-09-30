@@ -194,6 +194,47 @@ function testNumericFieldsAreBoundedIntegers() {
   );
 }
 
+/**
+ * An OPTIONAL requestId must still be a string when present.
+ *
+ * Review finding on PR #84. Both variants declare `requestId?: string`, and the
+ * validator checked only the REQUIRED ones, so a present number or object
+ * crossed the unknown→RuntimeCommand boundary. The session then emitted a typed
+ * acknowledgement carrying a non-string id, while the client keys #pending by
+ * string — so the reply could not correlate and the request waited for its
+ * timeout. Probed: `requestId: 42` settles as "ACKNOWLEDGE_AFTERMATH timed out
+ * after 50ms" rather than resolving.
+ *
+ * Optional means optional, not unvalidated: absence is accepted, a present
+ * non-string is refused.
+ */
+function testOptionalRequestIdMustBeAStringWhenPresent() {
+  for (const tag of ["RESOLVE_EVENT_DECISION", "ACKNOWLEDGE_AFTERMATH"] as const) {
+    const base = tag === "RESOLVE_EVENT_DECISION" ? { opportunityId: "o-1", choiceId: "c-1" } : {};
+
+    // Absent is legitimate: these are the fire-and-forget forms.
+    assert.equal(
+      validateRuntimeCommand({ type: tag, ...base }).ok,
+      true,
+      `${tag} with no requestId is accepted`,
+    );
+    // A present string is legitimate.
+    assert.equal(
+      validateRuntimeCommand({ type: tag, ...base, requestId: "r-1" }).ok,
+      true,
+      `${tag} with a string requestId is accepted`,
+    );
+    // A present non-string is the hole.
+    for (const bad of [42, 0, true, { nested: true }, ["r-1"], null]) {
+      assert.equal(
+        validateRuntimeCommand({ type: tag, ...base, requestId: bad }).ok,
+        false,
+        `${tag} refuses a present non-string requestId (${JSON.stringify(bad) ?? "null"})`,
+      );
+    }
+  }
+}
+
 /** Required-field presence for the remaining tags. */
 function testRequiredFieldsAreChecked() {
   const rejects = (input: unknown, why: string) => {
@@ -826,6 +867,7 @@ async function main() {
   testMalformedPayloadsAreRejected();
   testNumericFieldsAreBoundedIntegers();
   testRequiredFieldsAreChecked();
+  testOptionalRequestIdMustBeAStringWhenPresent();
   testRejectedCommandMutatesNothingButStillReleasesBackpressure();
   testRefusedCommandIsReportedAndLeavesTheSessionWhereItWas();
   console.log("runtime boundary validation: PASS");

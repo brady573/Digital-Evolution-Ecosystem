@@ -34,8 +34,9 @@ dependency and reconciliation rules.
 
 ## In Progress
 
-- Remaining Tranche A hardening: issue #54 items 6-12, which this tranche did not
-  claim. Item 6 (narrowing sim-runtime's public authority) is next
+- Tranche A is complete. Issue #54 items 6-12 belong to Tranche B and are not
+  remaining Tranche A work; they need a fresh bounded handoff after A7
+  acceptance
 - Issue #54 production-hardening chain remains open
 
 ## Blocked
@@ -87,10 +88,11 @@ satisfied: A3.4 merged as PR #76.
 
 ## Next Recommended Task
 
-Issue #54 item 6, narrowing sim-runtime's public authority surface, is the next
-Tranche A unit and needs a fresh bounded handoff against then-current main.
-Tranche B should not begin until that is accepted. Do not treat repository slice
-labels for Pixi preparation as release of the production cutover gate.
+Accept A7 (PR #84), then stop. Issue #54 items 6-12 are Tranche B work and
+require a fresh bounded handoff against then-current main — do not roll forward
+into them, and do not begin the Tranche B bounded live-snapshot redesign. Do not
+treat repository slice labels for Pixi preparation as release of the production
+cutover gate.
 
 ## Last Updated
 
