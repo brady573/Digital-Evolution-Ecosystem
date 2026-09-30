@@ -16,6 +16,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ENGINE_VERSION } from "../../packages/sim-core/src/index.ts";
 import { CHECKPOINT_SCHEMA_VERSION } from "../../packages/sim-runtime/src/session.ts";
+import { testHistoricalCheckpointBoundary } from "./checkpoint-historical-boundary.ts";
 
 /**
  * Issue #30 Phase B1: authoritative biological flow facts. sim-core credits
@@ -153,6 +154,12 @@ function testFlowCheckpoint() {
   for (const o of organisms) delete o.pc;
   delete legacy.experiment.state.props.lastLineageFlows;
   delete legacy.experiment.state.props.lineageInterval;
+  assert.throws(
+    () => new UniverseSession().restore(JSON.parse(JSON.stringify(legacy))),
+    (error: unknown) => error instanceof CheckpointRejectionError && error.field === "experiment.state.props.o[0].pc",
+    "the maintained current schema cannot use an older build's missing production counters",
+  );
+  legacy.checkpointSchemaVersion = "0.3";
   const aged = new UniverseSession();
   aged.restore(legacy);
   settle(aged, aged.snapshot().tick + 1000);
@@ -451,11 +458,27 @@ const MIGRATION_ABSORBER_PROBES: Readonly<Record<string, { file: string; probe: 
     file: "packages/sim-core/src/engine.ts",
     probe: /this\.lineageInterval\|\|new Map\(\)/,
   },
+  "organism-waste-tolerance-reads-as-zero": {
+    file: "packages/sim-core/src/engine.ts",
+    // Absorber `live-step-guard`: the biological step clamps an absent trait
+    // to zero. Probed against that clamp, so a rewrite that stopped treating
+    // absence as no-tolerance would fail here rather than silently changing
+    // waste exposure physiology.
+    probe: /Q\(o\.to\|\|0,0,1\.5\)/,
+  },
+  "organism-waste-cleanup-reads-as-zero": {
+    file: "packages/sim-core/src/engine.ts",
+    // Absorber `live-step-guard`: the cleanup process derives its access from
+    // the trait, so an absent one means the process cannot execute.
+    probe: /Q\(o\.cu\|\|0,0,1\.5\)\/1\.5/,
+  },
   "last-decision-tick-reconstructed-from-newest-record": {
     file: "packages/sim-runtime/src/session.ts",
-    // Absorber `structural-branch`: the legacy branch computes the value from
-    // the save's own records rather than reading a stored field.
-    probe: /this\.#lastDecisionTick=newestKnownDecisionTick\(pending,resolutions\);/,
+    // Absorber `structural-branch`: for 0.2 the legacy branch computes the value
+    // from the save's own records rather than reading a stored field. The whole
+    // conditional is probed, not just the call, so a rewrite that dropped the
+    // 0.2 reconstruction — or made 0.3 derive instead of preserve — fails here.
+    probe: /schema==="0\.3"\s*\?decisions\.lastDecisionTick\s*:newestKnownDecisionTick\(pending,resolutions\)/,
   },
   "major-catalyst-tick-predates-cooldown": {
     file: "packages/sim-runtime/src/session.ts",
@@ -478,13 +501,17 @@ const MIGRATION_ABSORBER_PROBES: Readonly<Record<string, { file: string; probe: 
     file: "packages/sim-runtime/src/session.ts",
     probe: /if\(copy\.catalystId===undefined\)copy\.catalystId=null;/,
   },
-  "decision-resolution-source-reads-as-event-decision": {
+  "pending-observation-not-recorded-in-02": {
     file: "packages/sim-runtime/src/session.ts",
-    probe: /if\(copy\.source===undefined\)copy\.source="event_decision";/,
+    probe: /if\(copy\.contextSnapshot===undefined\)copy\.contextSnapshot=null;/,
   },
-  "matched-control-absent-reads-as-null": {
+  "resolution-choice-title-not-recorded-in-02": {
     file: "packages/sim-runtime/src/session.ts",
-    probe: /checkpoint\.control\?restoreSimulationCheckpoint/,
+    probe: /choiceTitle:copy\.choiceTitle\?\?NOT_RECORDED/,
+  },
+  "resolution-direct-effect-not-recorded-in-02": {
+    file: "packages/sim-runtime/src/session.ts",
+    probe: /directEffectDescription:copy\.directEffectDescription\?\?NOT_RECORDED/,
   },
   "entity-refs-bare-numbers-mean-unrecorded-kind": {
     file: "packages/contracts/src/index.ts",
@@ -498,15 +525,33 @@ const MIGRATION_ABSORBER_PROBES: Readonly<Record<string, { file: string; probe: 
     file: "packages/sim-analysis/src/index.ts",
     probe: /const observer=new EcologyObserver\(\);[\s\S]{0,120}Object\.assign\(observer,/,
   },
+  "control-analysis-cuse-guild-absent": {
+    file: "packages/sim-analysis/src/index.ts",
+    probe: /const observer=new EcologyObserver\(\);[\s\S]{0,120}Object\.assign\(observer,/,
+  },
+  "control-analysis-niche-construction-absent": {
+    file: "packages/sim-analysis/src/index.ts",
+    probe: /const observer=new EcologyObserver\(\);[\s\S]{0,120}Object\.assign\(observer,/,
+  },
 };
 
 /** The schema the maintained save path writes. No rule may tolerate an
  *  omission in it: that is the whole point of the 0.4 split. */
 const CURRENT_SCHEMA = CHECKPOINT_SCHEMA_VERSION;
 
+// Rules that tolerate a historical absence in one place while the same field
+// may also be refused: a whole rule needs no `rejects`, a half rule must say
+// what it refuses. The two controlAnalysis detector rules are whole rules in
+// their own right (the fork observer's constructor default is the absorber),
+// but the source-schema preflight refuses a *present* malformed value there
+// just as it does for the live observer, so the refusal is recorded for them
+// too rather than left implicit.
 const SPLIT_RULE_IDS = [
   "analysis-cuse-guild-absent-reads-as-constructor-default",
   "analysis-niche-construction-absent-reads-as-constructor-default",
+  "control-analysis-cuse-guild-absent",
+  "control-analysis-niche-construction-absent",
+  "pending-observation-not-recorded-in-02",
 ];
 
 function testCheckpointMigrationRuleTable() {
@@ -669,8 +714,27 @@ function testBoundaryGeneratorIsDerived() {
     "the document must state what its rules do not cover, so its completeness claim is bounded",
   );
   assert.ok(
-    /never part of any save format|never carried/.test(out),
-    "the uncovered section must name the non-historical reconstruction explicitly",
+    !out.includes("Everything not listed here is refused") &&
+      !out.includes("not yet an exhaustive schema validator") &&
+      out.includes("the only authorized historical omissions"),
+    "the boundary must state the closed check set, not a claim of exhaustive validation it does not provide",
+  );
+  assert.ok(
+    out.includes("source-schema preflight") && out.includes("A3.4") && !out.includes("migration runs before validation"),
+    "the generated boundary must describe raw-source preflight and reserve canonical ordering for A3.4",
+  );
+  assert.ok(
+    out.includes("Two independent gates") && out.includes("no save-preservation promise"),
+    "the boundary must separate schema validity from engine-version compatibility",
+  );
+  assert.ok(
+    out.includes("deliberately outside this preflight") && !/not yet inventoried|remains to be inventoried/i.test(out),
+    "every out-of-scope field class must be named with a reason, and none may remain un-inventoried",
+  );
+  assert.ok(
+    out.includes("oldest world had no decision subsystem") &&
+      out.includes("even when saved versions are present"),
+    "the uncovered section must distinguish absent old subsystems from saved generator versions that are intentionally replaced",
   );
 
   // A3.3 proves three narrow properties. It does not prove canonical
@@ -768,6 +832,11 @@ function testPreA2EntityRefMigration() {
   session.create(config(FIXTURE_SEED));
   settle(session, 20000);
   const saved: any = JSON.parse(JSON.stringify(session.checkpoint()));
+  // A pre-A2 reference list is a 0.3 save, because A2 changed the persisted
+  // shape without bumping the schema. Relabelling a current save's stripped
+  // refs as current would describe a shape the current writer never emitted,
+  // and the source-schema preflight refuses exactly that.
+  saved.checkpointSchemaVersion = "0.3";
 
   const taggedCount = saved.analysis.records
     .flatMap((r: any) => r.entity_refs as any[])
@@ -779,6 +848,16 @@ function testPreA2EntityRefMigration() {
     r.entity_refs = (r.entity_refs as any[]).map((ref: any) => ref.id);
   }
   const originals: number[][] = saved.analysis.records.map((r: any) => [...r.entity_refs]);
+
+  // The same payload as the current schema must be refused: bare IDs are the
+  // historically absent shape, not an alternative encoding of a current one.
+  const asCurrent = JSON.parse(JSON.stringify(saved));
+  asCurrent.checkpointSchemaVersion = CHECKPOINT_SCHEMA_VERSION;
+  assert.throws(
+    () => new UniverseSession().restore(asCurrent),
+    (error: unknown) => error instanceof CheckpointRejectionError,
+    "a current save may not carry pre-A2 bare entity references",
+  );
 
   const aged = new UniverseSession();
   aged.restore(saved);
@@ -808,34 +887,102 @@ function testPreA2EntityRefMigration() {
   }
   assert.ok(compared > 0, "the comparison above actually ran");
 
-  // The engine's own output is incidental here — in 20k ticks it may name one
-  // entity or several. So the dedup case is stated explicitly on the restore
-  // path, with a record whose bare numbers repeat a lineage. A migration that
-  // rebuilt each ref as a fresh object and deduped by reference would leave
-  // all three entries, which is the A2 failure exactly.
-  saved.analysis.records.push({
-    id: "synthetic-duplicate-refs-established-1",
-    arc_id: "synthetic",
-    kind: "cuse",
-    tick: 1,
-    phase: "established",
-    title: "synthetic",
-    summary: "synthetic",
-    level: "major",
-    evidence: {},
-    entity_refs: [9, 9, 7],
-  });
-  const dup = new UniverseSession();
-  dup.restore(saved);
-  const dupRef = ((dup.analysis as any).records as any[]).at(-1).entity_refs as any[];
-  assert.equal(dupRef.length, 2, "a repeated bare lineage collapses to one ref, by value not by identity");
-  assert.deepEqual(
-    dupRef,
-    [{ kind: null, id: 9 }, { kind: null, id: 7 }],
-    "the collapsed ref keeps the first occurrence's order and an unrecorded kind",
+  /**
+   * The fixture's own references are incidental — in 20k ticks the engine may
+   * name one entity or several, and this run happened to name exactly one. A
+   * proof that shrinks with the fixture is a vacuous proof, so the invariant
+   * that actually regressed in A2 is stated here on an explicit reference set
+   * through the real restore path, independent of whatever the engine emitted.
+   *
+   * A2 broke because the migration constructed a fresh object per element and
+   * deduplicated by object identity, so a lineage named by two lists survived
+   * twice. Identity dedup fails on BARE numbers (each becomes a distinct
+   * object) and on TAGGED refs (each arrives as a distinct object). Both shapes
+   * are asserted, together with the case identity dedup gets wrong in the
+   * opposite direction: one numeric id carrying two different kinds must stay
+   * two references.
+   */
+  const REFERENCE_CASES: readonly {
+    readonly label: string;
+    readonly refs: readonly unknown[];
+    readonly expected: readonly unknown[];
+  }[] = [
+    {
+      label: "bare: a repeated lineage collapses, first-occurrence order kept",
+      refs: [9, 9, 7],
+      expected: [{ kind: null, id: 9 }, { kind: null, id: 7 }],
+    },
+    {
+      label: "bare: interleaved repeats collapse by value, not adjacency",
+      refs: [4, 9, 4, 9, 9, 2],
+      expected: [{ kind: null, id: 4 }, { kind: null, id: 9 }, { kind: null, id: 2 }],
+    },
+    {
+      label: "tagged: a repeated (kind, id) pair collapses",
+      refs: [
+        { kind: "lineage", id: 3 },
+        { kind: "lineage", id: 3 },
+        { kind: "organism", id: 3 },
+      ],
+      expected: [{ kind: "lineage", id: 3 }, { kind: "organism", id: 3 }],
+    },
+    {
+      label: "distinct kinds of one numeric id stay distinct references",
+      refs: [
+        { kind: "lineage", id: 5 },
+        { kind: "clade", id: 5 },
+        { kind: "organism", id: 5 },
+        { kind: "lineage", id: 5 },
+      ],
+      expected: [
+        { kind: "lineage", id: 5 },
+        { kind: "clade", id: 5 },
+        { kind: "organism", id: 5 },
+      ],
+    },
+    {
+      label: "an unrecorded kind is a real reference, not an absent one",
+      refs: [{ kind: null, id: 8 }, { kind: null, id: 8 }, { kind: "lineage", id: 8 }],
+      expected: [{ kind: null, id: 8 }, { kind: "lineage", id: 8 }],
+    },
+    {
+      label: "a single reference passes through unchanged",
+      refs: [12],
+      expected: [{ kind: null, id: 12 }],
+    },
+  ];
+
+  for (const [index, testCase] of REFERENCE_CASES.entries()) {
+    const payload: any = JSON.parse(JSON.stringify(saved));
+    payload.analysis.records.push({
+      id: `deterministic-ref-case-${index}`,
+      arc_id: "deterministic",
+      kind: "reference-case",
+      tick: 1,
+      phase: "established",
+      title: "synthetic",
+      summary: "synthetic",
+      level: "major",
+      evidence: {},
+      entity_refs: testCase.refs,
+    });
+    const restoredCase = new UniverseSession();
+    restoredCase.restore(payload);
+    const migratedCase = ((restoredCase.analysis as any).records as any[]).at(-1).entity_refs as any[];
+    // The exact expected list catches both directions: dropping an entry
+    // shortens it, failing to collapse lengthens it.
+    assert.deepEqual(
+      migratedCase,
+      testCase.expected,
+      `reference migration on the restore path — ${testCase.label}`,
+    );
+  }
+  assert.ok(
+    REFERENCE_CASES.filter((c) => c.refs.length > 1).length >= 4,
+    "the reference cases include several multi-reference inputs, not only single-element lists",
   );
   console.log(
-    `pre-A2 entity_refs migration: PASS (${compared} real refs length-preserved, duplicate case collapsed)`,
+    `pre-A2 entity_refs migration: PASS (${compared} fixture refs length-preserved, ${REFERENCE_CASES.length} deterministic reference cases)`,
   );
 }
 
@@ -962,9 +1109,31 @@ function testCooldownPreservationAcrossRestore() {
   // there is historical fact, so it migrates to the canonical value, and
   // "never fired" is the truth about a 0.2 world because the mechanic did not
   // exist yet.
+  //
+  // The payload must actually be 0.2-shaped, not a relabelled current save.
+  // 0.2 predates catalyst windows and the catalyst catalog version, so a
+  // genuine 0.2 world has neither a catalyst resolution nor the version keys
+  // that arrived with 0.3. Relabelling a current save kept those keys and the
+  // preflight correctly refused a shape no 0.2 build ever wrote.
   const older: any = JSON.parse(JSON.stringify(legacy));
   older.checkpointSchemaVersion = "0.2";
+  older.decisions.resolutions = older.decisions.resolutions.filter(
+    (r: any) => r.source === "event_decision",
+  );
+  if (older.decisions.pending?.source === "world_catalyst") older.decisions.pending = null;
   delete older.decisions.lastMajorCatalystTick;
+  delete older.decisions.lastDecisionTick;
+  delete older.decisions.catalystPolicyVersion;
+  for (const r of older.decisions.resolutions) {
+    delete r.catalystId;
+    delete r.offerTick;
+    delete r.choiceTitle;
+    delete r.directEffectDescription;
+  }
+  if (older.decisions.pending) {
+    delete older.decisions.pending.source;
+    delete older.decisions.pending.contextSnapshot;
+  }
   const olderRestored = new UniverseSession();
   olderRestored.restore(older);
   assert.ok(
@@ -1093,7 +1262,7 @@ function testCheckpointRejectionConditions() {
   );
   assert.match(contradictionError.message, /structural-contradiction/);
 
-  // A legacy save that the rules exist for is still accepted.
+  // The oldest schema predates the entire decision system.
   const legacy: any = JSON.parse(JSON.stringify(good));
   legacy.checkpointSchemaVersion = "0.1";
   delete legacy.decisions;
@@ -1102,11 +1271,9 @@ function testCheckpointRejectionConditions() {
 
   // --- The negative control -------------------------------------------------
   //
-  // `analysis.records` is the sharpest case, because a migration rule tolerates
-  // its absence for 0.1-0.3 and a 0.4 save may not omit it. If the validator
-  // simply checked "is this omission tolerated somewhere" it would accept the
-  // 0.4 save too, and the whole point of the version split would be lost. The
-  // same payload is therefore asserted twice: refused as 0.4, tolerated as 0.3.
+  // `analysis.records` was written by every schema and cannot demonstrate
+  // historical absence. Check that both 0.3 and 0.4 refuse its omission;
+  // `analysis.dep` below demonstrates the genuine version-scoped asymmetry.
   const missingRecords = (schema: string): any => {
     const bad = JSON.parse(JSON.stringify(good));
     bad.checkpointSchemaVersion = schema;
@@ -1115,14 +1282,14 @@ function testCheckpointRejectionConditions() {
   };
   // The other axis, and the one the version split does not test. A rule
   // governs *absence*; it says nothing about whether a value that is present
-  // is valid. The asymmetry above proves absence tolerance is version-scoped,
-  // which is why it stayed green while a malformed historical payload loaded.
+  // is valid. A version-scoped absence check alone stayed green while a
+  // malformed historical payload loaded.
   // A field covered by a rule must be *absent* and load; the same field
   // *present with a wrong type* must be refused at every supported schema.
-  // Scoped to the schemas where that shape is constructible: 0.3 and 0.4 wrote
-  // the field, and 0.1/0.2 predate it, so they are absence cases the migration
-  // table absorbs rather than invalidity cases.
-  for (const schema of ["0.3", "0.4"]) {
+  // This container exists in 0.2 as well as 0.3 and 0.4; older resolution
+  // records have different fields, but a non-array container is invalid in all
+  // three. The oldest schema predates the entire decision system.
+  for (const schema of ["0.2", "0.3", "0.4"]) {
     const wrongTyped: any = JSON.parse(JSON.stringify(good));
     wrongTyped.checkpointSchemaVersion = schema;
     wrongTyped.decisions.resolutions = "not an array";
@@ -1172,7 +1339,7 @@ function testCheckpointRejectionConditions() {
   assert.equal(
     asCurrent.field,
     "analysis.records",
-    "a current save may not omit a field that only older schemas may lack",
+    "a current save may not omit a field every supported schema wrote",
   );
   assert.equal(asCurrent.reason, "malformed-container");
 
@@ -1196,6 +1363,7 @@ function testCheckpointRejectionConditions() {
 testFlowCheckpoint();
 testCheckpointRejectionConditions();
 testCooldownPreservationAcrossRestore();
+testHistoricalCheckpointBoundary();
 testPreA2EntityRefMigration();
 testCheckpointMigrationRuleTable();
 testBoundaryGeneratorIsDerived();

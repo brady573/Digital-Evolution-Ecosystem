@@ -7,8 +7,8 @@
  * rule edited after the presentation leaves the document confidently wrong.
  *
  * So this reads `CHECKPOINT_MIGRATION_RULES` and prints it. The output is
- * derived from the same declaration the validator enforces, which means the
- * presentation cannot describe a boundary the code does not have.
+ * derived from the same declaration the source-schema preflight consults.
+ * Writer-history and value-validity evidence must still be reviewed separately.
  *
  * Run: pnpm exec tsx tools/validation/checkpoint-boundary.ts
  */
@@ -106,27 +106,27 @@ for (const [index, rule] of CHECKPOINT_MIGRATION_RULES.entries()) {
   lines.push("");
 }
 
-lines.push("## Everything not listed here is refused");
+lines.push("## Named absence compatibility and refusal checks");
 lines.push("");
 lines.push(
-  "Within the persisted checkpoint, a field with no rule above gets no default. A wrong type, a malformed container, a non-finite required number, an unsupported schema or checkpoint tag, and a record that contradicts itself are all refused with the field named, before the payload becomes live state.",
+  "A source-schema preflight examines the raw saved payload before reference migration, sim-core restore, or observer restore, and before any running session changes. The rules above are the only authorized historical omissions for their listed schemas. Every present persisted value is checked at every schema — the encoded simulation with its resource, waste, organism, interval and identity state, the observer's detectors and history records, entity references, and decision records — and refused with the field named for a wrong type, a malformed container, a non-finite number where one is required, an unknown tag or version, or a record that contradicts itself. Any restore-time tolerance that is not one of the rules above is a gap to be classified, not an accepted historical rule.",
 );
 lines.push("");
 lines.push("### What the rules do not cover");
 lines.push("");
 lines.push(
-  "The rules above describe **omissions from a saved payload**. Restore also sets values that were never part of any save format, and those are a different thing — running-build state, not historical compatibility. They are listed here so this document does not claim a completeness it does not have.",
+  "The rules above describe **omissions from a saved payload**. Restore also initializes state for subsystems absent from the oldest save format, and chooses the running build's generator versions; these are different from field-level omission compatibility. They are listed so this document does not claim a completeness it does not have.",
 );
 lines.push("");
 lines.push(
   `- **Decision-pacing state for a world that never had one.** A save declaring ${OLDEST_SUPPORTED} predates the decision system entirely (\`d86ddfe\` contains no \`decisions\` at all), so restore starts it with no pending decision, no decision history, and a last-decision tick of 0. There is no historical value to preserve, because the build that wrote the save had no such state to write.`,
 );
 lines.push(
-  "- **Policy and catalog generator versions.** Every schema, including the current one, restores with the running code's `DECISION_POLICY_VERSION` and `CATALYST_POLICY_VERSION`. A save's own copy is retained inside its resolution records, where it identifies the generator that produced that record; the runtime's own copy is always the running code's. This is deliberately not a historical omission: there is no older value worth restoring, and restoring one would apply a retired catalog's decisions to a current world.",
+  "- **Policy and catalog generator versions.** Older saves can carry a `decisions.policyVersion`, and newer saves can also carry `decisions.catalystPolicyVersion`. Restore deliberately selects the running code's generator versions, rather than reusing those persisted values for *future* opportunities; embedded versions on pending decisions and recorded resolutions remain part of those records. This is a running-build policy choice, not a claim that those fields were historically absent.",
 );
 lines.push("");
 lines.push(
-  "None of these is an absence compatibility rule, and none can be turned into one: each supplies a value for state the save format never carried. Presenting them as migration rules would imply older worlds depended on them, which is not true — and would put them inside the version-scoped absence axis, where they do not belong.",
+  "Neither case is a field-level absence compatibility rule: the oldest world had no decision subsystem, while the generator-version choice is made even when saved versions are present. Neither should be described as a missing persisted field acquiring a default.",
 );
 lines.push("");
 lines.push(`## A valid ${CURRENT_SCHEMA} save never depends on a migration rule`);
@@ -140,10 +140,10 @@ lines.push(
   `1. **No rule tolerates an omission in ${CURRENT_SCHEMA}.** Checked at print time: ${crossing.length === 0 ? "no rule names it" : `**${crossing.length} RULE(S) VIOLATE THIS — ${crossing.map((r) => r.id).join(", ")}**`}. The rule table also refuses such a rule as a blocking assertion, with ${CURRENT_SCHEMA} deliberately left a valid schema value in the whitelist so the property is proved rather than obtained by accident from an outdated list.`,
 );
 lines.push(
-  `2. **Migration absorbs absences that older builds wrote, and ${CURRENT_SCHEMA} is written by the build that requires those fields.** Every rule above names the change that introduced its field, and that change predates ${CURRENT_SCHEMA} — the current version is the first to *require* fields that older supported builds already wrote. That is what makes the tolerance historical rather than permissive: each one describes a build that really existed and really omitted the field, not a gap in the current contract.`,
+  `2. **Migration absorbs absences that older builds wrote, and ${CURRENT_SCHEMA} is written by the build that requires those fields.** The current version is the first to *require* fields that older supported builds already wrote, which is what makes the tolerance historical rather than permissive. The table check proves the scoping; each rule's historical basis is a reviewed claim about a build that really existed, and is not derivable from this generator.`,
 );
 lines.push(
-  `3. **The asymmetry is proved on one payload, twice.** \`analysis.dep\` is removed from an otherwise valid save: as "${CURRENT_SCHEMA}" it is refused (\`analysis.dep\`, malformed-container); as "${NEWEST_HISTORICAL}" the identical payload is accepted. If loadability leaked across the version boundary, that pair could not disagree. The subject is the C-use sub-state rather than a long-standing one deliberately: \`analysis.records\` has been written since ${OLDEST_SUPPORTED}, so a save omitting it is refused at *every* schema and cannot demonstrate a version-scoped absence.`,
+  `3. **The asymmetry is proved on one payload, twice.** \`analysis.dep\` is removed from an otherwise valid save: as "${CURRENT_SCHEMA}" it is refused (\`analysis.dep\`, malformed-container); as "${NEWEST_HISTORICAL}" the identical payload is accepted. If loadability leaked across the version boundary, that pair could not disagree. The subject is the C-use sub-state rather than a long-standing one deliberately: \`analysis.records\` has been written since ${OLDEST_SUPPORTED}, so a save omitting it is refused at *every* schema and cannot demonstrate a version-scoped absence. The same holds for the matched-control observer, whose pre-detector \`controlAnalysis.dep\` has its own rule because a fork made before the detector existed could not have written it.`,
 );
 lines.push("");
 lines.push(
@@ -225,16 +225,36 @@ for (const [reason, text] of Object.entries(CHECKPOINT_PLAYER_MESSAGES)) {
 }
 
 lines.push("");
+lines.push("## Two independent gates");
+lines.push("");
+lines.push(
+  "A checkpoint passes two different questions, and passing one says nothing about the other.",
+);
+lines.push("");
+lines.push(
+  "1. **Schema structural validity and supported historical omissions** — the boundary above. A source-schema preflight reads the raw saved payload and decides which absences are historical.",
+);
+lines.push(
+  "2. **Engine-version compatibility** — a separate, pre-existing guard. A save whose recorded engine version is not the running engine's is refused, whatever its schema says.",
+);
+lines.push("");
+lines.push(
+  `Because the historical writers ran older engines, a writer can justify an omission rule here while its literal checkpoint would still fail gate 2. The evidence below is about **payload shape**, not a promise of loadability: this document makes no save-preservation promise, and neither gate is allowed to stand in for the other.`,
+);
+lines.push("");
 lines.push("## Known limits of this boundary");
 lines.push("");
 lines.push(
-  `- **Whether a field may be absent is version-scoped; whether a present value is valid is not.** A save declaring an older supported version may omit the fields listed above, because a supported build really did write it without them. But once a value *is* present, it is held to the same checks at every schema: a wrong type, a malformed container, a non-finite required number, or a decision record whose parts disagree is refused wherever it appears. **Migration widens compatibility for known historical absence; it does not widen validity.**`,
+  "- **Two persisted field classes are deliberately outside this preflight, and the reason is named.** The measures inside a history record's `evidence` frame, and the bodies of the engine's own snapshot lists (`sn`, `long`, `eventSn`), are checked as containers but not field by field. Both are produced verbatim from simulation state and consumed read-only: neither can change restored biology, RNG or replay state, analysis or event lifecycle, decision or pacing state, or identity interpretation. Their list shapes, and the tick and label of each event-log entry, are checked here. A malformed measure inside one of them would misreport a past observation; it cannot make the world do something the save did not record.",
 );
 lines.push(
-  `- **What A3.3 proves:** a named historical absence is permitted according to its supported schema, a value that *is* present is validated regardless of the schema it arrived under, and a rejected payload cannot become live simulation state.`,
+  `- **Whether a field may be absent is version-scoped; whether a present value is valid is not.** A save declaring an older supported version may omit the fields listed above, because a supported build really did write it without them. Every present persisted value is held to the same checks at every schema: the encoded simulation and its resource, waste, organism and identity state, the observer's detectors and history records, entity references, and decision records. A wrong type, a malformed container, a non-finite number where one is required, an unknown tag, and a record that contradicts itself are refused wherever they appear. **Migration widens compatibility for known historical absence; it does not widen validity.**`,
 );
 lines.push(
-  "- **Canonical migrate-then-validate ordering is not claimed here.** Some migration work — pre-A2 entity references among it — does happen before validation, but other historical reconstruction happens later inside `restore`. Proving that every migration step precedes every validation step is a separate property, left to A3.4, which will make it structurally true and then test it rather than inherit the claim from here.",
+  `- **What A3.3 proves:** a named historical absence is permitted according to its supported schema; a present value is validated regardless of the schema it arrived under; and a payload the preflight refuses cannot become live simulation state, observer state, or a running session.`,
+);
+lines.push(
+  "- **What this boundary does not claim.** It claims that each persisted field class is either validated by the preflight, covered by a named historical-absence rule, validated by a lower boundary before live state, or deliberately out of scope with the reason stated above. It does not claim canonical `migrate → validate` ordering, which is A3.4's separate structural property, and it does not claim that any particular historical binary's checkpoint opens under the current engine.",
 );
 
 if (MIGRATION_RULE_BY_ID.size !== CHECKPOINT_MIGRATION_RULES.length) {

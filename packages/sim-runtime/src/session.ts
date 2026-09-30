@@ -168,6 +168,15 @@ function normalizePendingDecision(raw:unknown):PendingDecision|null{
   return null;
 }
 
+const NOT_RECORDED="Not recorded in this save";
+function normalizeHistoricalPending(raw:unknown):PendingDecision|null{
+  const pending=normalizePendingDecision(raw);
+  if(!pending)return null;
+  const copy={...pending} as Record<string,unknown>;
+  if(copy.contextSnapshot===undefined)copy.contextSnapshot=null;
+  return copy as unknown as PendingDecision;
+}
+
 function normalizeResolution(raw:any):DecisionResolution{
   const copy=JSON.parse(JSON.stringify(raw));
   // Backfill for 0.2 records, which predate these fields: the resolution tick
@@ -175,8 +184,15 @@ function normalizeResolution(raw:any):DecisionResolution{
   // catalyst window (they did not exist).
   if(copy.offerTick===undefined)copy.offerTick=copy.tick;
   if(copy.catalystId===undefined)copy.catalystId=null;
-  if(copy.source===undefined)copy.source="event_decision";
   return copy as DecisionResolution;
+}
+function normalizeHistoricalResolution(raw:any):DecisionResolution{
+  const copy=normalizeResolution(raw);
+  return {
+    ...copy,
+    choiceTitle:copy.choiceTitle??NOT_RECORDED,
+    directEffectDescription:copy.directEffectDescription??NOT_RECORDED,
+  };
 }
 
 /** Newest decision tick known to a migrated checkpoint, or 0 when none. */
@@ -618,24 +634,22 @@ export class UniverseSession {
     // becomes live state — and before any sim-core call, so the simulation is
     // never handed a value it would have to partially apply.
     //
-    // This runs on the *migrated* payload, not the raw one: a save that
-    // migrates cleanly must not be caught by a pre-migration check, or
-    // compatibility is broken by the mechanism meant to preserve it. The
-    // engine-version guard stays below, where it always was, because it is a
-    // different question from whether the payload is well-formed.
+    // Source-schema preflight examines the raw payload: only historically
+    // evidenced absent fields and pre-A2 bare refs may reach reconstruction.
+    // Canonical migrate-then-validate is the separate A3.4 contract.
     //
     // `migrateAnalysisEntityRefs` takes an analysis payload, not a checkpoint:
     // it was written and tested against one, and handing it a checkpoint makes
     // it look for `records` at the top level, find none, and no-op. The first
     // wiring attempt did exactly that, and the pre-A2 length test caught it.
+    validateCheckpoint(checkpoint);
+    if(checkpoint.engineVersion!==ENGINE_VERSION)throw new Error(`Checkpoint engine ${checkpoint.engineVersion} does not match ${ENGINE_VERSION}`);
     const migrated={
       ...checkpoint,
       analysis:migrateAnalysisEntityRefs(checkpoint.analysis),
       controlAnalysis:migrateAnalysisEntityRefs(checkpoint.controlAnalysis),
     };
-    validateCheckpoint(migrated);
     const schema=(migrated as any)?.checkpointSchemaVersion;
-    if(checkpoint.engineVersion!==ENGINE_VERSION)throw new Error(`Checkpoint engine ${checkpoint.engineVersion} does not match ${ENGINE_VERSION}`);
     // A restore is a new displayed world, not the old one continued: hand out
     // a fresh presentation identity so rendering inertia cannot carry over.
     this.#worldId=toWorldId(++worldIdCounter);
@@ -669,21 +683,22 @@ export class UniverseSession {
       this.#lastDecisionTick=typeof decisions?.lastDecisionTick==="number"?decisions.lastDecisionTick:0;
       this.#lastMajorCatalystTick=typeof decisions?.lastMajorCatalystTick==="number"?decisions.lastMajorCatalystTick:null;
     }else if(schema==="0.3"||schema==="0.2"){
-      // 0.3 and 0.2 share a shape for decision purposes: both predate the
-      // strict current contract, and both are normalised the same way. They are
-      // separate versions because they are separate histories, not because
-      // their decision records are read differently.
+      // Both older branches normalize pending decisions and resolutions, but
+      // only 0.2 reconstructs the pacing tick. Checkpoint 0.3 wrote its tick;
+      // that persisted value must survive rather than becoming an estimate.
       const decisions=(checkpoint as UniverseCheckpointV03).decisions;
-      const pending=normalizePendingDecision(decisions?.pending);
+      const pending=schema==="0.2"?normalizeHistoricalPending(decisions?.pending):normalizePendingDecision(decisions?.pending);
       const resolutions=Array.isArray(decisions?.resolutions)
-        ?(decisions.resolutions as any[]).map(normalizeResolution)
+        ?(decisions.resolutions as any[]).map(schema==="0.2"?normalizeHistoricalResolution:normalizeResolution)
         :[];
       this.#pendingDecision=pending;
       this.#decisionResolutions=resolutions;
       // Generator versions are always the running code's, for both catalogs.
       this.#policyVersion=DECISION_POLICY_VERSION;
       this.#catalystPolicyVersion=CATALYST_POLICY_VERSION;
-      this.#lastDecisionTick=newestKnownDecisionTick(pending,resolutions);
+      this.#lastDecisionTick=schema==="0.3"
+        ?decisions.lastDecisionTick
+        :newestKnownDecisionTick(pending,resolutions);
       // 0.3 and 0.2 differ here, and the difference is historical fact rather
       // than a shared convention. 0.3 wrote this field — b040b19's decision
       // checkpoint assigns it — so discarding it now would silence a real
