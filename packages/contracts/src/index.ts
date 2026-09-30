@@ -2281,10 +2281,71 @@ export type RuntimeCommand =
 export type RuntimeResponse =
   | { readonly type: "SNAPSHOT"; readonly snapshot: RenderSnapshot }
   | { readonly type: "CHECKPOINT"; readonly requestId: string; readonly checkpoint: UniverseCheckpoint }
-  | { readonly type: "EXPORT"; readonly requestId: string; readonly data: unknown }
+  | { readonly type: "EXPORT"; readonly requestId: string; readonly data: EvidenceExport }
   | { readonly type: "DECISION_RESOLVED"; readonly requestId: string; readonly snapshot: RenderSnapshot }
   /** Acknowledgement reply for ACKNOWLEDGE_AFTERMATH. Distinct from a bare
    *  SNAPSHOT so the awaiting caller can settle: a snapshot alone only notifies
    *  subscribers and would leave the request pending forever. */
   | { readonly type: "AFTERMATH_ACKNOWLEDGED"; readonly requestId: string; readonly snapshot: RenderSnapshot }
   | { readonly type: "ERROR"; readonly message: string; readonly requestId?: string };
+
+/* ------------------------------------------------------------------ *
+ * A6 evidence export: typed, versioned export contract with revision
+ * and cleanliness provenance (Decision 4). Only a known clean revision
+ * satisfies exact-source mapping; dirty/unknown exports stay exportable
+ * and labelled, never blocked. Payload interiors with no existing
+ * contract type stay `unknown` — declare what exists, nothing more.
+ * ------------------------------------------------------------------ */
+
+/** Source-state cleanliness of the build that produced an export. */
+export type Cleanliness = "clean" | "dirty" | "unknown";
+
+/** The maintained source revision an export claims to come from. */
+export interface SourceRevision {
+  readonly engine_version: string;
+  readonly app_version: string;
+  readonly format_version: number;
+  readonly git_commit: string | null;
+}
+
+/** Revision plus the cleanliness of the tree it was built from. */
+export interface SourceProvenance {
+  readonly revision: SourceRevision;
+  readonly cleanliness: Cleanliness;
+}
+
+/** Player-action half of the evidence export, exactly as the session emits. */
+export interface PlayerDecisions {
+  readonly schema_version: number;
+  readonly policy_version: string;
+  readonly catalyst_policy_version: string;
+  readonly checkpoint_schema_version: string;
+  readonly pending: PendingDecision | null;
+  readonly resolutions: readonly DecisionResolution[];
+  readonly catalyst_state: {
+    readonly last_decision_tick: number;
+    readonly last_major_catalyst_tick: number | null;
+    readonly quiet_ticks: number;
+    readonly major_cooldown_ticks: number;
+  };
+}
+
+/** Matched-control half of the evidence export, exactly as the session emits. */
+export interface MatchedControl {
+  readonly forked: boolean;
+  // A6 narrowing: next step — no contract type for raw control metrics yet.
+  readonly current_metrics: unknown;
+  readonly ecology_observer: AnalysisState | null;
+}
+
+/** Typed, versioned evidence export. Provenance is required, never implied. */
+export interface EvidenceExport {
+  readonly export_format_version: 1;
+  readonly provenance: SourceProvenance;
+  // A6 narrowing: next step — experiment interiors have no contract type yet.
+  readonly experiment: unknown;
+  readonly repository_analysis: AnalysisState;
+  readonly observed_events: readonly ObservedEvent[];
+  readonly player_decisions: PlayerDecisions;
+  readonly matched_control: MatchedControl | null;
+}
