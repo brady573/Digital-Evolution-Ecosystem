@@ -479,7 +479,160 @@ function testSubscribersAreStillNotified() {
   assert.deepEqual(seen, [1, 2], "unsubscribe still stops notification");
 }
 
+/** A short bounded lifetime, so the timeout contract is provable without
+ *  waiting the production value. */
+const TEST_REQUEST_TIMEOUT_MS = 20;
+
+/**
+ * A snapshot-shaped stand-in for the payload replies carry. Only `tick` is
+ * observed, but the real shape keeps a stray `.metrics` access honest.
+ */
+const replySnapshot = (tick: number) => snap(tick);
+
+/**
+ * Every request settles exactly once, and never later than its bounded
+ * lifetime. Four request types had no timeout at all, so a worker that never
+ * answered left their promises pending forever.
+ */
+async function testEveryRequestHasABoundedLifetime() {
+  const cases: [string, (c: WorkerRuntimeClient) => Promise<unknown>][] = [
+    ["requestCheckpoint", (c) => c.requestCheckpoint()],
+    ["requestExport", (c) => c.requestExport()],
+    ["resolveEventDecision", (c) => c.resolveEventDecision("opp-1", "choice-1")],
+    ["acknowledgeAftermath", (c) => c.acknowledgeAftermath()],
+  ];
+
+  for (const [name, issue] of cases) {
+    const fake = new FakeWorker();
+    const client = new WorkerRuntimeClient(() => fake, { requestTimeoutMs: TEST_REQUEST_TIMEOUT_MS });
+    const request = tracked(issue(client));
+
+    // Let the lifetime elapse without any reply arriving.
+    await new Promise((resolve) => setTimeout(resolve, TEST_REQUEST_TIMEOUT_MS * 3));
+    assert.equal(request.state.settled, true, `${name} settles within its bounded lifetime`);
+    assert.match(
+      String((request.state.error as Error).message),
+      new RegExp(`timeout|timed out`, "i"),
+      `${name} rejects with a timeout, not a silent hang`,
+    );
+    assert.equal(fake.posted.length, 1, `${name} posted exactly one command`);
+  }
+}
+
+/** A terminal worker failure must settle everything and clear the map. */
+async function testFatalWorkerFailureSettlesEverything() {
+  for (const kind of ["error", "messageerror"] as const) {
+    const fake = new FakeWorker();
+    const client = new WorkerRuntimeClient(() => fake, { requestTimeoutMs: 10_000 });
+    const a = tracked(client.requestCheckpoint());
+    const b = tracked(client.requestExport());
+    const load = tracked(client.loadCheckpoint(realCheckpoint()));
+
+    fake.fail(kind, `synthetic ${kind}`);
+
+    await tick();
+    assert.equal(a.state.settled, true, `${kind} settles a pending requestCheckpoint`);
+    assert.equal(b.state.settled, true, `${kind} settles a pending requestExport`);
+    assert.equal(load.state.settled, true, `${kind} settles a pending checkpoint load`);
+    for (const [label, state] of [["requestCheckpoint", a.state], ["requestExport", b.state], ["load", load.state]] as const) {
+      assert.match(
+        String((state.error as Error).message),
+        /simulation worker failed/i,
+        `${kind} rejects ${label} through the one fatal path`,
+      );
+    }
+
+    // AC5: no pending-map entry survives a terminal failure. Asserted directly
+    // rather than inferred from a late reply being harmless.
+    assert.equal(client.pendingRequestCount, 0, `${kind} retains no pending-request entries`);
+
+    fake.deliver({ type: "CHECKPOINT", requestId: "r-1", checkpoint: {} });
+    fake.deliver({ type: "SNAPSHOT", snapshot: replySnapshot(1) });
+    await tick();
+    assert.equal(a.state.settled, true, `${kind} leaves no request able to settle twice`);
+  }
+}
+
+/** destroy() settles deterministically and retains nothing. */
+async function testDestroySettlesAndRetainsNothing() {
+  const fake = new FakeWorker();
+  const client = new WorkerRuntimeClient(() => fake, { requestTimeoutMs: 10_000 });
+  const a = tracked(client.requestCheckpoint());
+  const load = tracked(client.loadCheckpoint(realCheckpoint()));
+
+  // A load lives in its own #pendingLoad slot, not the #pending map, so only the
+  // ordinary request is counted here. Asserting 2 would be asserting a fiction
+  // about where a load is tracked.
+  assert.equal(client.pendingRequestCount, 1, "the ordinary request is in flight before destroy");
+  client.destroy();
+
+  await tick();
+  assert.equal(a.state.settled, true, "destroy settles a pending request");
+  assert.equal(load.state.settled, true, "destroy settles a pending load");
+  assert.equal(client.pendingRequestCount, 0, "destroy retains no pending-request entries");
+  assert.match(
+    String((a.state.error as Error).message),
+    /runtime destroyed/i,
+    "destroy rejects with its own reason, not a timeout",
+  );
+  assert.equal(fake.terminated, true, "destroy terminates the transport");
+
+  // A late reply after destroy must be inert, not a second settlement.
+  fake.deliver({ type: "CHECKPOINT", requestId: "r-1", checkpoint: {} });
+  fake.deliver({ type: "SNAPSHOT", snapshot: replySnapshot(9) });
+  await tick();
+  assert.equal(a.state.settled, true, "no request settles twice after destroy");
+}
+
+/** A structured command failure settles exactly its own request. */
+async function testStructuredFailureSettlesOnlyItsOwnRequest() {
+  const fake = new FakeWorker();
+  const client = new WorkerRuntimeClient(() => fake, { requestTimeoutMs: 10_000 });
+  const failing = tracked(client.requestCheckpoint());
+  const other = tracked(client.requestExport());
+
+  const posted = fake.posted.map((p) => p as { type: string; requestId: string });
+  const failingId = posted.find((p) => p.type === "REQUEST_CHECKPOINT")!.requestId;
+  assert.equal(client.pendingRequestCount, 2, "both requests are in flight");
+  fake.deliver({ type: "ERROR", message: "structured failure", requestId: failingId });
+
+  await tick();
+  assert.equal(failing.state.settled, true, "the addressed request settles");
+  assert.equal(client.pendingRequestCount, 1, "and its entry leaves the pending map");
+  assert.match(
+    String((failing.state.error as Error).message),
+    /structured failure/,
+    "and rejects with the worker's reason",
+  );
+  assert.equal(other.state.settled, false, "an unrelated request is untouched by a sibling's failure");
+
+  // An error for an unknown request id is inert, not a crash.
+  fake.deliver({ type: "ERROR", message: "nobody is waiting", requestId: "r-does-not-exist" });
+  await tick();
+  assert.equal(other.state.settled, false, "an error for an unknown request id changes nothing");
+  assert.equal(failing.state.settled, true, "and does not re-settle a settled request");
+}
+
+/** Normal success still works: a request settles exactly once on its reply. */
+async function testNormalSuccessStillSettles() {
+  const fake = new FakeWorker();
+  const client = new WorkerRuntimeClient(() => fake, { requestTimeoutMs: 10_000 });
+  const request = tracked(client.requestCheckpoint());
+  const posted = fake.posted.at(-1) as { requestId: string };
+  const checkpoint = realCheckpoint();
+
+  fake.deliver({ type: "CHECKPOINT", requestId: posted.requestId, checkpoint });
+  await tick();
+  assert.equal(request.state.settled, true, "a matching reply settles the request");
+  assert.equal(request.state.value, checkpoint, "and resolves with the payload the worker sent");
+}
+
 async function main() {
+  await testNormalSuccessStillSettles();
+  await testStructuredFailureSettlesOnlyItsOwnRequest();
+  await testEveryRequestHasABoundedLifetime();
+  await testFatalWorkerFailureSettlesEverything();
+  await testDestroySettlesAndRetainsNothing();
   await testSameTickSnapshotCannotCompleteALoad();
   await testStaleReplyCannotSatisfyALiveLoad();
   await testASecondLoadSupersedesTheFirst();
@@ -495,4 +648,9 @@ async function main() {
   console.log("runtime boundary validation: PASS");
 }
 
-main();
+main().catch((error) => {
+  // Without this an async main's rejection surfaces as an unhandled rejection,
+  // which reports nothing about which assertion failed.
+  console.error(error);
+  process.exitCode = 1;
+});

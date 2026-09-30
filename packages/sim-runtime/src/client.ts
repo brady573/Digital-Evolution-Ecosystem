@@ -23,6 +23,13 @@ export interface WorkerLike {
 
 export type WorkerFactory=()=>WorkerLike;
 
+export interface WorkerRuntimeOptions{
+  /** Bounded lifetime for ordinary requests. A worker that never answers must
+   *  not leave a promise pending forever. Not product-visible: every caller
+   *  already awaits inside a handler that catches and reports. */
+  readonly requestTimeoutMs?:number;
+}
+
 export interface RuntimeClient {
   command(command: RuntimeCommand): void;
   subscribe(listener: (snapshot: RenderSnapshot) => void): () => void;
@@ -39,26 +46,63 @@ export interface RuntimeClient {
 }
 
 const LOAD_TIMEOUT_MS = 10_000;
+/** Bounded lifetime for an ordinary request. Chosen far above any observed
+ *  worker turnaround: a stalled worker should fail visibly, not linger. */
+const REQUEST_TIMEOUT_MS = 30_000;
+
+/** Best-effort description of a transport failure event, for the log line. */
+const describe=(event:unknown):string=>{
+  const message=(event as {message?:unknown})?.message;
+  return typeof message==="string"&&message.length>0?message:"no detail";
+};
 
 export class WorkerRuntimeClient implements RuntimeClient {
   #worker:Worker;
   #listeners=new Set<(snapshot:RenderSnapshot)=>void>();
-  #pending=new Map<string,{resolve:(value:any)=>void,reject:(reason?:any)=>void}>();
+  /** Test/diagnostic seam: how many request ids the pending map still holds.
+   *  AC5 is a claim about retained state, so it must be observable rather than
+   *  inferred from "nothing crashed". */
+  get pendingRequestCount(){return this.#pending.size}
+  #pending=new Map<string,{resolve:(value:any)=>void,reject:(reason?:any)=>void,timer:ReturnType<typeof setTimeout>}>();
   /** A load in flight. Keyed by the requestId the worker echoes in
    *  CHECKPOINT_LOADED, never by a tick: matching on tick let any live frame at
    *  the same tick satisfy a restore. `requestId` of the superseded load is
    *  remembered so its late reply is ignored rather than misattributed. */
   #pendingLoad:{requestId:string,resolve:(snapshot:RenderSnapshot)=>void,reject:(reason?:any)=>void,timer:ReturnType<typeof setTimeout>}|null=null;
   #seq=0;
+  readonly #requestTimeoutMs:number;
 
-  constructor(factory?:WorkerFactory){
+  constructor(factory?:WorkerFactory,options:WorkerRuntimeOptions={}){
     this.#worker=(factory?.()??new Worker(new URL("./worker.ts",import.meta.url),{type:"module",name:"digital-evolution-sim"}))as unknown as Worker;
+    this.#requestTimeoutMs=options.requestTimeoutMs??REQUEST_TIMEOUT_MS;
     this.#register();
   }
 
+  /**
+   * One place the transport's failure surface is attached, so error and
+   * messageerror cannot drift apart: both must enter the same fatal path.
+   */
   #register(){
     this.#worker.addEventListener("message",(event:MessageEvent<RuntimeResponse>)=>this.#receive(event.data));
-    this.#worker.addEventListener("error",(event)=>console.error("Simulation worker error",event));
+    this.#worker.addEventListener("error",(event)=>this.#failAll(new Error(`Simulation worker failed: ${describe(event)}`)));
+    this.#worker.addEventListener("messageerror",(event)=>this.#failAll(new Error(`Simulation worker failed: ${describe(event)}`)));
+  }
+
+  /**
+   * The single terminal-failure path. Rejects every pending request, fails any
+   * pending checkpoint load, clears the pending map so no entry survives, and
+   * drops subscribers - a dead worker can never deliver another snapshot, so
+   * retaining listeners would leave the UI holding a subscription only a new
+   * client could satisfy.
+   */
+  #failAll(reason:Error){
+    for(const pending of this.#pending.values()){
+      clearTimeout(pending.timer);
+      pending.reject(reason);
+    }
+    this.#pending.clear();
+    this.#failPendingLoad(reason);
+    this.#listeners.clear();
   }
 
   create(config:EngineConfig){this.command({type:"CREATE_UNIVERSE",config})}
@@ -122,10 +166,7 @@ export class WorkerRuntimeClient implements RuntimeClient {
 
   destroy(){
     this.#worker.terminate();
-    for(const pending of this.#pending.values())pending.reject(new Error("Runtime destroyed"));
-    this.#pending.clear();
-    this.#failPendingLoad(new Error("Runtime destroyed"));
-    this.#listeners.clear();
+    this.#failAll(new Error("Runtime destroyed"));
   }
 
   #failPendingLoad(reason:Error){
@@ -137,7 +178,12 @@ export class WorkerRuntimeClient implements RuntimeClient {
   #request<T>(type:"REQUEST_CHECKPOINT"|"REQUEST_EXPORT"|"RESOLVE_EVENT_DECISION"|"ACKNOWLEDGE_AFTERMATH",extra:Record<string,unknown>={}):Promise<T>{
     const requestId=`r-${++this.#seq}`;
     return new Promise<T>((resolve,reject)=>{
-      this.#pending.set(requestId,{resolve,reject});
+      const timer=setTimeout(()=>{
+        // Delete before rejecting: a late reply must not settle a settled request.
+        this.#pending.delete(requestId);
+        reject(new Error(`${type} timed out after ${this.#requestTimeoutMs}ms`));
+      },this.#requestTimeoutMs);
+      this.#pending.set(requestId,{resolve,reject,timer});
       this.command({type,requestId,...extra} as RuntimeCommand);
     });
   }
@@ -162,6 +208,7 @@ export class WorkerRuntimeClient implements RuntimeClient {
       const pending=this.#pending.get(response.requestId);
       if(!pending)return;
       this.#pending.delete(response.requestId);
+      clearTimeout(pending.timer);
       pending.resolve(response.snapshot);
       return;
     }
@@ -169,6 +216,7 @@ export class WorkerRuntimeClient implements RuntimeClient {
       const pending=this.#pending.get(response.requestId);
       if(!pending)return;
       this.#pending.delete(response.requestId);
+      clearTimeout(pending.timer);
       pending.resolve(response.type==="CHECKPOINT"?response.checkpoint:response.data);
       return;
     }
@@ -179,7 +227,11 @@ export class WorkerRuntimeClient implements RuntimeClient {
       if(!response.requestId)this.#failPendingLoad(new Error(response.message));
       if(response.requestId){
         const pending=this.#pending.get(response.requestId);
-        if(pending){this.#pending.delete(response.requestId);pending.reject(new Error(response.message))}
+        if(pending){
+          this.#pending.delete(response.requestId);
+          clearTimeout(pending.timer);
+          pending.reject(new Error(response.message));
+        }
       }else console.error(response.message);
     }
   }
