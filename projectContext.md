@@ -59,6 +59,11 @@ None. Offline-first single-user product; no accounts, no network services.
   Absence compatibility and value validity are independent axes.
 - Declare the smallest truthful contract first; add enforcement second
   (narrowing heuristic).
+- Parallel gate removals (Owner decision 2026-09-30): P1 rendering-only
+  slices, A6 vs A3.4, and surveys/evidence-trail/doc fixes may run in
+  parallel. P1 snapshot binding, worker-protocol changes, and Canvas2D
+  removal stay gated on Tranche B + reconciliation. Detail in
+  projectStatus.md "Parallel-Authorized".
 - Full record: `/sdcard/DEE/review/tranche-a-decisions.md` (review copy; session
   and main are the source of truth).
 
@@ -74,10 +79,10 @@ proof (PR #73) are merged. The maintained World is still Canvas2D.
 
 ## Current Focus
 
-A6 typed EvidenceExport provenance is open as PR #74. Remaining Tranche A work,
-including migrate-then-validate ordering and downstream runtime-boundary units,
-continues against current main. M7 remains on hold, and the merged Pixi scaffold
-does not release the production World cutover gate.
+A6 typed EvidenceExport provenance merged as PR #74, and the canonical restore
+ordering unit (A3.4, PR #76) merged after it. Remaining Tranche A work is the
+downstream runtime-boundary units against current main. M7 remains on hold, and
+the merged Pixi scaffold does not release the production World cutover gate.
 
 ## Important Constraints
 
@@ -121,4 +126,4 @@ does not release the production World cutover gate.
 
 ## Last Context Update
 
-2026-09-30 — reconciled against current main after PRs #70–#73; PR #74 remains open.
+2026-09-30 — reconciled against current main after PRs #70–#76.
