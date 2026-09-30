@@ -58,9 +58,27 @@ Recorded here because they are choices, not derivations. Each is reversible at r
 1. **Validation lives at the top of `session.handle`, not in `worker.ts`.** `handle` is the real command boundary: it is what every `RuntimeCommand` passes through, and the only two existing `.handle()` call sites in the repository (`aftermath-runtime.ts:337,343`) call it *directly*, bypassing `worker.ts`. Validating in `worker.ts` would leave those tests exercising an unvalidated path and would leave `handle` itself unprotected for any future caller. The trade-off accepted: `handle` gains one import and one guard call.
 2. **The validator lives in `packages/sim-runtime`, not `packages/contracts`.** The supported range for `ADVANCE_TICKS` is anchored on `MAX_SLICE_TICKS`, which `speed.ts:29` already owns. `contracts` may not import `sim-runtime`, so a contracts-owned validator could not reference the product's own slice ceiling. Sim-runtime placement also keeps the change out of the package every other product package depends on. `contracts` still changes in Task 3, but only to add a request id and a response variant.
 3. **The supported range is anchored on constants that already exist**, not invented: `ticks ∈ [0, MAX_SLICE_TICKS]` (2000, `speed.ts:29`, documented as the per-message UI-responsiveness ceiling) and `maxTicks ∈ [1, 100_000]` (the default at `session.ts:418` and `client.ts:44`). Neither is a population or biological cap, so the "no runtime-safety shortcut" invariant holds without argument. A rejected out-of-range count is a *request* bound, not a simulation bound.
-4. **A rejected command returns `ERROR` plus, when a universe exists, a `SNAPSHOT` of the unchanged world.** The snapshot mutates nothing — §5's prohibition is on mutating simulation, decision, analysis, checkpoint, or request state, and this reports that state unaltered — and it releases `advanceDebt` so a rejected command cannot freeze the product. This mirrors the existing `RESOLVE_EVENT_DECISION` precedent at `session.ts:730-734`, which already returns a correlated response *and* a snapshot.
+4. **A rejected command returns `ERROR` plus, when a universe exists, a `SNAPSHOT` of the unchanged world.** The snapshot mutates nothing — §5's prohibition is on mutating simulation, decision, analysis, checkpoint, or request state, and this reports that state unaltered — and it releases `advanceDebt` so a rejected command cannot freeze the product.
+
+   **This is a new bounded settlement rule, not an existing precedent.** Today `RESOLVE_EVENT_DECISION` emits acknowledgement + snapshot on *success*; its *failure* path emits `ERROR` alone. There is no existing precedent for "error plus a snapshot", and the resemblance to the success shape is exactly why it must be justified rather than assumed: without it, a rejected fire-and-forget advance leaves Explorer's `advanceDebt` permanently set and the simulation frozen.
+
+   **The emitted snapshot must be proven state-equivalent, not merely tick-equal.** The regression asserts all three of: no tick advance, no biological mutation (organism set, population, and metrics unchanged), and no decision/analysis mutation (`pendingDecision` and analysis record count unchanged). A tick-only assertion would pass while the snapshot carried a mutated world, which is the failure this rule exists to prevent.
 5. **`CHECKPOINT_LOADED` carries `requestId` and `snapshot`, and no new metadata field.** `requestId` is what proves which request completed; the carried snapshot's `tick` already proves where the world landed. Reusing `worldId` as restore proof was considered and rejected: `session.ts:64-72` documents it as presentation identity explicitly outside every reproducibility claim, and giving it a second meaning would contradict that documentation.
-6. **New unit is `runtime-boundary`, placed in `ci-sim-c`.** `ci-sim-a` is the critical path at 278s; `ci-sim-c` is the shortest simulation shard at 184s. Per `AGENTS.md` the fix for an over-long shard is to move units, not add runners, so the new unit goes where there is slack.
+6. **New unit is `runtime-boundary`, placed in `ci-sim-c`.** `ci-sim-a` is the critical path at 278s; `ci-sim-c` is the shortest simulation shard at 184s. Per `AGENTS.md` the fix for an over-long shard is to move units, not add runners, so the new unit goes where there is slack. The unit is `deterministic`, `blocking`, and `mergeGate: true`; AC3–AC8 are **not** downgraded to evidence class for CI latency. `baselineSeconds` is seeded with a placeholder and must be replaced with the measured value from the first representative run; if that run shows `ci-sim-c` materially exceeding the existing critical-path shard (`ci-sim-a`, 278s), rebalance the shards and re-run `pnpm validation:check` rather than letting the new shard become the new long pole.
+
+## Implementation order constraint
+
+The Owner accepted the task numbering but constrained the order in which work lands:
+
+> Establish the injectable transport seam before, or in the same implementation unit as, the client-side checkpoint-correlation tests that depend on it. Do not land request-correlation behavior with an effectively untestable client boundary.
+
+Therefore, although Task 4 is numbered before Task 5, **the seam is extracted and committed first**. The execution order is:
+
+```
+Task 1 -> Task 2 -> Task 3 -> Task 3a (seam) -> Task 4 -> Task 5 -> Task 6
+```
+
+The seam-only commit changes `client.ts`'s constructor to accept an optional `WorkerFactory` and adds the `WorkerLike` interface, with **no** settlement, timeout, or correlation behaviour change. It is independently green on its own and is provably behaviour-neutral: `App.tsx:477` constructs `WorkerRuntimeClient` with no argument and must compile and behave unchanged. Task 4 then has a real seam to test against, and Task 5 completes the settlement work on top of an already-proven seam.
 
 ---
 
@@ -241,19 +259,45 @@ Replaces silent coercion with deterministic rejection. `advance` currently compu
   Then the mutation-sensitivity pair, which is the part that makes this task's evidence real rather than decorative:
 
   ```ts
-  // A rejected command must not advance the world, and must not wedge the
+  // A rejected command must not mutate anything, and must not wedge the
   // product's time controls. App.tsx clears advanceDebt only inside subscribe,
   // so a rejection that returns no SNAPSHOT would freeze the simulation.
+  //
+  // The emitted snapshot must be STATE-EQUIVALENT, not merely tick-equal: a
+  // tick-only assertion would pass while the snapshot carried a mutated world.
+  // Three dimensions are asserted separately, because each is a distinct way
+  // this rule could be broken while the others still hold.
   const live = new UniverseSession();
   live.handle({ type: "CREATE_UNIVERSE", config: testConfig() });
-  const before = live.snapshot().tick;
+
+  const biological = (s: ReturnType<UniverseSession["snapshot"]>) =>
+    JSON.stringify({
+      population: s.population,
+      activePopulation: s.activePopulation,
+      dormantPopulation: s.dormantPopulation,
+      organisms: s.organisms,
+      metrics: s.metrics,
+    });
+  const interpretive = (s: ReturnType<UniverseSession["snapshot"]>) =>
+    JSON.stringify({ pendingDecision: s.pendingDecision, analysis: s.analysis });
+
+  const beforeTick = live.snapshot().tick;
+  const beforeBiology = biological(live.snapshot());
+  const beforeInterpretation = interpretive(live.snapshot());
+
   const rejected = live.handle({ type: "ADVANCE_TICKS", ticks: Number.POSITIVE_INFINITY });
   assert.equal(rejected[0]!.type, "ERROR", "Infinity advance is refused");
-  assert.equal(live.snapshot().tick, before, "a refused advance does not move the world");
-  assert.ok(
-    rejected.some((r) => r.type === "SNAPSHOT"),
-    "a refused command still emits a snapshot so backpressure releases",
-  );
+  assert.equal(live.snapshot().tick, beforeTick, "a refused advance does not advance the tick");
+  assert.equal(biological(live.snapshot()), beforeBiology, "a refused advance mutates no biology");
+  assert.equal(interpretive(live.snapshot()), beforeInterpretation, "a refused advance mutates no decision or analysis state");
+
+  // The snapshot that releases backpressure must itself be the unchanged world.
+  const echoed = rejected.find((r) => r.type === "SNAPSHOT");
+  assert.ok(echoed, "a refused command still emits a snapshot so backpressure releases");
+  assert.equal((echoed as { snapshot: ReturnType<UniverseSession["snapshot"]> }).snapshot.tick, beforeTick,
+    "the released snapshot is at the unchanged tick");
+  assert.equal(biological((echoed as { snapshot: ReturnType<UniverseSession["snapshot"]> }).snapshot), beforeBiology,
+    "the released snapshot carries unmutated biology");
   ```
 
   Import `MAX_SLICE_TICKS` from `@digital-evolution/sim-runtime` and `MAX_EVENT_SCAN_TICKS` from the validator module. Reuse an existing `testConfig()` helper if the repository already has one for `CREATE_UNIVERSE`; otherwise build a minimal valid `EngineConfig` and keep it in this file.
@@ -407,6 +451,86 @@ The contract change. `RuntimeCommand`'s `LOAD_CHECKPOINT` variant has no `reques
 
 ---
 
+### Task 3a: Extract the transport seam (behaviour-neutral)
+
+Ordered here by the *Implementation order constraint*, not by the original numbering. This is a prerequisite of Task 4's evidence and carries **no** settlement, timeout, or correlation change. Its only job is to make `client.ts` drivable from Node.
+
+**Files:**
+- Modify: `packages/sim-runtime/src/client.ts:28-39` (constructor)
+
+**Interfaces:**
+- Consumes: nothing.
+- Produces:
+
+  ```ts
+  /** The slice of Worker the client actually uses. Lets a test drive the
+   *  transport without a browser crash harness (issue #54 item 4). */
+  export interface WorkerLike {
+    postMessage(message: unknown): void;
+    terminate(): void;
+    addEventListener(type: "message" | "error" | "messageerror", listener: (event: never) => void): void;
+  }
+
+  export type WorkerFactory = () => WorkerLike;
+  ```
+
+- [ ] **Step 1: Write the seam test**
+
+  In `tools/validation/runtime-boundary.ts`, add a `FakeWorker` implementing `WorkerLike` — it records posted messages and lets a test push a synthetic `message`, `error`, or `messageerror` — and assert the seam is wired and behaviour-neutral:
+
+  ```ts
+  // The injected transport is actually used, and the default path is unchanged.
+  const fake = new FakeWorker();
+  const client = new WorkerRuntimeClient(() => fake);
+  client.advance(5);
+  assert.deepEqual(fake.posted, [{ type: "ADVANCE_TICKS", ticks: 5 }], "commands reach the injected transport");
+  assert.equal(client instanceof WorkerRuntimeClient, true, "injection does not change the type");
+  // No-argument construction must still compile and default to a real Worker.
+  // Exercised by typecheck (App.tsx:477 constructs it with no argument) and by
+  // the browser lane; there is deliberately no runtime instantiation here,
+  // because Node has no Worker global.
+  ```
+
+- [ ] **Step 2: Run it to verify it fails**
+
+  Run: `pnpm test:runtime-boundary`
+  Expected: FAIL — `WorkerRuntimeClient`'s constructor takes no argument, so the factory is ignored and `new Worker` throws in Node.
+
+- [ ] **Step 3: Add the seam**
+
+  Add `WorkerLike` and `WorkerFactory` to `client.ts`, and change the constructor to accept an optional factory, defaulting to today's inline construction:
+
+  ```ts
+  constructor(factory?: WorkerFactory) {
+    this.#worker = factory?.() ?? new Worker(new URL("./worker.ts", import.meta.url), { type: "module", name: "digital-evolution-sim" });
+    this.#register();
+  }
+  ```
+
+  `#register()` attaches the existing `message` and `error` listeners only — `messageerror` arrives in Task 5, so that this commit's diff is confined to the seam.
+
+- [ ] **Step 4: Run it to verify it passes, and that the world is unchanged**
+
+  Run: `pnpm test:runtime-boundary`
+  Expected: PASS.
+
+  Run: `pnpm typecheck`
+  Expected: PASS. This is the proof that the seam is behaviour-neutral at the call site: `App.tsx:477` constructs `new WorkerRuntimeClient()` with no argument and still compiles.
+
+- [ ] **Step 5: Confirm the only diff is the seam**
+
+  Run: `git diff --stat`
+  Expected: `client.ts` and `runtime-boundary.ts` only. If any settlement, timeout, correlation, or listener line changed, this commit has leaked Task 5's work into it — stop and split it.
+
+- [ ] **Step 6: Commit**
+
+  ```bash
+  git add packages/sim-runtime/src/client.ts tools/validation/runtime-boundary.ts
+  git commit -m "refactor(runtime): make the worker transport injectable"
+  ```
+
+---
+
 ### Task 4: Correlate the load by identity, and delete tick equality
 
 `client.ts:118` currently resolves a load on `response.snapshot.tick === pendingLoad.expectedTick`, where `expectedTick` is the checkpoint's `createdTick`. Any live snapshot at that tick completes it — including a decision-gated advance, which `session.ts:402` returns at the *unchanged* tick. This task removes that inference entirely.
@@ -421,7 +545,7 @@ The contract change. `RuntimeCommand`'s `LOAD_CHECKPOINT` variant has no `reques
 
 - [ ] **Step 1: Write the failing test**
 
-  `client.ts` has **no test seam and no test at all** today, so this test cannot be written until Task 5's seam exists. Therefore: **do Tasks 5 and 4 in that order**, or extract only the seam from Task 5 first as a standalone commit. The plan's stated order is 5-then-4 for this reason; if the executor prefers, the seam may be landed as its own commit immediately before this task with no other change.
+  `client.ts` has **no test seam and no test at all** today, so this test is unwritable until the seam exists. Per *Implementation order constraint* above, the seam was already extracted and committed as a standalone behaviour-neutral commit before this task began. It is present; this task proceeds against it.
 
   The test, once a seam exists:
 
@@ -499,26 +623,12 @@ The contract change. `RuntimeCommand`'s `LOAD_CHECKPOINT` variant has no `reques
 Prerequisite for Task 4's evidence, and the fix for issue #54 item 4. Today the four `#request` types have no timeout, `error` only logs (`client.ts:38`), and there is no `messageerror` listener at all — so a worker crash leaves every promise pending forever and never clears `#pending`.
 
 **Files:**
-- Modify: `packages/sim-runtime/src/client.ts:28-39` (constructor), `:107-113` (`#request`), `:93-105` (`destroy`, fatal path)
+- Modify: `packages/sim-runtime/src/client.ts:38` (`error` handler), `:107-113` (`#request`), `:93-105` (`destroy`, fatal path)
 - Modify: `tools/validation/runtime-boundary.ts`
 
 **Interfaces:**
-- Consumes: unit `runtime-boundary` (Task 1).
-- Produces:
-
-  ```ts
-  /** The slice of Worker the client actually uses. Lets a test drive the
-   *  transport without a browser crash harness (issue #54 item 4). */
-  export interface WorkerLike {
-    postMessage(message: unknown): void;
-    terminate(): void;
-    addEventListener(type: "message" | "error" | "messageerror", listener: (event: never) => void): void;
-  }
-
-  export type WorkerFactory = () => WorkerLike;
-  ```
-
-  `WorkerRuntimeClient`'s constructor takes an optional `WorkerFactory` defaulting to the current inline `new Worker(new URL("./worker.ts", import.meta.url), …)`. `App.tsx:477` constructs it with no argument and must keep compiling unchanged.
+- Consumes: `WorkerLike` and `WorkerFactory` from Task 3a (already merged), and unit `runtime-boundary` (Task 1).
+- Produces: `REQUEST_TIMEOUT_MS` and one `#failAll(reason: Error)` private path shared by `error`, `messageerror`, and `destroy`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -536,11 +646,9 @@ Prerequisite for Task 4's evidence, and the fix for issue #54 item 4. Today the 
   Run: `pnpm test:runtime-boundary`
   Expected: FAIL — there is no constructor parameter, no `messageerror` listener, and no per-request timer, so the timeout cases hang and the fatal cases leave the map populated. **Run with a timeout** (`timeout 120 pnpm test:runtime-boundary`) so a genuine hang is visible as a hang.
 
-- [ ] **Step 3: Add the seam**
+- [ ] **Step 3: Register the fatal listeners in one place**
 
-  Add `WorkerLike` and `WorkerFactory` as above, and change the constructor to `constructor(factory?: WorkerFactory)` using `factory?.() ?? new Worker(new URL("./worker.ts", import.meta.url), { type: "module", name: "digital-evolution-sim" })`.
-
-  Extract a private `#register()` that attaches `message`, `error`, and `messageerror` listeners, so the fatal path is registered in one place and cannot drift.
+  By this task the `WorkerLike` seam and its `WorkerFactory` constructor parameter are **already merged** (extracted as a standalone commit per *Implementation order constraint*); confirm they are present and do not re-add them. Add the `messageerror` listener and a private `#register()` that attaches `message`, `error`, and `messageerror` together, so the fatal path is registered in one place and cannot drift.
 
 - [ ] **Step 4: Give every request a bounded lifetime**
 
@@ -660,11 +768,11 @@ Every load-bearing claim below was re-verified first-hand against `2535960` rath
 
 ## Self-review
 
-**Spec coverage.** §5 command validation → Task 1 (tags, malformed payloads) and Task 2 (numeric rules, ranges, no mutation, validation before the loop). §6 exact-once settlement → Task 5. §6 fatal path → Task 5. §6 bounded lifetime → Task 5. §6 teardown → Task 5. §7 request identity → Task 3. §7 removal of tick equality → Task 4. §7 multiple-load semantics → Task 4 (supersession preserved and guarded). §7 restored metadata → Decision 5, carried in Task 3. §8 no biology change → Global Constraints; enforced by touching no file under `packages/sim-core`. §9 invariants → Global Constraints. AC1–AC2 → Tasks 1–2. AC3–AC5 → Task 5. AC6–AC8 → Tasks 3–4. AC9 → Task 3 Step 7 and Task 6 Step 4. AC10 → Task 2 Step 1 and Task 4. AC11 → Global Constraints; no renderer or presentation file is modified. AC12 → Task 6 Step 2. Validation expectations → Tasks 1, 2, 4, 5, 6. §15 return package → Task 6 Step 6. §14 stop → Task 6 Step 8. §13 non-goals → Global Constraints.
+**Spec coverage.** §5 command validation → Task 1 (tags, malformed payloads) and Task 2 (numeric rules, ranges, no mutation, validation before the loop). Transport seam required by issue #54 item 4's "injectable enough to test failure behavior without a browser crash harness" → Task 3a. §6 exact-once settlement → Task 5. §6 fatal path → Task 5. §6 bounded lifetime → Task 5. §6 teardown → Task 5. §7 request identity → Task 3. §7 removal of tick equality → Task 4. §7 multiple-load semantics → Task 4 (supersession preserved and guarded). §7 restored metadata → Decision 5, carried in Task 3. §8 no biology change → Global Constraints; enforced by touching no file under `packages/sim-core`. §9 invariants → Global Constraints. AC1–AC2 → Tasks 1–2. AC3–AC5 → Task 5 (seam in Task 3a). AC6–AC8 → Tasks 3–4. AC9 → Task 3 Step 7 and Task 6 Step 4. AC10 → Task 2 Step 1 and Task 4. AC11 → Global Constraints; no renderer or presentation file is modified. AC12 → Task 6 Step 2. Validation expectations → Tasks 1, 2, 3a, 4, 5, 6. §15 return package → Task 6 Step 6. §14 stop → Task 6 Step 8. §13 non-goals → Global Constraints.
 
 **Step scan.** Every step names a file, a signature, a command, or an expected output. No step says "add appropriate validation."
 
-**Ordering defect found and corrected during self-review.** The plan originally ordered Task 4 (client correlation) before Task 5 (transport seam). Task 4's evidence requires driving `client.ts` without a real `Worker`, and no seam exists — so Task 4's tests were unwritable as ordered. The seam now lands in Task 5, and Task 4 carries an explicit note that the seam must be extracted first if the executor wants to keep the original order.
+**Ordering defect found and corrected during self-review.** The plan originally ordered Task 4 (client correlation) before Task 5 (transport seam). Task 4's evidence requires driving `client.ts` without a real `Worker`, and no seam existed — so Task 4's tests were unwritable as ordered. The seam is now its own unit, Task 3a, landing before Task 4, and Task 5 assumes it is already present. The Owner independently imposed the same constraint, so the correction and the instruction agree.
 
 **Type consistency.** `validateRuntimeCommand` / `CommandValidation` / `MAX_EVENT_SCAN_TICKS` are defined once in Task 1 and consumed by name in Tasks 2, 3, and 6. `CHECKPOINT_LOADED` is introduced in Task 3 and consumed in Task 4. `WorkerLike` / `WorkerFactory` are introduced in Task 5 and consumed by Task 4's `FakeWorker`. `runtime-boundary` is the unit id everywhere.
 
