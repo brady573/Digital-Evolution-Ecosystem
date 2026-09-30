@@ -21,11 +21,15 @@ provisional and are expected to be superseded by the phenotype direction. The
 environmental rules — palette roles, value structure, ecological meaning,
 prohibitions against invented terrain — are the durable part.
 
-Adapted from the standard brief to a **procedural** renderer. This project ships
-almost no image files: the world, the substrate, and the organisms are all
-generated at runtime in Canvas 2D. The "art direction" is therefore a set of
-**render rules and palette roles**, and this document is the record that keeps
-them stable and reviewable instead of living only in code comments.
+Adapted from the standard brief to a **procedural** renderer. The world, the
+substrate, and in-world organisms are all generated at runtime (Canvas 2D
+today; Pixel Phenotype geometry for morphology). The one bundled-image
+exception is 24 family-portrait PNGs (six families x 16/32/64/128) used ONLY
+as Selected-organism inspection-card art — never as world sprites (see
+`assets/asset-manifest.json`: `family-portraits` vs `phenotype-textures`). The
+"art direction" is therefore a set of **render rules and palette roles**, and
+this document is the record that keeps them stable and reviewable instead of
+living only in code comments.
 
 ## Game frame
 
@@ -34,7 +38,9 @@ them stable and reviewable instead of living only in code comments.
 - **Core verbs:** create a universe, run it, select an organism, read its
   history, inspect fields, compare against an untouched twin.
 - **Engine and renderer:** React + Canvas 2D (`apps/explorer`), fed by
-  `sim-runtime` snapshots. 2D only; no 3D, no spritesheets, no external art.
+  `sim-runtime` snapshots. 2D only; no 3D, no spritesheets, no external world
+  art. The 24 bundled family portraits are inspection-card UI chrome, not
+  world sprites.
 - **Target platforms:** phone first (Android via Capacitor), then desktop
   browser. Touch and mouse both primary.
 - **Camera/view/facing:** strict top-down orthographic over a 600x600 toroidal
@@ -100,7 +106,9 @@ Everything in this section describes what the code does today. It is
 
 ## Technical contract
 
-- **Asset dimensions/aspect:** none — everything is procedural at runtime.
+- **Asset dimensions/aspect:** world rendering is procedural at runtime (no
+  world image files). The only bundled images are the 24 family-portrait PNGs
+  (six families x 16/32/64/128, RGBA) for the inspection card.
 - **Alpha/background:** opaque; the canvas is cleared to transparent and fully
   painted by the field buffer before life is drawn.
 - **Grid/tile/frame size:** 60x60 field cells over a 600x600 world (10 world
@@ -112,7 +120,10 @@ Everything in this section describes what the code does today. It is
   substrate continuous instead of a grid of cells. Do not disable smoothing.
 - **Color space:** sRGB, no conversion.
 - **Texture/poly/material budgets:** one 60x60 RGBA buffer (~14 KB) plus the
-  canvas. No image assets ship.
+  canvas for the world. Bundled images are inspection UI only: 24 portrait
+  PNGs (~170 KB total). In-world Pixi phenotype textures (P0, non-production)
+  are deterministic GPU cache artifacts generated from phenotype geometry —
+  never stored, never shipped as files.
 - **Naming and folders:** `apps/explorer/src/landscape.ts` owns the substrate
   palette and encodings; `App.tsx` owns organism rendering; `styles.css` owns
   UI chrome. Tests: `tools/validation/landscape.ts` (rules),
