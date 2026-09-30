@@ -54,7 +54,9 @@
     "test:dependency:tradeoff": "tsx tools/validation/dependency.ts -- --skip-policy --only=tradeoff",
     "validation:graph": "tsx tools/validation/run.ts graph",
     "ci:shard": "tsx tools/validation/run.ts ci",
-    "ci:plan": "tsx tools/validation/run.ts shard-plan"
+    "ci:plan": "tsx tools/validation/run.ts shard-plan",
+    "test:broad-ecology-022": "tsx tools/validation/broad-ecology-022.ts",
+    "test:broad-ecology-022-summary": "tsx tools/validation/broad-ecology-022-summary.ts"
   },
   "devDependencies": {
     "@types/node": "26.6.2",

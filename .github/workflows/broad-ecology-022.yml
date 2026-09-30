@@ -1,0 +1,40 @@
+name: broad-ecology-022
+
+# Manual scientific survey: Engine 0.22 broad ecology characterization.
+# Mirrors ecology-survey.yml precedent (dispatch-only, artifact upload, never
+# merge-gating). The runner is resume-safe: the branch carries the partial
+# artifact and each invocation completes only missing rows, so re-dispatch
+# continues rather than restarts. Device execution was abandoned after
+# repeated Termux crashes; CI is the execution environment for Task 5.
+
+on:
+  workflow_dispatch:
+    inputs:
+      disturbance:
+        description: "Run matched disturbance section"
+        required: false
+        default: "true"
+
+permissions:
+  contents: read
+
+jobs:
+  survey:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-project
+      - run: pnpm test:broad-ecology-022 -- --out=testdata/broad-ecology-0.22.json
+      - if: inputs.disturbance == 'true'
+        run: pnpm test:broad-ecology-022 -- --disturbance --out=testdata/broad-ecology-0.22.json
+      - run: pnpm test:broad-ecology-022-summary -- --in=testdata/broad-ecology-0.22.json --out=testdata/broad-ecology-0.22-summary.md --tables=testdata/broad-ecology-0.22-tables.json --spotcheck
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: broad-ecology-022-results
+          path: |
+            testdata/broad-ecology-0.22.json
+            testdata/broad-ecology-0.22-summary.md
+            testdata/broad-ecology-0.22-tables.json
+          if-no-files-found: error
+          retention-days: 30
