@@ -18,15 +18,19 @@
  * class without the claim changing, and a claim may not be proven by a class
  * that cannot see it.
  *
- * | Class | Question it answers | Environment | Blocking? |
- * |---|---|---|---|
- * | `invariant`     | Is the repository structurally sound? | Node | yes |
- * | `deterministic` | Is exact supported behaviour still exact? | Node | yes |
- * | `presentation`  | Does the product build and do its presentation contracts hold? | Node | yes |
- * | `browser`       | Does it behave correctly in an actual browser? | Chromium | yes |
- * | `platform`      | Does the Android packaging integrate? | Android SDK / emulator | yes |
- * | `scientific`    | What actually happens across seeds and horizons? | Node, long | manual |
- * | `evidence`      | Can a human inspect the result? | Chromium | no |
+ * | Class | Question it answers | Environment | Lane-blocking? | Merge gate? |
+ * |---|---|---|---|---|
+ * | `invariant`     | Is the repository structurally sound? | Node | yes | yes |
+ * | `deterministic` | Is exact supported behaviour still exact? | Node | yes | yes |
+ * | `presentation`  | Does the product build and do its presentation contracts hold? | Node | yes | yes |
+ * | `browser`       | Does it behave correctly in an actual browser? | Chromium | yes | yes for blocking units; captures no |
+ * | `platform`      | Does the Android packaging integrate? | Android SDK / emulator | yes | no |
+ * | `scientific`    | What actually happens across seeds and horizons? | Node, long | manual | no |
+ * | `evidence`      | Can a human inspect the result? | Chromium | no | no |
+ *
+ * Lane-blocking (the `enforcement` field) says whether failure fails the
+ * lane; merge gate (the `mergeGate` field) says whether success is required
+ * for merge readiness. Platform packaging is blocking but not merge-gating.
  *
  * The classes are not interchangeable. `deterministic` may not be used to claim
  * browser correctness, `scientific` may not be used to claim exactness, and
