@@ -689,6 +689,20 @@ export const UNITS: readonly ValidationUnit[] = [
       "Broad 0.22 characterization across four archetypes and recorded seeds, including trajectories, resources/waste, dormancy, cross-feeding, niche construction, clades, and matched disturbance. Characterisation, not proof of exactness.",
   },
   {
+    id: "interference-survey",
+    title: "Interference ecological characterization",
+    script: "test:interference-survey",
+    cls: "scientific",
+    enforcement: "manual",
+    mergeGate: false,
+    domains: withApparatus("contracts", "sim-core"),
+    needs: [],
+    parallelSafe: true,
+    artifact: "testdata",
+    claim:
+      "Secretion cost failure, conditional resistance counter-advantage, and secretion non-advantage characterised across regimes and seeds, with the undemonstrated advantage case retained as design tension. Characterisation, not proof of exactness.",
+  },
+  {
     id: "provenance",
     title: "Constant provenance measurements",
     script: "test:provenance",
@@ -849,7 +863,7 @@ export const GROUPS: readonly ValidationGroup[] = [
   {
     id: "survey",
     title: "Scientific characterisation (manual, long)",
-    unitIds: ["ecology-survey", "niche-survey", "washout-reliance", "provenance", "broad-ecology-022"],
+    unitIds: ["ecology-survey", "niche-survey", "washout-reliance", "provenance", "broad-ecology-022", "interference-survey"],
     ci: false,
   },
 
