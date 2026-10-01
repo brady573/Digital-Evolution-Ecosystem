@@ -14,10 +14,10 @@
  */
 import assert from "node:assert/strict";
 import type { EngineConfig, PresentationFrame, RenderSnapshot, WorldId, WorldLiveFrame } from "@digital-evolution/contracts";
-import { READ_MODEL_VERSION } from "@digital-evolution/contracts";
+import { ENVIRONMENT_PERIOD_TICKS, READ_MODEL_VERSION } from "@digital-evolution/contracts";
 import * as runtimeRoot from "@digital-evolution/sim-runtime";
 import { UniverseSession } from "../../packages/sim-runtime/src/session.ts";
-import { buildCatalog, buildEnvironment, buildLive, buildPresentation, resolveCatalogEntry } from "../../packages/sim-runtime/src/presentation.ts";
+import { buildCatalog, buildEnvironment, buildLive, buildPresentation, catalogMembershipSignature, interpretationPayloadKey, resolveCatalogEntry } from "../../packages/sim-runtime/src/presentation.ts";
 import {
   MAX_EVENT_SCAN_TICKS,
   validateRuntimeCommand,
@@ -306,16 +306,18 @@ function testRejectedCommandMutatesNothingButStillReleasesBackpressure() {
   assert.equal(biological(after), beforeBiology, "a refused advance mutates no biology");
   assert.equal(interpretive(after), beforeInterpretation, "a refused advance mutates no decision or analysis state");
 
-  // The frames that release backpressure must themselves describe the
-  // unchanged world — including the interpretation frame App releases on.
+  // The live heartbeat releases backpressure and must itself describe the
+  // unchanged world — including its tick. Unchanged catalog, environment, and
+  // interpretation stay suppressed per the staggered cadence: App releases
+  // advanceDebt on the live frame, so they are not needed to un wedge the UI.
   assert.ok(!rejected.some((r) => r.type === "SNAPSHOT"), "a refused command emits no legacy snapshot");
   const echoed = rejected
     .filter((r) => r.type === "PRESENTATION")
     .map((r) => (r as { frame: PresentationFrame }).frame);
-  assert.equal(echoed.length, 5, "a refused command still emits the unchanged world's frames so backpressure releases");
-  const released = echoed.find((f) => "metrics" in f);
-  assert.ok(released, "including the interpretation frame backpressure releases on");
-  assert.equal(released.tick, beforeTick, "the released frames are at the unchanged tick");
+  assert.equal(echoed.length, 1, "a refused command echoes only the live heartbeat for the unchanged world");
+  const released = echoed.find((f) => "organisms" in f && "population" in f);
+  assert.ok(released, "the echo carries the live frame backpressure releases on");
+  assert.equal(released.tick, beforeTick, "the released frame is at the unchanged tick");
 }
 
 /**
@@ -1009,10 +1011,11 @@ async function testPackageRootExposesNoMutableSessionAuthority() {
 }
 
 /**
- * Task 5 (read-model-only transport): live commands emit frames with no
+ * Fix-wave (staggered emission cadence): live commands emit frames with no
  * legacy payload beside them. Driven through UniverseSession.handle — the
  * point every RuntimeCommand passes through — so this proves emission, not
- * just derivation.
+ * just derivation. The first advance after create still delivers the full
+ * set (first-paint convergence); later advances go staggered.
  */
 function testLiveFramesArriveWithoutLegacyPayload() {
   const session = liveSession();
@@ -1021,7 +1024,7 @@ function testLiveFramesArriveWithoutLegacyPayload() {
   const frames = responses
     .filter((r) => r.type === "PRESENTATION")
     .map((r) => (r as { frame: PresentationFrame }).frame);
-  assert.equal(frames.length, 5, "all five read-model classes emit at each live point");
+  assert.equal(frames.length, 5, "the first advance after create still delivers the full set");
   const snapshot = session.snapshot();
   for (const frame of frames) {
     assert.equal(frame.worldId, snapshot.worldId, "every frame carries the snapshot worldId");
@@ -1033,12 +1036,141 @@ function testLiveFramesArriveWithoutLegacyPayload() {
   for (const banned of ["config", "analysis", "events", "resolvedDecisions", "aftermath", "pendingDecision", "seed", "metrics"]) {
     assert.ok(!(banned in (live as object)), `live frame carries no ${banned}`);
   }
+  // The second advance goes staggered: the live heartbeat always emits, and
+  // at least one stable class is suppressed (a pure no-op advance emits live
+  // alone — see testStaggeredEmissionCadence for the full pin).
+  const second = session.handle({ type: "ADVANCE_TICKS", ticks: 0 });
+  const staggered = second
+    .filter((r) => r.type === "PRESENTATION")
+    .map((r) => (r as { frame: PresentationFrame }).frame);
+  assert.ok(staggered.some((f) => "organisms" in f && "population" in f), "the live heartbeat emits on every advance");
+  assert.ok(staggered.length < 5, "a no-op advance suppresses every unchanged class");
+}
+
+/**
+ * Fix-wave (handoff AC5): the staggered emission cadence, pinned class by
+ * class through the command boundary. Identity emits on world-change paths
+ * plus the first advance after each; catalog FULL only on membership change;
+ * environment on its bounded period; interpretation only on payload change;
+ * live on every advance. A no-change advance (advance(0), a pure query)
+ * suppresses every stable class by construction — nothing about the engine
+ * fixture can make it emit — so each "not sent" assertion below is a
+ * cadence property, not a fixture accident.
+ */
+function testStaggeredEmissionCadence() {
+  const session = liveSession();
+  const classes = (responses: unknown[]): string[] =>
+    (responses as { type: string; frame?: PresentationFrame }[])
+      .filter((r) => r.type === "PRESENTATION")
+      .map((r) =>
+        "config" in r.frame! ? "identity"
+        : "entries" in r.frame! ? "catalog"
+        : "population" in r.frame! ? "live"
+        : "resources" in r.frame! ? "environment"
+        : "interpretation",
+      );
+
+  // World-change path: create announces the full set, in class order.
+  const created = session.handle({ type: "CREATE_UNIVERSE", config: config(FIXTURE_SEED + 1) });
+  assert.deepEqual(
+    classes(created),
+    ["identity", "catalog", "live", "environment", "interpretation"],
+    "create announces the full set in class order",
+  );
+  // First advance after create: full again, so first-paint always converges.
+  const first = session.handle({ type: "ADVANCE_TICKS", ticks: 1 });
+  assert.deepEqual(
+    classes(first),
+    ["identity", "catalog", "live", "environment", "interpretation"],
+    "the first advance after create re-announces the full set",
+  );
+  // Pure query: nothing changed, so only the live heartbeat emits.
+  const probe = session.handle({ type: "ADVANCE_TICKS", ticks: 0 });
+  assert.deepEqual(classes(probe), ["live"], "a no-change advance emits live alone");
+  assert.ok(!classes(probe).includes("catalog"), "catalog is NOT sent when membership is unchanged");
+  assert.ok(!classes(probe).includes("environment"), "environment is NOT sent inside its period");
+  assert.ok(!classes(probe).includes("interpretation"), "interpretation is NOT sent when its payload is unchanged");
+  assert.ok(!classes(probe).includes("identity"), "identity is NOT resent mid-world");
+
+  // Oracle run: over K single-tick advances every emission must match the
+  // documented rule recomputed from the live snapshot — catalog present iff
+  // the membership signature moved, environment present iff the period
+  // elapsed, interpretation present iff its payload key moved, live always.
+  const K = 2 * ENVIRONMENT_PERIOD_TICKS;
+  let lastCatalogSig = catalogMembershipSignature(buildCatalog(session.snapshot()));
+  let lastEnvTick = session.snapshot().tick;
+  let lastInterpKey = interpretationPayloadKey(
+    buildPresentation(session.snapshot()).interpretation,
+  );
+  const counts: Record<string, number> = { identity: 0, catalog: 0, live: 0, environment: 0, interpretation: 0 };
+  for (let i = 0; i < K; i++) {
+    const responses = session.handle({ type: "ADVANCE_TICKS", ticks: 1 });
+    assert.ok(!responses.some((r) => (r as { type: string }).type === "SNAPSHOT"), "no legacy snapshot rides the live path");
+    const emitted = classes(responses);
+    for (const c of emitted) counts[c]!++;
+    const snap = session.snapshot();
+    const catalogSig = catalogMembershipSignature(buildCatalog(snap));
+    const interpKey = interpretationPayloadKey(buildPresentation(snap).interpretation);
+    const expectCatalog = catalogSig !== lastCatalogSig;
+    const expectEnv = snap.tick - lastEnvTick >= ENVIRONMENT_PERIOD_TICKS;
+    const expectInterp = interpKey !== lastInterpKey;
+    assert.equal(emitted.includes("catalog"), expectCatalog, `advance ${i}: catalog iff membership changed`);
+    assert.equal(emitted.includes("environment"), expectEnv, `advance ${i}: environment iff period elapsed`);
+    assert.equal(emitted.includes("interpretation"), expectInterp, `advance ${i}: interpretation iff payload changed`);
+    assert.ok(emitted.includes("live"), `advance ${i}: live always emits`);
+    assert.ok(!emitted.includes("identity"), `advance ${i}: identity never resends mid-world`);
+    if (expectCatalog) lastCatalogSig = catalogSig;
+    if (expectEnv) lastEnvTick = snap.tick;
+    if (expectInterp) lastInterpKey = interpKey;
+  }
+  // The AC5 pin as message counts: live on every advance, each stable class
+  // suppressed at least once (the probe alone guarantees one suppression per
+  // class, so these hold regardless of engine churn).
+  const total = K + 1;
+  assert.equal(counts.live, K, "live emits on every advance of the run");
+  assert.ok(counts.catalog! < total, `catalog not sent every advance (${counts.catalog}/${total})`);
+  assert.ok(counts.environment! < total, `environment not sent every advance (${counts.environment}/${total})`);
+  assert.ok(counts.interpretation! < total, `interpretation not sent every advance (${counts.interpretation}/${total})`);
+  assert.equal(counts.identity, 0, "identity never resends mid-world");
+}
+
+/**
+ * Fix-wave: first-paint convergence under the staggered cadence. The App
+ * gate requires all five channels before first paint; the store composes
+ * whatever arrives, so the create + first-advance full sets must converge
+ * it, and later partial advances must keep it converged (slots retain).
+ */
+function testFirstPaintConvergesAndStaysConverged() {
+  const session = liveSession();
+  const store = createPresentationStore();
+  const gate = () => {
+    const v = store.getView();
+    return v.identity !== null && v.catalog !== null && v.live !== null && v.environment !== null && v.interpretation !== null;
+  };
+  const feed = (responses: unknown[]) => {
+    for (const r of responses as { type: string; frame?: PresentationFrame }[]) {
+      if (r.type === "PRESENTATION") store.apply(r.frame!);
+    }
+  };
+  feed(session.handle({ type: "ADVANCE_TICKS", ticks: 1 }));
+  assert.ok(gate(), "create + first advance converges the first-paint gate");
+  const snap = session.snapshot();
+  assert.deepEqual(store.getView().organisms, [...snap.organisms], "the converged join equals the snapshot organisms");
+  for (let i = 0; i < ENVIRONMENT_PERIOD_TICKS + 1; i++) {
+    feed(session.handle({ type: "ADVANCE_TICKS", ticks: 1 }));
+    assert.ok(gate(), `the gate stays converged through staggered advance ${i}`);
+  }
+  const later = session.snapshot();
+  assert.equal(store.getView().live?.tick, later.tick, "the live channel tracks the latest advance");
+  assert.deepEqual(store.getView().organisms, [...later.organisms], "the join stays exact through partial advances");
 }
 
 /**
  * Task 3 (F2a publisher): worker/direct parity. Frames beside a handled
  * command deep-equal a direct buildPresentation of the same world, after a
- * structured-clone round trip simulating the postMessage boundary.
+ * structured-clone round trip simulating the postMessage boundary. This
+ * exercises the first-advance full path (liveSession creates, then advances
+ * once), so the full set is present to compare.
  */
 function testWorkerFramesMatchDirectBuild() {
   const session = liveSession();
@@ -1247,15 +1379,36 @@ function testIdentityArrivalResetsCoherenceToTheNewWorld() {
 }
 
 /**
- * Task 5 (AC14): payload evidence. Live movement delivery must scale with
- * live presentation information rather than repeated serialization of all
- * retained product state.
+ * Fix-wave Task 5 (AC14): payload evidence. Live movement delivery must scale
+ * with live presentation information rather than repeated serialization of
+ * all retained product state. Measured over ALL messages actually sent per
+ * advance — the summed bytes of every emitted class, legacy snapshot vs new
+ * total — not just the live frame: with the staggered cadence the total must
+ * stay under half of the equivalent legacy snapshots on the fixture.
  */
 function testLiveDeliveryScalesWithLiveInformation() {
   // Through the worker path: every live command's responses over K advances.
   const session = liveSession();
-  let liveBytes = 0;
+  session.handle({ type: "ADVANCE_TICKS", ticks: 1 }); // first-advance full set, outside the measured window
+  let newBytes = 0;
   let legacyBytes = 0;
+  const counts: Record<string, number> = { identity: 0, catalog: 0, live: 0, environment: 0, interpretation: 0 };
+  const count = (responses: unknown[]) => {
+    for (const r of responses as { type: string; frame?: PresentationFrame }[]) {
+      if (r.type !== "PRESENTATION") continue;
+      const frame = r.frame!;
+      newBytes += Buffer.byteLength(JSON.stringify(frame));
+      if ("config" in frame) counts.identity!++;
+      else if ("entries" in frame) counts.catalog!++;
+      else if ("population" in frame) counts.live!++;
+      else if ("resources" in frame) counts.environment!++;
+      else counts.interpretation!++;
+    }
+  };
+  // A no-change probe opens the window: by construction (same snapshot, same
+  // tick) it emits live alone, so every strict inequality below holds
+  // regardless of engine churn later in the run.
+  count(session.handle({ type: "ADVANCE_TICKS", ticks: 0 }));
   const K = 10;
   for (let i = 0; i < K; i++) {
     const responses = session.handle({ type: "ADVANCE_TICKS", ticks: 1 });
@@ -1263,17 +1416,25 @@ function testLiveDeliveryScalesWithLiveInformation() {
     const presented = responses
       .filter((r) => r.type === "PRESENTATION")
       .map((r) => (r as { frame: PresentationFrame }).frame);
-    assert.equal(presented.length, 5, "each advance still delivers all five classes");
     const live = presented.find((f) => "organisms" in f && "population" in f);
     assert.ok(live, "a live frame is among the emitted frames");
-    liveBytes += Buffer.byteLength(JSON.stringify(live));
+    count(responses);
     legacyBytes += Buffer.byteLength(JSON.stringify(session.snapshot()));
   }
-  assert.ok(legacyBytes > 0 && liveBytes > 0, "both sides measured nonzero payload");
+  const total = K + 1;
+  assert.ok(legacyBytes > 0 && newBytes > 0, "both sides measured nonzero payload");
   assert.ok(
-    liveBytes < 0.5 * legacyBytes,
-    `live delivery (${liveBytes}B over ${K} ticks) stays under half of equivalent legacy snapshots (${legacyBytes}B)`,
+    newBytes < 0.5 * legacyBytes,
+    `staggered delivery (${newBytes}B over ${total} advances) stays under half of equivalent legacy snapshots (${legacyBytes}B)`,
   );
+  // The AC5 pin as message counts by class: the live heartbeat emits on every
+  // advance; no stable class does (catalog only on membership change,
+  // environment on its bounded period, interpretation only on payload change).
+  assert.equal(counts.live, total, `live emits every advance (${counts.live}/${total})`);
+  assert.ok(counts.catalog! < total, `catalog is NOT sent every advance (${counts.catalog}/${total})`);
+  assert.ok(counts.environment! < total, `environment is NOT sent every advance (${counts.environment}/${total})`);
+  assert.ok(counts.interpretation! < total, `interpretation is NOT sent every advance (${counts.interpretation}/${total})`);
+  assert.equal(counts.identity, 0, "identity never resends mid-world");
 
   // Live bytes grow with organism count...
   const snap = session.snapshot();
@@ -1347,6 +1508,8 @@ async function main() {
   testDetailRequestReturnsCurrentRetainedDetailWithoutAdvancing();
   await testDetailRequestSettlesOnItsCorrelatedReply();
   testLiveDeliveryScalesWithLiveInformation();
+  testStaggeredEmissionCadence();
+  testFirstPaintConvergesAndStaysConverged();
   testIdentityArrivalResetsCoherenceToTheNewWorld();
   testSameChannelOlderTicksAreRejected();
   testVersionMismatchIsRejected();

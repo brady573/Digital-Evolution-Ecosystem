@@ -563,16 +563,19 @@ export function App(){
   // on those frames would wipe it, repeating the PR #84 defect class.
   const knownWorldRef=useRef<WorldId|null>(null);
   useEffect(()=>{
-    // Read-model delivery only. The interpretation frame is the last of each
-    // batch, so one advance releases backpressure exactly once, with the
-    // freshest pending/aftermath state — the same atomicity the legacy
-    // per-snapshot callback had. Earlier frames only compose the store.
+    // Read-model delivery only. The live frame is the per-advance heartbeat —
+    // it emits on every advance — so one advance releases backpressure exactly
+    // once, on the freshest composed view. Status clearing and the
+    // decision-gate control flow below still live on the interpretation frame,
+    // which emits only when its bounded payload changes (staggered cadence):
+    // a suppressed interpretation must never stall the time controls.
+    // Earlier frames only compose the store.
     const unsubPresentation=runtime.subscribePresentation(frame=>{
       store.apply(frame);
       const view=store.getView();
       setPresentation(view);
+      if("organisms" in frame)advanceDebt.current=false;
       if(!("metrics" in frame))return;
-      advanceDebt.current=false;
       const transition=knownWorldRef.current!==null&&view.worldId!==knownWorldRef.current;
       knownWorldRef.current=view.worldId;
       if(!transition)setStatus("");

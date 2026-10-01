@@ -2668,14 +2668,23 @@ export type RuntimeResponse =
    *  while History reads keep their existing shape. */
   | { readonly type: "DETAIL"; readonly requestId: string; readonly snapshot: RenderSnapshot }
   /**
-   * Lane 3 F2a publisher: one read-model class beside the legacy transport.
+   * Lane 3 F2a publisher: one read-model class per message, on a staggered
+   * cadence — never a snapshot point emitting one message per class.
    *
    * ADDITIVE migration scaffolding, not a replacement: the legacy SNAPSHOT
    * responses elsewhere in this union are unchanged and still authoritative
    * for current consumers. One envelope kind for all five classes (see PresentationFrame
-   * for why); a snapshot point emits one message per class, in
-   * PresentationFrames order (identity, catalog, live, environment,
-   * interpretation).
+   * for why); emission follows the per-class lifetimes, in PresentationFrames
+   * order (identity, catalog, live, environment, interpretation) whenever more
+   * than one class emits at the same point:
+   * - identity: world-change paths (create/restore) plus the first advance
+   *   after each, so first-paint and resume always converge;
+   * - catalog: FULL on identity change, thereafter only when membership
+   *   changes (member-id signature comparison);
+   * - environment: on a bounded period (ENVIRONMENT_PERIOD_TICKS);
+   * - interpretation: only when its bounded payload differs from last
+   *   emitted, or identity changed;
+   * - live: every advance.
    */
   | { readonly type: "PRESENTATION"; readonly frame: PresentationFrame }
   | { readonly type: "ERROR"; readonly message: string; readonly requestId?: string };
@@ -2891,6 +2900,21 @@ export interface WorldEnvironmentFrame {
   readonly resources: RenderResourceField;
   readonly waste: RenderWasteField;
 }
+
+/**
+ * How often the environment frame is retransmitted on the live path, in
+ * simulation ticks since the last emitted environment frame.
+ *
+ * 5 is a presentation-staleness bound, not a biological claim: resource and
+ * waste fields evolve every tick by gradual diffusion, uptake, and decay, but
+ * the maintained World lenses and minimap quantize those fields into coarse
+ * visual bands (see apps/explorer landscape lens thresholds), so per-tick
+ * retransmission of the full grids is imperceptible. A 5-tick worst-case lag
+ * keeps environmental consequence presentation truthful while cutting
+ * environment traffic to roughly a fifth of the live cadence. The live frame
+ * still advances every tick, so motion never waits for the environment.
+ */
+export const ENVIRONMENT_PERIOD_TICKS = 5 as const;
 
 /** One bounded event reference: when it was observed and what it is called. */
 export interface WorldEventRef {

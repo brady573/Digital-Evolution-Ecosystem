@@ -334,16 +334,27 @@ function testResumeReplySettlesTheAwaitingCaller() {
   // state could not be left. A reply carrying the requestId is what makes that
   // promise resolve, so assert the wiring rather than trusting the button.
   const requestId="aftermath-req-1";
+  // The fixture above drives the session directly (no emissions yet), so the
+  // first handle() call re-announces the full set for the new world. A pure
+  // no-op advance through the boundary establishes the emission watermarks
+  // without disturbing the open impact state (advance(0) releases nothing),
+  // so the acknowledgement below exercises the steady-state staggered path.
+  session.handle({type:"ADVANCE_TICKS",ticks:0});
   const responses=session.handle({type:"ACKNOWLEDGE_AFTERMATH",requestId});
   const reply=responses.find(r=>r.type==="AFTERMATH_ACKNOWLEDGED");
   assert.ok(reply,"acknowledgement produces a request-correlated reply, not just frames");
   assert.equal((reply as any).requestId,requestId,"the reply carries the requestId the caller awaits");
   // PR #84 exactly-once lesson, Lane 3 Task 6: the announcement subscribers
   // read is the correlated reply plus the interpretation frame — never a
-  // trailing bare snapshot. Both carry the same release, so assert the pair.
+  // trailing bare snapshot. Fix-wave: under the staggered cadence the
+  // acknowledgement announces exactly the live heartbeat plus the changed
+  // interpretation (same tick, so catalog/environment stay suppressed); both
+  // carry the same release, so assert the pair.
   assert.ok(!responses.some(r=>r.type==="SNAPSHOT"),"no trailing bare snapshot rides beside the acknowledgement");
   const frames=responses.filter(r=>r.type==="PRESENTATION").map(r=>(r as any).frame);
-  assert.equal(frames.length,5,"the acknowledgement still announces all five read-model classes");
+  assert.equal(frames.length,2,"the acknowledgement announces the live heartbeat plus the changed interpretation");
+  const live=frames.find((f:any)=>"organisms" in f&&"population" in f);
+  assert.ok(live,"the live heartbeat rides the acknowledgement");
   const interp=frames.find((f:any)=>"metrics" in f);
   assert.ok(interp,"subscribers are notified through the interpretation frame");
   assert.equal(interp.aftermath?.phase,"observation","the frame announces the released aftermath");

@@ -165,7 +165,43 @@ export function buildInterpretation(snapshot: RenderSnapshot): WorldInterpretati
   };
 }
 
-/** All five read-model classes derived from one snapshot, in one pass. */
+/**
+ * Lane 3 fix-wave: staggered emission comparisons (handoff AC5, §13 freedom).
+ *
+ * Both are PURE functions over already-built frames: no session/engine
+ * access, no retained state, no mutation. The session keeps the last emitted
+ * value of each and re-emits only on difference.
+ */
+
+/**
+ * Catalog membership signature: living count plus member ids in catalog
+ * order. Catalog order follows snapshot order, which is deterministic, so
+ * string equality holds exactly when the same organisms are alive — an
+ * arrival or removal changes the string and triggers a FULL catalog resend,
+ * while births/deaths-free advances (position/energy-only motion) suppress
+ * it. A pure reorder with identical membership would also resend; that is a
+ * harmless over-emission (still the full catalog, still correct), never a
+ * missed arrival.
+ */
+export function catalogMembershipSignature(catalog: WorldEntityCatalog): string {
+  let sig = `${catalog.count}:`;
+  for (const entry of catalog.entries) sig += `${entry.id},`;
+  return sig;
+}
+
+/**
+ * Interpretation payload key: the bounded interpretation payload minus its
+ * coherence envelope. `tick` advances every tick by construction, so comparing
+ * the whole frame would re-emit every advance and defeat the cadence;
+ * `worldId`/`readModelVersion` change only on world change, which already
+ * forces a full emission through the identity path. What remains — metrics,
+ * bounded event refs, pending gate, bounded resolutions, aftermath, control
+ * summary — is exactly the payload whose change must announce.
+ */
+export function interpretationPayloadKey(interp: WorldInterpretationState): string {
+  const { tick: _tick, worldId: _world, readModelVersion: _version, ...payload } = interp;
+  return JSON.stringify(payload);
+}
 export function buildPresentation(snapshot: RenderSnapshot): PresentationFrames {
   return {
     identity: buildIdentity(snapshot),

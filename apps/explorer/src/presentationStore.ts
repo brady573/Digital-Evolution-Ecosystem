@@ -53,8 +53,15 @@ import { READ_MODEL_VERSION } from "@digital-evolution/contracts";
  * invented: that is exactly what a removal reads as, so selection lookup
  * of a departed id returns null through `organismById`.
  *
- * NO cadence-splitting here by ruling: the store consumes whatever arrives,
- * whenever it arrives, and exposes per-channel effective ticks on the view.
+ * Staggered cadence (fix-wave; the earlier "no cadence-splitting" ruling is
+ * rescinded per Owner handoff): the runtime now emits identity on world-change
+ * paths plus the first advance after each, catalog only on membership change,
+ * environment on a bounded period, interpretation only on payload change, and
+ * live every advance. The store consumes whatever arrives, whenever it
+ * arrives, exposes per-channel effective ticks on the view, and needs no
+ * change for the cadence: slots compose independently, the tick gates already
+ * tolerate absent channels, and the first-paint gate (all five slots filled)
+ * converges on the create/restore + first-advance full sets.
  */
 export interface PresentationChannelTicks {
   readonly identity: number | null;

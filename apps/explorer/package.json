@@ -15,7 +15,6 @@
     "@capacitor/share": "8.0.2",
     "@digital-evolution/contracts": "workspace:*",
     "@digital-evolution/phenotype": "workspace:*",
-    "@digital-evolution/sim-core": "workspace:*",
     "@digital-evolution/sim-runtime": "workspace:*",
     "pixi.js": "8.21.0",
     "react": "19.3.0",
