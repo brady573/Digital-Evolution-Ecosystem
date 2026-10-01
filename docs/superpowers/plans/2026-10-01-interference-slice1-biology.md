@@ -150,4 +150,26 @@
 
 ## Task 0 findings
 
-*(Appended by the Task 0 investigator before implementation begins.)*
+Test:migration (`tsx tools/validation/parity.ts`; manifest unit `migration`,
+invariant/blocking/merge-gate) proves EXACT same-version determinism: string
+equality of the full serialized state (counters, all five RNG states, resource
+stocks plus waste stock, every organism incl. tolerance/cleanup) — zero
+tolerance — on pinned seeds 821947219 / 3543950664 (balanced, 2000 ticks) and
+912367481 (harsh, 1500), checkpoints {1,251,502,1000,end}, plus RNG parity
+(0x1234abcd x 10k), clone-continuation, inspection-isolation, checkpoint and
+session parity. Decision: af9ad23 retired the legacy-vs-migrated trajectory
+gate with Owner approval (2026-09-26) because 0.22 waste biology intentionally
+breaks cross-version identity, replacing it with widened same-version coverage
+and per-pin re-pins with causal comments — no weakening. Two unconditional
+T-traits cost >= 2 extra rMut draws per child() (one mr-gate draw each, last in
+iteration order; rMove is a separate stream; founders use H01 hash, no
+stream), so rMut shifts from the second birth on and 0.22.0 replay is
+impossible by design: 0.23.0 MUST re-pin as a new versioned baseline (bump
+ENGINE_VERSION, widen parityState with the new traits + field stock, keep
+seeds/ticks, re-pin moved ticks with causal comments, add a survey artifact,
+leave legacy/ untouched). Proof the re-pin carries only the interference
+delta: migration green at full string-exactness on the widened state, a diff
+limited to expected-tick literals + new-field coverage with per-pin causes,
+and survey characterization with no retunes; run named checks PLUS pnpm
+verify. Note: manifest:199-200 still words migration as legacy-baseline
+reproduction — stale since af9ad23, update with the re-pin.
