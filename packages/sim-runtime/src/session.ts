@@ -143,6 +143,7 @@ function renderSnapshot(sim:any,analysis:EcologyObserver,control:any|null,pendin
       cladeId:sim.cladeRoot(o.l),
       speed:o.sp,sensing:o.se,metabolism:o.me,reproduction:o.rp,diet:o.di,habitat:o.ha,
       byproductUse:o.bu||0,dormancyResponse:o.dr||0,tolerance:o.to||0,cleanup:o.cu||0,
+      secretion:o.in||0,resistance:o.re||0,
     })),
     resources:{
       gridSize:sim.resources.n,
@@ -599,7 +600,12 @@ export class UniverseSession {
   }
 
   /**
-   * Restore schema 0.4 exactly. Older schemas migrate forward explicitly:
+   * Restore schema 0.5 exactly. Older schemas migrate forward explicitly:
+   * - 0.4: same simulation/analysis/control state, now historical; its
+   *   organisms carry no `in`/`re` and its resource system no inhibitor
+   *   field. A genuine 0.4 save also carries engine 0.22.0 and is refused by
+   *   the engine-version gate above before migration could read it — neither
+   *   absence is defaulted.
    * - 0.2: same simulation/analysis/control state; pending normalizes (a
    *   sourceless pending with a sourceEventId is an event decision);
    *   resolutions backfill offerTick/catalystId; pacing state restarts from

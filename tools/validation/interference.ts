@@ -609,3 +609,183 @@ testResistanceMitigatesButCosts();
 testDormancyInteraction();
 testSnapshotMeansAndOutTraits();
 console.log("interference validation (task 3): PASS");
+
+// --- Task 4: Versioning, checkpoint schema 0.5, persistence contract. ---
+
+import { ENGINE_VERSION } from "../../packages/sim-core/src/version.ts";
+import {
+  CHECKPOINT_MIGRATION_RULES,
+  CURRENT_SCHEMA,
+  SUPPORTED_SCHEMAS,
+  validateCheckpoint,
+} from "../../packages/contracts/src/index.ts";
+import {
+  CHECKPOINT_SCHEMA_VERSION as SESSION_SCHEMA_VERSION,
+  UniverseSession,
+} from "../../packages/sim-runtime/src/session.ts";
+
+function testCheckpointRoundTripWithInterference() {
+  // Version anchors first: these fail before the Task 4 bump, giving the
+  // required red run (version/schema mismatch).
+  assert.equal(ENGINE_VERSION, "0.23.0", "engine version bumped for interference persistence");
+  assert.equal(CURRENT_SCHEMA, "0.5", "current checkpoint schema is 0.5");
+  assert.ok(
+    (SUPPORTED_SCHEMAS as readonly string[]).includes("0.5"),
+    "0.5 is a supported schema",
+  );
+
+  const sim = new Simulation(config(20260501)) as any;
+  // Pin nonzero interference traits white-box (Task-3 pattern) so the
+  // round-trip has nonzero trait state to preserve.
+  sim.o[0].in = 1.0;
+  sim.o[0].re = 0.5;
+  for (let t = 0; t < 60; t++) sim.step();
+  const stockBefore = inhSum(sim);
+  assert.ok(stockBefore > 0, `field holds secreted mass before checkpoint, stock=${stockBefore}`);
+  const liveIn = (sim.o as any[]).map((o) => o.in as number);
+  assert.ok(liveIn.some((v) => v > 0), "nonzero secretion traits present before checkpoint");
+
+  const cp = JSON.parse(JSON.stringify(createSimulationCheckpoint(sim)));
+  const revived = restoreSimulationCheckpoint(cp) as any;
+  assert.ok(revived.resources.inhibitor, "checkpoint restores rs.inhibitor");
+  assert.ok(
+    Math.abs(inhSum(revived) - stockBefore) < 1e-9,
+    "restored inhibitor stock matches exactly",
+  );
+  const rInh = revived.resources.inhibitor;
+  const oInh = sim.resources.inhibitor;
+  for (const k of ["produced", "decayed", "discarded", "clampAdj"] as const) {
+    assert.equal(rInh[k], oInh[k], `restored inhibitor counter ${k} matches`);
+  }
+  // Traits restore per organism, by id.
+  const beforeById = new Map((sim.o as any[]).map((o) => [o.id, o]));
+  for (const o of revived.o as any[]) {
+    const b = beforeById.get(o.id);
+    assert.ok(b, `restored organism ${o.id} existed before`);
+    assert.equal(o.in, b.in, `organism ${o.id} secretion trait restores exactly`);
+    assert.equal(o.re, b.re, `organism ${o.id} resistance trait restores exactly`);
+  }
+  // Byte-equivalence: re-encoding the revived world yields the same bytes.
+  const cp2 = JSON.parse(JSON.stringify(createSimulationCheckpoint(revived)));
+  assert.deepStrictEqual(cp2, cp, "checkpoint round-trip is byte-equivalent");
+  // Restored accounting still closes.
+  const a = rInh.accounting();
+  assert.ok(Math.abs(a.residual as number) < 1e-4, `restored accounting closes, residual=${a.residual}`);
+  console.log("testCheckpointRoundTripWithInterference: PASS");
+}
+
+function testRestoredContinuationMatchesUninterrupted() {
+  // Restore mid-stride (T=300: stride at 251 banked, 49 ticks accumulated)
+  // then cross the next stride boundary (502) on both branches.
+  const T = 300, N = 250;
+  const a = new Simulation(config(313377)) as any;
+  for (let t = 0; t < T; t++) a.step();
+  const b = restoreSimulationCheckpoint(
+    JSON.parse(JSON.stringify(createSimulationCheckpoint(a))),
+  ) as any;
+  for (let t = 0; t < N; t++) {
+    a.step();
+    b.step();
+  }
+  assert.equal(b.t, a.t, "restored and uninterrupted worlds agree on tick");
+  assert.deepStrictEqual(b.o, a.o, "organisms identical after restore + advance");
+  assert.deepStrictEqual(
+    Array.from(b.resources.inhibitor.stock as Float32Array),
+    Array.from(a.resources.inhibitor.stock as Float32Array),
+    "inhibitor field stock identical after restore + advance",
+  );
+  assert.deepStrictEqual(
+    b.readIntervalFlows(),
+    a.readIntervalFlows(),
+    "interval flows identical after restore + advance",
+  );
+  console.log("testRestoredContinuationMatchesUninterrupted: PASS");
+}
+
+function testMatchedForkExactAtFork() {
+  const sim = new Simulation(config(777123)) as any;
+  for (let t = 0; t < 60; t++) sim.step();
+  const cpJson = (s: any) => JSON.parse(JSON.stringify(createSimulationCheckpoint(s)));
+  // Fork before any branch-specific action: byte-equivalent, including the
+  // RS.clone inhibitor branch (Task 3 coverage target).
+  const fork = sim.clone();
+  assert.deepStrictEqual(cpJson(fork), cpJson(sim), "fork checkpoint is byte-equivalent at fork time");
+  // Behavior: identical advance stays identical.
+  for (let t = 0; t < 25; t++) {
+    sim.step();
+    fork.step();
+  }
+  assert.deepStrictEqual(cpJson(fork), cpJson(sim), "fork and original advance identically");
+  assert.ok(inhSum(fork) > 0 && inhSum(sim) > 0, "both branches carry inhibitor field state");
+  console.log("testMatchedForkExactAtFork: PASS");
+}
+
+function testOldSavesRefusedExplicitly() {
+  assert.equal(SESSION_SCHEMA_VERSION, "0.5", "session writes schema 0.5");
+  const session = new UniverseSession();
+  session.create(config(424242));
+  const payload: any = JSON.parse(JSON.stringify(session.checkpoint()));
+  assert.equal(payload.checkpointSchemaVersion, "0.5", "fresh checkpoints declare 0.5");
+  assert.equal(payload.engineVersion, "0.23.0", "fresh checkpoints carry engine 0.23.0");
+
+  // Faithful 0.4 shape: schema + engine downgraded consistently, interference
+  // state absent — no 0.22.0 build ever wrote it.
+  const oldSave: any = JSON.parse(JSON.stringify(payload));
+  oldSave.checkpointSchemaVersion = "0.4";
+  oldSave.engineVersion = "0.22.0";
+  oldSave.experiment.engine_version = "0.22.0";
+  for (const o of oldSave.experiment.state.props.o) {
+    delete o.in;
+    delete o.re;
+  }
+  delete oldSave.experiment.state.props.resources.props.inhibitor;
+
+  // Scoping proof: the old shape passes *validation* (no interference
+  // requirement applies pre-0.5) and is refused by the engine-version gate.
+  validateCheckpoint(oldSave);
+  let refusal: unknown = null;
+  try {
+    new UniverseSession().restore(oldSave);
+  } catch (e) {
+    refusal = e;
+  }
+  assert.ok(refusal instanceof Error, "a 0.4/0.22.0 save is refused");
+  assert.match((refusal as Error).message, /0\.22\.0/, "refusal names the save's engine version");
+  assert.match((refusal as Error).message, /0\.23\.0/, "refusal names the running engine version");
+
+  // Same gate at the sim-core layer.
+  const scp: any = JSON.parse(
+    JSON.stringify(createSimulationCheckpoint(new Simulation(config(99)) as any)),
+  );
+  scp.engine_version = "0.22.0";
+  let coreRefusal: unknown = null;
+  try {
+    restoreSimulationCheckpoint(scp);
+  } catch (e) {
+    coreRefusal = e;
+  }
+  assert.ok(coreRefusal instanceof Error, "sim-core refuses a 0.22.0 payload");
+  assert.match((coreRefusal as Error).message, /0\.22\.0/, "core refusal names the save's engine");
+  assert.match((coreRefusal as Error).message, /0\.23\.0/, "core refusal names the running engine");
+
+  // No migration rule defaults interference state: old worlds are refused,
+  // never reinterpreted with invented traits or field mass.
+  for (const rule of CHECKPOINT_MIGRATION_RULES) {
+    const text = `${rule.id} ${rule.path}`;
+    assert.ok(
+      !/inhibitor|interference|secretion|resistance/i.test(text),
+      `${rule.id} must not default interference state`,
+    );
+    assert.ok(
+      !/\[\]\.(in|re)\b/.test(rule.path),
+      `${rule.id} must not default the interference traits`,
+    );
+  }
+  console.log("testOldSavesRefusedExplicitly: PASS");
+}
+
+testCheckpointRoundTripWithInterference();
+testRestoredContinuationMatchesUninterrupted();
+testMatchedForkExactAtFork();
+testOldSavesRefusedExplicitly();
+console.log("interference validation (task 4): PASS");
