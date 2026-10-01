@@ -36,7 +36,7 @@
     "test:niche-survey": "tsx tools/validation/niche-survey.ts",
     "test:washout-reliance": "tsx tools/validation/washout-reliance.ts",
     "test:phenotype": "tsx tools/validation/phenotype.ts && tsx tools/validation/phenotype-world.ts",
-    "test:landscape": "tsx tools/validation/landscape.ts",
+    "test:landscape": "tsx tools/validation/landscape.ts && tsx tools/validation/world-presentation.ts",
     "test:aftermath": "tsx tools/validation/aftermath.ts && tsx tools/validation/aftermath-runtime.ts",
     "test:visual": "tsx tools/validation/landscape-capture.ts",
     "test:mobile-ui": "tsx tools/validation/mobile-ui.ts",

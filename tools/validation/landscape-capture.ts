@@ -261,7 +261,7 @@ async function main(){
     // Pending decision on a phone viewport.
     const decisionShell=await context.newPage();
     await decisionShell.setViewportSize({width:390,height:844});
-    await decisionShell.goto(baseUrl,{waitUntil:"networkidle"});
+    await decisionShell.goto(`${baseUrl}?deeTest=1`,{waitUntil:"networkidle"});
     await decisionShell.getByLabel("Evolution world").waitFor();
     await decisionShell.getByRole("button",{name:"World settings"}).click();
     await decisionShell.getByLabel("World seed").fill(String(SEED));

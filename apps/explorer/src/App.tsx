@@ -11,10 +11,11 @@ import { Share } from "@capacitor/share";
 import { IndexedDbWorldRepository } from "./persistence";
 import { formatTickAge, formatYear, glossOutcome } from "./language";
 import {
-  LandscapeSmoother, fillWaste, fracArray, landscapeCell, landscapeTileLayout,
+  LandscapeSmoother, landscapeCell, landscapeTileLayout,
   microTexture, nutrientOverlayCell, wasteOverlayCell,
 } from "./landscape";
 import { cladeColor, dormantChannel, organismColor, type OrganismLens } from "./organismEncoding";
+import { projectWorldPresentation } from "./experience/worldProjection";
 import { AftermathPanel } from "./AftermathPanel";
 import { drawPhenotypeOrganism, phenotypeCache, tierForZoom } from "./phenotype";
 import { familyArtwork } from "./familyArt";
@@ -184,6 +185,7 @@ function WorldCanvas({
   // any viewport. The sim mapping stays resolution-independent; only the
   // presentation transform changes.
   const [size,setSize]=useState<[number,number]>([720,720]);
+  const presentation=useMemo(()=>projectWorldPresentation(snapshot),[snapshot]);
   useEffect(()=>{
     const canvas=ref.current,host=canvas?.parentElement;if(!canvas||!host)return;
     const ro=new ResizeObserver(entries=>{
@@ -212,7 +214,6 @@ function WorldCanvas({
     // Report the visible window (in world units) so the minimap can mark it.
     onView({w:w/s,h:h/s});
 
-    const stocks=snapshot.resources.stock,caps=snapshot.resources.capacity;
     const drawEnvironment=lens==="normal"||lens==="nutrients"||lens==="waste";
     if(drawEnvironment){
       // Analytical lenses read exact fields: no smoothing, no texture, flat
@@ -223,9 +224,7 @@ function WorldCanvas({
       // the browser's own interpolation. Large-scale structure is therefore
       // real simulation structure with smooth transitions, not cells.
       const analytical=lens!=="normal";
-      const a=new Float32Array(n*n),b=new Float32Array(n*n),c=new Float32Array(n*n),wf=new Float32Array(n*n);
-      fracArray(stocks,caps,0,a);fracArray(stocks,caps,1,b);fracArray(stocks,caps,2,c);
-      fillWaste(snapshot.waste,wf);
+      const a=presentation.nutrients.a,b=presentation.nutrients.b,c=presentation.nutrients.c,wf=presentation.waste;
       let av=a,bv=b,cv=c,wv=wf;
       if(lens==="normal"){
         // Presentation-only inertia, scoped by the universe's presentation
@@ -295,7 +294,6 @@ function WorldCanvas({
       }
     }
 
-    const traitRange=TRAIT_RANGES[traitView];
     // Lane 2 M4B: normal-lens morphology delegates to the phenotype engine.
     // Every other lens keeps the legacy voxel path exactly, so analytical
     // meaning always outranks decorative morphology. Phenotype resolutions
@@ -304,6 +302,7 @@ function WorldCanvas({
     const phenoTier=tierForZoom(zoom);
     const pheno=lens==="normal"?phenotypeCache.resolveSnapshot(snapshot):null;
     const unit=Math.max(2,s*2.2);
+    const traitRange=TRAIT_RANGES[traitView];
     for(const o of snapshot.organisms){
       const px=toX(o.x),py=toY(o.y);
       if(px<-24||py<-24||px>w+24||py>h+24)continue;
@@ -311,10 +310,8 @@ function WorldCanvas({
       // Clades and Traits always encode what they claim. Dormancy rides the
       // separate alpha/hollow channel below and never replaces the encoding.
       const color=organismColor(o as never,lens as OrganismLens,traitView,[traitRange[0],traitRange[1]]);
-      // Dormancy is its own channel (§21.2), so it never displaces the lens
-      // colour. One source of truth for alpha/hollow, asserted in validation.
       const chan=dormantChannel(o as never);
-
+      const dormant=chan.dormant;
       if(lens==="normal"&&pheno){
         // Phenotype morphology: grid shape encodes family/traits/dormancy,
         // lens color and dormancy dimming stay exactly as before.
@@ -328,7 +325,7 @@ function WorldCanvas({
       // texture is a deterministic function of organism id (stable per frame),
       // and density follows diet family. Positions are untouched, so
       // click-selection mapping is unchanged.
-      const energyClass=chan.dormant?0:(o.energy>120?2:o.energy>60?1:0);
+      const energyClass=dormant?0:(o.energy>120?2:o.energy>60?1:0);
       const span=2+energyClass;
       let hsh=Math.imul(o.id,2654435761)^0x9e3779b9;hsh^=hsh>>>15;hsh=Math.imul(hsh,0x85ebca6b)>>>0;
       ctx.fillStyle=color;ctx.strokeStyle=color;ctx.lineWidth=1;
@@ -343,7 +340,7 @@ function WorldCanvas({
         }
         if(!solid)continue;
         const bx=px+(gx-span/2)*unit,by=py+(gy-span/2)*unit;
-        if(chan.dormant)ctx.strokeRect(bx,by,unit,unit);else ctx.fillRect(bx,by,unit,unit);
+        if(dormant)ctx.strokeRect(bx,by,unit,unit);else ctx.fillRect(bx,by,unit,unit);
       }
       ctx.globalAlpha=1;
       }
