@@ -1,6 +1,7 @@
 import type {
   EngineConfig,
   EvidenceExport,
+  PresentationFrame,
   RenderSnapshot,
   RuntimeCommand,
   RuntimeResponse,
@@ -45,6 +46,12 @@ export interface TerminalFailure {
 export interface RuntimeClient {
   onTerminal(listener: (failure: TerminalFailure) => void): () => void;
   subscribe(listener: (snapshot: RenderSnapshot) => void): () => void;
+  /**
+   * Lane 3 F2a publisher: read-model frame delivery beside the legacy
+   * transport. PRESENTATION traffic routes here; the legacy subscribe path is
+   * byte-identical and neither direction leaks into the other.
+   */
+  subscribePresentation(listener: (frame: PresentationFrame) => void): () => void;
   loadCheckpoint(checkpoint: SupportedUniverseCheckpoint): Promise<RenderSnapshot>;
   requestCheckpoint(): Promise<UniverseCheckpoint>;
   requestExport(): Promise<EvidenceExport>;
@@ -80,6 +87,10 @@ export function createWorkerTransport():WorkerLike{
 export class WorkerRuntimeClient implements RuntimeClient {
   #worker:Worker;
   #listeners=new Set<(snapshot:RenderSnapshot)=>void>();
+  /** Lane 3 F2a: presentation-frame subscribers. Apart from snapshot
+   *  subscribers so the fatal path can drop both: a dead worker can never
+   *  deliver another frame either. */
+  #presentationListeners=new Set<(frame:PresentationFrame)=>void>();
   /** Test/diagnostic seam: how many request ids the pending map still holds.
    *  AC5 is a claim about retained state, so it must be observable rather than
    *  inferred from "nothing crashed". */
@@ -145,6 +156,7 @@ export class WorkerRuntimeClient implements RuntimeClient {
     this.#pending.clear();
     this.#failPendingLoad(reason);
     this.#listeners.clear();
+    this.#presentationListeners.clear();
     if(signal&&!this.#terminalFired){
       this.#terminalFired=true;
       this.#terminal={kind:"worker-error",detail:reason.message};
@@ -219,6 +231,14 @@ export class WorkerRuntimeClient implements RuntimeClient {
     return()=>this.#listeners.delete(listener);
   }
 
+  subscribePresentation(listener:(frame:PresentationFrame)=>void){
+    // Same dead-client rule as subscribe: no later frame can arrive after a
+    // terminal failure, so a post-death subscription is dead on arrival.
+    if(this.#terminalFired)return()=>{};
+    this.#presentationListeners.add(listener);
+    return()=>this.#presentationListeners.delete(listener);
+  }
+
   requestCheckpoint(){
     return this.#request<UniverseCheckpoint>("REQUEST_CHECKPOINT");
   }
@@ -257,6 +277,12 @@ export class WorkerRuntimeClient implements RuntimeClient {
       // load: settling on tick equality is what let an unrelated live frame at
       // the same tick satisfy a restore.
       for(const listener of this.#listeners)listener(response.snapshot);
+      return;
+    }
+    if(response.type==="PRESENTATION"){
+      // Lane 3 F2a: read-model traffic routes only to presentation listeners.
+      // The legacy subscribe path is untouched, in both directions.
+      for(const listener of this.#presentationListeners)listener(response.frame);
       return;
     }
     if(response.type==="CHECKPOINT_LOADED"){

@@ -2655,6 +2655,17 @@ export type RuntimeResponse =
    *  proves which request completed; the carried snapshot's tick proves where
    *  the world landed. */
   | { readonly type: "CHECKPOINT_LOADED"; readonly requestId: string; readonly snapshot: RenderSnapshot }
+  /**
+   * Lane 3 F2a publisher: one read-model class beside the legacy transport.
+   *
+   * ADDITIVE migration scaffolding, not a replacement: the legacy SNAPSHOT
+   * responses elsewhere in this union are unchanged and still authoritative
+   * for current consumers. One envelope kind for all five classes (see PresentationFrame
+   * for why); a snapshot point emits one message per class, in
+   * PresentationFrames order (identity, catalog, live, environment,
+   * interpretation).
+   */
+  | { readonly type: "PRESENTATION"; readonly frame: PresentationFrame }
   | { readonly type: "ERROR"; readonly message: string; readonly requestId?: string };
 
 /* ------------------------------------------------------------------ *
@@ -2932,3 +2943,27 @@ export interface PresentationFrames {
   readonly environment: WorldEnvironmentFrame;
   readonly interpretation: WorldInterpretationState;
 }
+
+/**
+ * Lane 3 F2a publisher: any one read-model class on the wire.
+ *
+ * A single envelope kind (`PRESENTATION`, below) carries this union, and the
+ * class is distinguished by the frame payload shape — not by a second message
+ * type per class. That is deliberate: transport may later batch several
+ * classes per message, or split them across cadences, without changing the
+ * envelope kind or the receiver's dispatch. Receivers discriminate on the
+ * payload's distinctive key, which no other class carries:
+ *
+ * - identity: `config` · catalog: `entries` · live: `organisms`
+ * - environment: `resources` · interpretation: `metrics`
+ *
+ * Every member carries `worldId` + effective `tick` + `readModelVersion`
+ * (§7 coherence identity), so a consumer can reject cross-world or
+ * stale-version composition without trusting transport order.
+ */
+export type PresentationFrame =
+  | WorldPresentationIdentity
+  | WorldEntityCatalog
+  | WorldLiveFrame
+  | WorldEnvironmentFrame
+  | WorldInterpretationState;

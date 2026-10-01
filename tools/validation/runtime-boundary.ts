@@ -13,7 +13,8 @@
  * Run: pnpm test:runtime-boundary
  */
 import assert from "node:assert/strict";
-import type { EngineConfig, RenderSnapshot } from "@digital-evolution/contracts";
+import type { EngineConfig, PresentationFrame, RenderSnapshot } from "@digital-evolution/contracts";
+import { READ_MODEL_VERSION } from "@digital-evolution/contracts";
 import * as runtimeRoot from "@digital-evolution/sim-runtime";
 import { UniverseSession } from "../../packages/sim-runtime/src/session.ts";
 import { buildCatalog, buildPresentation, resolveCatalogEntry } from "../../packages/sim-runtime/src/presentation.ts";
@@ -905,7 +906,7 @@ function testProductionSurfaceHasNoGenericCommand() {
   const fake = new FakeWorker();
   const client = new WorkerRuntimeClient(() => fake);
   assert.equal("command" in client, false, "no generic raw command escape hatch on the production surface");
-  for (const op of ["create", "advance", "runToNextEvent", "intervene", "createControlFork", "resolveEventDecision", "acknowledgeAftermath", "loadCheckpoint", "requestCheckpoint", "requestExport", "subscribe", "destroy", "onTerminal"] as const) {
+  for (const op of ["create", "advance", "runToNextEvent", "intervene", "createControlFork", "resolveEventDecision", "acknowledgeAftermath", "loadCheckpoint", "requestCheckpoint", "requestExport", "subscribe", "subscribePresentation", "destroy", "onTerminal"] as const) {
     assert.equal(typeof (client as unknown as Record<string, unknown>)[op], "function", `${op} remains an explicit typed product operation`);
   }
 }
@@ -987,7 +988,136 @@ async function testPackageRootExposesNoMutableSessionAuthority() {
   assert.equal(typeof runtimeRoot.WorkerRuntimeClient, "function", "WorkerRuntimeClient remains the production entry");
 }
 
+/**
+ * Task 3 (F2a publisher): live frames arrive beside the legacy transport with
+ * no legacy payload inside them. Driven through UniverseSession.handle — the
+ * point every RuntimeCommand passes through — so this proves emission, not
+ * just derivation.
+ */
+function testLiveFramesArriveWithoutLegacyPayload() {
+  const session = liveSession();
+  const responses = session.handle({ type: "ADVANCE_TICKS", ticks: 1 });
+  const legacy = responses.filter((r) => r.type === "SNAPSHOT");
+  assert.equal(legacy.length, 1, "the legacy SNAPSHOT still flows exactly once");
+  const frames = responses
+    .filter((r) => r.type === "PRESENTATION")
+    .map((r) => (r as { frame: PresentationFrame }).frame);
+  assert.equal(frames.length, 5, "all five read-model classes emit at each snapshot point");
+  const snapshot = (legacy[0] as { snapshot: RenderSnapshot }).snapshot;
+  for (const frame of frames) {
+    assert.equal(frame.worldId, snapshot.worldId, "every frame carries the snapshot worldId");
+    assert.equal(frame.tick, snapshot.tick, "every frame carries the snapshot effective tick");
+    assert.equal(frame.readModelVersion, READ_MODEL_VERSION, "every frame carries the read-model version");
+  }
+  const live = frames.find((f) => "organisms" in f && "population" in f);
+  assert.ok(live, "a live frame is among the emitted frames");
+  for (const banned of ["config", "analysis", "events", "resolvedDecisions", "aftermath", "pendingDecision", "seed", "metrics"]) {
+    assert.ok(!(banned in (live as object)), `live frame carries no ${banned}`);
+  }
+}
+
+/**
+ * Task 3 (F2a publisher): the legacy snapshot beside frames is byte-identical
+ * to a direct snapshot, and stays first — frame emission is purely additive.
+ */
+function testLegacySnapshotIsByteIdenticalBesideFrames() {
+  const session = liveSession();
+  const responses = session.handle({ type: "ADVANCE_TICKS", ticks: 2 });
+  const emitted = responses.find((r) => r.type === "SNAPSHOT") as { snapshot: RenderSnapshot };
+  assert.ok(emitted, "a legacy SNAPSHOT is emitted");
+  assert.equal(responses[0]!.type, "SNAPSHOT", "legacy stays first; frames are additive after it");
+  assert.equal(
+    JSON.stringify(emitted.snapshot),
+    JSON.stringify(session.snapshot()),
+    "the legacy snapshot beside frames serializes exactly like a direct snapshot",
+  );
+}
+
+/**
+ * Task 3 (F2a publisher): worker/direct parity. Frames beside a handled
+ * command deep-equal a direct buildPresentation of the same world, after a
+ * structured-clone round trip simulating the postMessage boundary.
+ */
+function testWorkerFramesMatchDirectBuild() {
+  const session = liveSession();
+  const responses = session.handle({ type: "ADVANCE_TICKS", ticks: 3 });
+  const wire = responses
+    .filter((r) => r.type === "PRESENTATION")
+    .map((r) => structuredClone((r as { frame: PresentationFrame }).frame));
+  const direct = structuredClone(buildPresentation(session.snapshot()));
+  assert.deepEqual(
+    wire,
+    [direct.identity, direct.catalog, direct.live, direct.environment, direct.interpretation],
+    "worker-round-tripped frames equal a direct build of the same world, in class order",
+  );
+}
+
+/**
+ * Task 3 (F2a publisher): coherence identity at the routing boundary (handoff
+ * §7; full supersede rejection is Task 5). The client tags nothing and strips
+ * nothing: each routed frame reaches subscribePresentation with its own
+ * worldId+tick+version envelope intact, so a later consumer can reject
+ * cross-world composition.
+ */
+async function testRoutedFramesKeepTheirCoherenceEnvelope() {
+  const fake = new FakeWorker();
+  const client = new WorkerRuntimeClient(() => fake);
+  const seen: PresentationFrame[] = [];
+  client.subscribePresentation((f) => seen.push(f));
+  // Two worlds: frames from each must stay distinguishable by envelope alone.
+  const first = liveSession();
+  const second = liveSession();
+  assert.notEqual(first.worldId, second.worldId, "the fixture holds two distinct worlds");
+  for (const session of [first, second]) {
+    const frames = buildPresentation(session.snapshot());
+    for (const frame of [frames.identity, frames.catalog, frames.live, frames.environment, frames.interpretation]) {
+      fake.deliver({ type: "PRESENTATION", frame });
+    }
+  }
+  await tick();
+  assert.equal(seen.length, 10, "frames from both worlds route to presentation listeners");
+  for (const frame of seen) {
+    assert.ok(frame.worldId !== undefined, "every routed frame exposes its worldId");
+    assert.equal(typeof frame.tick, "number", "every routed frame exposes its effective tick");
+    assert.equal(frame.readModelVersion, READ_MODEL_VERSION, "every routed frame exposes its read-model version");
+  }
+  const worlds = new Set(seen.map((f) => f.worldId as unknown as number));
+  assert.equal(worlds.size, 2, "the two worlds stay distinguishable by envelope");
+}
+
+/**
+ * Task 3 (F2a publisher): presentation routing is isolated from the legacy
+ * path in both directions — PRESENTATION never touches subscribe, SNAPSHOT
+ * never touches subscribePresentation.
+ */
+async function testPresentationRoutingIsIsolatedFromLegacy() {
+  const fake = new FakeWorker();
+  const client = new WorkerRuntimeClient(() => fake);
+  const seen: PresentationFrame[] = [];
+  const legacyTicks: number[] = [];
+  client.subscribePresentation((f) => seen.push(f));
+  client.subscribe((s) => legacyTicks.push(s.tick));
+  const session = liveSession();
+  const snapshot = session.snapshot();
+  const frames = buildPresentation(snapshot);
+  for (const frame of [frames.identity, frames.catalog, frames.live, frames.environment, frames.interpretation]) {
+    fake.deliver({ type: "PRESENTATION", frame });
+  }
+  await tick();
+  assert.equal(seen.length, 5, "all five classes route to presentation listeners");
+  assert.deepEqual(legacyTicks, [], "presentation traffic never touches legacy subscribers");
+  fake.deliver({ type: "SNAPSHOT", snapshot });
+  await tick();
+  assert.deepEqual(legacyTicks, [snapshot.tick], "legacy SNAPSHOT still reaches legacy subscribers");
+  assert.equal(seen.length, 5, "legacy traffic never touches presentation listeners");
+}
+
 async function main() {
+  await testPresentationRoutingIsIsolatedFromLegacy();
+  await testRoutedFramesKeepTheirCoherenceEnvelope();
+  testWorkerFramesMatchDirectBuild();
+  testLegacySnapshotIsByteIdenticalBesideFrames();
+  testLiveFramesArriveWithoutLegacyPayload();
   await testPackageRootExposesNoMutableSessionAuthority();
   testLiveFrameExcludesNonLivePayloads();
   testRemovedEntitiesResolveToNothing();

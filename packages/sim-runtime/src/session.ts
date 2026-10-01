@@ -10,6 +10,7 @@ import type {
   EvidenceExport,
   InterventionSpec,
   PendingDecision,
+  PresentationFrame,
   RenderSnapshot,
   RuntimeCommand,
   RuntimeResponse,
@@ -53,6 +54,7 @@ import {
   selectCatalystWindow,
 } from "@digital-evolution/sim-decisions";
 import { readInjectedSource, resolveSourceProvenance } from "./provenance";
+import { buildPresentation } from "./presentation";
 import { validateRuntimeCommand } from "./command-validation";
 
 /**
@@ -184,6 +186,41 @@ const canonicalizationContext = (): CanonicalizationContext => {
     },
   };
 };
+
+/**
+ * Lane 3 migration: compat — legacy SNAPSHOT still authoritative for current consumers.
+ *
+ * Every snapshot the session emits goes out beside its five read-model frames,
+ * in PresentationFrames order (identity, catalog, live, environment,
+ * interpretation), with no cadence-splitting in this task: identical behavior
+ * first, splitting is a later optimization. The legacy responses are
+ * byte-identical and stay first; frame emission is purely additive.
+ *
+ * Dedupe is by snapshot identity: a correlated reply and its trailing bare
+ * SNAPSHOT carry the same object, and one frame set describes both. Frames
+ * are derived from the same snapshot object the legacy response carries, so
+ * worker-round-tripped frames equal a direct buildPresentation of that world.
+ */
+function withPresentationFrames(responses: RuntimeResponse[]): RuntimeResponse[] {
+  const out: RuntimeResponse[] = [];
+  const framed = new Set<RenderSnapshot>();
+  for (const response of responses) {
+    out.push(response);
+    const snapshot = (response as { readonly snapshot?: RenderSnapshot }).snapshot;
+    if (snapshot === undefined || framed.has(snapshot)) continue;
+    framed.add(snapshot);
+    const frames = buildPresentation(snapshot);
+    const classes: readonly PresentationFrame[] = [
+      frames.identity,
+      frames.catalog,
+      frames.live,
+      frames.environment,
+      frames.interpretation,
+    ];
+    for (const frame of classes) out.push({ type: "PRESENTATION", frame });
+  }
+  return out;
+}
 
 export class UniverseSession {
   #experiment:any|null=null;
@@ -739,27 +776,27 @@ export class UniverseSession {
         // grants no authority and advances nothing.
         const echoed=this.#currentOrNull();
         return echoed
-          ?[{type:"ERROR",message:validation.message},{type:"SNAPSHOT",snapshot:echoed}]
+          ?withPresentationFrames([{type:"ERROR",message:validation.message},{type:"SNAPSHOT",snapshot:echoed}])
           :[{type:"ERROR",message:validation.message}];
       }
       command=validation.command;
       switch(command.type){
-        case "CREATE_UNIVERSE":return[{type:"SNAPSHOT",snapshot:this.create(command.config)}];
-        case "ADVANCE_TICKS":return[{type:"SNAPSHOT",snapshot:this.advance(command.ticks)}];
-        case "RUN_TO_NEXT_EVENT":return[{type:"SNAPSHOT",snapshot:this.runToNextEvent(command.maxTicks)}];
-        case "CREATE_CONTROL_FORK":return[{type:"SNAPSHOT",snapshot:this.createControlFork()}];
-        case "APPLY_INTERVENTION":return[{type:"SNAPSHOT",snapshot:this.intervene(command.intervention)}];
+        case "CREATE_UNIVERSE":return withPresentationFrames([{type:"SNAPSHOT",snapshot:this.create(command.config)}]);
+        case "ADVANCE_TICKS":return withPresentationFrames([{type:"SNAPSHOT",snapshot:this.advance(command.ticks)}]);
+        case "RUN_TO_NEXT_EVENT":return withPresentationFrames([{type:"SNAPSHOT",snapshot:this.runToNextEvent(command.maxTicks)}]);
+        case "CREATE_CONTROL_FORK":return withPresentationFrames([{type:"SNAPSHOT",snapshot:this.createControlFork()}]);
+        case "APPLY_INTERVENTION":return withPresentationFrames([{type:"SNAPSHOT",snapshot:this.intervene(command.intervention)}]);
         case "RESOLVE_EVENT_DECISION":{
           const snapshot=this.resolveEventDecision(command.opportunityId,command.choiceId);
-          return command.requestId
+          return withPresentationFrames(command.requestId
             ?[{type:"DECISION_RESOLVED",requestId:command.requestId,snapshot},{type:"SNAPSHOT",snapshot}]
-            :[{type:"SNAPSHOT",snapshot}];
+            :[{type:"SNAPSHOT",snapshot}]);
         }
         case "ACKNOWLEDGE_AFTERMATH":{
           const snapshot=this.acknowledgeAftermath();
-          return command.requestId
+          return withPresentationFrames(command.requestId
             ?[{type:"AFTERMATH_ACKNOWLEDGED",requestId:command.requestId,snapshot},{type:"SNAPSHOT",snapshot}]
-            :[{type:"SNAPSHOT",snapshot}];
+            :[{type:"SNAPSHOT",snapshot}]);
         }
         case "LOAD_CHECKPOINT":{
           // restore() is unchanged: A3.3 preflight then A3.4 canonical
@@ -774,7 +811,7 @@ export class UniverseSession {
           // snapshot, wiping "Checkpoint restored". The client notifies
           // subscribers from this one correlated reply instead.
           const snapshot=this.restore(command.checkpoint);
-          return[{type:"CHECKPOINT_LOADED",requestId:command.requestId,snapshot}];
+          return withPresentationFrames([{type:"CHECKPOINT_LOADED",requestId:command.requestId,snapshot}]);
         }
         case "REQUEST_CHECKPOINT":return[{type:"CHECKPOINT",requestId:command.requestId,checkpoint:this.checkpoint()}];
         case "REQUEST_EXPORT":return[{type:"EXPORT",requestId:command.requestId,data:this.exportEvidence()}];
