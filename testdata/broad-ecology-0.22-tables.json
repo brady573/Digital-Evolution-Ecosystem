@@ -1,0 +1,1617 @@
+{
+  "meta": {
+    "generator": "tools/validation/broad-ecology-022-summary.ts",
+    "in": "testdata/broad-ecology-0.22.json",
+    "engine": "0.22.0",
+    "currentEngine": "0.22.0",
+    "engineMatch": true,
+    "horizon": 250000,
+    "sampleStride": 5000,
+    "horizonJustification": "Matches the ecology-survey standard horizon; exceeds the niche-survey 150k establishment window and the washout 60k-settle/120k-extended windows; covers the ~63k establishment timescale noted in landscape-capture with headroom for persistence/turnover/recovery.",
+    "runCount": 32,
+    "disturbanceCount": 16
+  },
+  "matrix": {
+    "archetypes": [
+      "balanced",
+      "patchwork",
+      "harsh",
+      "abundant"
+    ],
+    "seeds": [
+      24681357,
+      821947219,
+      3543950664,
+      111111111,
+      222222222,
+      333333333,
+      444444444,
+      555555555
+    ],
+    "horizon": 250000,
+    "sampleStride": 5000,
+    "presets": {
+      "balanced": {
+        "rich": 0.6,
+        "patch": 0.6,
+        "resdiv": 1,
+        "pop": 30,
+        "div": 0.35,
+        "mr": 0.03,
+        "press": 0.45
+      },
+      "patchwork": {
+        "rich": 0.68,
+        "patch": 0.9,
+        "resdiv": 1,
+        "pop": 34,
+        "div": 0.45,
+        "mr": 0.03,
+        "press": 0.42
+      },
+      "harsh": {
+        "rich": 0.38,
+        "patch": 0.55,
+        "resdiv": 0.8,
+        "pop": 30,
+        "div": 0.35,
+        "mr": 0.04,
+        "press": 0.78
+      },
+      "abundant": {
+        "rich": 3.2,
+        "patch": 0.6,
+        "resdiv": 1,
+        "pop": 30,
+        "div": 0.35,
+        "mr": 0.03,
+        "press": 0.45
+      }
+    },
+    "disturbanceSeeds": [
+      24681357,
+      821947219,
+      3543950664,
+      111111111
+    ],
+    "forkTick": 60000,
+    "immediateTick": 61000,
+    "lateTick": 90000
+  },
+  "runs": [
+    {
+      "archetype": "balanced",
+      "seed": 24681357,
+      "tick": 250000,
+      "population": 387,
+      "extinct": false,
+      "extinctTick": null,
+      "outcome": "Persistent dual-niche partitioning",
+      "labels": {
+        "resources_waste": "depletion",
+        "dormancy": "established-with-return",
+        "crossfeeding": "in-use",
+        "niche": "no-modification"
+      },
+      "clades": {
+        "everActiveMax": 29,
+        "finalActive": 26,
+        "replacementsObserved": "not-observed",
+        "collapseObserved": true,
+        "recoveryObserved": true
+      },
+      "samplesRetained": 50,
+      "engine": "0.22.0"
+    },
+    {
+      "archetype": "balanced",
+      "seed": 821947219,
+      "tick": 250000,
+      "population": 363,
+      "extinct": false,
+      "extinctTick": null,
+      "outcome": "Discordant resource use",
+      "labels": {
+        "resources_waste": "depletion",
+        "dormancy": "established-no-return-observed",
+        "crossfeeding": "in-use",
+        "niche": "no-modification"
+      },
+      "clades": {
+        "everActiveMax": 29,
+        "finalActive": 27,
+        "replacementsObserved": "not-observed",
+        "collapseObserved": false,
+        "recoveryObserved": false
+      },
+      "samplesRetained": 50,
+      "engine": "0.22.0"
+    },
+    {
+      "archetype": "balanced",
+      "seed": 3543950664,
+      "tick": 250000,
+      "population": 381,
+      "extinct": false,
+      "extinctTick": null,
+      "outcome": "Persistent dual-niche partitioning",
+      "labels": {
+        "resources_waste": "depletion",
+        "dormancy": "established-no-return-observed",
+        "crossfeeding": "in-use",
+        "niche": "no-modification"
+      },
+      "clades": {
+        "everActiveMax": 30,
+        "finalActive": 23,
+        "replacementsObserved": "not-observed",
+        "collapseObserved": false,
+        "recoveryObserved": false
+      },
+      "samplesRetained": 50,
+      "engine": "0.22.0"
+    },
+    {
+      "archetype": "balanced",
+      "seed": 111111111,
+      "tick": 250000,
+      "population": 350,
+      "extinct": false,
+      "extinctTick": null,
+      "outcome": "Discordant resource use",
+      "labels": {
+        "resources_waste": "depletion",
+        "dormancy": "established-with-return",
+        "crossfeeding": "in-use",
+        "niche": "no-modification"
+      },
+      "clades": {
+        "everActiveMax": 29,
+        "finalActive": 19,
+        "replacementsObserved": "not-observed",
+        "collapseObserved": false,
+        "recoveryObserved": false
+      },
+      "samplesRetained": 50,
+      "engine": "0.22.0"
+    },
+    {
+      "archetype": "balanced",
+      "seed": 222222222,
+      "tick": 250000,
+      "population": 356,
+      "extinct": false,
+      "extinctTick": null,
+      "outcome": "Persistent dual-niche partitioning",
+      "labels": {
+        "resources_waste": "depletion",
+        "dormancy": "established-no-return-observed",
+        "crossfeeding": "in-use",
+        "niche": "no-modification"
+      },
+      "clades": {
+        "everActiveMax": 28,
+        "finalActive": 23,
+        "replacementsObserved": "not-observed",
+        "collapseObserved": false,
+        "recoveryObserved": false
+      },
+      "samplesRetained": 50,
+      "engine": "0.22.0"
+    },
+    {
+      "archetype": "balanced",
+      "seed": 333333333,
+      "tick": 250000,
+      "population": 394,
+      "extinct": false,
+      "extinctTick": null,
+      "outcome": "Persistent dual-niche partitioning",
+      "labels": {
+        "resources_waste": "depletion",
+        "dormancy": "established-with-return",
+        "crossfeeding": "in-use",
+        "niche": "no-modification"
+      },
+      "clades": {
+        "everActiveMax": 30,
+        "finalActive": 21,
+        "replacementsObserved": false,
+        "collapseObserved": false,
+        "recoveryObserved": false
+      },
+      "samplesRetained": 50,
+      "engine": "0.22.0"
+    },
+    {
+      "archetype": "balanced",
+      "seed": 444444444,
+      "tick": 250000,
+      "population": 384,
+      "extinct": false,
+      "extinctTick": null,
+      "outcome": "Persistent dual-niche partitioning",
+      "labels": {
+        "resources_waste": "depletion",
+        "dormancy": "established-no-return-observed",
+        "crossfeeding": "in-use",
+        "niche": "no-modification"
+      },
+      "clades": {
+        "everActiveMax": 29,
+        "finalActive": 25,
+        "replacementsObserved": "not-observed",
+        "collapseObserved": false,
+        "recoveryObserved": false
+      },
+      "samplesRetained": 50,
+      "engine": "0.22.0"
+    },
+    {
+      "archetype": "balanced",
+      "seed": 555555555,
+      "tick": 250000,
+      "population": 365,
+      "extinct": false,
+      "extinctTick": null,
+      "outcome": "Discordant resource use",
+      "labels": {
+        "resources_waste": "depletion",
+        "dormancy": "established-no-return-observed",
+        "crossfeeding": "in-use",
+        "niche": "no-modification"
+      },
+      "clades": {
+        "everActiveMax": 29,
+        "finalActive": 21,
+        "replacementsObserved": "not-observed",
+        "collapseObserved": false,
+        "recoveryObserved": false
+      },
+      "samplesRetained": 50,
+      "engine": "0.22.0"
+    },
+    {
+      "archetype": "patchwork",
+      "seed": 24681357,
+      "tick": 250000,
+      "population": 417,
+      "extinct": false,
+      "extinctTick": null,
+      "outcome": "Discordant resource use",
+      "labels": {
+        "resources_waste": "transient-spike",
+        "dormancy": "established-with-return",
+        "crossfeeding": "in-use",
+        "niche": "established"
+      },
+      "clades": {
+        "everActiveMax": 31,
+        "finalActive": 26,
+        "replacementsObserved": false,
+        "collapseObserved": true,
+        "recoveryObserved": true
+      },
+      "samplesRetained": 50,
+      "engine": "0.22.0"
+    },
+    {
+      "archetype": "patchwork",
+      "seed": 821947219,
+      "tick": 250000,
+      "population": 450,
+      "extinct": false,
+      "extinctTick": null,
+      "outcome": "Persistent dual-niche partitioning",
+      "labels": {
+        "resources_waste": "flat/absent",
+        "dormancy": "established-no-return-observed",
+        "crossfeeding": "in-use",
+        "niche": "no-modification"
+      },
+      "clades": {
+        "everActiveMax": 35,
+        "finalActive": 25,
+        "replacementsObserved": "not-observed",
+        "collapseObserved": false,
+        "recoveryObserved": false
+      },
+      "samplesRetained": 50,
+      "engine": "0.22.0"
+    },
+    {
+      "archetype": "patchwork",
+      "seed": 3543950664,
+      "tick": 250000,
+      "population": 514,
+      "extinct": false,
+      "extinctTick": null,
+      "outcome": "Discordant resource use",
+      "labels": {
+        "resources_waste": "depletion",
+        "dormancy": "established-no-return-observed",
+        "crossfeeding": "in-use",
+        "niche": "no-modification"
+      },
+      "clades": {
+        "everActiveMax": 40,
+        "finalActive": 34,
+        "replacementsObserved": "not-observed",
+        "collapseObserved": true,
+        "recoveryObserved": true
+      },
+      "samplesRetained": 50,
+      "engine": "0.22.0"
+    },
+    {
+      "archetype": "patchwork",
+      "seed": 111111111,
+      "tick": 250000,
+      "population": 451,
+      "extinct": false,
+      "extinctTick": null,
+      "outcome": "Discordant resource use",
+      "labels": {
+        "resources_waste": "depletion",
+        "dormancy": "established-no-return-observed",
+        "crossfeeding": "in-use",
+        "niche": "no-modification"
+      },
+      "clades": {
+        "everActiveMax": 34,
+        "finalActive": 26,
+        "replacementsObserved": false,
+        "collapseObserved": false,
+        "recoveryObserved": false
+      },
+      "samplesRetained": 50,
+      "engine": "0.22.0"
+    },
+    {
+      "archetype": "patchwork",
+      "seed": 222222222,
+      "tick": 250000,
+      "population": 471,
+      "extinct": false,
+      "extinctTick": null,
+      "outcome": "Discordant resource use",
+      "labels": {
+        "resources_waste": "depletion",
+        "dormancy": "established-with-return",
+        "crossfeeding": "in-use",
+        "niche": "no-modification"
+      },
+      "clades": {
+        "everActiveMax": 36,
+        "finalActive": 24,
+        "replacementsObserved": "not-observed",
+        "collapseObserved": false,
+        "recoveryObserved": false
+      },
+      "samplesRetained": 50,
+      "engine": "0.22.0"
+    },
+    {
+      "archetype": "patchwork",
+      "seed": 333333333,
+      "tick": 250000,
+      "population": 461,
+      "extinct": false,
+      "extinctTick": null,
+      "outcome": "Persistent dual-niche partitioning",
+      "labels": {
+        "resources_waste": "flat/absent",
+        "dormancy": "established-no-return-observed",
+        "crossfeeding": "capability-only",
+        "niche": "no-modification"
+      },
+      "clades": {
+        "everActiveMax": 35,
+        "finalActive": 30,
+        "replacementsObserved": "not-observed",
+        "collapseObserved": false,
+        "recoveryObserved": false
+      },
+      "samplesRetained": 50,
+      "engine": "0.22.0"
+    },
+    {
+      "archetype": "patchwork",
+      "seed": 444444444,
+      "tick": 250000,
+      "population": 470,
+      "extinct": false,
+      "extinctTick": null,
+      "outcome": "Persistent dual-niche partitioning",
+      "labels": {
+        "resources_waste": "flat/absent",
+        "dormancy": "established-no-return-observed",
+        "crossfeeding": "in-use",
+        "niche": "no-modification"
+      },
+      "clades": {
+        "everActiveMax": 36,
+        "finalActive": 31,
+        "replacementsObserved": "not-observed",
+        "collapseObserved": true,
+        "recoveryObserved": true
+      },
+      "samplesRetained": 50,
+      "engine": "0.22.0"
+    },
+    {
+      "archetype": "patchwork",
+      "seed": 555555555,
+      "tick": 250000,
+      "population": 451,
+      "extinct": false,
+      "extinctTick": null,
+      "outcome": "Transient dual-niche partitioning",
+      "labels": {
+        "resources_waste": "depletion",
+        "dormancy": "established-with-return",
+        "crossfeeding": "in-use",
+        "niche": "no-modification"
+      },
+      "clades": {
+        "everActiveMax": 34,
+        "finalActive": 33,
+        "replacementsObserved": "not-observed",
+        "collapseObserved": false,
+        "recoveryObserved": false
+      },
+      "samplesRetained": 50,
+      "engine": "0.22.0"
+    },
+    {
+      "archetype": "harsh",
+      "seed": 24681357,
+      "tick": 250000,
+      "population": 182,
+      "extinct": false,
+      "extinctTick": null,
+      "outcome": "Mixed eco-strategies",
+      "labels": {
+        "resources_waste": "depletion",
+        "dormancy": "established-with-return",
+        "crossfeeding": "in-use",
+        "niche": "no-modification"
+      },
+      "clades": {
+        "everActiveMax": 24,
+        "finalActive": 10,
+        "replacementsObserved": "not-observed",
+        "collapseObserved": false,
+        "recoveryObserved": true
+      },
+      "samplesRetained": 50,
+      "engine": "0.22.0"
+    },
+    {
+      "archetype": "harsh",
+      "seed": 821947219,
+      "tick": 250000,
+      "population": 178,
+      "extinct": false,
+      "extinctTick": null,
+      "outcome": "A-adapted dominance",
+      "labels": {
+        "resources_waste": "depletion",
+        "dormancy": "established-with-return",
+        "crossfeeding": "in-use",
+        "niche": "no-modification"
+      },
+      "clades": {
+        "everActiveMax": 16,
+        "finalActive": 12,
+        "replacementsObserved": false,
+        "collapseObserved": false,
+        "recoveryObserved": true
+      },
+      "samplesRetained": 50,
+      "engine": "0.22.0"
+    },
+    {
+      "archetype": "harsh",
+      "seed": 3543950664,
+      "tick": 250000,
+      "population": 193,
+      "extinct": false,
+      "extinctTick": null,
+      "outcome": "Persistent dual-niche partitioning",
+      "labels": {
+        "resources_waste": "depletion",
+        "dormancy": "established-with-return",
+        "crossfeeding": "in-use",
+        "niche": "no-modification"
+      },
+      "clades": {
+        "everActiveMax": 15,
+        "finalActive": 8,
+        "replacementsObserved": "not-observed",
+        "collapseObserved": false,
+        "recoveryObserved": false
+      },
+      "samplesRetained": 50,
+      "engine": "0.22.0"
+    },
+    {
+      "archetype": "harsh",
+      "seed": 111111111,
+      "tick": 250000,
+      "population": 173,
+      "extinct": false,
+      "extinctTick": null,
+      "outcome": "Discordant resource use",
+      "labels": {
+        "resources_waste": "depletion",
+        "dormancy": "established-with-return",
+        "crossfeeding": "in-use",
+        "niche": "no-modification"
+      },
+      "clades": {
+        "everActiveMax": 17,
+        "finalActive": 8,
+        "replacementsObserved": false,
+        "collapseObserved": false,
+        "recoveryObserved": true
+      },
+      "samplesRetained": 50,
+      "engine": "0.22.0"
+    },
+    {
+      "archetype": "harsh",
+      "seed": 222222222,
+      "tick": 250000,
+      "population": 161,
+      "extinct": false,
+      "extinctTick": null,
+      "outcome": "Discordant resource use",
+      "labels": {
+        "resources_waste": "depletion",
+        "dormancy": "established-with-return",
+        "crossfeeding": "in-use",
+        "niche": "no-modification"
+      },
+      "clades": {
+        "everActiveMax": 19,
+        "finalActive": 9,
+        "replacementsObserved": "not-observed",
+        "collapseObserved": false,
+        "recoveryObserved": true
+      },
+      "samplesRetained": 50,
+      "engine": "0.22.0"
+    },
+    {
+      "archetype": "harsh",
+      "seed": 333333333,
+      "tick": 250000,
+      "population": 179,
+      "extinct": false,
+      "extinctTick": null,
+      "outcome": "Discordant resource use",
+      "labels": {
+        "resources_waste": "transient-spike",
+        "dormancy": "established-with-return",
+        "crossfeeding": "in-use",
+        "niche": "exposure-without-shift"
+      },
+      "clades": {
+        "everActiveMax": 19,
+        "finalActive": 12,
+        "replacementsObserved": false,
+        "collapseObserved": false,
+        "recoveryObserved": true
+      },
+      "samplesRetained": 50,
+      "engine": "0.22.0"
+    },
+    {
+      "archetype": "harsh",
+      "seed": 444444444,
+      "tick": 250000,
+      "population": 167,
+      "extinct": false,
+      "extinctTick": null,
+      "outcome": "Persistent dual-niche partitioning",
+      "labels": {
+        "resources_waste": "depletion",
+        "dormancy": "established-with-return",
+        "crossfeeding": "in-use",
+        "niche": "no-modification"
+      },
+      "clades": {
+        "everActiveMax": 17,
+        "finalActive": 9,
+        "replacementsObserved": "not-observed",
+        "collapseObserved": false,
+        "recoveryObserved": true
+      },
+      "samplesRetained": 50,
+      "engine": "0.22.0"
+    },
+    {
+      "archetype": "harsh",
+      "seed": 555555555,
+      "tick": 250000,
+      "population": 179,
+      "extinct": false,
+      "extinctTick": null,
+      "outcome": "Discordant resource use",
+      "labels": {
+        "resources_waste": "depletion",
+        "dormancy": "established-with-return",
+        "crossfeeding": "in-use",
+        "niche": "no-modification"
+      },
+      "clades": {
+        "everActiveMax": 19,
+        "finalActive": 12,
+        "replacementsObserved": "not-observed",
+        "collapseObserved": true,
+        "recoveryObserved": true
+      },
+      "samplesRetained": 50,
+      "engine": "0.22.0"
+    },
+    {
+      "archetype": "abundant",
+      "seed": 24681357,
+      "tick": 250000,
+      "population": 4636,
+      "extinct": false,
+      "extinctTick": null,
+      "outcome": "Discordant resource use",
+      "labels": {
+        "resources_waste": "flat/absent",
+        "dormancy": "established-no-return-observed",
+        "crossfeeding": "in-use",
+        "niche": "no-modification"
+      },
+      "clades": {
+        "everActiveMax": 270,
+        "finalActive": 245,
+        "replacementsObserved": "not-observed",
+        "collapseObserved": false,
+        "recoveryObserved": false
+      },
+      "samplesRetained": 50,
+      "engine": "0.22.0"
+    },
+    {
+      "archetype": "abundant",
+      "seed": 821947219,
+      "tick": 250000,
+      "population": 4752,
+      "extinct": false,
+      "extinctTick": null,
+      "outcome": "Discordant resource use",
+      "labels": {
+        "resources_waste": "flat/absent",
+        "dormancy": "established-no-return-observed",
+        "crossfeeding": "in-use",
+        "niche": "no-modification"
+      },
+      "clades": {
+        "everActiveMax": 271,
+        "finalActive": 251,
+        "replacementsObserved": "not-observed",
+        "collapseObserved": false,
+        "recoveryObserved": false
+      },
+      "samplesRetained": 50,
+      "engine": "0.22.0"
+    },
+    {
+      "archetype": "abundant",
+      "seed": 3543950664,
+      "tick": 250000,
+      "population": 4703,
+      "extinct": false,
+      "extinctTick": null,
+      "outcome": "Discordant resource use",
+      "labels": {
+        "resources_waste": "flat/absent",
+        "dormancy": "established-no-return-observed",
+        "crossfeeding": "in-use",
+        "niche": "no-modification"
+      },
+      "clades": {
+        "everActiveMax": 283,
+        "finalActive": 260,
+        "replacementsObserved": "not-observed",
+        "collapseObserved": false,
+        "recoveryObserved": false
+      },
+      "samplesRetained": 50,
+      "engine": "0.22.0"
+    },
+    {
+      "archetype": "abundant",
+      "seed": 111111111,
+      "tick": 250000,
+      "population": 4826,
+      "extinct": false,
+      "extinctTick": null,
+      "outcome": "Discordant resource use",
+      "labels": {
+        "resources_waste": "flat/absent",
+        "dormancy": "established-no-return-observed",
+        "crossfeeding": "in-use",
+        "niche": "no-modification"
+      },
+      "clades": {
+        "everActiveMax": 276,
+        "finalActive": 251,
+        "replacementsObserved": "not-observed",
+        "collapseObserved": false,
+        "recoveryObserved": false
+      },
+      "samplesRetained": 50,
+      "engine": "0.22.0"
+    },
+    {
+      "archetype": "abundant",
+      "seed": 222222222,
+      "tick": 250000,
+      "population": 4678,
+      "extinct": false,
+      "extinctTick": null,
+      "outcome": "Discordant resource use",
+      "labels": {
+        "resources_waste": "flat/absent",
+        "dormancy": "established-no-return-observed",
+        "crossfeeding": "in-use",
+        "niche": "no-modification"
+      },
+      "clades": {
+        "everActiveMax": 261,
+        "finalActive": 249,
+        "replacementsObserved": "not-observed",
+        "collapseObserved": false,
+        "recoveryObserved": false
+      },
+      "samplesRetained": 50,
+      "engine": "0.22.0"
+    },
+    {
+      "archetype": "abundant",
+      "seed": 333333333,
+      "tick": 250000,
+      "population": 4778,
+      "extinct": false,
+      "extinctTick": null,
+      "outcome": "Discordant resource use",
+      "labels": {
+        "resources_waste": "flat/absent",
+        "dormancy": "established-no-return-observed",
+        "crossfeeding": "in-use",
+        "niche": "no-modification"
+      },
+      "clades": {
+        "everActiveMax": 283,
+        "finalActive": 257,
+        "replacementsObserved": "not-observed",
+        "collapseObserved": false,
+        "recoveryObserved": false
+      },
+      "samplesRetained": 50,
+      "engine": "0.22.0"
+    },
+    {
+      "archetype": "abundant",
+      "seed": 444444444,
+      "tick": 250000,
+      "population": 4907,
+      "extinct": false,
+      "extinctTick": null,
+      "outcome": "Discordant resource use",
+      "labels": {
+        "resources_waste": "flat/absent",
+        "dormancy": "established-no-return-observed",
+        "crossfeeding": "in-use",
+        "niche": "no-modification"
+      },
+      "clades": {
+        "everActiveMax": 271,
+        "finalActive": 255,
+        "replacementsObserved": "not-observed",
+        "collapseObserved": false,
+        "recoveryObserved": false
+      },
+      "samplesRetained": 50,
+      "engine": "0.22.0"
+    },
+    {
+      "archetype": "abundant",
+      "seed": 555555555,
+      "tick": 250000,
+      "population": 4881,
+      "extinct": false,
+      "extinctTick": null,
+      "outcome": "Discordant resource use",
+      "labels": {
+        "resources_waste": "flat/absent",
+        "dormancy": "established-no-return-observed",
+        "crossfeeding": "in-use",
+        "niche": "no-modification"
+      },
+      "clades": {
+        "everActiveMax": 274,
+        "finalActive": 271,
+        "replacementsObserved": "not-observed",
+        "collapseObserved": false,
+        "recoveryObserved": false
+      },
+      "samplesRetained": 50,
+      "engine": "0.22.0"
+    }
+  ],
+  "distributions": {
+    "terminalPopulation": {
+      "min": 161,
+      "max": 4907
+    },
+    "terminalTick": {
+      "min": 250000,
+      "max": 250000
+    },
+    "extinctCount": 0,
+    "byArchetype": {
+      "balanced": {
+        "runs": 8,
+        "extinct": 0,
+        "population": {
+          "min": 350,
+          "max": 394
+        }
+      },
+      "patchwork": {
+        "runs": 8,
+        "extinct": 0,
+        "population": {
+          "min": 417,
+          "max": 514
+        }
+      },
+      "harsh": {
+        "runs": 8,
+        "extinct": 0,
+        "population": {
+          "min": 161,
+          "max": 193
+        }
+      },
+      "abundant": {
+        "runs": 8,
+        "extinct": 0,
+        "population": {
+          "min": 4636,
+          "max": 4907
+        }
+      }
+    },
+    "labels": {
+      "resources_waste": {
+        "depletion": 19,
+        "transient-spike": 2,
+        "flat/absent": 11
+      },
+      "dormancy": {
+        "established-with-return": 14,
+        "established-no-return-observed": 18
+      },
+      "crossfeeding": {
+        "in-use": 31,
+        "capability-only": 1
+      },
+      "niche": {
+        "no-modification": 30,
+        "established": 1,
+        "exposure-without-shift": 1
+      }
+    },
+    "outcomes": {
+      "Persistent dual-niche partitioning": 10,
+      "Discordant resource use": 19,
+      "Transient dual-niche partitioning": 1,
+      "Mixed eco-strategies": 1,
+      "A-adapted dominance": 1
+    },
+    "lastSampleWasteFraction": {
+      "min": 0.0014035643062379997,
+      "max": 0.02055367518036333
+    },
+    "maxDormantFraction": {
+      "min": 0.40796920987095314,
+      "max": 0.7580645161290323
+    },
+    "cladeEverActiveMax": {
+      "min": 15,
+      "max": 283
+    },
+    "turnover": {
+      "replacements": {
+        "not-observed": 26,
+        "false": 6
+      },
+      "collapse": {
+        "true": 5,
+        "false": 27
+      },
+      "recovery": {
+        "true": 11,
+        "false": 21
+      }
+    },
+    "nicheNoResponseCount": 0
+  },
+  "negativeCases": {
+    "extinct": [],
+    "noDormancy": [],
+    "noCrossfeeding": [],
+    "noNiche": [
+      "balanced/24681357",
+      "balanced/821947219",
+      "balanced/3543950664",
+      "balanced/111111111",
+      "balanced/222222222",
+      "balanced/333333333",
+      "balanced/444444444",
+      "balanced/555555555",
+      "patchwork/821947219",
+      "patchwork/3543950664",
+      "patchwork/111111111",
+      "patchwork/222222222",
+      "patchwork/333333333",
+      "patchwork/444444444",
+      "patchwork/555555555",
+      "harsh/24681357",
+      "harsh/821947219",
+      "harsh/3543950664",
+      "harsh/111111111",
+      "harsh/222222222",
+      "harsh/444444444",
+      "harsh/555555555",
+      "abundant/24681357",
+      "abundant/821947219",
+      "abundant/3543950664",
+      "abundant/111111111",
+      "abundant/222222222",
+      "abundant/333333333",
+      "abundant/444444444",
+      "abundant/555555555"
+    ],
+    "noDivergence": [
+      "balanced/24681357",
+      "balanced/821947219",
+      "balanced/111111111",
+      "patchwork/24681357",
+      "patchwork/3543950664",
+      "patchwork/111111111",
+      "harsh/821947219",
+      "harsh/3543950664",
+      "harsh/111111111",
+      "abundant/821947219",
+      "abundant/3543950664",
+      "abundant/111111111"
+    ],
+    "stocksNotObserved": [],
+    "diverged": [
+      "balanced/3543950664",
+      "patchwork/821947219",
+      "harsh/24681357",
+      "abundant/24681357"
+    ]
+  },
+  "disturbance": [
+    {
+      "archetype": "balanced",
+      "seed": 24681357,
+      "forkTick": 60000,
+      "forkPopulation": 432,
+      "immediate": {
+        "tick": 61000,
+        "live": 345,
+        "control": 441,
+        "liveA": 172.82897008198975,
+        "controlA": 327.6891210368978
+      },
+      "late": {
+        "tick": 90000,
+        "live": 424,
+        "control": 424,
+        "liveA": 336.1190633544344,
+        "controlA": 297.695031664881,
+        "liveOutcome": "Discordant resource use",
+        "controlOutcome": "Discordant resource use"
+      },
+      "liveOutcome": "Discordant resource use",
+      "controlOutcome": "Discordant resource use",
+      "divergedRetained": false,
+      "divergedRecomputed": false,
+      "divergedCited": "no-divergence",
+      "flagAgrees": true,
+      "join": {
+        "baselineFound": true,
+        "engine": "0.22.0",
+        "configMatch": true,
+        "baselineCommandsRetained": true,
+        "assayCommandsRetained": true
+      }
+    },
+    {
+      "archetype": "balanced",
+      "seed": 821947219,
+      "forkTick": 60000,
+      "forkPopulation": 341,
+      "immediate": {
+        "tick": 61000,
+        "live": 264,
+        "control": 345,
+        "liveA": 171.81093224104467,
+        "controlA": 235.29608852859815
+      },
+      "late": {
+        "tick": 90000,
+        "live": 343,
+        "control": 325,
+        "liveA": 245.66562439283027,
+        "controlA": 240.90720942612353,
+        "liveOutcome": "Adapted generalist dominance",
+        "controlOutcome": "Discordant resource use"
+      },
+      "liveOutcome": "Adapted generalist dominance",
+      "controlOutcome": "Discordant resource use",
+      "divergedRetained": false,
+      "divergedRecomputed": false,
+      "divergedCited": "no-divergence",
+      "flagAgrees": true,
+      "join": {
+        "baselineFound": true,
+        "engine": "0.22.0",
+        "configMatch": true,
+        "baselineCommandsRetained": true,
+        "assayCommandsRetained": true
+      }
+    },
+    {
+      "archetype": "balanced",
+      "seed": 3543950664,
+      "forkTick": 60000,
+      "forkPopulation": 421,
+      "immediate": {
+        "tick": 61000,
+        "live": 335,
+        "control": 422,
+        "liveA": 167.89672353133193,
+        "controlA": 269.5694021385741
+      },
+      "late": {
+        "tick": 90000,
+        "live": 427,
+        "control": 414,
+        "liveA": 243.5592608525231,
+        "controlA": 256.02680322446844,
+        "liveOutcome": "Discordant resource use",
+        "controlOutcome": "Discordant resource use"
+      },
+      "liveOutcome": "Discordant resource use",
+      "controlOutcome": "Discordant resource use",
+      "divergedRetained": true,
+      "divergedRecomputed": true,
+      "divergedCited": "diverged",
+      "flagAgrees": true,
+      "join": {
+        "baselineFound": true,
+        "engine": "0.22.0",
+        "configMatch": true,
+        "baselineCommandsRetained": true,
+        "assayCommandsRetained": true
+      }
+    },
+    {
+      "archetype": "balanced",
+      "seed": 111111111,
+      "forkTick": 60000,
+      "forkPopulation": 359,
+      "immediate": {
+        "tick": 61000,
+        "live": 280,
+        "control": 345,
+        "liveA": 122.74792856137819,
+        "controlA": 295.6225389041223
+      },
+      "late": {
+        "tick": 90000,
+        "live": 307,
+        "control": 314,
+        "liveA": 280.2494409019739,
+        "controlA": 262.85100027204857,
+        "liveOutcome": "Discordant resource use",
+        "controlOutcome": "Discordant resource use"
+      },
+      "liveOutcome": "Discordant resource use",
+      "controlOutcome": "Discordant resource use",
+      "divergedRetained": false,
+      "divergedRecomputed": false,
+      "divergedCited": "no-divergence",
+      "flagAgrees": true,
+      "join": {
+        "baselineFound": true,
+        "engine": "0.22.0",
+        "configMatch": true,
+        "baselineCommandsRetained": true,
+        "assayCommandsRetained": true
+      }
+    },
+    {
+      "archetype": "patchwork",
+      "seed": 24681357,
+      "forkTick": 60000,
+      "forkPopulation": 350,
+      "immediate": {
+        "tick": 61000,
+        "live": 289,
+        "control": 343,
+        "liveA": 251.33452400653624,
+        "controlA": 516.400707485168
+      },
+      "late": {
+        "tick": 90000,
+        "live": 369,
+        "control": 371,
+        "liveA": 379.95125792625765,
+        "controlA": 377.0050458530032,
+        "liveOutcome": "Discordant resource use",
+        "controlOutcome": "Discordant resource use"
+      },
+      "liveOutcome": "Discordant resource use",
+      "controlOutcome": "Discordant resource use",
+      "divergedRetained": false,
+      "divergedRecomputed": false,
+      "divergedCited": "no-divergence",
+      "flagAgrees": true,
+      "join": {
+        "baselineFound": true,
+        "engine": "0.22.0",
+        "configMatch": true,
+        "baselineCommandsRetained": true,
+        "assayCommandsRetained": true
+      }
+    },
+    {
+      "archetype": "patchwork",
+      "seed": 821947219,
+      "forkTick": 60000,
+      "forkPopulation": 405,
+      "immediate": {
+        "tick": 61000,
+        "live": 326,
+        "control": 408,
+        "liveA": 164.1431073159582,
+        "controlA": 221.80982304567044
+      },
+      "late": {
+        "tick": 90000,
+        "live": 440,
+        "control": 400,
+        "liveA": 216.96100745314698,
+        "controlA": 232.11995431167884,
+        "liveOutcome": "Discordant resource use",
+        "controlOutcome": "Transient dual-niche partitioning"
+      },
+      "liveOutcome": "Discordant resource use",
+      "controlOutcome": "Transient dual-niche partitioning",
+      "divergedRetained": true,
+      "divergedRecomputed": true,
+      "divergedCited": "diverged",
+      "flagAgrees": true,
+      "join": {
+        "baselineFound": true,
+        "engine": "0.22.0",
+        "configMatch": true,
+        "baselineCommandsRetained": true,
+        "assayCommandsRetained": true
+      }
+    },
+    {
+      "archetype": "patchwork",
+      "seed": 3543950664,
+      "forkTick": 60000,
+      "forkPopulation": 448,
+      "immediate": {
+        "tick": 61000,
+        "live": 358,
+        "control": 459,
+        "liveA": 176.21356512951613,
+        "controlA": 259.75684749316525
+      },
+      "late": {
+        "tick": 90000,
+        "live": 449,
+        "control": 488,
+        "liveA": 260.1681610031774,
+        "controlA": 227.56516556353577,
+        "liveOutcome": "Discordant resource use",
+        "controlOutcome": "Discordant resource use"
+      },
+      "liveOutcome": "Discordant resource use",
+      "controlOutcome": "Discordant resource use",
+      "divergedRetained": false,
+      "divergedRecomputed": false,
+      "divergedCited": "no-divergence",
+      "flagAgrees": true,
+      "join": {
+        "baselineFound": true,
+        "engine": "0.22.0",
+        "configMatch": true,
+        "baselineCommandsRetained": true,
+        "assayCommandsRetained": true
+      }
+    },
+    {
+      "archetype": "patchwork",
+      "seed": 111111111,
+      "forkTick": 60000,
+      "forkPopulation": 425,
+      "immediate": {
+        "tick": 61000,
+        "live": 379,
+        "control": 449,
+        "liveA": 136.51592156794212,
+        "controlA": 266.3443602811281
+      },
+      "late": {
+        "tick": 90000,
+        "live": 442,
+        "control": 461,
+        "liveA": 257.5569144857657,
+        "controlA": 217.64746314704374,
+        "liveOutcome": "Discordant resource use",
+        "controlOutcome": "Discordant resource use"
+      },
+      "liveOutcome": "Discordant resource use",
+      "controlOutcome": "Discordant resource use",
+      "divergedRetained": false,
+      "divergedRecomputed": false,
+      "divergedCited": "no-divergence",
+      "flagAgrees": true,
+      "join": {
+        "baselineFound": true,
+        "engine": "0.22.0",
+        "configMatch": true,
+        "baselineCommandsRetained": true,
+        "assayCommandsRetained": true
+      }
+    },
+    {
+      "archetype": "harsh",
+      "seed": 24681357,
+      "forkTick": 60000,
+      "forkPopulation": 202,
+      "immediate": {
+        "tick": 61000,
+        "live": 149,
+        "control": 212,
+        "liveA": 181.89661692670248,
+        "controlA": 419.4262585961415
+      },
+      "late": {
+        "tick": 90000,
+        "live": 214,
+        "control": 219,
+        "liveA": 351.39680728663626,
+        "controlA": 432.22866116159105,
+        "liveOutcome": "Adapted generalist dominance",
+        "controlOutcome": "Discordant resource use"
+      },
+      "liveOutcome": "Adapted generalist dominance",
+      "controlOutcome": "Discordant resource use",
+      "divergedRetained": true,
+      "divergedRecomputed": true,
+      "divergedCited": "diverged",
+      "flagAgrees": true,
+      "join": {
+        "baselineFound": true,
+        "engine": "0.22.0",
+        "configMatch": true,
+        "baselineCommandsRetained": true,
+        "assayCommandsRetained": true
+      }
+    },
+    {
+      "archetype": "harsh",
+      "seed": 821947219,
+      "forkTick": 60000,
+      "forkPopulation": 169,
+      "immediate": {
+        "tick": 61000,
+        "live": 106,
+        "control": 171,
+        "liveA": 179.283638532407,
+        "controlA": 391.01338621561
+      },
+      "late": {
+        "tick": 90000,
+        "live": 177,
+        "control": 170,
+        "liveA": 343.44582252361965,
+        "controlA": 342.04829545712334,
+        "liveOutcome": "Discordant resource use",
+        "controlOutcome": "Discordant resource use"
+      },
+      "liveOutcome": "Discordant resource use",
+      "controlOutcome": "Discordant resource use",
+      "divergedRetained": false,
+      "divergedRecomputed": false,
+      "divergedCited": "no-divergence",
+      "flagAgrees": true,
+      "join": {
+        "baselineFound": true,
+        "engine": "0.22.0",
+        "configMatch": true,
+        "baselineCommandsRetained": true,
+        "assayCommandsRetained": true
+      }
+    },
+    {
+      "archetype": "harsh",
+      "seed": 3543950664,
+      "forkTick": 60000,
+      "forkPopulation": 198,
+      "immediate": {
+        "tick": 61000,
+        "live": 152,
+        "control": 215,
+        "liveA": 199.46739760058358,
+        "controlA": 408.8642841527642
+      },
+      "late": {
+        "tick": 90000,
+        "live": 182,
+        "control": 179,
+        "liveA": 394.43705865372397,
+        "controlA": 343.82692349941817,
+        "liveOutcome": "Discordant resource use",
+        "controlOutcome": "Discordant resource use"
+      },
+      "liveOutcome": "Discordant resource use",
+      "controlOutcome": "Discordant resource use",
+      "divergedRetained": false,
+      "divergedRecomputed": false,
+      "divergedCited": "no-divergence",
+      "flagAgrees": true,
+      "join": {
+        "baselineFound": true,
+        "engine": "0.22.0",
+        "configMatch": true,
+        "baselineCommandsRetained": true,
+        "assayCommandsRetained": true
+      }
+    },
+    {
+      "archetype": "harsh",
+      "seed": 111111111,
+      "forkTick": 60000,
+      "forkPopulation": 151,
+      "immediate": {
+        "tick": 61000,
+        "live": 92,
+        "control": 158,
+        "liveA": 203.37499763343783,
+        "controlA": 447.23167234358243
+      },
+      "late": {
+        "tick": 90000,
+        "live": 161,
+        "control": 156,
+        "liveA": 484.3144418763592,
+        "controlA": 398.1599088210198,
+        "liveOutcome": "Discordant resource use",
+        "controlOutcome": "Discordant resource use"
+      },
+      "liveOutcome": "Discordant resource use",
+      "controlOutcome": "Discordant resource use",
+      "divergedRetained": false,
+      "divergedRecomputed": false,
+      "divergedCited": "no-divergence",
+      "flagAgrees": true,
+      "join": {
+        "baselineFound": true,
+        "engine": "0.22.0",
+        "configMatch": true,
+        "baselineCommandsRetained": true,
+        "assayCommandsRetained": true
+      }
+    },
+    {
+      "archetype": "abundant",
+      "seed": 24681357,
+      "forkTick": 60000,
+      "forkPopulation": 4313,
+      "immediate": {
+        "tick": 61000,
+        "live": 3685,
+        "control": 4350,
+        "liveA": 98.78591491975672,
+        "controlA": 140.40999438316504
+      },
+      "late": {
+        "tick": 90000,
+        "live": 4543,
+        "control": 4476,
+        "liveA": 138.39053636772314,
+        "controlA": 139.84415793513384,
+        "liveOutcome": "Discordant resource use",
+        "controlOutcome": "Discordant resource use"
+      },
+      "liveOutcome": "Discordant resource use",
+      "controlOutcome": "Discordant resource use",
+      "divergedRetained": true,
+      "divergedRecomputed": true,
+      "divergedCited": "diverged",
+      "flagAgrees": true,
+      "join": {
+        "baselineFound": true,
+        "engine": "0.22.0",
+        "configMatch": true,
+        "baselineCommandsRetained": true,
+        "assayCommandsRetained": true
+      }
+    },
+    {
+      "archetype": "abundant",
+      "seed": 821947219,
+      "forkTick": 60000,
+      "forkPopulation": 4899,
+      "immediate": {
+        "tick": 61000,
+        "live": 4125,
+        "control": 4860,
+        "liveA": 96.77044997608016,
+        "controlA": 141.88395878348172
+      },
+      "late": {
+        "tick": 90000,
+        "live": 4797,
+        "control": 4934,
+        "liveA": 157.7422620358314,
+        "controlA": 136.58579779376504,
+        "liveOutcome": "Transient dual-niche partitioning",
+        "controlOutcome": "Discordant resource use"
+      },
+      "liveOutcome": "Transient dual-niche partitioning",
+      "controlOutcome": "Discordant resource use",
+      "divergedRetained": false,
+      "divergedRecomputed": false,
+      "divergedCited": "no-divergence",
+      "flagAgrees": true,
+      "join": {
+        "baselineFound": true,
+        "engine": "0.22.0",
+        "configMatch": true,
+        "baselineCommandsRetained": true,
+        "assayCommandsRetained": true
+      }
+    },
+    {
+      "archetype": "abundant",
+      "seed": 3543950664,
+      "forkTick": 60000,
+      "forkPopulation": 4905,
+      "immediate": {
+        "tick": 61000,
+        "live": 4168,
+        "control": 4905,
+        "liveA": 116.3350924526882,
+        "controlA": 135.64689536740116
+      },
+      "late": {
+        "tick": 90000,
+        "live": 5071,
+        "control": 4917,
+        "liveA": 153.1429414692898,
+        "controlA": 134.7021904247071,
+        "liveOutcome": "Discordant resource use",
+        "controlOutcome": "Discordant resource use"
+      },
+      "liveOutcome": "Discordant resource use",
+      "controlOutcome": "Discordant resource use",
+      "divergedRetained": false,
+      "divergedRecomputed": false,
+      "divergedCited": "no-divergence",
+      "flagAgrees": true,
+      "join": {
+        "baselineFound": true,
+        "engine": "0.22.0",
+        "configMatch": true,
+        "baselineCommandsRetained": true,
+        "assayCommandsRetained": true
+      }
+    },
+    {
+      "archetype": "abundant",
+      "seed": 111111111,
+      "forkTick": 60000,
+      "forkPopulation": 4719,
+      "immediate": {
+        "tick": 61000,
+        "live": 4019,
+        "control": 4673,
+        "liveA": 99.73352596653368,
+        "controlA": 145.1327381305078
+      },
+      "late": {
+        "tick": 90000,
+        "live": 4863,
+        "control": 4938,
+        "liveA": 168.11421635482253,
+        "controlA": 143.4878305828878,
+        "liveOutcome": "Discordant resource use",
+        "controlOutcome": "Discordant resource use"
+      },
+      "liveOutcome": "Discordant resource use",
+      "controlOutcome": "Discordant resource use",
+      "divergedRetained": false,
+      "divergedRecomputed": false,
+      "divergedCited": "no-divergence",
+      "flagAgrees": true,
+      "join": {
+        "baselineFound": true,
+        "engine": "0.22.0",
+        "configMatch": true,
+        "baselineCommandsRetained": true,
+        "assayCommandsRetained": true
+      }
+    }
+  ],
+  "spotcheck": [
+    {
+      "run": "balanced/24681357",
+      "expectedHash": "cd151ec773ca435e1872c1ac22749fed937d99d49f37b094fa917389ca9836b7",
+      "actualHash": "cd151ec773ca435e1872c1ac22749fed937d99d49f37b094fa917389ca9836b7",
+      "match": true,
+      "tickMatch": true,
+      "populationMatch": true,
+      "engineMatch": true,
+      "note": null
+    },
+    {
+      "run": "abundant/555555555",
+      "expectedHash": "794f5f6c1dc7cae1a23a086846e228a72af3aa51f3bee7d7e40d53a15941e1ec",
+      "actualHash": "794f5f6c1dc7cae1a23a086846e228a72af3aa51f3bee7d7e40d53a15941e1ec",
+      "match": true,
+      "tickMatch": true,
+      "populationMatch": true,
+      "engineMatch": true,
+      "note": null
+    }
+  ],
+  "supportedClaims": [
+    "Retained 32 baseline runs (balanced/patchwork/harsh/abundant) with per-5000-tick scalar trajectories (up to 50 samples/run).",
+    "Terminal populations range 161..4907 across 32 retained runs; 0 of 32 runs extinct.",
+    "Label distributions are as tabulated (counts, never best-run-only); negative cases are named in the tables.",
+    "16 matched droughtA pairs retained (fork 60000, immediate +1000, late +30000): 4 diverged, 12 no-divergence, 0 stocks-not-observed; comparability is cited only through the baseline identity join (engine + resolvedConfig).",
+    "Reproducibility spot check: 2/2 re-runs identical in tick, population, and scalar-sample hash under the current engine determinism contract."
+  ],
+  "notSupportedClaims": [
+    "Exactness of engine behaviour: this is characterisation across seeds, not proof that any trajectory is exact.",
+    "Representative-device performance: no attributable representative-device environment in this tranche; desktop/headless timings are harness costs, not device evidence.",
+    "Causal attribution of late-pair divergence to the droughtA intervention beyond the matched comparison: the pairs are descriptive, never causal.",
+    "Ecological reliance on cross-feeding from single-run labels alone: reliance needs matched-assay support; per-run labels top out at in-use.",
+    "Absence of the niche no-response label as a biological finding: it is unreachable under the ported rule (rule artifact).",
+    "Absence of silent richness drift from replacementsObserved=false: the sample series is the drift evidence, not the verdict flag.",
+    "No-divergence readings from null-stock disturbance rows: diverged=false conflates no-divergence with stocks-unobserved."
+  ],
+  "defects": [
+    "No biology defect observed in the retained artifact. None fixed: this generator is read-only."
+  ],
+  "notes": {
+    "wakes": "Per-sample wakes comes from read-only simulation.last.wakes (interval-scoped, null-fallback); it is part of the per-sample source list.",
+    "nicheNoResponse": "The niche no-response label is unreachable under the ported rule and is never expected in aggregates; its absence is a rule artifact, not a finding.",
+    "replacementsObserved": "replacementsObserved=false is never read as evidence against silent richness drift; the clades_active sample series is the drift evidence.",
+    "divergedNulls": "diverged=false conflates no-divergence with stocks-unobserved; only rows with non-null late.liveA/late.controlA are cited as diverged or no-divergence, the rest as not-observed."
+  }
+}
