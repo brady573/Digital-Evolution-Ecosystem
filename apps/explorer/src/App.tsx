@@ -17,6 +17,10 @@ import {
 import { cladeColor, dormantChannel, organismColor, type OrganismLens } from "./organismEncoding";
 import { projectWorldPresentation } from "./experience/worldProjection";
 import { AftermathPanel } from "./AftermathPanel";
+import { AftermathStage2Panel } from "./AftermathStage2Panel";
+import { projectAftermath } from "./experience/aftermath/project";
+import { transitionAftermath } from "./experience/aftermath/lifecycle";
+import type { AftermathLifecycleEvent, AftermathPresentationState, AftermathStage2Fixture, DevelopmentEvidence } from "./experience/aftermath/model";
 import { drawPhenotypeOrganism, phenotypeCache, tierForZoom } from "./phenotype";
 import { familyArtwork } from "./familyArt";
 
@@ -548,6 +552,8 @@ export function App(){
   const [traitView,setTraitView]=useState<TraitView>("speed");
   const [selectedId,setSelectedId]=useState<OrganismId|null>(null);
   const [selectedStoryId,setSelectedStoryId]=useState<HistoryRecordId|null>(null);
+  const [aftermathPresentation,setAftermathPresentation]=useState<AftermathPresentationState|null>(null);
+  const [aftermathFixture,setAftermathFixture]=useState<AftermathStage2Fixture|null>(null);
   const [selectedCladeId,setSelectedCladeId]=useState<CladeId|null>(null);
   // Camera: uniform zoom + toroidal pan into the same 600x600 world.
   const [cam,setCam]=useState<Camera>({x:300,y:300});
@@ -567,6 +573,76 @@ export function App(){
   // worker can drain it and the UI stalls instead of running fast.
   const advanceDebt=useRef(false);
   const deadRef=useRef(false);
+
+  const aftermathProjection=useMemo(()=>{
+    if(!snapshot?.aftermath)return null;
+    const testMode=typeof window!=="undefined"&&new URLSearchParams(window.location.search).has("deeTest");
+    const resolution=snapshot.resolvedDecisions.find(item=>item.commandId===snapshot.aftermath!.commandId);
+    const originRecord=resolution?.sourceEventId
+      ?snapshot.analysis.records.find(record=>String(record.id)===resolution.sourceEventId)
+      :undefined;
+    const fixtureEnabled=testMode&&aftermathFixture!==null;
+    const fixtureEvidence:DevelopmentEvidence[] = fixtureEnabled&&aftermathFixture==="development"?[{
+      aftermathCommandId:snapshot.aftermath.commandId,
+      source:"matched-comparison",
+      sourceId:"deeTest-stage2-development",
+      title:"Synthetic development fixture",
+      summary:"This test-only card exercises presentation and makes no claim about the running world.",
+      followLens:"clades",
+      fixtureOnly:true,
+    }]:[];
+    return projectAftermath({
+      aftermath:snapshot.aftermath,
+      currentTick:fixtureEnabled&&aftermathFixture==="settlement"
+        ?snapshot.aftermath.resolutionTick+25_000
+        :snapshot.tick,
+      population:snapshot.population,
+      originHistoryRecordId:originRecord?.id??null,
+      fixtureOnly:fixtureEnabled,
+      // Current contracts do not carry a stable relationship from later
+      // developments to this command. Do not use chronology or originating
+      // event provenance as a substitute.
+      candidates:fixtureEvidence,
+    });
+  },[snapshot,aftermathFixture]);
+
+  useEffect(()=>{
+    const aftermath=snapshot?.aftermath;
+    setAftermathFixture(null);
+    if(!aftermath){setAftermathPresentation(null);return}
+    setAftermathPresentation(previous=>previous?.commandId===aftermath.commandId?previous:{
+      commandId:aftermath.commandId,
+      stage:aftermath.phase==="impact"?"impact":"observation",
+      expanded:aftermath.phase==="impact",
+      suspended:!!snapshot?.pendingDecision,
+      dismissed:false,
+      following:false,
+      automaticLens:null,
+      manualLensOverride:false,
+    });
+  },[snapshot?.aftermath?.commandId]);
+
+  useEffect(()=>{
+    setAftermathPresentation(previous=>previous?transitionAftermath(previous,{
+      type:snapshot?.pendingDecision?"suspend":"resume-presentation",
+    }):previous);
+  },[!!snapshot?.pendingDecision]);
+
+  // Runtime releases its pinned impact phase on an explicit acknowledgment or
+  // when a resumed session executes its first tick. In either case the
+  // Explorer presentation moves to the compact observation affordance; it
+  // never leaves an expanded sheet behind as a playback gate.
+  useEffect(()=>{
+    if(snapshot?.aftermath?.phase!=="observation")return;
+    setAftermathPresentation(previous=>previous?.commandId===snapshot.aftermath!.commandId&&previous.stage==="impact"
+      ?transitionAftermath(previous,{type:"acknowledge-impact"})
+      :previous);
+  },[snapshot?.aftermath?.commandId,snapshot?.aftermath?.phase]);
+
+  const aftermathEvent=(event:AftermathLifecycleEvent)=>{
+    setAftermathPresentation(previous=>previous?transitionAftermath(previous,event):previous);
+    if(event.type==="follow"&&event.lens)setLens(event.lens);
+  };
 
   useEffect(()=>{
     const unsub=runtime.subscribe(s=>{
@@ -638,6 +714,7 @@ export function App(){
       runToNextEvent:()=>runtime.runToNextEvent(),
       acknowledgeAftermath:()=>runtime.acknowledgeAftermath(),
       resolve:(opportunityId:string,choiceId:string)=>runtime.resolveEventDecision(opportunityId,choiceId),
+      setAftermathFixture:(fixture:AftermathStage2Fixture|null)=>setAftermathFixture(fixture),
       killWorker:()=>instrumentedRef.current?.fail("error"),
     };
     (window as any).__DEE_TEST__=hook;
@@ -661,7 +738,7 @@ export function App(){
     setStatus("Recording your decision…");
     try{
       await runtime.resolveEventDecision(pending.opportunityId,choiceId);
-      setStatus("Decision recorded. The world stays paused until you resume.");
+      setStatus("Decision recorded.");
     }catch(error){
       setStatus(`Decision failed: ${error instanceof Error?error.message:String(error)}`);
     }
@@ -675,6 +752,7 @@ export function App(){
   const [acknowledging,setAcknowledging]=useState(false);
   const acknowledgeAftermath=async()=>{
     if(!snapshot?.aftermath)return;
+    aftermathEvent({type:"acknowledge-impact"});
     setAcknowledging(true);
     try{
       await runtime.acknowledgeAftermath();
@@ -761,7 +839,16 @@ export function App(){
   // slot without being discarded, so it returns after the decision resolves.
   const showDecision=!!pending;
   const showAftermath=!pending&&!!snapshot.aftermath&&snapshot.aftermath.phase==="impact";
+  const showAftermathStage2=!pending&&surface==="world"&&!!aftermathProjection&&!!aftermathPresentation
+    &&aftermathProjection.stage!=="impact"&&aftermathPresentation.stage!=="impact"&&aftermathPresentation.expanded&&!aftermathPresentation.dismissed;
+  const showCompactAftermath=!pending&&surface==="world"&&!!aftermathProjection&&!!aftermathPresentation
+    &&aftermathProjection.stage!=="impact"&&aftermathPresentation.stage!=="impact"&&!aftermathPresentation.expanded&&!aftermathPresentation.dismissed;
   const records=snapshot.analysis.records;
+  const reviewAftermathHistory=(recordId:HistoryRecordId)=>{
+    if(!records.some(record=>record.id===recordId))return;
+    setSelectedStoryId(recordId);
+    setSurface("history");
+  };
   const clades=m.clades?.top||[];
   const selected=snapshot.organisms.find(o=>o.id===selectedId)??null;
   const accounting=m.nutrient_field?.accounting?.absolute_residual??[];
@@ -790,7 +877,7 @@ export function App(){
             <span>{LENS_LABELS[lens]}</span><span className="lens-caret" aria-hidden="true">{lensMenuOpen?"▴":"▾"}</span>
           </button>
           <div className="lens-options" role="group" aria-label="Lens">
-          {(["normal","nutrients","waste","clades","traits"] as Lens[]).map(v=><button key={v} className={lens===v?"active":""} aria-pressed={lens===v} onClick={()=>{setLens(v);setLensMenuOpen(false)}}>{LENS_LABELS[v]}</button>)}
+          {(["normal","nutrients","waste","clades","traits"] as Lens[]).map(v=><button key={v} className={lens===v?"active":""} aria-pressed={lens===v} onClick={()=>{aftermathEvent({type:"manual-lens-change"});setLens(v);setLensMenuOpen(false)}}>{LENS_LABELS[v]}</button>)}
           </div>
           {lens==="nutrients"&&<select aria-label="Resource view" value={resourceView} onChange={e=>setResourceView(e.target.value as ResourceView)}><option value="combined">Combined</option><option value="a">Nutrient A</option><option value="b">Nutrient B</option><option value="c">Metabolite C</option></select>}
           {lens==="waste"&&<span className="lensnote" role="note">Metabolic Waste, exact and untextured: brighter means more waste in that cell (a luminance ramp, so the reading does not depend on hue). The Landscape lens shows the same field differently — loaded ground loses its green cast and settles toward pale, desaturated ash, lifted well clear of barren soil and stippled so the texture reads without colour.</span>}
@@ -799,6 +886,13 @@ export function App(){
         <div className="world-wrap">
           <div className="world-scene" aria-hidden="true"><div className="glow g-a"/><div className="glow g-b"/><div className="glow g-c"/><div className="ambient"/></div>
           <WorldCanvas snapshot={snapshot} lens={lens} resourceView={resourceView} traitView={traitView} selectedId={selectedId} onSelect={setSelectedId} cam={cam} zoom={zoom} onCamera={setCam} onView={reportView}/>
+          {showCompactAftermath&&aftermathProjection&&aftermathPresentation&&<AftermathStage2Panel
+            projection={aftermathProjection}
+            presentation={aftermathPresentation}
+            remainingTicks={Math.max(0,(snapshot.aftermath?.resolutionTick??snapshot.tick)+25_000-snapshot.tick)}
+            onEvent={aftermathEvent}
+            onReviewHistory={recordId=>reviewAftermathHistory(recordId)}
+          />}
           {/* A pending decision outranks inspection, so it also yields the view
               overlay: leaving the minimap/zoom controls under the sheet made
               zoom unreachable (AC8). The world canvas itself stays visible as
@@ -821,9 +915,9 @@ export function App(){
               is continuous. A pending decision always outranks an aftermath
               (AC15): it takes the slot and the aftermath record survives
               underneath, to be shown again once this decision resolves. */}
-          {(showDecision||showAftermath)&&<section className="decision-sheet" role="dialog" aria-modal="false"
+          {(showDecision||showAftermath||showAftermathStage2)&&<section className="decision-sheet" role="dialog" aria-modal="false"
             aria-label={showDecision?(pending!.source==="world_catalyst"?"World catalyst":"Event decision"):"Aftermath"}
-            data-testid="sheet-slot" data-mode={showDecision?"decision":"aftermath"}>
+            data-testid="sheet-slot" data-mode={showDecision?"decision":showAftermath?"aftermath":"aftermath-stage2"}>
             {showDecision
               ? <div data-testid="decision-sheet" data-source={pending!.source}>
                   <span className="eyebrow">{pending!.source==="world_catalyst"?"World catalyst — your move":"A decision is waiting"}</span>
@@ -839,7 +933,15 @@ export function App(){
                   </div>
                   <p className="decision-foot">Time stays paused until you choose. Leaving an intervention out changes nothing.</p>
                 </div>
-              : <AftermathPanel snapshot={snapshot} onAcknowledge={acknowledgeAftermath} busy={acknowledging}/>}
+              : showAftermath
+                ? <AftermathPanel snapshot={snapshot} onAcknowledge={acknowledgeAftermath} busy={acknowledging}/>
+                : aftermathProjection&&aftermathPresentation&&<AftermathStage2Panel
+                  projection={aftermathProjection}
+                  presentation={aftermathPresentation}
+                  remainingTicks={Math.max(0,(snapshot.aftermath?.resolutionTick??snapshot.tick)+25_000-snapshot.tick)}
+                  onEvent={aftermathEvent}
+                  onReviewHistory={recordId=>reviewAftermathHistory(recordId)}
+                />}
           </section>}
         </div>
       </section>
@@ -850,7 +952,7 @@ export function App(){
             remains visible as context, and the simulation stays paused exactly
             as the decision contract already guarantees. Nothing about the
             simulation changes; this only decides what is painted. */}
-        {surface==="world"&&!pending&&<div className={inspectorOpen?"inspector sheet":"inspector sheet collapsed"}>
+        {surface==="world"&&!pending&&!showAftermath&&!showAftermathStage2&&<div className={inspectorOpen?"inspector sheet":"inspector sheet collapsed"}>
           {/* Progressive disclosure: with nothing selected there is no handle
               at all, and with something selected it is a small chip naming
               it — not a permanently expanded full-width bar. */}

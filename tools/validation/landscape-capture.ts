@@ -100,6 +100,18 @@ async function main(){
       }
       return false;
     };
+    // The last pause can race with an event becoming pending. That decision
+    // removes the World overlay (including zoom controls) by design. Drain any
+    // such gate and give its presentation update a moment to settle before
+    // running captures which use those controls.
+    const settlePendingDecision=async()=>{
+      for(let attempt=0;attempt<5;attempt++){
+        if(await settleDecision())continue;
+        await page.waitForTimeout(150);
+        if(!await page.getByTestId("decision-sheet").count())return;
+      }
+      throw new Error("Could not clear pending decision before landscape captures");
+    };
 
     await pressRun(true);
     let load=0;
@@ -154,6 +166,7 @@ async function main(){
     }
 
     // 3. Closer zoom: substrate texture and organisms.
+    await settlePendingDecision();
     await page.getByRole("button",{name:"Zoom in"}).click();
     await page.getByRole("button",{name:"Zoom in"}).click();
     await page.waitForTimeout(500);
@@ -274,6 +287,60 @@ async function main(){
     }
     if(await decisionShell.getByTestId("decision-sheet").count()){
       await shell("12-shell-390px-pending-decision",decisionShell,"phone shell with pending decision");
+      for(const width of [320,430,1280]){
+        await decisionShell.setViewportSize({width,height:width===1280?900:844});
+        await decisionShell.waitForTimeout(200);
+        await shell(`12-shell-${width}px-pending-decision`,decisionShell,`pending decision @${width}px`);
+      }
+      await decisionShell.setViewportSize({width:390,height:844});
+      const action=decisionShell.getByTestId("decision-sheet").locator(".decision-choices button").filter({hasNotText:"Keep watching"}).first();
+      await action.click();
+      await decisionShell.getByTestId("aftermath-impact").waitFor({timeout:15_000});
+      for(const width of [320,390,430,1280]){
+        await decisionShell.setViewportSize({width,height:width===1280?900:844});
+        await decisionShell.waitForTimeout(250);
+        await shell(`13-aftermath-impact-${width}px`,decisionShell,`Aftermath impact @${width}px`);
+      }
+      await decisionShell.setViewportSize({width:390,height:844});
+      await decisionShell.getByTestId("aftermath-acknowledge").click();
+      await decisionShell.getByTestId("aftermath-compact").waitFor({timeout:15_000});
+      for(const width of [320,390,430,1280]){
+        await decisionShell.setViewportSize({width,height:width===1280?900:844});
+        await decisionShell.waitForTimeout(250);
+        await shell(`14-aftermath-compact-${width}px`,decisionShell,`compact Aftermath observation @${width}px`);
+      }
+      await decisionShell.setViewportSize({width:390,height:844});
+      await decisionShell.getByTestId("aftermath-compact").click();
+      await decisionShell.getByTestId("aftermath-stage2").waitFor();
+      for(const width of [320,390,430,1280]){
+        await decisionShell.setViewportSize({width,height:width===1280?900:844});
+        await decisionShell.waitForTimeout(250);
+        await shell(`15-aftermath-observation-${width}px`,decisionShell,`expanded observation @${width}px`);
+      }
+      await decisionShell.setViewportSize({width:390,height:844});
+      await decisionShell.getByRole("button",{name:"Collapse"}).click();
+      await decisionShell.evaluate(()=> (window as any).__DEE_TEST__.setAftermathFixture("development"));
+      await decisionShell.getByTestId("aftermath-compact").click();
+      await decisionShell.getByTestId("aftermath-stage2").waitFor();
+      await decisionShell.getByText("TEST FIXTURE — synthetic presentation only; not a world finding.").waitFor();
+      for(const width of [320,390,430,1280]){
+        await decisionShell.setViewportSize({width,height:width===1280?900:844});
+        await decisionShell.waitForTimeout(250);
+        await shell(`16-aftermath-development-fixture-${width}px`,decisionShell,`labeled development fixture @${width}px`);
+      }
+      await decisionShell.setViewportSize({width:390,height:844});
+      await decisionShell.getByRole("button",{name:"Collapse"}).click();
+      await decisionShell.evaluate(()=> (window as any).__DEE_TEST__.setAftermathFixture("settlement"));
+      await decisionShell.getByTestId("aftermath-compact").getByText(/settled/).waitFor();
+      await decisionShell.getByTestId("aftermath-compact").click();
+      await decisionShell.getByTestId("aftermath-settlement").waitFor();
+      for(const width of [320,390,430,1280]){
+        await decisionShell.setViewportSize({width,height:width===1280?900:844});
+        await decisionShell.waitForTimeout(250);
+        await shell(`17-aftermath-settlement-fixture-${width}px`,decisionShell,`labeled quiet-settlement fixture @${width}px`);
+      }
+      await decisionShell.evaluate(()=> (window as any).__DEE_TEST__.setAftermathFixture(null));
+      await decisionShell.getByRole("button",{name:"Collapse"}).click();
     }else{
       console.log("no pending decision reached on this run; decision shell capture skipped");
     }
@@ -285,7 +352,9 @@ async function main(){
       wasteCellCoverage:+(load*100).toFixed(2),
       captures:written,
       nicheHistoryCapture:"omitted by decision: establishment occurs around tick 63k, outside a bounded interactive run. Deterministic establishment evidence lives in the engine/analysis validation and testdata/niche-survey-0.22.json; the history surface's record fields and causal caveat are covered there, not by a screenshot.",
-      note:"Deterministic captures of the Slice 2 ecological landscape. Regenerate with pnpm test:visual against a preview server. wasteCellCoverage is the measured share of world cells whose waste overlay is lit, so 'waste-modified' is a measured claim rather than a label.",
+      aftermathDevelopmentCapture:"captures are labeled deeTest-only synthetic presentation fixtures, not production findings; current contracts expose no stable identity link from a later ecological History record to this Aftermath.",
+      aftermathSettlementCapture:"capture is a labeled deeTest presentation fixture with a synthetic horizon projection, not evidence that a live simulation reached 25,000 ticks; the real boundary is covered by deterministic projection tests.",
+      note:"Deterministic captures of the Slice 2 ecological landscape and Aftermath impact/observation states. Regenerate with pnpm test:visual against a preview server. wasteCellCoverage is the measured share of world cells whose waste overlay is lit, so 'waste-modified' is a measured claim rather than a label.",
     },null,2)+"\n");
   }finally{
     await browser.close();
