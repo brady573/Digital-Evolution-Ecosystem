@@ -129,6 +129,8 @@ async function main(){
   await intervening.click();
   const deltaImpact=deltaPage.getByTestId("aftermath-impact");
   await deltaImpact.waitFor({timeout:15_000});
+  assert.equal(await deltaPage.locator(".investigation-rail .inspector").count(),0,
+    "expanded impact owns the single large sheet over inspection");
   // Still zero ticks: the world has not advanced past the resolution, so every
   // pixel difference below is the intervention and nothing else.
   assert.equal(await tick(deltaPage),decisionTick,"the world is still at the resolution tick while the sheet is open");
@@ -210,9 +212,73 @@ async function main(){
   // 4,000 ticks and requires the retained states to be unchanged.
   const stillPinned=await deltaPage.getByTestId("sheet-slot").count();
   assert.equal(stillPinned,0,"the slot is released once the sheet is acknowledged");
+  const compactAftermath=deltaPage.getByTestId("aftermath-compact");
+  await compactAftermath.waitFor({timeout:15_000});
+  const observationTick=await tick(deltaPage);
+  await compactAftermath.click();
+  const observationPanel=deltaPage.getByTestId("aftermath-stage2");
+  await observationPanel.waitFor();
+  assert.equal(await deltaPage.getByTestId("sheet-slot").getAttribute("data-mode"),"aftermath-stage2",
+    "expanded observation uses the same single sheet slot");
+  assert.equal(await deltaPage.locator(".decision-sheet").count(),1,"only one large sheet is present");
+  assert.equal(await deltaPage.locator(".investigation-rail .inspector").count(),0,
+    "expanded observation owns the sheet priority over inspection");
+  assert.equal(await tick(deltaPage),observationTick,"expanding observation is a zero-tick presentation action");
+  await deltaPage.getByRole("button",{name:"Collapse"}).click();
+  await deltaPage.getByTestId("aftermath-compact").waitFor();
+  assert.equal(await tick(deltaPage),observationTick,"collapsing observation is a zero-tick presentation action");
+  await deltaPage.evaluate(()=>(window as any).__DEE_TEST__.setAftermathFixture("development"));
+  await deltaPage.getByTestId("aftermath-compact").click();
+  await deltaPage.getByTestId("aftermath-stage2").waitFor();
+  await deltaPage.getByText("TEST FIXTURE — synthetic presentation only; not a world finding.").waitFor();
+  assert.equal(await tick(deltaPage),observationTick,"fixture development presentation does not advance the world");
+  await deltaPage.getByRole("button",{name:"Follow this view"}).click();
+  assert.match(await deltaPage.locator(".lens-active").innerText(),/^Clades\b/,"Follow exposes only the fixture's explicitly selected lens");
+  await deltaPage.getByRole("button",{name:"Traits",exact:true}).click();
+  await deltaPage.getByRole("button",{name:"Stop Follow"}).waitFor();
+  assert.match(await deltaPage.locator(".lens-active").innerText(),/^Traits\b/,"manual lens change remains the player's viewport");
+  await deltaPage.getByRole("button",{name:"Stop Follow"}).click();
+  assert.match(await deltaPage.locator(".lens-active").innerText(),/^Traits\b/,"stopping Follow never restores a hidden lens");
+  assert.equal(await tick(deltaPage),observationTick,"Follow and manual lens override are zero-tick actions");
+  await deltaPage.getByRole("button",{name:"Collapse"}).click();
+  await deltaPage.evaluate(()=>(window as any).__DEE_TEST__.setAftermathFixture("settlement"));
+  await deltaPage.getByTestId("aftermath-compact").getByText(/settled/).waitFor();
+  await deltaPage.getByTestId("aftermath-compact").click();
+  await deltaPage.getByTestId("aftermath-stage2").getByTestId("aftermath-settlement").waitFor();
+  assert.equal(await deltaPage.getByTestId("aftermath-settlement").innerText(),
+    "little/no major measured response within the observation window","horizon settlement uses evidence-bounded quiet wording");
+  assert.equal(await deltaPage.getByRole("button",{name:"Review development in History"}).count(),0,
+    "quiet settlement never creates a development History link");
+  assert.equal(await tick(deltaPage),observationTick,"settlement presentation is a zero-tick operation");
+  await deltaPage.getByRole("button",{name:"Collapse"}).click();
+  await deltaPage.evaluate(()=>(window as any).__DEE_TEST__.setAftermathFixture(null));
+  await deltaPage.getByTestId("aftermath-compact").getByText(/observing/).waitFor();
+  await deltaPage.getByTestId("aftermath-compact").click();
+  const provenanceLink=deltaPage.getByRole("button",{name:"Review decision context in History"});
+  if(await provenanceLink.isVisible().catch(()=>false)){
+    await provenanceLink.click();
+    await deltaPage.getByRole("heading",{name:"History"}).waitFor();
+    await deltaPage.locator(".story-detail").waitFor();
+    assert.equal(await tick(deltaPage),observationTick,"History navigation does not advance simulation ticks");
+    await deltaPage.getByRole("button",{name:"World",exact:true}).click();
+    await deltaPage.getByTestId("aftermath-compact").waitFor();
+  }else{
+    await deltaPage.getByRole("button",{name:"Collapse"}).click();
+  }
+  await deltaPage.getByTestId("aftermath-compact").waitFor();
+  const preemptedDecision=deltaPage.getByTestId("decision-sheet");
+  for(let i=0;i<25&&!await preemptedDecision.isVisible().catch(()=>false);i++){
+    await deltaPage.evaluate(()=>(window as any).__DEE_TEST__.runToNextEvent());
+    await deltaPage.waitForTimeout(400);
+  }
+  await preemptedDecision.waitFor({timeout:180_000});
+  assert.equal(await deltaPage.getByTestId("sheet-slot").getAttribute("data-mode"),"decision",
+    "a pending decision takes the one expanded sheet slot");
+  assert.equal(await deltaPage.getByTestId("aftermath-compact").count(),0,
+    "pending decisions hide compact Aftermath without deleting its retained evidence");
 
   await deltaPage.close();
-  console.log("aftermath impact sheet: PASS");
+  console.log("aftermath impact → compact observation → expand/collapse: PASS");
   })();
 
     await page.getByRole("button",{name:"History"}).click();
