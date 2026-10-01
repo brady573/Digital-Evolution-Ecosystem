@@ -14,7 +14,8 @@
  */
 import assert from "node:assert/strict";
 import type { EngineConfig, RenderSnapshot } from "@digital-evolution/contracts";
-import { UniverseSession } from "@digital-evolution/sim-runtime";
+import * as runtimeRoot from "@digital-evolution/sim-runtime";
+import { UniverseSession } from "../../packages/sim-runtime/src/session.ts";
 import {
   MAX_EVENT_SCAN_TICKS,
   validateRuntimeCommand,
@@ -922,7 +923,21 @@ async function testTerminalSignalFiresExactlyOnceAcrossBothFailureKinds() {
   assert.ok(!("data" in seen[0]! || "target" in seen[0]!), "no raw browser event object crosses the boundary");
 }
 
+async function testPackageRootExposesNoMutableSessionAuthority() {
+  // NOTE (Task 2): the brief prescribes `await import("@digital-evolution/sim-runtime")`
+  // here, but a dynamic bare-specifier import cannot resolve under this repo's
+  // toolchain: tsx rewrites *static* bare imports to the workspace package, while
+  // a dynamic import() falls through to Node's ESM resolver, which has no
+  // node_modules/@digital-evolution link (ERR_MODULE_NOT_FOUND, probed 2026-10-01).
+  // A static namespace import goes through the same package specifier — i.e. the
+  // identical production surface and module file (package.json "." -> src/index.ts)
+  // — so the assertion below proves the same boundary claim deterministically.
+  assert.equal("UniverseSession" in runtimeRoot, false, "UniverseSession is not reachable from the package root");
+  assert.equal(typeof runtimeRoot.WorkerRuntimeClient, "function", "WorkerRuntimeClient remains the production entry");
+}
+
 async function main() {
+  await testPackageRootExposesNoMutableSessionAuthority();
   await testTerminalSignalFiresExactlyOnceAcrossBothFailureKinds();
   await testDestroyDoesNotEmitTerminalSignal();
   await testOrdinaryFailuresDoNotEmitTerminalSignal();
