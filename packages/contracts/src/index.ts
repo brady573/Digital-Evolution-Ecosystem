@@ -1037,6 +1037,7 @@ const CHECKPOINT_TAGS: readonly string[] = [
   "simulation",
   "resource-system",
   "waste-field",
+  "inhibitor-field",
   "legacy-observer",
   "map",
   "undefined",
@@ -1082,7 +1083,7 @@ function validateEncodedSimulation(value: unknown, path: string, source: Checkpo
       if (typeof tag !== "string" || !CHECKPOINT_TAGS.includes(tag)) {
         reject(at, "unsupported-tag", `unrecognised checkpoint tag ${JSON.stringify(tag)}`);
       }
-      if (["simulation", "resource-system", "waste-field", "legacy-observer"].includes(tag)) {
+      if (["simulation", "resource-system", "waste-field", "inhibitor-field", "legacy-observer"].includes(tag)) {
         if (!isPlainObject(node.props)) reject(`${at}.props`, "malformed-container", "tagged state needs object props");
         for (const [key, item] of Object.entries(node.props)) walk(item, `${at}.props.${key}`);
       } else if (tag === "map") {
@@ -1306,6 +1307,7 @@ function validateResourceSystem(value: unknown, at: string): void {
     }
   }
   validateWasteField(props.waste, `${at}.props.waste`);
+  validateInhibitorField(props.inhibitor, `${at}.props.inhibitor`);
 }
 
 /** The waste field is read cell-by-cell in the biological step. */
@@ -1316,6 +1318,24 @@ function validateWasteField(value: unknown, at: string): void {
   const props = (value as Record<string, unknown>).props as Record<string, unknown>;
   if (!isPlainObject(props)) reject(`${at}.props`, "malformed-container", "waste field needs object props");
   for (const field of ["n", "cell", "size", "produced", "bioRemoved", "decayed", "clampAdj", "discarded", "diffusionRate", "decayRate", "updateStride"] as const) {
+    if (!isFiniteNumber(props[field])) reject(`${at}.props.${field}`, "wrong-type", "expected a finite number");
+  }
+  for (const field of ["stock", "cap", "right", "down", "delta", "decayLast"] as const) validateTypedArray(props[field], `${at}.props.${field}`);
+  if (props.decayBuckets !== undefined && !Array.isArray(props.decayBuckets)) reject(`${at}.props.decayBuckets`, "malformed-container", "expected decay buckets");
+}
+
+/**
+ * Slice 1 interference: the inhibitor signal field persists alongside waste.
+ * Same shape as the waste field minus biological removal (no removal path
+ * exists yet), so the required numerics omit bioRemoved.
+ */
+function validateInhibitorField(value: unknown, at: string): void {
+  if (!isPlainObject(value) || value[CHECKPOINT_TAG_KEY] !== "inhibitor-field") {
+    reject(at, "malformed-container", "expected tagged inhibitor-field state");
+  }
+  const props = (value as Record<string, unknown>).props as Record<string, unknown>;
+  if (!isPlainObject(props)) reject(`${at}.props`, "malformed-container", "inhibitor field needs object props");
+  for (const field of ["n", "cell", "size", "produced", "decayed", "clampAdj", "discarded", "diffusionRate", "decayRate", "updateStride"] as const) {
     if (!isFiniteNumber(props[field])) reject(`${at}.props.${field}`, "wrong-type", "expected a finite number");
   }
   for (const field of ["stock", "cap", "right", "down", "delta", "decayLast"] as const) validateTypedArray(props[field], `${at}.props.${field}`);

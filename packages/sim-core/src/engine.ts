@@ -34,6 +34,23 @@ const C_BYPRODUCT_YIELD=.32,C_ENERGY_YIELD=9,C_DECAY_RATE=.00022,C_DIFFUSION_RAT
  */
 // impl: REQ-SLICE-002 (Slice 2 waste-field calibration)
 const WASTE_YIELD=.15,WASTE_CAP_FRACTION=.25,WASTE_DIFFUSION=.20,WASTE_DECAY=.0001,WASTE_HALF_SAT=.3,WASTE_BURDEN_MAX=.45,WASTE_TOL_EFFICACY=.75,WASTE_TOL_COST=.001,CU_STANDING=.0015,CU_ACTIVE=.6,CU_RATE=.09;
+/**
+ * Slice 1 interference (Task 2): inhibitor-field calibration anchors. No
+ * production path exists yet (secretion arrives in Task 3), so these seed
+ * only the passive field dynamics; evidence-led retuning happens once
+ * secretion/effect data exists. Each anchors to the proven WASTE_* scale:
+ * INHIBITOR_DIFFUSION = WASTE_DIFFUSION (.20): same toroidal neighbor-flux
+ * algorithm as WasteField, so the same rate keeps spatial semantics (signal
+ * range vs locality) comparable between the two substances.
+ * INHIBITOR_DECAY = WASTE_DECAY (.0001): same slow passive loss, so an
+ * unreplenished signal persists on the same timescale as waste while Task 3+
+ * measures whether interference needs faster/slower clearing.
+ * INHIBITOR_CAP_FRACTION = WASTE_CAP_FRACTION (.25): same per-cell headroom
+ * relative to total capacity, so saturation (explicit saturated loss) only
+ * binds under genuinely concentrated secretion, never under background flux.
+ */
+// impl: REQ-SLICE-001 (Slice 1 inhibitor-field calibration anchors)
+const INHIBITOR_DIFFUSION=WASTE_DIFFUSION,INHIBITOR_DECAY=WASTE_DECAY,INHIBITOR_CAP_FRACTION=WASTE_CAP_FRACTION;
 const H01=(seed:number,id:number,salt=0):number=>{let x=(seed^(Math.imul(id+salt,0x9E3779B1)))>>>0;x^=x>>>16;x=Math.imul(x,0x7FEB352D);x^=x>>>15;x=Math.imul(x,0x846CA68B);x^=x>>>16;return(x>>>0)/4294967296};
 const C_ACCESS=(bu:number):number=>{let v=Q(bu,0,1.5);return v<=0?0:(v*v)/(v*v+.1024)};
 const BUC=(bu:number):number=>BU_MAINT_COST*bu*bu;
@@ -47,8 +64,8 @@ const B=():Record<string,[number,number]>=>Object.fromEntries(Object.keys(T).map
 /** Per-stride biological interval counters (births, deaths, resource flows, dormancy transitions). */
 // impl: REQ-POP-001 (birth/death/flow counters drive emergent population arcs)
 interface LineageDelta{consumedA:number;consumedB:number;consumedC:number;energyA:number;energyB:number;energyC:number;producedC:number;births:number;deaths:number;wasteProduced:number;wasteRemoved:number;burdenEnergy:number;cleanupEnergy:number;cleanupExec:number}
-interface Interval{births:number;deaths:number;mutation_attempts:number;effective_mutations:number;resources_spawned:number;resources_suppressed:number;resources_consumed:number;spawned_a:number;spawned_b:number;consumed_a:number;consumed_b:number;consumed_c:number;produced_c:number;decayed_c:number;energy_a:number;energy_b:number;energy_c:number;repro_supported_a:number;repro_supported_b:number;repro_supported_mixed:number;repro_supported_c:number;dormancy_entries:number;wakes:number;wake_clades:Record<string,number>;proc_exec_a:number;proc_exec_b:number;proc_exec_c:number;produced_w:number;removed_w:number;decayed_w:number;burden_energy:number;cleanup_energy:number;cleanup_exec:number;[k:string]:number|Record<string,number>}
-const I=():Interval=>({births:0,deaths:0,mutation_attempts:0,effective_mutations:0,resources_spawned:0,resources_suppressed:0,resources_consumed:0,spawned_a:0,spawned_b:0,consumed_a:0,consumed_b:0,consumed_c:0,produced_c:0,decayed_c:0,energy_a:0,energy_b:0,energy_c:0,repro_supported_a:0,repro_supported_b:0,repro_supported_mixed:0,repro_supported_c:0,dormancy_entries:0,wakes:0,wake_clades:{},proc_exec_a:0,proc_exec_b:0,proc_exec_c:0,produced_w:0,removed_w:0,decayed_w:0,burden_energy:0,cleanup_energy:0,cleanup_exec:0});
+interface Interval{births:number;deaths:number;mutation_attempts:number;effective_mutations:number;resources_spawned:number;resources_suppressed:number;resources_consumed:number;spawned_a:number;spawned_b:number;consumed_a:number;consumed_b:number;consumed_c:number;produced_c:number;decayed_c:number;energy_a:number;energy_b:number;energy_c:number;repro_supported_a:number;repro_supported_b:number;repro_supported_mixed:number;repro_supported_c:number;dormancy_entries:number;wakes:number;wake_clades:Record<string,number>;proc_exec_a:number;proc_exec_b:number;proc_exec_c:number;produced_w:number;removed_w:number;decayed_w:number;burden_energy:number;cleanup_energy:number;cleanup_exec:number;secreted_i:number;decayed_i:number;saturated_i:number;[k:string]:number|Record<string,number>}
+const I=():Interval=>({births:0,deaths:0,mutation_attempts:0,effective_mutations:0,resources_spawned:0,resources_suppressed:0,resources_consumed:0,spawned_a:0,spawned_b:0,consumed_a:0,consumed_b:0,consumed_c:0,produced_c:0,decayed_c:0,energy_a:0,energy_b:0,energy_c:0,repro_supported_a:0,repro_supported_b:0,repro_supported_mixed:0,repro_supported_c:0,dormancy_entries:0,wakes:0,wake_clades:{},proc_exec_a:0,proc_exec_b:0,proc_exec_c:0,produced_w:0,removed_w:0,decayed_w:0,burden_energy:0,cleanup_energy:0,cleanup_exec:0,secreted_i:0,decayed_i:0,saturated_i:0});
 const H_STD=[50000,100000,200000,300000],H_DEEP=[100000,300000,500000,1000000];
 const SCI={disclaimer:'Sources inform experimental design and interpretation; the exact simulation equations remain deliberate abstractions.',sources:[
 {key:'avida',authors:'Ofria & Wilke',year:2004,title:'Avida: A Software Platform for Research in Computational Evolutionary Biology',doi:'10.1162/106454604773563612',url:'https://doi.org/10.1162/106454604773563612',informs:['digital evolution','controlled experiments']},
@@ -322,7 +339,7 @@ class RS{
  declare stock:Float32Array[];declare cap:Float32Array[];declare source:Float32Array[];
  declare input:number[];declare biologicalProduction:number[];declare consumed:number[];declare decayed:number[];declare externalRemoved:number[];declare removalEvents:RemovalEvent[];declare diffusionAdjustment:number[];declare minFraction:number;declare maxFraction:number;declare lastInput:number[];declare diffusionRate:number[];declare delta:Float32Array[];
  declare sourceBoost:Float64Array[];declare right:Int32Array;declare down:Int32Array;declare minCapRight:Float64Array[];declare minCapDown:Float64Array[];declare totalStock:number[];declare totalCapacity:number[];declare regenLast:Int32Array;declare regenBuckets:number[][];
- declare regenRate:number;declare totalCapTarget:number;declare initialFraction:number;declare initialStock:number[];declare waste:WasteField;
+ declare regenRate:number;declare totalCapTarget:number;declare initialFraction:number;declare initialStock:number[];declare waste:WasteField;declare inhibitor:InhibitorField;
  /** Temporary external C sink (validation washout assays): multiplies C decay while active. Null when absent. */
  declare cSink:{end:number;factor:number}|null;
  constructor(c:EngineConfig){
@@ -343,7 +360,7 @@ class RS{
   for(let iy=0;iy<this.n;iy++)for(let ix=0;ix<this.n;ix++){let i=iy*this.n+ix;this.right[i]=iy*this.n+((ix+1)%this.n);this.down[i]=((iy+1)%this.n)*this.n+ix}
   let regenLoad=new Float64Array(this.updateStride);for(let i=0;i<this.size;i++){let phase=0;for(let q=1;q<this.updateStride;q++)if((regenLoad[q]!)<(regenLoad[phase]!))phase=q;this.regenBuckets[phase]!.push(i);regenLoad[phase]!+=this.cap[0]![i]!+this.cap[1]![i]!}
   for(let k=0;k<3;k++)for(let i=0;i<this.size;i++){this.minCapRight[k]![i]=Math.min(this.cap[k]![i]!,this.cap[k]![this.right[i]!]!);this.minCapDown[k]![i]=Math.min(this.cap[k]![i]!,this.cap[k]![this.down[i]!]!)}
-  this.initialStock=[...this.totalStock];this.cSink=null;this.waste=new WasteField(this.totalCapTarget,this.updateStride);this.recalcBounds();
+  this.initialStock=[...this.totalStock];this.cSink=null;this.waste=new WasteField(this.totalCapTarget,this.updateStride);this.inhibitor=new InhibitorField(this.totalCapTarget,this.updateStride);this.recalcBounds();
  }
  idx(x:number,y:number):number{let ix=Math.floor((((x%600)+600)%600)/this.cell)%this.n,iy=Math.floor((((y%600)+600)%600)/this.cell)%this.n;return iy*this.n+ix}
  fractionAt(kind:number,x:number,y:number):number{let i=this.idx(x,y),c=this.cap[kind]![i]!;return c>1e-9?this.stock[kind]![i]!/c:0}
@@ -368,7 +385,7 @@ class RS{
  diffuse(k:number):void{let st=this.stock[k]!,cp=this.cap[k]!,d=this.delta[k]!,right=this.right,down=this.down,mr=this.minCapRight[k]!,md=this.minCapDown[k]!,rate=this.diffusionRate[k]!;d.fill(0);for(let i=0;i<this.size;i++){let ci=cp[i]!>1e-9?st[i]!/cp[i]!:0,j=right[i]!,cj=cp[j]!>1e-9?st[j]!/cp[j]!:0,flux=rate*(ci-cj)*mr[i]!;d[i]!-=flux;d[j]!+=flux;j=down[i]!;cj=cp[j]!>1e-9?st[j]!/cp[j]!:0;flux=rate*(ci-cj)*md[i]!;d[i]!-=flux;d[j]!+=flux}let adj=0;for(let i=0;i<this.size;i++){let before=st[i]!,raw=before+d[i]!,next=Q(raw,0,cp[i]!);st[i]=next;adj+=next-before}this.totalStock[k]!+=adj;this.diffusionAdjustment[k]!+=adj}
  step(t:number,drought:DroughtState|null,interval:Interval):void{let added=[0,0,0],phase=t%this.updateStride,bucket=this.regenBuckets[phase]!,elapsed=new Int32Array(bucket.length);for(let j=0;j<bucket.length;j++){let i=bucket[j]!;elapsed[j]=Math.max(1,t-this.regenLast[i]!)}for(let k=0;k<2;k++){let factor=drought&&t<drought.end&&k===drought.kind?(1-drought.suppression):1,st=this.stock[k]!,cp=this.cap[k]!,boost=this.sourceBoost[k]!;for(let j=0;j<bucket.length;j++){let i=bucket[j]!,gap=cp[i]!-st[i]!;if(gap<=1e-9)continue;let inc=gap*(1-Math.exp(-this.regenRate*boost[i]!*factor*elapsed[j]!));if(inc>0){let before=st[i]!;st[i]!+=inc;this.totalStock[k]!+=st[i]!-before;added[k]!+=inc}}this.input[k]!+=added[k]!}
   if(this.enabledByproduct){let st=this.stock[2]!,dec=0,decayRate=(this.cSink&&t<this.cSink.end)?C_DECAY_RATE*this.cSink.factor:C_DECAY_RATE;for(let j=0;j<bucket.length;j++){let i=bucket[j]!,e=elapsed[j]!,before=st[i]!,next=before*Math.exp(-decayRate*e),loss=before-next;if(loss>0){st[i]=next;dec+=loss}}this.totalStock[2]!-=dec;this.decayed[2]!+=dec;if(interval)interval.decayed_c+=dec}
-  this.waste.stepWaste(t,interval);if(t%100===0){this.diffuse(0);this.diffuse(1);if(this.enabledByproduct)this.diffuse(2)}for(let j=0;j<bucket.length;j++)this.regenLast[bucket[j]!]=t;this.lastInput=added;if(interval){interval.resources_spawned+=added[0]!+added[1]!;interval.spawned_a+=added[0]!;interval.spawned_b+=added[1]!;if(drought&&t<drought.end&&t%this.updateStride===0)interval.resources_suppressed+=1}this.recalcBounds();
+  this.waste.stepWaste(t,interval);this.inhibitor.stepInhibitor(t,interval);if(t%100===0){this.diffuse(0);this.diffuse(1);if(this.enabledByproduct)this.diffuse(2)}for(let j=0;j<bucket.length;j++)this.regenLast[bucket[j]!]=t;this.lastInput=added;if(interval){interval.resources_spawned+=added[0]!+added[1]!;interval.spawned_a+=added[0]!;interval.spawned_b+=added[1]!;if(drought&&t<drought.end&&t%this.updateStride===0)interval.resources_suppressed+=1}this.recalcBounds();
  }
  scale(kind:null,factor:number,meta?:{tick:number|null;type:string|null;source:string|null;reason?:string}|null):number[];
  scale(kind:number,factor:number,meta?:{tick:number|null;type:string|null;source:string|null;reason?:string}|null):number;
@@ -376,8 +393,8 @@ class RS{
  totals(){let a=this.totalStock[0]!,b=this.totalStock[1]!,c=this.totalStock[2]!,ca=this.totalCapacity[0]!,cb=this.totalCapacity[1]!,cc=this.totalCapacity[2]!,primaryCap=ca+cb,primary=a+b,all=primary+c;return{a,b,c,a_capacity:ca,b_capacity:cb,c_capacity:cc,total:primary,total_with_byproduct:all,total_capacity:primaryCap,total_capacity_with_byproduct:primaryCap+cc,fraction:primaryCap?primary/primaryCap:0,c_fraction:cc?c/cc:0,min_fraction:this.minFraction,max_fraction:this.maxFraction}}
  recalcBounds(){let cap=this.totalCapacity[0]!+this.totalCapacity[1]!,tot=this.totalStock[0]!+this.totalStock[1]!,f=cap?tot/cap:0;this.minFraction=Math.min(this.minFraction,f);this.maxFraction=Math.max(this.maxFraction,f)}
  accounting(){let final=[...this.totalStock],residual=[0,1,2].map(k=>this.initialStock[k]!+this.input[k]!+this.biologicalProduction[k]!-this.consumed[k]!-this.decayed[k]!-this.externalRemoved[k]!+this.diffusionAdjustment[k]!-final[k]!);return{initial_stock:[...this.initialStock],environmental_input:[...this.input],biological_production:[...this.biologicalProduction],biological_consumption:[...this.consumed],decay:[...this.decayed],external_removal:[...this.externalRemoved],diffusion_clamp_adjustment:[...this.diffusionAdjustment],final_stock:final,residual,absolute_residual:residual.map(Math.abs),removal_events:this.removalEvents.map(v=>({...v,amounts:[...v.amounts]})),identity:'initial + environmental input + biological production - biological consumption - decay - external removal + diffusion clamp adjustment = final stock + residual'}}
- clone(){let n=Object.create(RS.prototype);for(const [k,v] of Object.entries(this)){if(v instanceof WasteField)n[k]=v.clone();else if(Array.isArray(v)&&v.length&&ArrayBuffer.isView(v[0]))n[k]=v.map(a=>new a.constructor(a));else if(ArrayBuffer.isView(v))n[k]=new (v.constructor as any)(v);else if(Array.isArray(v))n[k]=v.map(x=>x&&typeof x==='object'?JSON.parse(JSON.stringify(x)):x);else if(v&&typeof v==='object')n[k]=JSON.parse(JSON.stringify(v));else n[k]=v}return n}
- export(){let q=this.totals();return{model:'definition_driven_spatial_substance_field',grid:{width:this.n,height:this.n,cell_world_units:this.cell,toroidal:true},definitions:this.defs.map(v=>({...v})),update_stride_ticks:this.updateStride,uptake_per_tick:this.uptake,totals:q,environmental_input:[...this.input],biological_production:[...this.biologicalProduction],biological_consumption:[...this.consumed],decay:[...this.decayed],external_removal:[...this.externalRemoved],accounting:this.accounting(),stock_fields:this.stock.map(a=>Array.from(a)),capacity_fields:this.cap.map(a=>Array.from(a)),source_fields:this.source.map(a=>Array.from(a))}}
+ clone(){let n=Object.create(RS.prototype);for(const [k,v] of Object.entries(this)){if(v instanceof WasteField)n[k]=v.clone();else if(v instanceof InhibitorField)n[k]=v.clone();else if(Array.isArray(v)&&v.length&&ArrayBuffer.isView(v[0]))n[k]=v.map(a=>new a.constructor(a));else if(ArrayBuffer.isView(v))n[k]=new (v.constructor as any)(v);else if(Array.isArray(v))n[k]=v.map(x=>x&&typeof x==='object'?JSON.parse(JSON.stringify(x)):x);else if(v&&typeof v==='object')n[k]=JSON.parse(JSON.stringify(v));else n[k]=v}return n}
+ export(){let q=this.totals();return{model:'definition_driven_spatial_substance_field',grid:{width:this.n,height:this.n,cell_world_units:this.cell,toroidal:true},definitions:this.defs.map(v=>({...v})),update_stride_ticks:this.updateStride,uptake_per_tick:this.uptake,totals:q,environmental_input:[...this.input],biological_production:[...this.biologicalProduction],biological_consumption:[...this.consumed],decay:[...this.decayed],external_removal:[...this.externalRemoved],accounting:this.accounting(),inhibitor:this.inhibitor.export(),stock_fields:this.stock.map(a=>Array.from(a)),capacity_fields:this.cap.map(a=>Array.from(a)),source_fields:this.source.map(a=>Array.from(a))}}
 }
 
 /**
@@ -452,6 +469,74 @@ class WasteField{
  accounting():{identity:string;initial:number;produced:number;bio_removed:number;decayed:number;clamp_adjustment:number;saturated_loss:number;final_stock:number;residual:number}{let final=this.totals().stock,residual=this.produced-this.bioRemoved-this.decayed+this.clampAdj-final;return{identity:'generated = deposited (produced) + saturated loss (discarded); deposited - biological removal - decay + clamp adjustment = final stock + residual',initial:0,produced:this.produced,bio_removed:this.bioRemoved,decayed:this.decayed,clamp_adjustment:this.clampAdj,saturated_loss:this.discarded,final_stock:final,residual}}
  clone():WasteField{let n=Object.create(WasteField.prototype);for(const [k,v] of Object.entries(this)){if(ArrayBuffer.isView(v))n[k]=new (v.constructor as any)(v);else if(Array.isArray(v))n[k]=v.map(x=>x&&typeof x==='object'?JSON.parse(JSON.stringify(x)):x);else if(v&&typeof v==='object')n[k]=JSON.parse(JSON.stringify(v));else n[k]=v}return n}
  export():{model:string;grid:number;cell_world_units:number;diffusion_rate:number;decay_rate:number;totals:unknown;accounting:unknown}{return{model:'spatial_waste_substance_field',grid:this.n,cell_world_units:this.cell,diffusion_rate:this.diffusionRate,decay_rate:this.decayRate,totals:this.totals(),accounting:this.accounting()}}
+}
+
+/**
+ * Slice 1 interference (Task 2): spatial Inhibitor signal field. Modeled on
+ * WasteField (same 60x60 toroidal grid, per-cell caps, bucketed exponential
+ * decay, neighbor diffusion with capacity clamping, closed mass accounting)
+ * but a SEPARATE substance: inhibitor concentration is never read from, or
+ * written to, waste stock. No production path exists yet — Task 3 adds
+ * secretion; until then mass enters only via direct deposit() calls
+ * (validation assays). There is no biological removal path yet either, so
+ * the accounting identity has no removal term.
+ */
+class InhibitorField{
+  declare n:number;declare cell:number;declare size:number;
+  declare stock:Float32Array;declare cap:Float32Array;
+  declare produced:number;declare decayed:number;declare clampAdj:number;declare discarded:number;
+  declare diffusionRate:number;declare decayRate:number;
+  declare right:Int32Array;declare down:Int32Array;declare delta:Float32Array;
+  declare updateStride:number;declare decayLast:Int32Array;declare decayBuckets:number[][];
+  constructor(totalCap:number,updateStride:number){
+   this.n=FIELD_N;this.cell=FIELD_CELL;this.size=FIELD_CELLS;this.updateStride=updateStride;
+   this.diffusionRate=INHIBITOR_DIFFUSION;this.decayRate=INHIBITOR_DECAY;
+   let per=totalCap*INHIBITOR_CAP_FRACTION/this.size;
+   this.stock=new Float32Array(this.size);this.cap=new Float32Array(this.size).fill(per);
+   this.produced=0;this.decayed=0;this.clampAdj=0;this.discarded=0;
+   this.right=new Int32Array(this.size);this.down=new Int32Array(this.size);this.delta=new Float32Array(this.size);
+   for(let iy=0;iy<this.n;iy++)for(let ix=0;ix<this.n;ix++){let i=iy*this.n+ix;this.right[i]=iy*this.n+((ix+1)%this.n);this.down[i]=((iy+1)%this.n)*this.n+ix}
+   this.decayLast=new Int32Array(this.size);this.decayBuckets=Array.from({length:this.updateStride},()=>[] as number[]);
+   for(let i=0;i<this.size;i++)this.decayBuckets[i%this.updateStride]!.push(i);
+  }
+  idx(x:number,y:number):number{let ix=Math.floor((((x%600)+600)%600)/this.cell)%this.n,iy=Math.floor((((y%600)+600)%600)/this.cell)%this.n;return iy*this.n+ix}
+  fractionAt(x:number,y:number):number{let i=this.idx(x,y),c=this.cap[i]!;return c>1e-9?this.stock[i]!/c:0}
+  amountAt(x:number,y:number):number{return this.stock[this.idx(x,y)]!}
+  deposit(x:number,y:number,amount:number,interval:Interval|null):number{
+   if(amount<=0)return 0;
+   let i=this.idx(x,y),room=Math.max(0,this.cap[i]!-this.stock[i]!),add=Math.min(room,amount);
+   // Saturated surplus never enters the field. It is counted as discarded
+   // (+ interval saturated_i), never silently dropped: the accounting
+   // identity reports saturated loss separately, so generated mass always
+   // reconciles to deposited + discarded.
+   let lost=amount-add;
+   if(lost>0){this.discarded+=lost;if(interval)interval.saturated_i=(interval.saturated_i||0)+lost}
+   if(add<=0)return 0;
+   this.stock[i]!+=add;this.produced+=add;
+   if(interval)interval.secreted_i=(interval.secreted_i||0)+add;
+   return add;
+  }
+  diffuseOne():void{
+   let st=this.stock,cp=this.cap,d=this.delta,right=this.right,down=this.down,rate=this.diffusionRate,per=cp[0]!;
+   d.fill(0);
+   for(let i=0;i<this.size;i++){let ci=cp[i]!>1e-9?st[i]!/cp[i]!:0,j=right[i]!,cj=cp[j]!>1e-9?st[j]!/cp[j]!:0,flux=rate*(ci-cj)*per;d[i]!-=flux;d[j]!+=flux;j=down[i]!;cj=cp[j]!>1e-9?st[j]!/cp[j]!:0;flux=rate*(ci-cj)*per;d[i]!-=flux;d[j]!+=flux}
+   let adj=0;for(let i=0;i<this.size;i++){let before=st[i]!,next=Math.max(0,Math.min(cp[i]!,before+d[i]!));st[i]=next;adj+=next-before}
+   this.clampAdj+=adj;
+  }
+  stepInhibitor(t:number,interval:Interval|null):void{
+   let phase=t%this.updateStride,bucket=this.decayBuckets[phase]!,elapsed=new Int32Array(bucket.length);
+   for(let j=0;j<bucket.length;j++){let i=bucket[j]!;elapsed[j]=Math.max(1,t-this.decayLast[i]!)}
+   let st=this.stock,dec=0;
+   for(let j=0;j<bucket.length;j++){let i=bucket[j]!,e=elapsed[j]!,before=st[i]!,next=before*Math.exp(-this.decayRate*e),loss=before-next;if(loss>0){st[i]=next;dec+=loss}}
+   this.decayed+=dec;
+   if(interval)interval.decayed_i=(interval.decayed_i||0)+dec;
+   if(t%100===0)this.diffuseOne();
+   for(let j=0;j<bucket.length;j++)this.decayLast[bucket[j]!]=t;
+  }
+  totals():{stock:number;capacity:number;fraction:number}{let s=0,c=0;for(let i=0;i<this.size;i++){s+=this.stock[i]!;c+=this.cap[i]!}return{stock:s,capacity:c,fraction:c>0?s/c:0}}
+  accounting():{identity:string;initial:number;produced:number;decayed:number;clamp_adjustment:number;saturated_loss:number;final_stock:number;residual:number}{let final=this.totals().stock,residual=this.produced-this.decayed+this.clampAdj-final;return{identity:'generated = deposited (produced) + saturated loss (discarded); deposited - decayed + clamp adjustment = final stock + residual',initial:0,produced:this.produced,decayed:this.decayed,clamp_adjustment:this.clampAdj,saturated_loss:this.discarded,final_stock:final,residual}}
+  clone():InhibitorField{let n=Object.create(InhibitorField.prototype);for(const [k,v] of Object.entries(this)){if(ArrayBuffer.isView(v))n[k]=new (v.constructor as any)(v);else if(Array.isArray(v))n[k]=v.map(x=>x&&typeof x==='object'?JSON.parse(JSON.stringify(x)):x);else if(v&&typeof v==='object')n[k]=JSON.parse(JSON.stringify(v));else n[k]=v}return n}
+  export():{model:string;grid:number;cell_world_units:number;diffusion_rate:number;decay_rate:number;totals:unknown;accounting:unknown}{return{model:'spatial_inhibitor_substance_field',grid:this.n,cell_world_units:this.cell,diffusion_rate:this.diffusionRate,decay_rate:this.decayRate,totals:this.totals(),accounting:this.accounting()}}
 }
 
 class S{
@@ -606,6 +691,7 @@ function encodeCheckpointValue(v:any):any{
  if(v instanceof S)return{[CHECKPOINT_TAG]:"simulation",props:Object.fromEntries(Object.entries(v).map(([k,x])=>[k,encodeCheckpointValue(x)]))};
  if(v instanceof RS)return{[CHECKPOINT_TAG]:"resource-system",props:Object.fromEntries(Object.entries(v).map(([k,x])=>[k,encodeCheckpointValue(x)]))};
  if(v instanceof WasteField)return{[CHECKPOINT_TAG]:"waste-field",props:Object.fromEntries(Object.entries(v).map(([k,x])=>[k,encodeCheckpointValue(x)]))};
+  if(v instanceof InhibitorField)return{[CHECKPOINT_TAG]:"inhibitor-field",props:Object.fromEntries(Object.entries(v).map(([k,x])=>[k,encodeCheckpointValue(x)]))};
  if(v instanceof EcologyObserver)return{[CHECKPOINT_TAG]:"legacy-observer",props:Object.fromEntries(Object.entries(v).map(([k,x])=>[k,encodeCheckpointValue(x)]))};
  if(v instanceof Map)return{[CHECKPOINT_TAG]:"map",entries:[...v].map(([k,x])=>[encodeCheckpointValue(k),encodeCheckpointValue(x)])};
  if(ArrayBuffer.isView(v)&&!(v instanceof DataView))return{[CHECKPOINT_TAG]:"typed-array",ctor:v.constructor.name,values:Array.from(v as unknown as ArrayLike<number>)};
@@ -622,8 +708,8 @@ function decodeCheckpointValue(v:any):any{
  if(tag==="rng"){let r=R(0);r.setState(v.state);return r}
  if(tag==="typed-array"){let C:any={Float32Array,Float64Array,Int32Array,Uint32Array,Uint16Array,Uint8Array,Int16Array,Int8Array}[(v.ctor as string)];if(!C)throw new Error("Unsupported checkpoint typed array: "+v.ctor);return new C(v.values)}
  if(tag==="map")return new Map(v.entries.map(([k,x]:any)=>[decodeCheckpointValue(k),decodeCheckpointValue(x)]));
- if(tag==="simulation"||tag==="resource-system"||tag==="legacy-observer"||tag==="waste-field"){
-  let o=Object.create(tag==="simulation"?S.prototype:tag==="resource-system"?RS.prototype:tag==="waste-field"?WasteField.prototype:EcologyObserver.prototype);
+ if(tag==="simulation"||tag==="resource-system"||tag==="legacy-observer"||tag==="waste-field"||tag==="inhibitor-field"){
+  let o=Object.create(tag==="simulation"?S.prototype:tag==="resource-system"?RS.prototype:tag==="waste-field"?WasteField.prototype:tag==="inhibitor-field"?InhibitorField.prototype:EcologyObserver.prototype);
   for(const [k,x] of Object.entries(v.props))o[k]=decodeCheckpointValue(x);
   return o;
  }
