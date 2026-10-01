@@ -643,7 +643,7 @@ const MIGRATION_ABSORBER_PROBES: Readonly<Record<string, { file: string; probe: 
 };
 
 /** The schema the maintained save path writes. No rule may tolerate an
- *  omission in it: that is the whole point of the 0.4 split. */
+ *  omission in it: that is the whole point of the current-schema (0.5) split. */
 const CURRENT_SCHEMA = CHECKPOINT_SCHEMA_VERSION;
 
 // Rules that tolerate a historical absence in one place while the same field
@@ -662,10 +662,11 @@ const SPLIT_RULE_IDS = [
 ];
 
 function testCheckpointMigrationRuleTable() {
-  // Every version the contract knows, so a rule scoped to 0.4 — which no
-  // absence tolerance may be — is still a *valid* value here and has to be
-  // caught by the no-crossing assertion below rather than by the whitelist.
-  const schemas = ["0.1", "0.2", "0.3", "0.4"];
+  // Every version the contract knows, so a rule scoped to the current schema
+  // (0.5) — which no absence tolerance may be — is still a *valid* value here
+  // and has to be caught by the no-crossing assertion below rather than by
+  // the whitelist.
+  const schemas = ["0.1", "0.2", "0.3", "0.4", "0.5"];
   const absorbers = [
     "live-step-guard",
     "nullable-field",
@@ -682,7 +683,7 @@ function testCheckpointMigrationRuleTable() {
     assert.ok(rule.path.length > 0, `${rule.id} must state where the field lives`);
     // A rule must name a supported build that could have written the shape.
     // "The restore code currently tolerates it" is not a basis, and the whole
-    // point of 0.4 is that the two are no longer the same claim.
+    // point of the current-schema split is that the two are no longer the same claim.
     assert.ok(
       typeof rule.historicalBasis === "string" && rule.historicalBasis.length > 40,
       `${rule.id} must name concrete evidence that a supported build wrote this shape`,
@@ -696,7 +697,7 @@ function testCheckpointMigrationRuleTable() {
     for (const schema of rule.appliesToSchemas) {
       assert.ok(schemas.includes(schema), `${rule.id} names unknown schema ${schema}`);
     }
-    // No absence tolerance may cross into the current schema: a 0.4 save is
+    // No absence tolerance may cross into the current schema: a 0.5 save is
     // written by the build that requires these fields, so it may not omit them.
     assert.ok(
       !rule.appliesToSchemas.includes(CURRENT_SCHEMA),
@@ -1299,7 +1300,7 @@ function testCooldownPreservationAcrossRestore() {
     "a 0.2 save predating the field migrates to clear, which is historically correct rather than permissive",
   );
 
-  console.log("major-catalyst cooldown preservation: PASS (0.4, 0.3, and 0.2-absence)");
+  console.log("major-catalyst cooldown preservation: PASS (current/0.5, 0.3, and 0.2-absence)");
 }
 
 
@@ -1384,8 +1385,9 @@ function testCheckpointRejectionConditions() {
     );
   }
 
-  // unsupported-version
-  for (const version of ["0.5", "1.0", "", null, 3]) {
+  // unsupported-version (0.5 is now a supported schema, so the probe uses a
+  // genuinely unknown 0.6 instead).
+  for (const version of ["0.6", "1.0", "", null, 3]) {
     const bad = JSON.parse(JSON.stringify(good));
     bad.checkpointSchemaVersion = version;
     const error = rejected(bad);
@@ -1430,8 +1432,9 @@ function testCheckpointRejectionConditions() {
   // --- The negative control -------------------------------------------------
   //
   // `analysis.records` was written by every schema and cannot demonstrate
-  // historical absence. Check that both 0.3 and 0.4 refuse its omission;
-  // `analysis.dep` below demonstrates the genuine version-scoped asymmetry.
+  // historical absence. Check that 0.3, 0.4 and the current 0.5 all refuse
+  // its omission; `analysis.dep` below demonstrates the genuine
+  // version-scoped asymmetry.
   const missingRecords = (schema: string): any => {
     const bad = JSON.parse(JSON.stringify(good));
     bad.checkpointSchemaVersion = schema;
@@ -1444,10 +1447,10 @@ function testCheckpointRejectionConditions() {
   // malformed historical payload loaded.
   // A field covered by a rule must be *absent* and load; the same field
   // *present with a wrong type* must be refused at every supported schema.
-  // This container exists in 0.2 as well as 0.3 and 0.4; older resolution
+  // This container exists in 0.2 as well as 0.3, 0.4 and 0.5; older resolution
   // records have different fields, but a non-array container is invalid in all
-  // three. The oldest schema predates the entire decision system.
-  for (const schema of ["0.2", "0.3", "0.4"]) {
+  // four. The oldest schema predates the entire decision system.
+  for (const schema of ["0.2", "0.3", "0.4", "0.5"]) {
     const wrongTyped: any = JSON.parse(JSON.stringify(good));
     wrongTyped.checkpointSchemaVersion = schema;
     wrongTyped.decisions.resolutions = "not an array";
@@ -1463,8 +1466,9 @@ function testCheckpointRejectionConditions() {
   // The asymmetry, restated against a field whose history actually supports
   // it. `analysis.records` is written by every checkpoint build since d86ddfe,
   // so a save omitting it is malformed at 0.3 too and is refused at both. The
-  // version split is therefore NOT "0.3 may omit what 0.4 requires" in general:
-  // it is scoped per field, by when that field was introduced.
+  // version split is therefore NOT "0.3 may omit what the current schema
+  // requires" in general: it is scoped per field, by when that field was
+  // introduced.
   const missingRecordsAt03 = rejected(missingRecords("0.3"));
   assert.equal(
     missingRecordsAt03.field,
@@ -1486,27 +1490,42 @@ function testCheckpointRejectionConditions() {
     true,
     "a 0.3 save omitting the post-0.3 C-use sub-state loads, because no 0.3 build wrote it",
   );
-  const depAsCurrent = rejected(missingDep("0.4"));
+  const depAsCurrent = rejected(missingDep(CURRENT_SCHEMA));
   assert.equal(
     depAsCurrent.field,
     "analysis.dep",
     "a current save may not omit the C-use sub-state, so no rule may tolerate its absence there",
   );
+  // 0.4 is historical now, but it also wrote dep — its omission there stays
+  // refused, not historical.
+  const depAt04 = rejected(missingDep("0.4"));
+  assert.equal(
+    depAt04.field,
+    "analysis.dep",
+    "a 0.4 save may not omit the C-use sub-state either: 0.4 wrote it",
+  );
 
-  const asCurrent = rejected(missingRecords("0.4"));
+  const asCurrent = rejected(missingRecords(CURRENT_SCHEMA));
   assert.equal(
     asCurrent.field,
     "analysis.records",
     "a current save may not omit a field every supported schema wrote",
   );
   assert.equal(asCurrent.reason, "malformed-container");
+  const recordsAt04 = rejected(missingRecords("0.4"));
+  assert.equal(
+    recordsAt04.field,
+    "analysis.records",
+    "a 0.4 save may not omit a field every supported schema wrote either",
+  );
+  assert.equal(recordsAt04.reason, "malformed-container");
 
   // The same asymmetry, reached through a real restore rather than the
   // validator, so the ordering in `restore` is what is under test. `dep` is
   // the field whose absence is genuinely historical at 0.3.
   const realCurrent = new UniverseSession();
   assert.throws(
-    () => realCurrent.restore(missingDep("0.4")),
+    () => realCurrent.restore(missingDep(CURRENT_SCHEMA)),
     (error: unknown) => error instanceof CheckpointRejectionError && error.field === "analysis.dep",
     "restore refuses a current save missing the C-use sub-state",
   );

@@ -789,3 +789,221 @@ testRestoredContinuationMatchesUninterrupted();
 testMatchedForkExactAtFork();
 testOldSavesRefusedExplicitly();
 console.log("interference validation (task 4): PASS");
+
+// --- Task 5: accounting cross-checks + registered blocking unit. ---
+
+function testZeroInterferenceBaseline() {
+  // Task 0 decision: two unconditional T-traits cost >= 2 extra rMut draws
+  // per child() (one mr-gate draw each, last in iteration order), so rMut
+  // shifts from the second birth on and a 0.22.0 trajectory replay is
+  // impossible by design — even with the field empty, the draws are consumed
+  // regardless of trait value. The 0.23.0 baseline is therefore a new
+  // versioned deterministic behavior, proven here as same-version twin
+  // determinism of a zero-trait world (mr:0 freezes traits at zero while the
+  // gate draws still advance the stream, so the Task-0 mechanism is active).
+  const mk = (): any => {
+    const sim = new Simulation(config(20261001, { mr: 0 })) as any;
+    for (const o of sim.o as any[]) {
+      o.in = 0;
+      o.re = 0;
+    }
+    return sim;
+  };
+  const a = mk();
+  const b = mk();
+  const N = 300; // crosses the 251-tick stride: intervals bank mid-run.
+  for (let t = 0; t < N; t++) {
+    a.step();
+    b.step();
+  }
+  assert.equal(b.t, a.t, "zero-trait twins agree on tick");
+  assert.deepStrictEqual(b.o, a.o, "zero-trait twins carry identical organisms");
+  assert.ok(Math.abs(inhSum(b) - inhSum(a)) < 1e-12, "zero-trait twins agree on inhibitor stock");
+  assert.deepStrictEqual(
+    b.readIntervalFlows(),
+    a.readIntervalFlows(),
+    "zero-trait twins agree on interval flows",
+  );
+  const cpJson = (s: any) => JSON.parse(JSON.stringify(createSimulationCheckpoint(s)));
+  assert.deepStrictEqual(cpJson(b), cpJson(a), "zero-trait twins checkpoint byte-identically");
+
+  // And the world behaved as specified: no secretion, no exposure, no
+  // suppression, no interference energy — the field stayed empty.
+  assert.equal(inhSum(a), 0, "zero-trait world secretes nothing into the field");
+  assert.equal(a.resources.inhibitor.produced, 0, "no produced mass without the trait");
+  assert.equal(a.resources.inhibitor.discarded, 0, "no saturated loss without secretion");
+  assert.equal(a.cur.secreted_i, 0, "no secreted_i without the trait");
+  assert.equal(a.cur.exposure_i, 0, "no exposure in an empty field");
+  assert.equal(a.cur.secretion_energy, 0, "no secretion cost without the trait");
+  assert.equal(a.cur.resistance_energy, 0, "no resistance cost without the trait");
+  for (const k of ["suppressed_a", "suppressed_b", "suppressed_c"] as const) {
+    assert.equal(a.cur[k], 0, `no ${k} without exposure`);
+  }
+  for (const o of a.o as any[]) {
+    assert.equal(o.in, 0, "mr:0 freezes secretion at zero");
+    assert.equal(o.re, 0, "mr:0 freezes resistance at zero");
+  }
+  console.log("testZeroInterferenceBaseline: PASS");
+}
+
+function testMassIdentityCloses() {
+  // Closed inhibitor mass accounting against an independent stock sum. The
+  // engine identity (Task 2 semantics: produced counts accepted mass only)
+  // is produced - decayed + clamp - final ≈ 0, with saturated loss reported
+  // separately (produced + discarded = attempted generation). The brief's
+  // shorthand omits the clamp term; the full identity is asserted here so a
+  // diffusion-clamp leak cannot hide inside the tolerance.
+  const sim = new Simulation(config(3133777)) as any;
+  for (let t = 0; t < 300; t++) sim.step();
+  const inh = sim.resources.inhibitor;
+  const sum = inhibitorStockSum(inh);
+  const a = inh.accounting();
+  assert.ok((inh.produced as number) > 0, "live secretion produced field mass");
+  assert.ok((inh.decayed as number) > 0, "decay recorded over 300 ticks");
+  assert.ok(Math.abs(a.residual as number) < 1e-4, `accounting residual ≈ 0, got ${a.residual}`);
+  const recomputed =
+    (a.produced as number) -
+    (a.decayed as number) +
+    (a.clamp_adjustment as number) -
+    sum;
+  assert.ok(Math.abs(recomputed) < 1e-4, `produced - decayed + clamp - final ≈ 0, got ${recomputed}`);
+
+  // Saturation path: overfill one cell, then prove the identity still closes
+  // with the loss explicit rather than absorbed.
+  const sim2 = new Simulation(config(42424444)) as any;
+  const inh2 = sim2.resources.inhibitor;
+  const perCell = (inh2.cap as Float32Array)[0]!;
+  const over = perCell * 10;
+  inh2.deposit(5, 5, over, null);
+  const lost = over - perCell;
+  assert.ok(Math.abs((inh2.discarded as number) - lost) < 1e-6, "surplus counted in discarded");
+  const a2 = inh2.accounting();
+  assert.ok(
+    Math.abs((a2.produced as number) + (a2.saturated_loss as number) - over) < 1e-6,
+    "produced + saturated loss equals attempted generation",
+  );
+  const recomputed2 =
+    (a2.produced as number) -
+    (a2.decayed as number) +
+    (a2.clamp_adjustment as number) -
+    inhibitorStockSum(inh2);
+  assert.ok(Math.abs(recomputed2) < 1e-4, `identity closes after saturation, got ${recomputed2}`);
+  assert.ok(Math.abs(a2.residual as number) < 1e-4, `residual ≈ 0 after saturation, got ${a2.residual}`);
+  console.log("testMassIdentityCloses: PASS");
+}
+
+function testReportedSuppressionMatchesBiology() {
+  // Reported suppressed_* must equal full-take minus actual-take recomputed
+  // from independent stock deltas. Tick 1 carries no diffusion (t % 100) and
+  // no regen for the probed cell (bucket 0 runs on phase 0, not phase 1), and
+  // nutrient A/B do not decay, so the stock delta is pure consumption — any
+  // untracked clamp or diffusion adjustment would break the reconciliation
+  // and fail the test.
+  const setups: Array<{ k: number; setup: (o: any) => void; c: string; s: string }> = [
+    { k: 0, setup: (o) => { o.di = -1.5; o.ha = -1.5; o.bu = 0; }, c: "consumed_a", s: "suppressed_a" },
+    { k: 1, setup: (o) => { o.di = 1.5; o.ha = 1.5; o.bu = 0; }, c: "consumed_b", s: "suppressed_b" },
+    { k: 2, setup: (o) => { o.di = 0; o.ha = 0; o.bu = 1.5; }, c: "consumed_c", s: "suppressed_c" },
+  ];
+  for (const { k, setup, c, s } of setups) {
+    const sim = new Simulation(config(999002)) as any;
+    zeroStocks(sim);
+    const o = isolateFirst(sim);
+    o.x = 5; o.y = 5; o.h = 0; o.sp = 0.3; o.en = 200;
+    o.in = 0; o.re = 0; o.to = 0; o.cu = 0;
+    setup(o);
+    const rs = sim.resources as any;
+    const idx = rs.idx(5, 5) as number;
+    const cap = (rs.cap[k] as Float32Array)[idx]!;
+    const S0 = cap * 0.8;
+    setCellStock(sim, k, 5, 5, S0);
+    const perCell = (rs.inhibitor.cap as Float32Array)[0]!;
+    rs.inhibitor.deposit(5, 5, 0.5 * perCell, null);
+    assert.equal((rs.diffusionAdjustment as number[])[k], 0, "no nutrient clamp before the step");
+    sim.step();
+    const S1 = (rs.stock[k] as Float32Array)[idx]!;
+    const actual = S0 - S1;
+    const cur = sim.cur as any;
+    assert.ok(
+      Math.abs(actual - (cur[c] as number)) < 1e-6,
+      `substrate ${k}: stock delta reconciles to ${c}`,
+    );
+    const full = Math.min(S0, (rs.uptake as number) * (0.55 + 0.45 * Math.min(1, Math.max(0, S0 / cap))));
+    const supp = cur[s] as number;
+    assert.ok(
+      Math.abs(actual + supp - full) < 1e-6,
+      `substrate ${k}: reported ${s} equals full-take minus actual-take (${actual} + ${supp} vs ${full})`,
+    );
+    assert.ok(
+      Math.abs((rs.diffusionAdjustment as number[])[k]!) < 1e-12,
+      `substrate ${k}: no nutrient diffusion clamp on tick 1 to hide behind`,
+    );
+    const flows = sim.readIntervalFlows();
+    assert.ok(
+      Math.abs((flows.totals as any)[s] - supp) < 1e-12,
+      `substrate ${k}: lineage ${s} reconciles to the interval total`,
+    );
+  }
+  console.log("testReportedSuppressionMatchesBiology: PASS");
+}
+
+function testDiffusionIsRedistribution() {
+  // Diffusion-only evolution changes no total except the tracked clamp
+  // adjustment. diffuseOne() performs no decay and no production, so the
+  // stock change must equal the clamp delta exactly — and below cap the
+  // delta is ~0 (pure redistribution), while a saturated neighborhood
+  // exercises the clamp path without losing track.
+  const sim = new Simulation(config(556677889910)) as any;
+  const inh = sim.resources.inhibitor;
+  const perCell = (inh.cap as Float32Array)[0]!;
+  inh.deposit(5, 5, perCell * 0.4, null);
+  const producedBefore = inh.produced as number;
+  const decayedBefore = inh.decayed as number;
+  for (let i = 0; i < 10; i++) {
+    const before = inhibitorStockSum(inh);
+    const clampBefore = inh.clampAdj as number;
+    inh.diffuseOne();
+    const after = inhibitorStockSum(inh);
+    const clampDelta = (inh.clampAdj as number) - clampBefore;
+    // Tolerance is 1e-7, not 1e-9: stock and delta are Float32Array, so each
+    // cell rounds on store and repeated passes accumulate ~1e-9 drift that a
+    // single-pass check (Task 2) never sees. A real clamp leak would be O(mass).
+    assert.ok(
+      Math.abs(after - before - clampDelta) < 1e-7,
+      `diffusion ${i}: stock change (${after - before}) equals clamp adjustment only (${clampDelta})`,
+    );
+  }
+  assert.ok(
+    Math.abs(inhibitorStockSum(inh) - perCell * 0.4) < 1e-6,
+    "below-cap diffusion conserves mass across repeated passes",
+  );
+  assert.equal(inh.produced, producedBefore, "diffusion produces nothing");
+  assert.equal(inh.decayed, decayedBefore, "diffusion decays nothing");
+  assert.ok((inh.stock as Float32Array)[1]! > 0, "mass redistributed to the neighbor cell");
+
+  // Saturated neighborhood: fill a 2x2 block to cap, then diffuse — the
+  // clamp path engages but the change still equals the tracked adjustment.
+  const sim2 = new Simulation(config(778889910)) as any;
+  const inh2 = sim2.resources.inhibitor;
+  const per2 = (inh2.cap as Float32Array)[0]!;
+  for (const [x, y] of [[5, 5], [15, 5], [5, 15], [15, 15]] as const) {
+    inh2.deposit(x, y, per2, null);
+  }
+  const before2 = inhibitorStockSum(inh2);
+  const clampBefore2 = inh2.clampAdj as number;
+  inh2.diffuseOne();
+  const after2 = inhibitorStockSum(inh2);
+  const clampDelta2 = (inh2.clampAdj as number) - clampBefore2;
+  assert.ok(
+    Math.abs(after2 - before2 - clampDelta2) < 1e-7,
+    `saturated diffusion: stock change (${after2 - before2}) equals clamp adjustment (${clampDelta2})`,
+  );
+  const a2 = inh2.accounting();
+  assert.ok(Math.abs(a2.residual as number) < 1e-4, `accounting still closes, residual=${a2.residual}`);
+  console.log("testDiffusionIsRedistribution: PASS");
+}
+
+testZeroInterferenceBaseline();
+testMassIdentityCloses();
+testReportedSuppressionMatchesBiology();
+testDiffusionIsRedistribution();
+console.log("interference validation (task 5): PASS");

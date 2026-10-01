@@ -44,6 +44,7 @@
     "test:art-review": "tsx tools/validation/art-review.ts",
     "test:validation-arch": "tsx tools/validation/validation-arch.ts",
     "test:runtime-boundary": "tsx tools/validation/runtime-boundary.ts",
+    "test:interference": "tsx tools/validation/interference.ts",
     "test:plated": "tsx tools/plated-proof/validate.ts && tsx tools/plated-proof/geo-validate.ts",
     "test:pixi-spike": "tsx tools/pixi-spike/validate.ts",
     "test:pixi-p0": "tsx tools/validation/pixi-p0.ts",

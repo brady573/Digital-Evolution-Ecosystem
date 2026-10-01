@@ -97,7 +97,7 @@ export function testHistoricalCheckpointBoundary(): void {
     (e: unknown) => e instanceof CheckpointRejectionError && e.field === "decisions.lastDecisionTick",
     "0.3 wrote the field; omission is not historical",
   );
-  for (const schema of ["0.3", "0.4"] as const) {
+  for (const schema of ["0.3", "0.4", "0.5"] as const) {
     const withoutCooldown = JSON.parse(JSON.stringify(original));
     withoutCooldown.checkpointSchemaVersion = schema;
     delete withoutCooldown.decisions.lastMajorCatalystTick;
@@ -228,7 +228,7 @@ export function testHistoricalCheckpointBoundary(): void {
   // Each build since 0.2 wrote both keys even when no decision was pending or
   // resolved. Missing is not the same as the persisted null / empty array.
   for (const [schema, payload] of [
-    ["0.2", older], ["0.3", original], ["0.4", session.checkpoint()],
+    ["0.2", older], ["0.3", original], ["0.5", session.checkpoint()],
   ] as const) {
     for (const field of ["pending", "resolutions"] as const) {
       const missingField: any = JSON.parse(JSON.stringify(payload));
@@ -244,7 +244,7 @@ export function testHistoricalCheckpointBoundary(): void {
   // Every runtime writer from d86ddfe onward emits these outer keys, even
   // when the control pair is null. No historical absence rule covers them.
   for (const [schema, payload] of [
-    ["0.1", oldest], ["0.2", older], ["0.3", original], ["0.4", session.checkpoint()],
+    ["0.1", oldest], ["0.2", older], ["0.3", original], ["0.5", session.checkpoint()],
   ] as const) {
     for (const field of ["engineVersion", "createdTick", "experiment", "analysis", "control", "controlAnalysis"] as const) {
       const missingField: any = JSON.parse(JSON.stringify(payload));
@@ -259,7 +259,7 @@ export function testHistoricalCheckpointBoundary(): void {
 
   // These two named absence rules must not allow a present malformed value
   // through Object.assign into live observer state on any supported schema.
-  for (const schema of ["0.1", "0.2", "0.3", "0.4"] as const) {
+  for (const schema of ["0.1", "0.2", "0.3", "0.4", "0.5"] as const) {
     for (const field of ["dep", "niche"] as const) {
       const malformed: any = JSON.parse(JSON.stringify(original));
       malformed.checkpointSchemaVersion = schema;
@@ -341,7 +341,7 @@ export function testHistoricalCheckpointBoundary(): void {
     "the fork writer always emits a matching observer with a control simulation",
   );
   for (const [schema, payload] of [
-    ["0.2", older], ["0.3", original], ["0.4", current],
+    ["0.2", older], ["0.3", original], ["0.5", current],
   ] as const) {
     for (const field of schema === "0.2" ? ["policyVersion"] : ["policyVersion", "catalystPolicyVersion"]) {
       const invalid = JSON.parse(JSON.stringify(payload));
@@ -371,7 +371,7 @@ export function testHistoricalCheckpointBoundary(): void {
     "an inner engine mismatch is refused before #worldId or the simulation is replaced",
   );
   assert.deepEqual(session.checkpoint(), before, "an inner engine mismatch cannot partially replace a live world");
-  for (const schema of ["0.1", "0.2", "0.3", "0.4"] as const) {
+  for (const schema of ["0.1", "0.2", "0.3", "0.4", "0.5"] as const) {
     const missingResources = JSON.parse(JSON.stringify(current));
     missingResources.checkpointSchemaVersion = schema;
     if (schema === "0.1") delete missingResources.decisions;
@@ -535,7 +535,7 @@ export function testHistoricalCheckpointBoundary(): void {
     (e: unknown) => e instanceof CheckpointRejectionError && e.reason === "unsupported-tag" && e.field === "experiment",
     "an unrecognised tag on the simulation checkpoint envelope must not be ignored",
   );
-  for (const schema of ["0.2", "0.3", "0.4"] as const) {
+  for (const schema of ["0.2", "0.3", "0.4", "0.5"] as const) {
     const invalid = JSON.parse(JSON.stringify(original));
     invalid.checkpointSchemaVersion = schema;
     invalid.decisions.pending = {
@@ -590,7 +590,7 @@ export function testHistoricalCheckpointBoundary(): void {
   const oldWorld = new UniverseSession();
   oldWorld.restore(historical02);
   const canonical = oldWorld.checkpoint();
-  for (const schema of ["0.3", "0.4"] as const) {
+  for (const schema of ["0.3", "0.4", "0.5"] as const) {
     const invalid = JSON.parse(JSON.stringify(canonical));
     invalid.checkpointSchemaVersion = schema;
     invalid.decisions.pending = null;
@@ -898,8 +898,8 @@ export function testHistoricalCheckpointBoundary(): void {
   // First, structurally: the candidate carries no schema at all, so there is
   // nothing for the validator to switch on.
   const derivedFrom02 = canonicalizeRestoreState(older as any, canonicalContext());
-  const derivedFrom04 = canonicalizeRestoreState(session.checkpoint() as any, canonicalContext());
-  for (const [label, candidate] of [["0.2", derivedFrom02], ["0.4", derivedFrom04]] as const) {
+  const derivedFrom05 = canonicalizeRestoreState(session.checkpoint() as any, canonicalContext());
+  for (const [label, candidate] of [["0.2", derivedFrom02], ["0.5", derivedFrom05]] as const) {
     assert.ok(
       !("checkpointSchemaVersion" in (candidate as unknown as Record<string, unknown>)),
       `a candidate derived from ${label} carries no source schema for validation to switch on`,
@@ -911,8 +911,8 @@ export function testHistoricalCheckpointBoundary(): void {
   // break is a legitimate old save. So: canonical state derived from EVERY
   // supported source schema must satisfy the CURRENT contract. Removing the
   // offerTick migration, for instance, leaves a valid 0.2 resolution missing a
-  // field 0.4 requires, and that has to fail here.
-  for (const schema of ["0.1", "0.2", "0.3", "0.4"] as const) {
+  // field the current schema requires, and that has to fail here.
+  for (const schema of ["0.1", "0.2", "0.3", "0.4", "0.5"] as const) {
     const fixture: any = JSON.parse(JSON.stringify(current));
     fixture.checkpointSchemaVersion = schema;
     fixture.decisions.resolutions = [

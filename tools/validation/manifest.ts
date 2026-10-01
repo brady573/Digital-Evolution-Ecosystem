@@ -203,7 +203,7 @@ export const UNITS: readonly ValidationUnit[] = [
     parallelSafe: true,
     baselineSeconds: 15,
     claim:
-      "sim-core still reproduces the frozen legacy/prototype baselines, so biology has not silently moved.",
+      "sim-core still replays its own pinned deterministic baselines exactly (string-equal state incl. RNG streams, stocks and organisms; legacy RNG-stream parity retained), so biology has not silently moved.",
   },
 
   {
@@ -352,6 +352,19 @@ export const UNITS: readonly ValidationUnit[] = [
     claim:
       "An impact pause retains both sides of the effect at one tick and auto-resume never loses them.",
     baselineSeconds: 11,
+  },
+  {
+    id: "interference",
+    title: "Interference biology and accounting",
+    script: "test:interference",
+    cls: "deterministic",
+    enforcement: "blocking",
+    mergeGate: true,
+    domains: withApparatus("contracts", "sim-core", "sim-runtime"),
+    needs: [],
+    parallelSafe: true,
+    claim:
+      "Secretion, resistance, exposure and acquisition suppression behave exactly as specified, with closed inhibitor mass accounting.",
   },
   // --- Dependency shards ----------------------------------------------------
   // `pnpm test:dependency` was 647s on CI and, as a single shard, the entire
@@ -783,6 +796,7 @@ export const GROUPS: readonly ValidationGroup[] = [
       "ecology",
       "niche",
       "aftermath",
+      "interference",
       "dependency-policy",
       "dependency-arc",
       "dependency-possibility",
@@ -867,7 +881,7 @@ export const GROUPS: readonly ValidationGroup[] = [
   {
     id: "ci-sim-c",
     title: "Deterministic suites C (niche, ecology, runtime boundary)",
-    unitIds: ["niche", "ecology", "runtime-boundary"],
+    unitIds: ["niche", "ecology", "runtime-boundary", "interference"],
     ci: true,
   },
   {
