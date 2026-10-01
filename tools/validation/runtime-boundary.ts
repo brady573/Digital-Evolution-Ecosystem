@@ -17,7 +17,7 @@ import type { EngineConfig, PresentationFrame, RenderSnapshot } from "@digital-e
 import { READ_MODEL_VERSION } from "@digital-evolution/contracts";
 import * as runtimeRoot from "@digital-evolution/sim-runtime";
 import { UniverseSession } from "../../packages/sim-runtime/src/session.ts";
-import { buildCatalog, buildPresentation, resolveCatalogEntry } from "../../packages/sim-runtime/src/presentation.ts";
+import { buildCatalog, buildEnvironment, buildLive, buildPresentation, resolveCatalogEntry } from "../../packages/sim-runtime/src/presentation.ts";
 import {
   MAX_EVENT_SCAN_TICKS,
   validateRuntimeCommand,
@@ -28,6 +28,7 @@ import {
   type TerminalFailure,
   type WorkerLike,
 } from "../../packages/sim-runtime/src/client.ts";
+import { createPresentationStore } from "../../apps/explorer/src/presentationStore.ts";
 
 const FIXTURE_SEED = 20260930;
 
@@ -1112,7 +1113,61 @@ async function testPresentationRoutingIsIsolatedFromLegacy() {
   assert.equal(seen.length, 5, "legacy traffic never touches presentation listeners");
 }
 
+/**
+ * Task 4 (F2b consumer cutover): the presentation store exposes the effective
+ * tick per channel. Two channels at different ticks must each report their
+ * own — the UI must never read slower state as newer, and no cadence-splitting
+ * is assumed: the store consumes whatever arrives.
+ */
+function testStoreExposesEffectiveTickPerChannel() {
+  const store = createPresentationStore();
+  const base = liveSnapshotFixture();
+  store.apply({ ...buildLive(base), tick: 100 });
+  store.apply({ ...buildEnvironment(base), tick: 90 });
+  const view = store.getView();
+  assert.equal(view.live?.tick, 100, "live channel current");
+  assert.equal(view.environment?.tick, 90, "environment channel labeled with its own tick, never as newer");
+  assert.equal(view.channelTicks.live, 100, "live effective tick exposed on the view");
+  assert.equal(view.channelTicks.environment, 90, "environment effective tick exposed on the view");
+}
+
+/**
+ * Task 4 (F2b consumer cutover): selection lookup through the store resolves
+ * a living organism and returns null for a removed id, using the Task 2
+ * removal representation (absence from a newer catalog) end to end. Joined
+ * entries are RenderOrganism-shaped, so selection/phenotype consumers resolve
+ * through the store without refetching static traits from a live frame.
+ */
+function testStoreJoinMatchesSnapshotAndRemovalResolvesToNull() {
+  const store = createPresentationStore();
+  const first = liveSnapshotFixture();
+  assert.ok(first.organisms.length > 1, "the fixture holds several living organisms");
+  const frames = buildPresentation(first);
+  for (const frame of [frames.identity, frames.catalog, frames.live, frames.environment, frames.interpretation]) {
+    store.apply(frame);
+  }
+  const removedId = first.organisms[0]!.id;
+  const survivor = first.organisms[1]!;
+  assert.deepEqual(store.getView().organisms, [...first.organisms], "joined entries equal the snapshot organisms");
+  assert.ok(store.getView().organismById(removedId) !== null, "a living organism resolves through the store");
+  assert.equal(
+    store.getView().organismById(survivor.id)?.lineageId,
+    survivor.lineageId,
+    "a joined entry keeps its catalog identity without refetching",
+  );
+
+  const second: RenderSnapshot = { ...first, tick: first.tick + 1, organisms: first.organisms.slice(1) };
+  const next = buildPresentation(second);
+  for (const frame of [next.identity, next.catalog, next.live, next.environment, next.interpretation]) {
+    store.apply(frame);
+  }
+  assert.equal(store.getView().organismById(removedId), null, "a removed id resolves to null through the store");
+  assert.ok(store.getView().organismById(survivor.id) !== null, "a survivor still resolves");
+}
+
 async function main() {
+  testStoreJoinMatchesSnapshotAndRemovalResolvesToNull();
+  testStoreExposesEffectiveTickPerChannel();
   await testPresentationRoutingIsIsolatedFromLegacy();
   await testRoutedFramesKeepTheirCoherenceEnvelope();
   testWorkerFramesMatchDirectBuild();
