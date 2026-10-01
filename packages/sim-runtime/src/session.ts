@@ -199,8 +199,10 @@ const canonicalizationContext = (): CanonicalizationContext => {
  * - identity: world-change paths (create/restore mint a fresh worldId) plus
  *   the first advance after each, so first-paint and resume always converge
  *   on a full set even if a subscriber missed the announcement;
- * - catalog: FULL on identity change, thereafter only when the membership
- *   signature (living count + member ids) differs from last emitted;
+ * - catalog: FULL on identity change, thereafter only when the catalog
+ *   change signature (living count + member ids + clade assignments)
+ *   differs from last emitted — so a lineage-establishment reassignment
+ *   resends even with zero arrivals or removals;
  * - environment: when the snapshot tick has moved at least
  *   ENVIRONMENT_PERIOD_TICKS past the last emitted environment tick;
  * - interpretation: when its bounded payload (envelope stripped) differs

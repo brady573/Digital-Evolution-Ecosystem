@@ -174,18 +174,38 @@ export function buildInterpretation(snapshot: RenderSnapshot): WorldInterpretati
  */
 
 /**
- * Catalog membership signature: living count plus member ids in catalog
- * order. Catalog order follows snapshot order, which is deterministic, so
- * string equality holds exactly when the same organisms are alive — an
- * arrival or removal changes the string and triggers a FULL catalog resend,
- * while births/deaths-free advances (position/energy-only motion) suppress
- * it. A pure reorder with identical membership would also resend; that is a
- * harmless over-emission (still the full catalog, still correct), never a
- * missed arrival.
+ * Catalog change signature: living count plus per-member id AND clade
+ * assignment in catalog order. Catalog order follows snapshot order, which
+ * is deterministic, so string equality holds exactly when the same organisms
+ * are alive under the same clade assignments — an arrival, a removal, or a
+ * lineage-establishment reassignment changes the string and triggers a FULL
+ * catalog resend, while births/deaths/establishment-free advances
+ * (position/energy-only motion) suppress it. A pure reorder with identical
+ * membership and assignments would also resend; that is a harmless
+ * over-emission (still the full catalog, still correct), never a missed
+ * arrival.
+ *
+ * Per-field audit against engine mutability (packages/sim-core/src/engine.ts):
+ * id / parent / generation are written once per organism — at founding
+ * (constructor) or at birth (child()) — and never reassigned; lineageId is
+ * the organism's `l`, likewise birth-set (child() inherits or mints via
+ * newL) with no reassignment site anywhere in the step loop; the ten
+ * inherited traits (speed/sensing/metabolism/reproduction/diet/habitat/
+ * byproductUse/dormancyResponse/tolerance/cleanup) are birth-set through
+ * mut() and thereafter only read (movement/physiology/digestion cost terms),
+ * static by design. cladeId is the SOLE mutable field: it is derived per
+ * snapshot as cladeRoot(o.l) — the deepest established lineage branch with
+ * peak >= CLADE_MIN_PEAK and age >= CLADE_MIN_AGE, else the founder family
+ * root — so when a lineage's peak/age crosses the establishment thresholds
+ * (updateLineageHistory, at stride ticks), every living member's cladeId can
+ * change with zero births or deaths. The signature therefore covers count +
+ * id + cladeId: exactly the membership plus every legitimately mutable
+ * catalog field, and nothing frame-dynamic (position/energy/activity live in
+ * the live frame, never here).
  */
 export function catalogMembershipSignature(catalog: WorldEntityCatalog): string {
   let sig = `${catalog.count}:`;
-  for (const entry of catalog.entries) sig += `${entry.id},`;
+  for (const entry of catalog.entries) sig += `${entry.id}:${entry.cladeId},`;
   return sig;
 }
 

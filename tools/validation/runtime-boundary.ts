@@ -1135,6 +1135,68 @@ function testStaggeredEmissionCadence() {
 }
 
 /**
+ * PR-review finding (fix-wave 2): the catalog change signature watched
+ * organism membership only, but cladeId can change while the same organisms
+ * stay alive — cladeRoot(o.l) is re-derived per snapshot and flips when a
+ * lineage crosses the establishment thresholds — leaving the clade lens and
+ * inspector with stale assignments.
+ *
+ * Driven through UniverseSession.handle end to end on the suite fixture
+ * (seed 20260930): stride tick 6024 (251 x 24) carries a live
+ * lineage-establishment reassignment with zero births/deaths on that step,
+ * so membership is constant while cladeIds move. The setup advances in
+ * MAX_SLICE_TICKS-bounded chunks and pins the pre-step tick plus the absence
+ * of a pending decision, so a future engine trajectory change fails here
+ * explicitly instead of silently testing a different world.
+ */
+function testCladeEstablishmentReemitsCatalogWithConstantMembership() {
+  const session = new UniverseSession();
+  session.handle({ type: "CREATE_UNIVERSE", config: config(FIXTURE_SEED) });
+  for (const ticks of [2000, 2000, 2000, 23]) {
+    session.handle({ type: "ADVANCE_TICKS", ticks });
+  }
+  const before = session.snapshot();
+  assert.equal(before.tick, 6023, "setup lands on the tick before the establishment stride");
+  assert.equal(before.pendingDecision, null, "setup reached the stride with no pending decision stopping the run");
+  const beforeClades = new Map(before.organisms.map((o) => [o.id, o.cladeId]));
+
+  const responses = session.handle({ type: "ADVANCE_TICKS", ticks: 1 });
+  const after = session.snapshot();
+  assert.equal(after.tick, 6024, "the probed step is the establishment stride tick");
+  assert.deepEqual(
+    after.organisms.map((o) => o.id).sort((a, b) => a - b),
+    before.organisms.map((o) => o.id).sort((a, b) => a - b),
+    "no arrival or removal across the establishment step: membership is constant",
+  );
+  const flipped = after.organisms.filter((o) => beforeClades.get(o.id) !== o.cladeId);
+  assert.ok(flipped.length > 0, "lineage establishment reassigned cladeIds of living organisms");
+  assert.notEqual(
+    catalogMembershipSignature(buildCatalog(after)),
+    catalogMembershipSignature(buildCatalog(before)),
+    "the signature moves on a clade reassignment alone",
+  );
+
+  const catalogs = responses
+    .filter((r) => r.type === "PRESENTATION")
+    .map((r) => (r as { frame: PresentationFrame }).frame)
+    .filter((f) => "entries" in f);
+  assert.equal(catalogs.length, 1, "the establishment step re-emits the catalog with membership unchanged");
+  const emitted = catalogs[0]!;
+  assert.deepEqual(
+    emitted.entries,
+    buildCatalog(after).entries,
+    "the re-emitted catalog carries the current clade assignments, not the stale ones",
+  );
+  for (const o of flipped) {
+    assert.equal(
+      resolveCatalogEntry(emitted, o.id)?.cladeId,
+      o.cladeId,
+      `reassigned organism ${o.id} reads with its new clade`,
+    );
+  }
+}
+
+/**
  * Fix-wave: first-paint convergence under the staggered cadence. The App
  * gate requires all five channels before first paint; the store composes
  * whatever arrives, so the create + first-advance full sets must converge
@@ -1509,6 +1571,7 @@ async function main() {
   await testDetailRequestSettlesOnItsCorrelatedReply();
   testLiveDeliveryScalesWithLiveInformation();
   testStaggeredEmissionCadence();
+  testCladeEstablishmentReemitsCatalogWithConstantMembership();
   testFirstPaintConvergesAndStaysConverged();
   testIdentityArrivalResetsCoherenceToTheNewWorld();
   testSameChannelOlderTicksAreRejected();
