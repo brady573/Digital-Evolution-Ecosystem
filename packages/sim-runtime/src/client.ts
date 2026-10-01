@@ -30,8 +30,20 @@ export interface WorkerRuntimeOptions{
   readonly requestTimeoutMs?:number;
 }
 
+/** Typed terminal state for a dead worker transport.
+ *
+ *  A worker error/messageerror ends the WorkerRuntimeClient instance: no later
+ *  snapshot can arrive, so the product needs an explicit "runtime stopped"
+ *  signal rather than a silently frozen UI. The detail is a plain string, never
+ *  a raw browser event object.
+ */
+export interface TerminalFailure {
+  readonly kind: "worker-error";
+  readonly detail: string;
+}
+
 export interface RuntimeClient {
-  command(command: RuntimeCommand): void;
+  onTerminal(listener: (failure: TerminalFailure) => void): () => void;
   subscribe(listener: (snapshot: RenderSnapshot) => void): () => void;
   loadCheckpoint(checkpoint: SupportedUniverseCheckpoint): Promise<RenderSnapshot>;
   requestCheckpoint(): Promise<UniverseCheckpoint>;
@@ -56,6 +68,15 @@ const describe=(event:unknown):string=>{
   return typeof message==="string"&&message.length>0?message:"no detail";
 };
 
+/**
+ * Canonical production worker construction. The client's default transport.
+ * The constructor takes an injected factory instead so failure behaviour is
+ * provable through a fake transport; the default here is what ships.
+ */
+export function createWorkerTransport():WorkerLike{
+  return new Worker(new URL("./worker.ts",import.meta.url),{type:"module",name:"digital-evolution-sim"}) as unknown as WorkerLike;
+}
+
 export class WorkerRuntimeClient implements RuntimeClient {
   #worker:Worker;
   #listeners=new Set<(snapshot:RenderSnapshot)=>void>();
@@ -71,9 +92,15 @@ export class WorkerRuntimeClient implements RuntimeClient {
   #pendingLoad:{requestId:string,resolve:(snapshot:RenderSnapshot)=>void,reject:(reason?:any)=>void,timer:ReturnType<typeof setTimeout>}|null=null;
   #seq=0;
   readonly #requestTimeoutMs:number;
+  #terminal:TerminalFailure|null=null;
+  #terminalFired=false;
+  /** Terminal listeners live apart from snapshot subscribers so the fatal
+   *  path's #listeners.clear() cannot drop them: a dead worker's one signal
+   *  must still reach the product. */
+  #terminalListeners=new Set<(failure:TerminalFailure)=>void>();
 
   constructor(factory?:WorkerFactory,options:WorkerRuntimeOptions={}){
-    this.#worker=(factory?.()??new Worker(new URL("./worker.ts",import.meta.url),{type:"module",name:"digital-evolution-sim"}))as unknown as Worker;
+    this.#worker=(factory?.()??createWorkerTransport())as unknown as Worker;
     this.#requestTimeoutMs=options.requestTimeoutMs??REQUEST_TIMEOUT_MS;
     this.#register();
   }
@@ -84,8 +111,18 @@ export class WorkerRuntimeClient implements RuntimeClient {
    */
   #register(){
     this.#worker.addEventListener("message",(event:MessageEvent<RuntimeResponse>)=>this.#receive(event.data));
-    this.#worker.addEventListener("error",(event)=>this.#failAll(new Error(`Simulation worker failed: ${describe(event)}`)));
-    this.#worker.addEventListener("messageerror",(event)=>this.#failAll(new Error(`Simulation worker failed: ${describe(event)}`)));
+    this.#worker.addEventListener("error",(event)=>this.#onTransportFailure(event));
+    this.#worker.addEventListener("messageerror",(event)=>this.#onTransportFailure(event));
+  }
+
+  /**
+   * Shared transport-failure entry: error and messageerror must enter the same
+   * fatal path. Tests drive it through an injected fake transport's
+   * fail(kind, detail), which invokes the registered listeners exactly as a
+   * real worker failure would.
+   */
+  #onTransportFailure(event:unknown){
+    this.#failAll(new Error(`Simulation worker failed: ${describe(event)}`),true);
   }
 
   /**
@@ -94,8 +131,13 @@ export class WorkerRuntimeClient implements RuntimeClient {
    * drops subscribers - a dead worker can never deliver another snapshot, so
    * retaining listeners would leave the UI holding a subscription only a new
    * client could satisfy.
+   *
+   * When signal is true (worker error/messageerror, never destroy), the
+   * terminal state is recorded and terminal listeners fire exactly once per
+   * client lifetime. destroy() passes false: intentional teardown is not a
+   * terminal failure the product must surface.
    */
-  #failAll(reason:Error){
+  #failAll(reason:Error,signal:boolean){
     for(const pending of this.#pending.values()){
       clearTimeout(pending.timer);
       pending.reject(reason);
@@ -103,13 +145,18 @@ export class WorkerRuntimeClient implements RuntimeClient {
     this.#pending.clear();
     this.#failPendingLoad(reason);
     this.#listeners.clear();
+    if(signal&&!this.#terminalFired){
+      this.#terminalFired=true;
+      this.#terminal={kind:"worker-error",detail:reason.message};
+      for(const listener of [...this.#terminalListeners])listener(this.#terminal);
+    }
   }
 
-  create(config:EngineConfig){this.command({type:"CREATE_UNIVERSE",config})}
-  advance(ticks:number){this.command({type:"ADVANCE_TICKS",ticks})}
-  intervene(intervention:"global"|"droughtA"|"droughtB"){this.command({type:"APPLY_INTERVENTION",intervention})}
-  runToNextEvent(maxTicks=100_000){this.command({type:"RUN_TO_NEXT_EVENT",maxTicks})}
-  createControlFork(){this.command({type:"CREATE_CONTROL_FORK"})}
+  create(config:EngineConfig){this.#post({type:"CREATE_UNIVERSE",config})}
+  advance(ticks:number){this.#post({type:"ADVANCE_TICKS",ticks})}
+  intervene(intervention:"global"|"droughtA"|"droughtB"){this.#post({type:"APPLY_INTERVENTION",intervention})}
+  runToNextEvent(maxTicks=100_000){this.#post({type:"RUN_TO_NEXT_EVENT",maxTicks})}
+  createControlFork(){this.#post({type:"CREATE_CONTROL_FORK"})}
   resolveEventDecision(opportunityId:string,choiceId:string){
     return this.#request<RenderSnapshot>("RESOLVE_EVENT_DECISION",{opportunityId,choiceId});
   }
@@ -145,13 +192,29 @@ export class WorkerRuntimeClient implements RuntimeClient {
         },
         timer:setTimeout(()=>this.#failPendingLoad(new Error(`Restore timed out waiting for tick ${checkpoint.createdTick}`)),LOAD_TIMEOUT_MS),
       };
-      this.command({type:"LOAD_CHECKPOINT",requestId,checkpoint});
+      this.#post({type:"LOAD_CHECKPOINT",requestId,checkpoint});
     });
   }
 
-  command(command:RuntimeCommand){this.#worker.postMessage(command)}
+  /** Raw dispatch is private: production consumers use the typed product
+   *  operations above, never a generic command escape hatch. */
+  #post(command:RuntimeCommand){this.#worker.postMessage(command)}
+
+  onTerminal(listener:(failure:TerminalFailure)=>void){
+    this.#terminalListeners.add(listener);
+    return()=>{this.#terminalListeners.delete(listener)};
+  }
+
+  /** The recorded terminal state, or null while the transport lives.
+   *  Class-only, like pendingRequestCount: lets late subscribers query what
+   *  happened without widening the production RuntimeClient interface. */
+  get terminal(){return this.#terminal}
 
   subscribe(listener:(snapshot:RenderSnapshot)=>void){
+    // A dead client accepts no new subscribers: no later snapshot can arrive,
+    // so retaining the listener would only leak it and mislead the caller
+    // into holding a subscription only a new client could satisfy.
+    if(this.#terminalFired)return()=>{};
     this.#listeners.add(listener);
     return()=>this.#listeners.delete(listener);
   }
@@ -166,7 +229,7 @@ export class WorkerRuntimeClient implements RuntimeClient {
 
   destroy(){
     this.#worker.terminate();
-    this.#failAll(new Error("Runtime destroyed"));
+    this.#failAll(new Error("Runtime destroyed"),false);
   }
 
   #failPendingLoad(reason:Error){
@@ -184,7 +247,7 @@ export class WorkerRuntimeClient implements RuntimeClient {
         reject(new Error(`${type} timed out after ${this.#requestTimeoutMs}ms`));
       },this.#requestTimeoutMs);
       this.#pending.set(requestId,{resolve,reject,timer});
-      this.command({type,requestId,...extra} as RuntimeCommand);
+      this.#post({type,requestId,...extra} as RuntimeCommand);
     });
   }
 

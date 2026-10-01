@@ -14,7 +14,8 @@
  */
 import assert from "node:assert/strict";
 import type { EngineConfig, RenderSnapshot } from "@digital-evolution/contracts";
-import { UniverseSession } from "@digital-evolution/sim-runtime";
+import * as runtimeRoot from "@digital-evolution/sim-runtime";
+import { UniverseSession } from "../../packages/sim-runtime/src/session.ts";
 import {
   MAX_EVENT_SCAN_TICKS,
   validateRuntimeCommand,
@@ -22,6 +23,7 @@ import {
 import { MAX_SLICE_TICKS } from "../../packages/sim-runtime/src/speed.ts";
 import {
   WorkerRuntimeClient,
+  type TerminalFailure,
   type WorkerLike,
 } from "../../packages/sim-runtime/src/client.ts";
 
@@ -847,7 +849,100 @@ async function testFatalFailureDropsSubscribers() {
   assert.deepEqual(seen, [1], "a snapshot after a fatal failure reaches no subscriber");
 }
 
+async function testDestroyDoesNotEmitTerminalSignal() {
+  const fake = new FakeWorker();
+  const client = new WorkerRuntimeClient(() => fake, { requestTimeoutMs: 10_000 });
+  const seen: TerminalFailure[] = [];
+  client.onTerminal((f) => seen.push(f));
+  const request = tracked(client.requestCheckpoint());
+  client.destroy();
+  await tick();
+  assert.equal(request.state.settled, true, "destroy settles the in-flight request");
+  assert.match(String((request.state.error as Error).message), /runtime destroyed/i, "with the teardown reason");
+  assert.deepEqual(seen, [], "intentional teardown emits no terminal signal");
+  assert.equal(client.terminal, null, "the terminal getter stays null after destroy");
+}
+
+async function testOrdinaryFailuresDoNotEmitTerminalSignal() {
+  const fake = new FakeWorker();
+  const client = new WorkerRuntimeClient(() => fake, { requestTimeoutMs: TEST_REQUEST_TIMEOUT_MS });
+  const seen: TerminalFailure[] = [];
+  client.onTerminal((f) => seen.push(f));
+  // A structured failure addressed to one request...
+  const failing = tracked(client.requestCheckpoint());
+  const failingId = (fake.posted.at(-1) as { requestId: string }).requestId;
+  fake.deliver({ type: "ERROR", message: "structured failure", requestId: failingId });
+  // ...plus a request that never gets a reply at all.
+  const hanging = tracked(client.requestExport());
+  await tick();
+  assert.equal(failing.state.settled, true, "the structured failure settles its own request");
+  await new Promise((resolve) => setTimeout(resolve, TEST_REQUEST_TIMEOUT_MS * 3));
+  assert.equal(hanging.state.settled, true, "the unanswered request settles via its timeout");
+  assert.deepEqual(seen, [], "neither ordinary failure emits a terminal signal");
+  assert.equal(client.terminal, null, "the terminal getter stays null without transport failure");
+}
+
+async function testTerminalStateIsQueryableAfterDeath() {
+  const fake = new FakeWorker();
+  const client = new WorkerRuntimeClient(() => fake, { requestTimeoutMs: 10_000 });
+  const seen: TerminalFailure[] = [];
+  client.onTerminal((f) => seen.push(f));
+  fake.fail("error", "boom");
+  await tick();
+  assert.equal(seen.length, 1, "one terminal signal fired");
+  assert.deepEqual(client.terminal, seen[0], "the getter returns the emitted failure");
+  // A post-death subscription is dead on arrival: the fatal path dropped
+  // subscribers, and no later snapshot can revive them.
+  const late: number[] = [];
+  client.subscribe((s) => late.push(s.tick));
+  fake.deliver({ type: "SNAPSHOT", snapshot: snap(99) });
+  await tick();
+  assert.deepEqual(late, [], "a post-death subscribe plus delivered snapshot reaches no listener");
+}
+
+function testProductionSurfaceHasNoGenericCommand() {
+  const fake = new FakeWorker();
+  const client = new WorkerRuntimeClient(() => fake);
+  assert.equal("command" in client, false, "no generic raw command escape hatch on the production surface");
+  for (const op of ["create", "advance", "runToNextEvent", "intervene", "createControlFork", "resolveEventDecision", "acknowledgeAftermath", "loadCheckpoint", "requestCheckpoint", "requestExport", "subscribe", "destroy", "onTerminal"] as const) {
+    assert.equal(typeof (client as unknown as Record<string, unknown>)[op], "function", `${op} remains an explicit typed product operation`);
+  }
+}
+
+async function testTerminalSignalFiresExactlyOnceAcrossBothFailureKinds() {
+  const fake = new FakeWorker();
+  const client = new WorkerRuntimeClient(() => fake);
+  const seen: TerminalFailure[] = [];
+  client.onTerminal((f) => seen.push(f));
+  fake.fail("error", "boom");
+  fake.fail("messageerror", "again");
+  await tick();
+  assert.equal(seen.length, 1, "two transport failures produce one terminal signal");
+  assert.equal(seen[0]!.kind, "worker-error", "signal carries the terminal kind");
+  assert.equal(typeof seen[0]!.detail, "string", "signal carries a string detail, never a raw event");
+  assert.ok(!("data" in seen[0]! || "target" in seen[0]!), "no raw browser event object crosses the boundary");
+}
+
+async function testPackageRootExposesNoMutableSessionAuthority() {
+  // NOTE (Task 2): the brief prescribes `await import("@digital-evolution/sim-runtime")`
+  // here, but a dynamic bare-specifier import cannot resolve under this repo's
+  // toolchain: tsx rewrites *static* bare imports to the workspace package, while
+  // a dynamic import() falls through to Node's ESM resolver, which has no
+  // node_modules/@digital-evolution link (ERR_MODULE_NOT_FOUND, probed 2026-10-01).
+  // A static namespace import goes through the same package specifier — i.e. the
+  // identical production surface and module file (package.json "." -> src/index.ts)
+  // — so the assertion below proves the same boundary claim deterministically.
+  assert.equal("UniverseSession" in runtimeRoot, false, "UniverseSession is not reachable from the package root");
+  assert.equal(typeof runtimeRoot.WorkerRuntimeClient, "function", "WorkerRuntimeClient remains the production entry");
+}
+
 async function main() {
+  await testPackageRootExposesNoMutableSessionAuthority();
+  await testTerminalSignalFiresExactlyOnceAcrossBothFailureKinds();
+  await testDestroyDoesNotEmitTerminalSignal();
+  await testOrdinaryFailuresDoNotEmitTerminalSignal();
+  await testTerminalStateIsQueryableAfterDeath();
+  testProductionSurfaceHasNoGenericCommand();
   await testARestoreAnnouncesTheWorldExactlyOnce();
   await testFatalFailureDropsSubscribers();
   await testAFailedLoadRejectsWithTheWorkersReason();

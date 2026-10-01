@@ -4,6 +4,7 @@ import { CHECKPOINT_PLAYER_NOTICE, CheckpointRejectionError } from "@digital-evo
 import { cladeId, formatCladeId, formatLineageId, lineageId, typedRefs } from "@digital-evolution/contracts";
 import { ENGINE_VERSION } from "@digital-evolution/sim-core";
 import { WorkerRuntimeClient, normalizeSpeedMode, sliceFor } from "@digital-evolution/sim-runtime";
+import type { WorkerLike } from "../../../packages/sim-runtime/src/client";
 import { Capacitor } from "@capacitor/core";
 import { Directory, Encoding, Filesystem } from "@capacitor/filesystem";
 import { Share } from "@capacitor/share";
@@ -473,8 +474,51 @@ function Slider({label,value,min,max,step,onChange}:{label:string;value:number;m
   return <label className="slider"><span>{label}<b>{value}</b></span><input type="range" min={min} max={max} step={step} value={value} onChange={e=>onChange(Number(e.target.value))}/></label>;
 }
 
+/**
+ * Test-only transport wrapper (?deeTest only; never instantiated in production).
+ * Wraps a real worker transport, records the client's error/messageerror
+ * listeners as they register, and replays a synthetic failure through them —
+ * driving the same registered-listener path as a real worker failure, with no
+ * kill seam on the production client class.
+ */
+class InstrumentedTransport implements WorkerLike{
+  #inner:Worker;
+  #listeners=new Map<"message"|"error"|"messageerror",Array<(event:never)=>void>>();
+  constructor(inner:Worker){this.#inner=inner}
+  postMessage(message:unknown):void{this.#inner.postMessage(message)}
+  terminate():void{this.#inner.terminate()}
+  addEventListener(type:"message"|"error"|"messageerror",listener:(event:never)=>void):void{
+    const existing=this.#listeners.get(type)??[];
+    existing.push(listener);
+    this.#listeners.set(type,existing);
+    this.#inner.addEventListener(type,listener as unknown as EventListener);
+  }
+  /** Replay a synthetic transport failure through the recorded listeners. */
+  fail(kind:"error"|"messageerror"):void{
+    for(const listener of this.#listeners.get(kind)??[]){
+      (listener as (event:unknown)=>void)({message:`simulated ${kind} failure for test`,kind});
+    }
+  }
+}
+
 export function App(){
-  const runtime=useMemo(()=>new WorkerRuntimeClient(),[]);
+  // Test-only instrumented transport (?deeTest only; stays null in production,
+  // where the client is constructed with no factory and owns its transport).
+  const instrumentedRef=useRef<InstrumentedTransport|null>(null);
+  const runtime=useMemo(()=>{
+    if(typeof window!=="undefined"&&new URLSearchParams(window.location.search).has("deeTest")){
+      // Test-only construction path. The worker expression below duplicates the
+      // canonical construction in packages/sim-runtime/src/client.ts
+      // createWorkerTransport, which is canonical: the package exports map
+      // exposes only the root entry, so no deep subpath import typechecks or
+      // bundles here. The default (production) path below is unchanged.
+      const inner=new Worker(new URL("../../../packages/sim-runtime/src/worker.ts",import.meta.url),{type:"module",name:"digital-evolution-sim"});
+      const instrumented=new InstrumentedTransport(inner);
+      instrumentedRef.current=instrumented;
+      return new WorkerRuntimeClient(()=>instrumented);
+    }
+    return new WorkerRuntimeClient();
+  },[]);
   const repository=useMemo(()=>new IndexedDbWorldRepository(),[]);
   const [snapshot,setSnapshot]=useState<RenderSnapshot|null>(null);
   const [surface,setSurface]=useState<Surface>("world");
@@ -525,6 +569,7 @@ export function App(){
   // the previous one. Without this, high speeds pile up work faster than the
   // worker can drain it and the UI stalls instead of running fast.
   const advanceDebt=useRef(false);
+  const deadRef=useRef(false);
 
   useEffect(()=>{
     const unsub=runtime.subscribe(s=>{
@@ -547,8 +592,15 @@ export function App(){
         setWasPlaying(false);
       }
     });
+    const onFatal=runtime.onTerminal(()=>{
+      deadRef.current=true;
+      setRunning(false);
+      setWasPlaying(false);
+      advanceDebt.current=false;
+      setStatus("Simulation stopped — reload to continue");
+    });
     runtime.create(configFromSettings(DEFAULT_SETTINGS));
-    return()=>{unsub();runtime.destroy()};
+    return()=>{unsub();onFatal();runtime.destroy()};
   },[runtime]);
 
   useEffect(()=>{
@@ -562,6 +614,7 @@ export function App(){
     let raf=0,carry=0,last=performance.now();
     const frame=(now:number)=>{
       const elapsed=now-last;last=now;
+      if(deadRef.current)return;
       if(!advanceDebt.current){
         const slice=sliceFor(normalizeSpeedMode(speed),elapsed,carry);
         carry=slice.carry;
@@ -588,6 +641,7 @@ export function App(){
       runToNextEvent:()=>runtime.runToNextEvent(),
       acknowledgeAftermath:()=>runtime.acknowledgeAftermath(),
       resolve:(opportunityId:string,choiceId:string)=>runtime.resolveEventDecision(opportunityId,choiceId),
+      killWorker:()=>instrumentedRef.current?.fail("error"),
     };
     (window as any).__DEE_TEST__=hook;
     return()=>{delete (window as any).__DEE_TEST__};
@@ -871,7 +925,7 @@ export function App(){
           The wrappers are `display:contents` on desktop, so the desktop
           control bar is unchanged. */}
       <span className="control-row control-row-primary">
-        <button onClick={()=>{if(blockWhilePending())return;setRunning(v=>!v)}}>{running?"Pause":"Play"}</button>
+        <button onClick={()=>{if(deadRef.current){setStatus("Simulation stopped — reload to continue");return}if(blockWhilePending())return;setRunning(v=>!v)}}>{running?"Pause":"Play"}</button>
         {/* AC21: bounded speeds only. Max is gone from the product - it was a
             throughput ceiling the player could not read, not a speed, and its
             ratio assertion was the flaky part of #46. The internal
@@ -890,7 +944,7 @@ export function App(){
         <button onClick={load}>Resume</button>
         <button onClick={exportEvidence}>Export</button>
       </span>
-      <span className="status">{status}</span>
+      <span className="status" data-testid="runtime-status">{status}</span>
     </footer>
 
     {settingsOpen&&<div className="modal-backdrop" role="presentation"><section className="modal" role="dialog" aria-modal="true" aria-label="World settings">
