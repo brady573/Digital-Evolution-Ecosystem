@@ -100,6 +100,18 @@ async function main(){
       }
       return false;
     };
+    // The last pause can race with an event becoming pending. That decision
+    // removes the World overlay (including zoom controls) by design. Drain any
+    // such gate and give its presentation update a moment to settle before
+    // running captures which use those controls.
+    const settlePendingDecision=async()=>{
+      for(let attempt=0;attempt<5;attempt++){
+        if(await settleDecision())continue;
+        await page.waitForTimeout(150);
+        if(!await page.getByTestId("decision-sheet").count())return;
+      }
+      throw new Error("Could not clear pending decision before landscape captures");
+    };
 
     await pressRun(true);
     let load=0;
@@ -154,6 +166,7 @@ async function main(){
     }
 
     // 3. Closer zoom: substrate texture and organisms.
+    await settlePendingDecision();
     await page.getByRole("button",{name:"Zoom in"}).click();
     await page.getByRole("button",{name:"Zoom in"}).click();
     await page.waitForTimeout(500);
