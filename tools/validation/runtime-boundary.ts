@@ -16,6 +16,7 @@ import assert from "node:assert/strict";
 import type { EngineConfig, RenderSnapshot } from "@digital-evolution/contracts";
 import * as runtimeRoot from "@digital-evolution/sim-runtime";
 import { UniverseSession } from "../../packages/sim-runtime/src/session.ts";
+import { buildCatalog, buildPresentation, resolveCatalogEntry } from "../../packages/sim-runtime/src/presentation.ts";
 import {
   MAX_EVENT_SCAN_TICKS,
   validateRuntimeCommand,
@@ -923,6 +924,56 @@ async function testTerminalSignalFiresExactlyOnceAcrossBothFailureKinds() {
   assert.ok(!("data" in seen[0]! || "target" in seen[0]!), "no raw browser event object crosses the boundary");
 }
 
+/**
+ * Task 2 (F2a): a real RenderSnapshot as read-model derivation input, so the
+ * builders are exercised against the true snapshot shape rather than a
+ * hand-built stub. A short advance moves organisms off their founding cells,
+ * so the live frame carries genuine positions rather than initial placement.
+ */
+const liveSnapshotFixture = (): RenderSnapshot => {
+  const session = liveSession();
+  session.advance(5);
+  return session.snapshot();
+};
+
+function testLiveFrameExcludesNonLivePayloads() {
+  const frames = buildPresentation(liveSnapshotFixture());
+  const keys = Object.keys(frames.live);
+  for (const banned of ["config", "analysis", "events", "resolvedDecisions", "aftermath", "pendingDecision", "seed"]) {
+    assert.ok(!keys.includes(banned), `live frame carries no ${banned}`);
+  }
+  assert.ok(frames.live.tick >= 0 && frames.live.worldId !== undefined, "live frame keeps tick + worldId");
+}
+
+/**
+ * Task 2 (F2a): catalog arrival/removal across two consecutive builds. The
+ * second snapshot is the first with one organism filtered out — the shape a
+ * death/removal takes at the derivation boundary regardless of which engine
+ * path removed it, so this pins builder semantics rather than engine
+ * mortality (which the determinism suites own).
+ */
+function testRemovedEntitiesResolveToNothing() {
+  const first = liveSnapshotFixture();
+  assert.ok(first.organisms.length > 0, "the fixture holds living organisms");
+  const removedId = first.organisms[0]!.id;
+
+  const departed = buildCatalog(first);
+  assert.equal(resolveCatalogEntry(departed, removedId)?.id, removedId, "a living organism resolves from its own catalog");
+
+  const second: RenderSnapshot = { ...first, tick: first.tick + 1, organisms: first.organisms.slice(1) };
+  const current = buildCatalog(second);
+  assert.ok(!current.entries.some((e) => e.id === removedId), "the removed id is absent from the newer catalog");
+  assert.equal(resolveCatalogEntry(current, removedId), null, "a removed entity resolves to null");
+
+  // A survivor stays resolvable with its static inputs intact, so identity and
+  // inherited traits never need refetching from a live frame.
+  const survivor = second.organisms[0]!;
+  const entry = resolveCatalogEntry(current, survivor.id);
+  assert.ok(entry !== null, "a surviving organism still resolves");
+  assert.equal(entry.lineageId, survivor.lineageId, "catalog keeps stable lineage identity");
+  assert.equal(entry.speed, survivor.speed, "catalog keeps inherited presentation inputs");
+}
+
 async function testPackageRootExposesNoMutableSessionAuthority() {
   // NOTE (Task 2): the brief prescribes `await import("@digital-evolution/sim-runtime")`
   // here, but a dynamic bare-specifier import cannot resolve under this repo's
@@ -938,6 +989,8 @@ async function testPackageRootExposesNoMutableSessionAuthority() {
 
 async function main() {
   await testPackageRootExposesNoMutableSessionAuthority();
+  testLiveFrameExcludesNonLivePayloads();
+  testRemovedEntitiesResolveToNothing();
   await testTerminalSignalFiresExactlyOnceAcrossBothFailureKinds();
   await testDestroyDoesNotEmitTerminalSignal();
   await testOrdinaryFailuresDoNotEmitTerminalSignal();

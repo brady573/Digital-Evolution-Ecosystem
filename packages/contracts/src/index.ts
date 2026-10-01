@@ -2723,3 +2723,212 @@ export interface EvidenceExport {
   readonly player_decisions: PlayerDecisions;
   readonly matched_control: MatchedControl | null;
 }
+
+/* ------------------------------------------------------------------ *
+ * Lane 3 F2a: versioned presentation read-model boundary.
+ *
+ * The maintained presentation boundary is no longer one giant snapshot.
+ * The runtime publishes bounded read-model classes with different lifetimes
+ * and cadences; Explorer composes them; renderers consume presentation state
+ * and never gain simulation authority.
+ *
+ * The five classes below describe OBSERVED or presentation-resolved state
+ * only (§8: read-model-must-not-become-biology). They are not a second
+ * biological state machine, not an analysis authority, not a checkpoint, and
+ * not renderer-owned biology. Nothing here mutates, predicts, or replays:
+ * builders copy scalars out of a RenderSnapshot and carry no authority back.
+ *
+ * Coherence (§7): every class carries `worldId`, an effective `tick`, and
+ * `readModelVersion`, so a consumer can reject cross-world or stale-state
+ * composition and never silently combine incompatible versions. For the
+ * identity class the tick is the deriving snapshot's tick — a coherence
+ * marker, not a liveness claim. `tick` is a plain number (not branded):
+ * branding it would conflate the presentation coherence marker with the
+ * biological clock it merely observes.
+ *
+ * Detail reads reuse the existing RenderOrganism/detail types directly; there
+ * is deliberately no new detail envelope in this version.
+ * ------------------------------------------------------------------ */
+
+/** Presentation read-model contract version. Every class carries it. */
+export const READ_MODEL_VERSION = 1 as const;
+
+/**
+ * WorldPresentationIdentity: worldId, seed, resolved active configuration,
+ * and display/runtime provenance. Changes only when the displayed world
+ * identity/configuration changes (create/restore hands out a fresh worldId),
+ * never on a movement frame — so transport may send it once per world.
+ */
+export interface WorldPresentationIdentity {
+  readonly readModelVersion: typeof READ_MODEL_VERSION;
+  readonly worldId: WorldId;
+  /** Deriving snapshot's tick: coherence marker only, not a liveness claim. */
+  readonly tick: number;
+  readonly seed: number;
+  /** Exact resolved engine configuration of the running universe. Read-only:
+   *  it never changes simulation behavior. */
+  readonly config: EngineConfig;
+  /** Display/runtime provenance (the RUNTIME_IDENTITY values), so Explorer
+   *  never imports sim-core for version display. */
+  readonly engineVersion: string;
+  readonly appVersion: string;
+}
+
+/**
+ * One catalog entry: stable organism identity plus the relatively stable
+ * inherited/presentation inputs that selection, lineage/clade presentation,
+ * and Pixel Phenotype resolution need without refetching per frame. The
+ * phenotype inputs are exactly what apps/explorer phenotype resolution reads
+ * (speed/sensing/metabolism/reproduction/diet/habitat/byproductUse/
+ * dormancyResponse) plus parent/lineage for family resolution; tolerance and
+ * cleanup ride along as inherited presentation inputs. Frame-dynamic values
+ * (position, energy, activity) live in the live frame, never here.
+ */
+export interface WorldCatalogEntry {
+  readonly id: OrganismId;
+  readonly parent: OrganismId | null;
+  readonly generation: number;
+  readonly lineageId: LineageId;
+  readonly cladeId: CladeId;
+  readonly speed: number;
+  readonly sensing: number;
+  readonly metabolism: number;
+  readonly reproduction: number;
+  readonly diet: number;
+  readonly habitat: number;
+  readonly byproductUse: number;
+  readonly dormancyResponse: number;
+  readonly tolerance: number;
+  readonly cleanup: number;
+}
+
+/**
+ * WorldEntityCatalog: the living population's stable identity and inputs.
+ *
+ * FULL catalog per build, by construction: the builders are pure functions
+ * over a single RenderSnapshot with no retained state, so a delta is
+ * uncomputable here without breaking purity. The performance intent is met
+ * one layer up, at transport cadence — the catalog is re-sent when the world
+ * changes (arrival/removal), not on every movement frame — while the live
+ * frame carries identity keys only. Arrival is presence in a newer catalog;
+ * removal is absence from it, resolving to null through the lookup helper.
+ */
+export interface WorldEntityCatalog {
+  readonly readModelVersion: typeof READ_MODEL_VERSION;
+  readonly worldId: WorldId;
+  /** Deriving snapshot's tick: what "current" meant for this catalog. */
+  readonly tick: number;
+  readonly entries: readonly WorldCatalogEntry[];
+  /** Living count, equal to entries.length. Carried explicitly so a consumer
+   *  can assert completeness without trusting array shape. */
+  readonly count: number;
+}
+
+/**
+ * One live organism: identity plus ONLY genuinely frame-dynamic presentation
+ * values. Energy rides here — not in the catalog — because it changes as
+ * organisms metabolize and the maintained Canvas reads it every frame
+ * (energy-class brightness and the selection energy readout). Anything
+ * configuration-, history-, checkpoint-, analysis-, or decision-shaped is
+ * refused here by type: if a consumer needs it, it belongs to another class.
+ */
+export interface WorldLiveOrganism {
+  readonly id: OrganismId;
+  readonly x: number;
+  readonly y: number;
+  readonly energy: number;
+  readonly activity: "active" | "dormant";
+}
+
+/**
+ * WorldLiveFrame: worldId, tick, population totals, and per-organism live
+ * values. Historical, checkpoint, full-analysis, configuration, and retained
+ * decision-history payloads do not belong here.
+ */
+export interface WorldLiveFrame {
+  readonly readModelVersion: typeof READ_MODEL_VERSION;
+  readonly worldId: WorldId;
+  readonly tick: number;
+  readonly population: number;
+  readonly activePopulation: number;
+  readonly dormantPopulation: number;
+  readonly organisms: readonly WorldLiveOrganism[];
+}
+
+/**
+ * WorldEnvironmentFrame: resource/waste presentation data for World rendering,
+ * lenses, minimap, and environmental consequence presentation. Independently
+ * representable from movement frames, so its transport cadence may differ;
+ * no optimization here alters sim-core field resolution or accounting.
+ */
+export interface WorldEnvironmentFrame {
+  readonly readModelVersion: typeof READ_MODEL_VERSION;
+  readonly worldId: WorldId;
+  readonly tick: number;
+  readonly resources: RenderResourceField;
+  readonly waste: RenderWasteField;
+}
+
+/** One bounded event reference: when it was observed and what it is called. */
+export interface WorldEventRef {
+  readonly tick: number;
+  readonly label: string;
+}
+
+/**
+ * How many of the snapshot's trailing event refs the interpretation state
+ * retains. 50 keeps ordinary product surfaces (recent-event presentation)
+ * truthful without dragging complete retained history into every update;
+ * full history stays on the retained/detail path, never in this frame.
+ */
+export const INTERPRETATION_EVENT_LIMIT = 50 as const;
+
+/**
+ * How many of the most recent decision resolutions the interpretation state
+ * retains, newest last. 10 keeps the current consequence presentation
+ * truthful; `resolvedDecisionCount` below records the full retained total so
+ * truncation is observable rather than silent. Complete decision history
+ * stays on the retained/detail path.
+ */
+export const INTERPRETATION_RESOLUTION_LIMIT = 10 as const;
+
+/** Current control comparison summary, mirroring the snapshot's shape. */
+export interface WorldControlSummary {
+  readonly tick: number;
+  readonly population: number;
+  readonly metrics: RenderMetrics;
+}
+
+/**
+ * WorldInterpretationState: bounded current metrics/summaries, the pending
+ * decision gate, current Aftermath presentation state, bounded event refs,
+ * and the current control comparison summary. `metrics` reuses RenderMetrics,
+ * which is already the bounded presentation subset — not the engine's whole
+ * metrics object — so no new authority is smuggled in through it.
+ */
+export interface WorldInterpretationState {
+  readonly readModelVersion: typeof READ_MODEL_VERSION;
+  readonly worldId: WorldId;
+  readonly tick: number;
+  readonly metrics: RenderMetrics;
+  /** Trailing event refs, newest last, bounded by INTERPRETATION_EVENT_LIMIT. */
+  readonly events: readonly WorldEventRef[];
+  readonly pendingDecision: PendingDecision | null;
+  /** Most recent resolutions, newest last, bounded by
+   *  INTERPRETATION_RESOLUTION_LIMIT. */
+  readonly resolvedDecisions: readonly DecisionResolution[];
+  /** Total resolutions retained by the runtime, so a consumer can tell a
+   *  complete history (length === count) from a bounded window. */
+  readonly resolvedDecisionCount: number;
+  readonly aftermath: AftermathState | null;
+  readonly control: WorldControlSummary | null;
+}
+
+/** All five read-model classes derived from one snapshot, in one pass. */
+export interface PresentationFrames {
+  readonly identity: WorldPresentationIdentity;
+  readonly catalog: WorldEntityCatalog;
+  readonly live: WorldLiveFrame;
+  readonly environment: WorldEnvironmentFrame;
+  readonly interpretation: WorldInterpretationState;
+}
