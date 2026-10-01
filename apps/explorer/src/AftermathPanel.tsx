@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import type {
   AftermathBaseline,
   AftermathComparison,
+  AftermathState,
   RenderResourceField,
-  RenderSnapshot,
 } from "@digital-evolution/contracts";
 import {
   DELTA_EPSILON,
@@ -155,13 +155,20 @@ function FieldCanvas({ change, mode }: { change: KindChange; mode: AftermathComp
 }
 
 export interface AftermathPanelProps {
-  readonly snapshot: RenderSnapshot;
+  /**
+   * Lane 3 F2b consumer cutover: the current aftermath from the
+   * interpretation frame plus live capacity from the environment frame.
+   * Capacity is a static configuration value no intervention alters, so
+   * reading it live cannot drift while the world resumes behind the sheet —
+   * exactly the guarantee the previous snapshot-sourced read relied on.
+   */
+  readonly aftermath: AftermathState | null;
+  readonly capacity: RenderResourceField["capacity"];
   readonly onAcknowledge: () => void;
   readonly busy: boolean;
 }
 
-export function AftermathPanel({ snapshot, onAcknowledge, busy }: AftermathPanelProps) {
-  const aftermath = snapshot.aftermath;
+export function AftermathPanel({ aftermath, capacity, onAcknowledge, busy }: AftermathPanelProps) {
   // Both sides are RETAINED at the resolution tick, not read live. Playback
   // resumes automatically once the choice resolves (AC22), so a live "Now"
   // would drift while the player reads the sheet and would stop being the
@@ -181,7 +188,7 @@ export function AftermathPanel({ snapshot, onAcknowledge, busy }: AftermathPanel
 
   const rows = baselinePresent ? changedScalars(aftermath!.baseline, resolved!.scalars) : [];
   const nutrients = baselinePresent
-    ? changedNutrients(aftermath!.baseline, aftermath!.resolved, snapshot.resources.capacity)
+    ? changedNutrients(aftermath!.baseline, aftermath!.resolved, capacity)
     : [];
   const showingDifference = mode === "difference" && baselinePresent;
   const quiet = showingDifference && rows.length === 0 && nutrients.length === 0;

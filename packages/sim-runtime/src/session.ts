@@ -53,6 +53,8 @@ import {
   selectCatalystWindow,
 } from "@digital-evolution/sim-decisions";
 import { readInjectedSource, resolveSourceProvenance } from "./provenance";
+import { ENVIRONMENT_PERIOD_TICKS } from "@digital-evolution/contracts";
+import { buildLive, buildPresentation, catalogMembershipSignature, interpretationPayloadKey } from "./presentation";
 import { validateRuntimeCommand } from "./command-validation";
 
 /**
@@ -185,6 +187,97 @@ const canonicalizationContext = (): CanonicalizationContext => {
   };
 };
 
+/**
+ * Lane 3 fix-wave: staggered read-model emission (handoff AC5/AC14, §13
+ * freedom — change-triggered catalog, bounded-period environment).
+ *
+ * The previous shape emitted all five classes at every emission point. That
+ * retransmitted stable identity, inherited catalog inputs, full resource
+ * grids, and bounded retained payloads on every movement advance — the AC14
+ * defect. Emission is now per-class, keyed on what actually changed:
+ *
+ * - identity: world-change paths (create/restore mint a fresh worldId) plus
+ *   the first advance after each, so first-paint and resume always converge
+ *   on a full set even if a subscriber missed the announcement;
+ * - catalog: FULL on identity change, thereafter only when the catalog
+ *   change signature (living count + member ids + clade assignments)
+ *   differs from last emitted — so a lineage-establishment reassignment
+ *   resends even with zero arrivals or removals;
+ * - environment: when the snapshot tick has moved at least
+ *   ENVIRONMENT_PERIOD_TICKS past the last emitted environment tick;
+ * - interpretation: when its bounded payload (envelope stripped) differs
+ *   from last emitted, or identity changed;
+ * - live: every advance — the per-advance heartbeat Explorer releases
+ *   advance backpressure on.
+ *
+ * Memory always reflects the last EMITTED frame per channel: a suppressed
+ * channel leaves its memory untouched, and a world change resets every slot.
+ * Emission order stays PresentationFrames order (identity, catalog, live,
+ * environment, interpretation) whenever several classes emit together, so a
+ * batch still reads identity-first. No biology, checkpoint, evidence,
+ * decision, phenotype, or reproducibility semantics are involved: the inputs
+ * are the same RenderSnapshot as before, only fewer frames leave per point.
+ */
+function selectEmission(
+  snapshot: RenderSnapshot,
+  memory: EmissionMemory,
+  isAdvance: boolean,
+): RuntimeResponse[] {
+  const frames = buildPresentation(snapshot);
+  const worldChanged = memory.worldId !== snapshot.worldId;
+  // Only a genuine advance consumes the armed first-advance full: a decision
+  // or intervention command between the announcement and the first advance
+  // announces on the staggered cadence without stealing first-paint's
+  // re-announcement.
+  const forceFull = worldChanged || (isAdvance && memory.firstAdvanceFull);
+  const out: RuntimeResponse[] = [];
+  if (forceFull) {
+    out.push(
+      { type: "PRESENTATION", frame: frames.identity },
+      { type: "PRESENTATION", frame: frames.catalog },
+      { type: "PRESENTATION", frame: frames.live },
+      { type: "PRESENTATION", frame: frames.environment },
+      { type: "PRESENTATION", frame: frames.interpretation },
+    );
+    memory.worldId = snapshot.worldId;
+    // A world-change full arms one more full for the next advance (first
+    // paint / resume convergence even if the announcement was missed); a
+    // first-advance full disarms, so later advances go staggered.
+    memory.firstAdvanceFull = worldChanged;
+    memory.catalogSignature = catalogMembershipSignature(frames.catalog);
+    memory.environmentTick = snapshot.tick;
+    memory.interpretationKey = interpretationPayloadKey(frames.interpretation);
+    return out;
+  }
+  const catalogSignature = catalogMembershipSignature(frames.catalog);
+  if (catalogSignature !== memory.catalogSignature) {
+    out.push({ type: "PRESENTATION", frame: frames.catalog });
+    memory.catalogSignature = catalogSignature;
+  }
+  // Live always: the heartbeat every advance carries, backpressure included.
+  out.push({ type: "PRESENTATION", frame: frames.live });
+  if (memory.environmentTick === null || snapshot.tick - memory.environmentTick >= ENVIRONMENT_PERIOD_TICKS) {
+    out.push({ type: "PRESENTATION", frame: frames.environment });
+    memory.environmentTick = snapshot.tick;
+  }
+  const interpretationKey = interpretationPayloadKey(frames.interpretation);
+  if (interpretationKey !== memory.interpretationKey) {
+    out.push({ type: "PRESENTATION", frame: frames.interpretation });
+    memory.interpretationKey = interpretationKey;
+  }
+  return out;
+}
+
+/** Last-emitted watermark per staggered channel. See selectEmission. */
+interface EmissionMemory {
+  worldId: WorldId | null;
+  /** Set by create/restore: the next advance re-announces the full set. */
+  firstAdvanceFull: boolean;
+  catalogSignature: string | null;
+  environmentTick: number | null;
+  interpretationKey: string | null;
+}
+
 export class UniverseSession {
   #experiment:any|null=null;
   #analysis=new EcologyObserver();
@@ -211,6 +304,20 @@ export class UniverseSession {
    *  can chain. Intended for validation and browser harnesses only. */
   enableTestCatalysts(){this.#testCatalysts=true;return this.snapshot()}
   get testCatalysts(){return this.#testCatalysts}
+
+  /** Staggered emission watermarks: last emitted frame per channel. */
+  #emission: EmissionMemory = {
+    worldId: null,
+    firstAdvanceFull: false,
+    catalogSignature: null,
+    environmentTick: null,
+    interpretationKey: null,
+  };
+
+  /** Emit this snapshot's read-model frames on the staggered cadence. */
+  #emit(snapshot: RenderSnapshot, isAdvance: boolean): RuntimeResponse[] {
+    return selectEmission(snapshot, this.#emission, isAdvance);
+  }
 
   /** M3 aftermath under observation, entered at decision resolution.
    *  Evidence/presentation state, not biology. NOT checkpointed: like
@@ -732,52 +839,68 @@ export class UniverseSession {
       // it is validated before dispatch and before any simulation loop can run.
       const validation=validateRuntimeCommand(command);
       if(!validation.ok){
-        // A refused command must not mutate anything, but Explorer clears its
-        // advanceDebt backpressure flag only inside the subscribe callback, so a
-        // rejection that emitted no SNAPSHOT would wedge the time controls
-        // permanently. The echoed snapshot reports the world unchanged; it
-        // grants no authority and advances nothing.
+        // A refused command must not mutate anything, but Explorer releases
+        // its advanceDebt backpressure flag on the live frame, so a rejection
+        // that emitted no frames would wedge the time controls permanently.
+        // The echo is the live heartbeat only, built directly so it neither
+        // consumes the armed first-advance full set nor moves any cadence
+        // watermark: a refusal reports the world unchanged (same tick, same
+        // biology), grants no authority, and advances nothing.
         const echoed=this.#currentOrNull();
-        return echoed
-          ?[{type:"ERROR",message:validation.message},{type:"SNAPSHOT",snapshot:echoed}]
-          :[{type:"ERROR",message:validation.message}];
+        const refused: RuntimeResponse[] = [{type:"ERROR",message:validation.message}];
+        if(echoed)refused.push({type:"PRESENTATION",frame:buildLive(echoed)});
+        return refused;
       }
       command=validation.command;
       switch(command.type){
-        case "CREATE_UNIVERSE":return[{type:"SNAPSHOT",snapshot:this.create(command.config)}];
-        case "ADVANCE_TICKS":return[{type:"SNAPSHOT",snapshot:this.advance(command.ticks)}];
-        case "RUN_TO_NEXT_EVENT":return[{type:"SNAPSHOT",snapshot:this.runToNextEvent(command.maxTicks)}];
-        case "CREATE_CONTROL_FORK":return[{type:"SNAPSHOT",snapshot:this.createControlFork()}];
-        case "APPLY_INTERVENTION":return[{type:"SNAPSHOT",snapshot:this.intervene(command.intervention)}];
+        case "CREATE_UNIVERSE":return this.#emit(this.create(command.config),false);
+        case "ADVANCE_TICKS":return this.#emit(this.advance(command.ticks),true);
+        case "RUN_TO_NEXT_EVENT":return this.#emit(this.runToNextEvent(command.maxTicks),true);
+        case "CREATE_CONTROL_FORK":return this.#emit(this.createControlFork(),false);
+        case "APPLY_INTERVENTION":return this.#emit(this.intervene(command.intervention),false);
         case "RESOLVE_EVENT_DECISION":{
           const snapshot=this.resolveEventDecision(command.opportunityId,command.choiceId);
-          return command.requestId
-            ?[{type:"DECISION_RESOLVED",requestId:command.requestId,snapshot},{type:"SNAPSHOT",snapshot}]
-            :[{type:"SNAPSHOT",snapshot}];
+          const out: RuntimeResponse[] = [];
+          if(command.requestId)out.push({type:"DECISION_RESOLVED",requestId:command.requestId,snapshot});
+          out.push(...this.#emit(snapshot,false));
+          return out;
         }
         case "ACKNOWLEDGE_AFTERMATH":{
           const snapshot=this.acknowledgeAftermath();
-          return command.requestId
-            ?[{type:"AFTERMATH_ACKNOWLEDGED",requestId:command.requestId,snapshot},{type:"SNAPSHOT",snapshot}]
-            :[{type:"SNAPSHOT",snapshot}];
+          const out: RuntimeResponse[] = [];
+          if(command.requestId)out.push({type:"AFTERMATH_ACKNOWLEDGED",requestId:command.requestId,snapshot});
+          // Lane 3 Task 6: no trailing bare SNAPSHOT. The correlated reply
+          // settles the awaiting caller and the PRESENTATION frames announce
+          // the release to subscribers (PR #84 exactly-once lesson: assert via
+          // the correlated reply, not a trailing snapshot). Retired together
+          // with the aftermath-runtime settlement assertion that required it.
+          out.push(...this.#emit(snapshot,false));
+          return out;
         }
         case "LOAD_CHECKPOINT":{
           // restore() is unchanged: A3.3 preflight then A3.4 canonical
           // validation, in that order, in the same place. A second restore path
           // for worker convenience is forbidden. The correlated reply is what
-          // lets the awaiting caller settle; the trailing SNAPSHOT keeps the
-          // render stream and Explorer backpressure behaving exactly as before.
+          // lets the awaiting caller settle; the read-model frames announce the
+          // restored world to presentation.
           //
-          // One message, not two. postMessage delivers each as its own task, so a
-          // trailing bare SNAPSHOT would reach subscribers AFTER the load's
-          // .then() had run - and Explorer clears its status string on every
-          // snapshot, wiping "Checkpoint restored". The client notifies
-          // subscribers from this one correlated reply instead.
+          // One correlated message plus frames, never a trailing bare SNAPSHOT.
+          // postMessage delivers each as its own task, and Explorer sets its
+          // status string when the load resolves — a trailing snapshot arriving
+          // after that (or any subscriber fan-out from this reply) would wipe
+          // "Checkpoint restored". The client resolves the awaiting load from
+          // this reply alone and routes only the frames to presentation.
           const snapshot=this.restore(command.checkpoint);
-          return[{type:"CHECKPOINT_LOADED",requestId:command.requestId,snapshot}];
+          return [{type:"CHECKPOINT_LOADED",requestId:command.requestId,snapshot},...this.#emit(snapshot,false)];
         }
         case "REQUEST_CHECKPOINT":return[{type:"CHECKPOINT",requestId:command.requestId,checkpoint:this.checkpoint()}];
         case "REQUEST_EXPORT":return[{type:"EXPORT",requestId:command.requestId,data:this.exportEvidence()}];
+        // Lane 3 Task 6 retained/detail path: a pure retained-detail read.
+        // snapshot() advances nothing and mutates nothing; a missing universe
+        // throws into the shared catch and answers as a correlated ERROR, the
+        // same contract the other pure queries keep. No frames are emitted:
+        // detail is pulled on demand, never pushed into live traffic.
+        case "REQUEST_DETAIL":return[{type:"DETAIL",requestId:command.requestId,snapshot:this.snapshot()}];
         // Unreachable while the guard above holds, and kept deliberately: it is
         // what makes handle total. Without it an unrecognised tag falls out of
         // the switch and returns undefined, which worker.ts then iterates over,

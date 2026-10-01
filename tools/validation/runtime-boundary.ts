@@ -13,9 +13,11 @@
  * Run: pnpm test:runtime-boundary
  */
 import assert from "node:assert/strict";
-import type { EngineConfig, RenderSnapshot } from "@digital-evolution/contracts";
+import type { EngineConfig, PresentationFrame, RenderSnapshot, WorldId, WorldLiveFrame } from "@digital-evolution/contracts";
+import { ENVIRONMENT_PERIOD_TICKS, READ_MODEL_VERSION } from "@digital-evolution/contracts";
 import * as runtimeRoot from "@digital-evolution/sim-runtime";
 import { UniverseSession } from "../../packages/sim-runtime/src/session.ts";
+import { buildCatalog, buildEnvironment, buildLive, buildPresentation, catalogMembershipSignature, interpretationPayloadKey, resolveCatalogEntry } from "../../packages/sim-runtime/src/presentation.ts";
 import {
   MAX_EVENT_SCAN_TICKS,
   validateRuntimeCommand,
@@ -26,6 +28,7 @@ import {
   type TerminalFailure,
   type WorkerLike,
 } from "../../packages/sim-runtime/src/client.ts";
+import { createPresentationStore } from "../../apps/explorer/src/presentationStore.ts";
 
 const FIXTURE_SEED = 20260930;
 
@@ -255,6 +258,7 @@ function testRequiredFieldsAreChecked() {
   rejects({ type: "LOAD_CHECKPOINT", checkpoint: {} }, "LOAD_CHECKPOINT with no requestId");
   rejects({ type: "REQUEST_CHECKPOINT" }, "REQUEST_CHECKPOINT with no requestId");
   rejects({ type: "REQUEST_EXPORT" }, "REQUEST_EXPORT with no requestId");
+  rejects({ type: "REQUEST_DETAIL" }, "REQUEST_DETAIL with no requestId");
 
   // Every supported tag is reachable, so a valid command is never refused.
   const session = liveSession();
@@ -265,14 +269,15 @@ function testRequiredFieldsAreChecked() {
 }
 
 /**
- * A rejected command mutates nothing, and still releases the snapshot
- * backpressure depends on.
+ * A rejected command mutates nothing, and still releases the backpressure
+ * App depends on.
  *
- * App.tsx sets advanceDebt on post and clears it only inside subscribe, so a
- * rejection that returned no SNAPSHOT would freeze the simulation permanently.
- * The released snapshot must be STATE-EQUIVALENT: a tick-only assertion would
- * pass while the snapshot carried a mutated world, so no tick advance, no
- * biological mutation and no decision/analysis mutation are asserted separately.
+ * App sets advanceDebt on post and clears it only on the interpretation frame,
+ * so a rejection that returned no frames would freeze the simulation
+ * permanently. The released frames must be STATE-EQUIVALENT: a tick-only
+ * assertion would pass while the frames carried a mutated world, so no tick
+ * advance, no biological mutation and no decision/analysis mutation are
+ * asserted separately.
  */
 function testRejectedCommandMutatesNothingButStillReleasesBackpressure() {
   const live = liveSession();
@@ -301,13 +306,18 @@ function testRejectedCommandMutatesNothingButStillReleasesBackpressure() {
   assert.equal(biological(after), beforeBiology, "a refused advance mutates no biology");
   assert.equal(interpretive(after), beforeInterpretation, "a refused advance mutates no decision or analysis state");
 
-  // The snapshot that releases backpressure must itself be the unchanged world.
-  const echoed = rejected.find((r) => r.type === "SNAPSHOT");
-  assert.ok(echoed, "a refused command still emits a snapshot so backpressure releases");
-  const released = (echoed as { snapshot: ReturnType<UniverseSession["snapshot"]> }).snapshot;
-  assert.equal(released.tick, beforeTick, "the released snapshot is at the unchanged tick");
-  assert.equal(biological(released), beforeBiology, "the released snapshot carries unmutated biology");
-  assert.equal(interpretive(released), beforeInterpretation, "the released snapshot carries unmutated interpretation");
+  // The live heartbeat releases backpressure and must itself describe the
+  // unchanged world — including its tick. Unchanged catalog, environment, and
+  // interpretation stay suppressed per the staggered cadence: App releases
+  // advanceDebt on the live frame, so they are not needed to un wedge the UI.
+  assert.ok(!rejected.some((r) => r.type === "SNAPSHOT"), "a refused command emits no legacy snapshot");
+  const echoed = rejected
+    .filter((r) => r.type === "PRESENTATION")
+    .map((r) => (r as { frame: PresentationFrame }).frame);
+  assert.equal(echoed.length, 1, "a refused command echoes only the live heartbeat for the unchanged world");
+  const released = echoed.find((f) => "organisms" in f && "population" in f);
+  assert.ok(released, "the echo carries the live frame backpressure releases on");
+  assert.equal(released.tick, beforeTick, "the released frame is at the unchanged tick");
 }
 
 /**
@@ -476,10 +486,10 @@ const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 const realCheckpoint = () => engineFixture().checkpoint;
 
 /**
- * A same-tick snapshot that is not the correlated reply must not complete a
- * load. This is the AC7 defect: any live frame at the checkpoint's tick used to
- * satisfy the restore, including a decision-gated advance that returns a
- * snapshot at the unchanged tick.
+ * A same-tick live frame that is not the correlated reply must not complete a
+ * load. The client routes completion only by request identity: a bare
+ * SNAPSHOT (emitted by no command since Task 6 retired the ACK trailing
+ * emission) reaches no listener and settles nothing.
  */
 async function testSameTickSnapshotCannotCompleteALoad() {
   const fake = new FakeWorker();
@@ -497,10 +507,10 @@ async function testSameTickSnapshotCannotCompleteALoad() {
   await tick();
   assert.equal(load.state.settled, false, "an unrelated same-tick snapshot does not complete the load");
 
-  // Also a stale snapshot from an earlier restore, same tick.
-  fake.deliver({ type: "SNAPSHOT", snapshot: snap(Math.max(0, createdTick - 1)) });
+  // Also a reply addressed to a different load, at any tick.
+  fake.deliver({ type: "CHECKPOINT_LOADED", requestId: "load-other", snapshot: snap(createdTick) });
   await tick();
-  assert.equal(load.state.settled, false, "a stale snapshot does not complete the load");
+  assert.equal(load.state.settled, false, "a reply for another load does not complete this one");
 
   // Only the correlated reply settles it. Promise callbacks are microtasks, so
   // the settlement flag is observed after yielding, not synchronously.
@@ -569,31 +579,38 @@ async function testASecondLoadSupersedesTheFirst() {
   assert.equal((second.state.value as RenderSnapshot).tick, 5, "and resolves to its own world");
 }
 
-/** Subscribers still receive every snapshot, correlated or not. */
-function testSubscribersAreStillNotified() {
+/** The legacy snapshot `subscribe` path is removed; presentation subscribers
+ *  still receive every frame, and unsubscribing still stops notification. */
+function testLegacySubscribePathIsGone() {
   const fake = new FakeWorker();
   const client = new WorkerRuntimeClient(() => fake);
-  const seen: number[] = [];
-  const unsubscribe = client.subscribe((s) => seen.push(s.tick));
+  assert.equal(
+    typeof (client as unknown as Record<string, unknown>)["subscribe"],
+    "undefined",
+    "legacy subscribe is removed from the client",
+  );
+  assert.equal(typeof client.subscribePresentation, "function", "presentation delivery remains the live path");
+}
 
-  fake.deliver({ type: "SNAPSHOT", snapshot: snap(1) });
-  fake.deliver({ type: "SNAPSHOT", snapshot: snap(2) });
-  assert.deepEqual(seen, [1, 2], "subscribers see every live frame");
+function testPresentationSubscribersReceiveFrames() {
+  const fake = new FakeWorker();
+  const client = new WorkerRuntimeClient(() => fake);
+  const seen: PresentationFrame[] = [];
+  const unsubscribe = client.subscribePresentation((f) => seen.push(f));
+  const frames = buildPresentation(liveSnapshotFixture());
+  for (const frame of [frames.identity, frames.catalog, frames.live, frames.environment, frames.interpretation]) {
+    fake.deliver({ type: "PRESENTATION", frame });
+  }
+  assert.equal(seen.length, 5, "presentation subscribers see every frame class");
 
   unsubscribe();
-  fake.deliver({ type: "SNAPSHOT", snapshot: snap(3) });
-  assert.deepEqual(seen, [1, 2], "unsubscribe still stops notification");
+  fake.deliver({ type: "PRESENTATION", frame: frames.live });
+  assert.equal(seen.length, 5, "unsubscribe still stops notification");
 }
 
 /** A short bounded lifetime, so the timeout contract is provable without
  *  waiting the production value. */
 const TEST_REQUEST_TIMEOUT_MS = 20;
-
-/**
- * A snapshot-shaped stand-in for the payload replies carry. Only `tick` is
- * observed, but the real shape keeps a stray `.metrics` access honest.
- */
-const replySnapshot = (tick: number) => snap(tick);
 
 /**
  * Every request settles exactly once, and never later than its bounded
@@ -604,6 +621,7 @@ async function testEveryRequestHasABoundedLifetime() {
   const cases: [string, (c: WorkerRuntimeClient) => Promise<unknown>][] = [
     ["requestCheckpoint", (c) => c.requestCheckpoint()],
     ["requestExport", (c) => c.requestExport()],
+    ["requestDetail", (c) => c.requestDetail()],
     ["resolveEventDecision", (c) => c.resolveEventDecision("opp-1", "choice-1")],
     ["acknowledgeAftermath", (c) => c.acknowledgeAftermath()],
   ];
@@ -657,7 +675,7 @@ async function testFatalWorkerFailureSettlesEverything() {
     // on a promise that cannot settle twice.
     assert.equal(client.pendingRequestCount, 0, `${kind} left nothing a late reply could settle`);
     fake.deliver({ type: "CHECKPOINT", requestId: "r-1", checkpoint: {} });
-    fake.deliver({ type: "SNAPSHOT", snapshot: replySnapshot(1) });
+    fake.deliver({ type: "PRESENTATION", frame: buildLive(liveSnapshotFixture()) });
     await tick();
     assert.equal(client.pendingRequestCount, 0, `${kind} a late reply creates no new pending entry`);
   }
@@ -689,7 +707,7 @@ async function testDestroySettlesAndRetainsNothing() {
 
   // A late reply after destroy must be inert, not a second settlement.
   fake.deliver({ type: "CHECKPOINT", requestId: "r-1", checkpoint: {} });
-  fake.deliver({ type: "SNAPSHOT", snapshot: replySnapshot(9) });
+  fake.deliver({ type: "PRESENTATION", frame: buildLive(liveSnapshotFixture()) });
   await tick();
   assert.equal(client.pendingRequestCount, 0, "a late reply after destroy creates no pending entry");
 }
@@ -797,56 +815,62 @@ async function testUnrelatedErrorDoesNotFailALoad() {
 }
 
 /**
- * A restore delivers the restored world to subscribers exactly once.
+ * A restore composes through frames only: the correlated reply settles the
+ * load, and the five read-model frames that follow compose the restored world
+ * in the presentation store — with no legacy subscriber anywhere in between.
  *
- * Regression guard for the CI failure on PR #84 (browser-smoke timed out waiting
- * for "Checkpoint restored"). Cause: postMessage delivers each message as its
- * own task, so the trailing bare SNAPSHOT ran AFTER the load's .then() had set
- * the status. Explorer's subscribe callback runs setStatus("") on every snapshot,
- * so that second delivery wiped "Checkpoint restored" and the UI showed nothing.
- *
- * The trailing SNAPSHOT was also redundant: the correlated reply already carries
- * the same snapshot, and the client resolved the load from it. Now the session
- * sends only CHECKPOINT_LOADED and the client notifies subscribers from that one
- * message, so the restore announces the world once and the status survives.
+ * Regression guard for the CI failure on PR #84 (browser-smoke timed out
+ * waiting for "Checkpoint restored"). Cause: postMessage delivers each message
+ * as its own task, so a trailing second delivery ran AFTER the load's .then()
+ * had set the status. Explorer's old subscribe callback ran setStatus("") on
+ * every snapshot, so that second delivery wiped "Checkpoint restored" and the
+ * UI showed nothing. Now the session sends the correlated reply plus frames
+ * (never a trailing snapshot), and Explorer skips status clearing for a
+ * create/restore batch, so the status survives.
  */
 async function testARestoreAnnouncesTheWorldExactlyOnce() {
   const fake = new FakeWorker();
   const client = new WorkerRuntimeClient(() => fake, { requestTimeoutMs: 10_000 });
-  const seen: number[] = [];
-  client.subscribe((s) => seen.push(s.tick));
+  const store = createPresentationStore();
+  client.subscribePresentation((f) => store.apply(f));
 
   const load = tracked(client.loadCheckpoint(realCheckpoint()));
   const requestId = (fake.posted.at(-1) as { requestId: string }).requestId;
 
-  // Exactly the single message the worker now posts for a successful restore.
-  fake.deliver({ type: "CHECKPOINT_LOADED", requestId, snapshot: snap(4242) });
+  // Exactly what the session emits for a restore, in order.
+  const session = liveSession();
+  const restoreResponses = session.handle({ type: "LOAD_CHECKPOINT", requestId, checkpoint: session.checkpoint() });
+  assert.ok(!restoreResponses.some((r) => r.type === "SNAPSHOT"), "a restore emits no bare snapshot");
+  for (const response of restoreResponses) fake.deliver(response);
   await tick();
 
   assert.equal(load.state.settled, true, "the load settles on its correlated reply");
-  assert.equal((load.state.value as RenderSnapshot).tick, 4242, "and resolves to the restored world");
-  assert.deepEqual(seen, [4242], "the restore notifies subscribers exactly once");
+  const restored = load.state.value as RenderSnapshot;
+  assert.equal(store.getView().live?.tick, restored.tick, "the composed view reaches the restored tick through frames alone");
+  assert.equal(store.getView().worldId, restored.worldId, "with no legacy subscriber in between");
 }
 
 /**
- * A fatal worker failure drops subscribers, because a dead worker can never
- * deliver another snapshot: keeping the listeners would leave the UI holding
- * subscription objects only a replacement client could satisfy. This is a
- * behaviour change from the previous code, so it is pinned rather than assumed.
+ * A fatal worker failure drops presentation subscribers, because a dead
+ * worker can never deliver another frame: keeping the listeners would leave
+ * the UI holding subscription objects only a replacement client could
+ * satisfy. This is a behaviour change from the previous code, so it is pinned
+ * rather than assumed.
  */
 async function testFatalFailureDropsSubscribers() {
   const fake = new FakeWorker();
   const client = new WorkerRuntimeClient(() => fake, { requestTimeoutMs: 10_000 });
-  const seen: number[] = [];
-  client.subscribe((s) => seen.push(s.tick));
+  const seen: PresentationFrame[] = [];
+  client.subscribePresentation((f) => seen.push(f));
+  const frames = buildPresentation(liveSnapshotFixture());
 
-  fake.deliver({ type: "SNAPSHOT", snapshot: snap(1) });
-  assert.deepEqual(seen, [1], "subscribers are notified while the worker lives");
+  fake.deliver({ type: "PRESENTATION", frame: frames.live });
+  assert.equal(seen.length, 1, "presentation subscribers are notified while the worker lives");
 
   fake.fail("error", "synthetic error");
-  fake.deliver({ type: "SNAPSHOT", snapshot: snap(2) });
+  fake.deliver({ type: "PRESENTATION", frame: frames.environment });
   await tick();
-  assert.deepEqual(seen, [1], "a snapshot after a fatal failure reaches no subscriber");
+  assert.equal(seen.length, 1, "a frame after a fatal failure reaches no subscriber");
 }
 
 async function testDestroyDoesNotEmitTerminalSignal() {
@@ -892,19 +916,19 @@ async function testTerminalStateIsQueryableAfterDeath() {
   assert.equal(seen.length, 1, "one terminal signal fired");
   assert.deepEqual(client.terminal, seen[0], "the getter returns the emitted failure");
   // A post-death subscription is dead on arrival: the fatal path dropped
-  // subscribers, and no later snapshot can revive them.
-  const late: number[] = [];
-  client.subscribe((s) => late.push(s.tick));
-  fake.deliver({ type: "SNAPSHOT", snapshot: snap(99) });
+  // subscribers, and no later frame can revive them.
+  const late: PresentationFrame[] = [];
+  client.subscribePresentation((f) => late.push(f));
+  fake.deliver({ type: "PRESENTATION", frame: buildLive(liveSnapshotFixture()) });
   await tick();
-  assert.deepEqual(late, [], "a post-death subscribe plus delivered snapshot reaches no listener");
+  assert.deepEqual(late, [], "a post-death subscribe plus delivered frame reaches no listener");
 }
 
 function testProductionSurfaceHasNoGenericCommand() {
   const fake = new FakeWorker();
   const client = new WorkerRuntimeClient(() => fake);
   assert.equal("command" in client, false, "no generic raw command escape hatch on the production surface");
-  for (const op of ["create", "advance", "runToNextEvent", "intervene", "createControlFork", "resolveEventDecision", "acknowledgeAftermath", "loadCheckpoint", "requestCheckpoint", "requestExport", "subscribe", "destroy", "onTerminal"] as const) {
+  for (const op of ["create", "advance", "runToNextEvent", "intervene", "createControlFork", "resolveEventDecision", "acknowledgeAftermath", "loadCheckpoint", "requestCheckpoint", "requestExport", "requestDetail", "subscribePresentation", "destroy", "onTerminal"] as const) {
     assert.equal(typeof (client as unknown as Record<string, unknown>)[op], "function", `${op} remains an explicit typed product operation`);
   }
 }
@@ -923,6 +947,56 @@ async function testTerminalSignalFiresExactlyOnceAcrossBothFailureKinds() {
   assert.ok(!("data" in seen[0]! || "target" in seen[0]!), "no raw browser event object crosses the boundary");
 }
 
+/**
+ * Task 2 (F2a): a real RenderSnapshot as read-model derivation input, so the
+ * builders are exercised against the true snapshot shape rather than a
+ * hand-built stub. A short advance moves organisms off their founding cells,
+ * so the live frame carries genuine positions rather than initial placement.
+ */
+const liveSnapshotFixture = (): RenderSnapshot => {
+  const session = liveSession();
+  session.advance(5);
+  return session.snapshot();
+};
+
+function testLiveFrameExcludesNonLivePayloads() {
+  const frames = buildPresentation(liveSnapshotFixture());
+  const keys = Object.keys(frames.live);
+  for (const banned of ["config", "analysis", "events", "resolvedDecisions", "aftermath", "pendingDecision", "seed"]) {
+    assert.ok(!keys.includes(banned), `live frame carries no ${banned}`);
+  }
+  assert.ok(frames.live.tick >= 0 && frames.live.worldId !== undefined, "live frame keeps tick + worldId");
+}
+
+/**
+ * Task 2 (F2a): catalog arrival/removal across two consecutive builds. The
+ * second snapshot is the first with one organism filtered out — the shape a
+ * death/removal takes at the derivation boundary regardless of which engine
+ * path removed it, so this pins builder semantics rather than engine
+ * mortality (which the determinism suites own).
+ */
+function testRemovedEntitiesResolveToNothing() {
+  const first = liveSnapshotFixture();
+  assert.ok(first.organisms.length > 0, "the fixture holds living organisms");
+  const removedId = first.organisms[0]!.id;
+
+  const departed = buildCatalog(first);
+  assert.equal(resolveCatalogEntry(departed, removedId)?.id, removedId, "a living organism resolves from its own catalog");
+
+  const second: RenderSnapshot = { ...first, tick: first.tick + 1, organisms: first.organisms.slice(1) };
+  const current = buildCatalog(second);
+  assert.ok(!current.entries.some((e) => e.id === removedId), "the removed id is absent from the newer catalog");
+  assert.equal(resolveCatalogEntry(current, removedId), null, "a removed entity resolves to null");
+
+  // A survivor stays resolvable with its static inputs intact, so identity and
+  // inherited traits never need refetching from a live frame.
+  const survivor = second.organisms[0]!;
+  const entry = resolveCatalogEntry(current, survivor.id);
+  assert.ok(entry !== null, "a surviving organism still resolves");
+  assert.equal(entry.lineageId, survivor.lineageId, "catalog keeps stable lineage identity");
+  assert.equal(entry.speed, survivor.speed, "catalog keeps inherited presentation inputs");
+}
+
 async function testPackageRootExposesNoMutableSessionAuthority() {
   // NOTE (Task 2): the brief prescribes `await import("@digital-evolution/sim-runtime")`
   // here, but a dynamic bare-specifier import cannot resolve under this repo's
@@ -936,8 +1010,582 @@ async function testPackageRootExposesNoMutableSessionAuthority() {
   assert.equal(typeof runtimeRoot.WorkerRuntimeClient, "function", "WorkerRuntimeClient remains the production entry");
 }
 
+/**
+ * Fix-wave (staggered emission cadence): live commands emit frames with no
+ * legacy payload beside them. Driven through UniverseSession.handle — the
+ * point every RuntimeCommand passes through — so this proves emission, not
+ * just derivation. The first advance after create still delivers the full
+ * set (first-paint convergence); later advances go staggered.
+ */
+function testLiveFramesArriveWithoutLegacyPayload() {
+  const session = liveSession();
+  const responses = session.handle({ type: "ADVANCE_TICKS", ticks: 1 });
+  assert.ok(!responses.some((r) => r.type === "SNAPSHOT"), "no legacy SNAPSHOT on the live path");
+  const frames = responses
+    .filter((r) => r.type === "PRESENTATION")
+    .map((r) => (r as { frame: PresentationFrame }).frame);
+  assert.equal(frames.length, 5, "the first advance after create still delivers the full set");
+  const snapshot = session.snapshot();
+  for (const frame of frames) {
+    assert.equal(frame.worldId, snapshot.worldId, "every frame carries the snapshot worldId");
+    assert.equal(frame.tick, snapshot.tick, "every frame carries the snapshot effective tick");
+    assert.equal(frame.readModelVersion, READ_MODEL_VERSION, "every frame carries the read-model version");
+  }
+  const live = frames.find((f) => "organisms" in f && "population" in f);
+  assert.ok(live, "a live frame is among the emitted frames");
+  for (const banned of ["config", "analysis", "events", "resolvedDecisions", "aftermath", "pendingDecision", "seed", "metrics"]) {
+    assert.ok(!(banned in (live as object)), `live frame carries no ${banned}`);
+  }
+  // The second advance goes staggered: the live heartbeat always emits, and
+  // at least one stable class is suppressed (a pure no-op advance emits live
+  // alone — see testStaggeredEmissionCadence for the full pin).
+  const second = session.handle({ type: "ADVANCE_TICKS", ticks: 0 });
+  const staggered = second
+    .filter((r) => r.type === "PRESENTATION")
+    .map((r) => (r as { frame: PresentationFrame }).frame);
+  assert.ok(staggered.some((f) => "organisms" in f && "population" in f), "the live heartbeat emits on every advance");
+  assert.ok(staggered.length < 5, "a no-op advance suppresses every unchanged class");
+}
+
+/**
+ * Fix-wave (handoff AC5): the staggered emission cadence, pinned class by
+ * class through the command boundary. Identity emits on world-change paths
+ * plus the first advance after each; catalog FULL only on membership change;
+ * environment on its bounded period; interpretation only on payload change;
+ * live on every advance. A no-change advance (advance(0), a pure query)
+ * suppresses every stable class by construction — nothing about the engine
+ * fixture can make it emit — so each "not sent" assertion below is a
+ * cadence property, not a fixture accident.
+ */
+function testStaggeredEmissionCadence() {
+  const session = liveSession();
+  const classes = (responses: unknown[]): string[] =>
+    (responses as { type: string; frame?: PresentationFrame }[])
+      .filter((r) => r.type === "PRESENTATION")
+      .map((r) =>
+        "config" in r.frame! ? "identity"
+        : "entries" in r.frame! ? "catalog"
+        : "population" in r.frame! ? "live"
+        : "resources" in r.frame! ? "environment"
+        : "interpretation",
+      );
+
+  // World-change path: create announces the full set, in class order.
+  const created = session.handle({ type: "CREATE_UNIVERSE", config: config(FIXTURE_SEED + 1) });
+  assert.deepEqual(
+    classes(created),
+    ["identity", "catalog", "live", "environment", "interpretation"],
+    "create announces the full set in class order",
+  );
+  // First advance after create: full again, so first-paint always converges.
+  const first = session.handle({ type: "ADVANCE_TICKS", ticks: 1 });
+  assert.deepEqual(
+    classes(first),
+    ["identity", "catalog", "live", "environment", "interpretation"],
+    "the first advance after create re-announces the full set",
+  );
+  // Pure query: nothing changed, so only the live heartbeat emits.
+  const probe = session.handle({ type: "ADVANCE_TICKS", ticks: 0 });
+  assert.deepEqual(classes(probe), ["live"], "a no-change advance emits live alone");
+  assert.ok(!classes(probe).includes("catalog"), "catalog is NOT sent when membership is unchanged");
+  assert.ok(!classes(probe).includes("environment"), "environment is NOT sent inside its period");
+  assert.ok(!classes(probe).includes("interpretation"), "interpretation is NOT sent when its payload is unchanged");
+  assert.ok(!classes(probe).includes("identity"), "identity is NOT resent mid-world");
+
+  // Oracle run: over K single-tick advances every emission must match the
+  // documented rule recomputed from the live snapshot — catalog present iff
+  // the membership signature moved, environment present iff the period
+  // elapsed, interpretation present iff its payload key moved, live always.
+  const K = 2 * ENVIRONMENT_PERIOD_TICKS;
+  let lastCatalogSig = catalogMembershipSignature(buildCatalog(session.snapshot()));
+  let lastEnvTick = session.snapshot().tick;
+  let lastInterpKey = interpretationPayloadKey(
+    buildPresentation(session.snapshot()).interpretation,
+  );
+  const counts: Record<string, number> = { identity: 0, catalog: 0, live: 0, environment: 0, interpretation: 0 };
+  for (let i = 0; i < K; i++) {
+    const responses = session.handle({ type: "ADVANCE_TICKS", ticks: 1 });
+    assert.ok(!responses.some((r) => (r as { type: string }).type === "SNAPSHOT"), "no legacy snapshot rides the live path");
+    const emitted = classes(responses);
+    for (const c of emitted) counts[c]!++;
+    const snap = session.snapshot();
+    const catalogSig = catalogMembershipSignature(buildCatalog(snap));
+    const interpKey = interpretationPayloadKey(buildPresentation(snap).interpretation);
+    const expectCatalog = catalogSig !== lastCatalogSig;
+    const expectEnv = snap.tick - lastEnvTick >= ENVIRONMENT_PERIOD_TICKS;
+    const expectInterp = interpKey !== lastInterpKey;
+    assert.equal(emitted.includes("catalog"), expectCatalog, `advance ${i}: catalog iff membership changed`);
+    assert.equal(emitted.includes("environment"), expectEnv, `advance ${i}: environment iff period elapsed`);
+    assert.equal(emitted.includes("interpretation"), expectInterp, `advance ${i}: interpretation iff payload changed`);
+    assert.ok(emitted.includes("live"), `advance ${i}: live always emits`);
+    assert.ok(!emitted.includes("identity"), `advance ${i}: identity never resends mid-world`);
+    if (expectCatalog) lastCatalogSig = catalogSig;
+    if (expectEnv) lastEnvTick = snap.tick;
+    if (expectInterp) lastInterpKey = interpKey;
+  }
+  // The AC5 pin as message counts: live on every advance, each stable class
+  // suppressed at least once (the probe alone guarantees one suppression per
+  // class, so these hold regardless of engine churn).
+  const total = K + 1;
+  assert.equal(counts.live, K, "live emits on every advance of the run");
+  assert.ok(counts.catalog! < total, `catalog not sent every advance (${counts.catalog}/${total})`);
+  assert.ok(counts.environment! < total, `environment not sent every advance (${counts.environment}/${total})`);
+  assert.ok(counts.interpretation! < total, `interpretation not sent every advance (${counts.interpretation}/${total})`);
+  assert.equal(counts.identity, 0, "identity never resends mid-world");
+}
+
+/**
+ * PR-review finding (fix-wave 2): the catalog change signature watched
+ * organism membership only, but cladeId can change while the same organisms
+ * stay alive — cladeRoot(o.l) is re-derived per snapshot and flips when a
+ * lineage crosses the establishment thresholds — leaving the clade lens and
+ * inspector with stale assignments.
+ *
+ * Driven through UniverseSession.handle end to end on the suite fixture
+ * (seed 20260930): stride tick 6024 (251 x 24) carries a live
+ * lineage-establishment reassignment with zero births/deaths on that step,
+ * so membership is constant while cladeIds move. The setup advances in
+ * MAX_SLICE_TICKS-bounded chunks and pins the pre-step tick plus the absence
+ * of a pending decision, so a future engine trajectory change fails here
+ * explicitly instead of silently testing a different world.
+ */
+function testCladeEstablishmentReemitsCatalogWithConstantMembership() {
+  const session = new UniverseSession();
+  session.handle({ type: "CREATE_UNIVERSE", config: config(FIXTURE_SEED) });
+  for (const ticks of [2000, 2000, 2000, 23]) {
+    session.handle({ type: "ADVANCE_TICKS", ticks });
+  }
+  const before = session.snapshot();
+  assert.equal(before.tick, 6023, "setup lands on the tick before the establishment stride");
+  assert.equal(before.pendingDecision, null, "setup reached the stride with no pending decision stopping the run");
+  const beforeClades = new Map(before.organisms.map((o) => [o.id, o.cladeId]));
+
+  const responses = session.handle({ type: "ADVANCE_TICKS", ticks: 1 });
+  const after = session.snapshot();
+  assert.equal(after.tick, 6024, "the probed step is the establishment stride tick");
+  assert.deepEqual(
+    after.organisms.map((o) => o.id).sort((a, b) => a - b),
+    before.organisms.map((o) => o.id).sort((a, b) => a - b),
+    "no arrival or removal across the establishment step: membership is constant",
+  );
+  const flipped = after.organisms.filter((o) => beforeClades.get(o.id) !== o.cladeId);
+  assert.ok(flipped.length > 0, "lineage establishment reassigned cladeIds of living organisms");
+  assert.notEqual(
+    catalogMembershipSignature(buildCatalog(after)),
+    catalogMembershipSignature(buildCatalog(before)),
+    "the signature moves on a clade reassignment alone",
+  );
+
+  const catalogs = responses
+    .filter((r) => r.type === "PRESENTATION")
+    .map((r) => (r as { frame: PresentationFrame }).frame)
+    .filter((f) => "entries" in f);
+  assert.equal(catalogs.length, 1, "the establishment step re-emits the catalog with membership unchanged");
+  const emitted = catalogs[0]!;
+  assert.deepEqual(
+    emitted.entries,
+    buildCatalog(after).entries,
+    "the re-emitted catalog carries the current clade assignments, not the stale ones",
+  );
+  for (const o of flipped) {
+    assert.equal(
+      resolveCatalogEntry(emitted, o.id)?.cladeId,
+      o.cladeId,
+      `reassigned organism ${o.id} reads with its new clade`,
+    );
+  }
+}
+
+/**
+ * Fix-wave: first-paint convergence under the staggered cadence. The App
+ * gate requires all five channels before first paint; the store composes
+ * whatever arrives, so the create + first-advance full sets must converge
+ * it, and later partial advances must keep it converged (slots retain).
+ */
+function testFirstPaintConvergesAndStaysConverged() {
+  const session = liveSession();
+  const store = createPresentationStore();
+  const gate = () => {
+    const v = store.getView();
+    return v.identity !== null && v.catalog !== null && v.live !== null && v.environment !== null && v.interpretation !== null;
+  };
+  const feed = (responses: unknown[]) => {
+    for (const r of responses as { type: string; frame?: PresentationFrame }[]) {
+      if (r.type === "PRESENTATION") store.apply(r.frame!);
+    }
+  };
+  feed(session.handle({ type: "ADVANCE_TICKS", ticks: 1 }));
+  assert.ok(gate(), "create + first advance converges the first-paint gate");
+  const snap = session.snapshot();
+  assert.deepEqual(store.getView().organisms, [...snap.organisms], "the converged join equals the snapshot organisms");
+  for (let i = 0; i < ENVIRONMENT_PERIOD_TICKS + 1; i++) {
+    feed(session.handle({ type: "ADVANCE_TICKS", ticks: 1 }));
+    assert.ok(gate(), `the gate stays converged through staggered advance ${i}`);
+  }
+  const later = session.snapshot();
+  assert.equal(store.getView().live?.tick, later.tick, "the live channel tracks the latest advance");
+  assert.deepEqual(store.getView().organisms, [...later.organisms], "the join stays exact through partial advances");
+}
+
+/**
+ * Task 3 (F2a publisher): worker/direct parity. Frames beside a handled
+ * command deep-equal a direct buildPresentation of the same world, after a
+ * structured-clone round trip simulating the postMessage boundary. This
+ * exercises the first-advance full path (liveSession creates, then advances
+ * once), so the full set is present to compare.
+ */
+function testWorkerFramesMatchDirectBuild() {
+  const session = liveSession();
+  const responses = session.handle({ type: "ADVANCE_TICKS", ticks: 3 });
+  const wire = responses
+    .filter((r) => r.type === "PRESENTATION")
+    .map((r) => structuredClone((r as { frame: PresentationFrame }).frame));
+  const direct = structuredClone(buildPresentation(session.snapshot()));
+  assert.deepEqual(
+    wire,
+    [direct.identity, direct.catalog, direct.live, direct.environment, direct.interpretation],
+    "worker-round-tripped frames equal a direct build of the same world, in class order",
+  );
+}
+
+/**
+ * Task 3 (F2a publisher): coherence identity at the routing boundary (handoff
+ * §7; full supersede rejection is Task 5). The client tags nothing and strips
+ * nothing: each routed frame reaches subscribePresentation with its own
+ * worldId+tick+version envelope intact, so a later consumer can reject
+ * cross-world composition.
+ */
+async function testRoutedFramesKeepTheirCoherenceEnvelope() {
+  const fake = new FakeWorker();
+  const client = new WorkerRuntimeClient(() => fake);
+  const seen: PresentationFrame[] = [];
+  client.subscribePresentation((f) => seen.push(f));
+  // Two worlds: frames from each must stay distinguishable by envelope alone.
+  const first = liveSession();
+  const second = liveSession();
+  assert.notEqual(first.worldId, second.worldId, "the fixture holds two distinct worlds");
+  for (const session of [first, second]) {
+    const frames = buildPresentation(session.snapshot());
+    for (const frame of [frames.identity, frames.catalog, frames.live, frames.environment, frames.interpretation]) {
+      fake.deliver({ type: "PRESENTATION", frame });
+    }
+  }
+  await tick();
+  assert.equal(seen.length, 10, "frames from both worlds route to presentation listeners");
+  for (const frame of seen) {
+    assert.ok(frame.worldId !== undefined, "every routed frame exposes its worldId");
+    assert.equal(typeof frame.tick, "number", "every routed frame exposes its effective tick");
+    assert.equal(frame.readModelVersion, READ_MODEL_VERSION, "every routed frame exposes its read-model version");
+  }
+  const worlds = new Set(seen.map((f) => f.worldId as unknown as number));
+  assert.equal(worlds.size, 2, "the two worlds stay distinguishable by envelope");
+}
+
+/**
+ * Task 5 (read-model-only transport): presentation routing stands alone. A
+ * bare SNAPSHOT — emitted by no command since Task 6 retired the ACK trailing
+ * emission — reaches no listener and disturbs nothing on its way through the
+ * client.
+ */
+async function testPresentationRoutingIsIsolatedFromLegacy() {
+  const fake = new FakeWorker();
+  const client = new WorkerRuntimeClient(() => fake);
+  const seen: PresentationFrame[] = [];
+  client.subscribePresentation((f) => seen.push(f));
+  const session = liveSession();
+  const snapshot = session.snapshot();
+  const frames = buildPresentation(snapshot);
+  for (const frame of [frames.identity, frames.catalog, frames.live, frames.environment, frames.interpretation]) {
+    fake.deliver({ type: "PRESENTATION", frame });
+  }
+  await tick();
+  assert.equal(seen.length, 5, "all five classes route to presentation listeners");
+  fake.deliver({ type: "SNAPSHOT", snapshot });
+  await tick();
+  assert.equal(seen.length, 5, "a bare snapshot reaches no listener and disturbs nothing");
+}
+
+/**
+ * Task 4 (F2b consumer cutover): the presentation store exposes the effective
+ * tick per channel. Two channels at different ticks must each report their
+ * own — the UI must never read slower state as newer, and no cadence-splitting
+ * is assumed: the store consumes whatever arrives.
+ */
+function testStoreExposesEffectiveTickPerChannel() {
+  const store = createPresentationStore();
+  const base = liveSnapshotFixture();
+  store.apply({ ...buildLive(base), tick: 100 });
+  store.apply({ ...buildEnvironment(base), tick: 90 });
+  const view = store.getView();
+  assert.equal(view.live?.tick, 100, "live channel current");
+  assert.equal(view.environment?.tick, 90, "environment channel labeled with its own tick, never as newer");
+  assert.equal(view.channelTicks.live, 100, "live effective tick exposed on the view");
+  assert.equal(view.channelTicks.environment, 90, "environment effective tick exposed on the view");
+}
+
+/**
+ * Task 4 (F2b consumer cutover): selection lookup through the store resolves
+ * a living organism and returns null for a removed id, using the Task 2
+ * removal representation (absence from a newer catalog) end to end. Joined
+ * entries are RenderOrganism-shaped, so selection/phenotype consumers resolve
+ * through the store without refetching static traits from a live frame.
+ */
+function testStoreJoinMatchesSnapshotAndRemovalResolvesToNull() {
+  const store = createPresentationStore();
+  const first = liveSnapshotFixture();
+  assert.ok(first.organisms.length > 1, "the fixture holds several living organisms");
+  const frames = buildPresentation(first);
+  for (const frame of [frames.identity, frames.catalog, frames.live, frames.environment, frames.interpretation]) {
+    store.apply(frame);
+  }
+  const removedId = first.organisms[0]!.id;
+  const survivor = first.organisms[1]!;
+  assert.deepEqual(store.getView().organisms, [...first.organisms], "joined entries equal the snapshot organisms");
+  assert.ok(store.getView().organismById(removedId) !== null, "a living organism resolves through the store");
+  assert.equal(
+    store.getView().organismById(survivor.id)?.lineageId,
+    survivor.lineageId,
+    "a joined entry keeps its catalog identity without refetching",
+  );
+
+  const second: RenderSnapshot = { ...first, tick: first.tick + 1, organisms: first.organisms.slice(1) };
+  const next = buildPresentation(second);
+  for (const frame of [next.identity, next.catalog, next.live, next.environment, next.interpretation]) {
+    store.apply(frame);
+  }
+  assert.equal(store.getView().organismById(removedId), null, "a removed id resolves to null through the store");
+  assert.ok(store.getView().organismById(survivor.id) !== null, "a survivor still resolves");
+}
+
+/**
+ * Task 5 (read-model-only transport): coherence gates on the presentation
+ * store (handoff §7, AC9/AC10). WorldIds are process-unique monotonic numbers
+ * (session mints a fresh one per create/restore), so a numerically newer world
+ * resets coherence while a numerically older one is superseded and dropped.
+ */
+const liveFrame = (worldId: number, tick: number): WorldLiveFrame => ({
+  readModelVersion: READ_MODEL_VERSION,
+  worldId: worldId as WorldId,
+  tick,
+  population: 0,
+  activePopulation: 0,
+  dormantPopulation: 0,
+  organisms: [],
+});
+
+function testSupersededWorldFramesAreRejected() {
+  const store = createPresentationStore();
+  store.apply(liveFrame(1, 50));
+  store.apply(liveFrame(2, 3));   // restore/create resets coherence
+  store.apply(liveFrame(1, 51));   // stale late arrival
+  assert.equal(store.getView().live?.worldId, 2, "superseded-world frames never compose into the new view");
+}
+
+function testVersionMismatchIsRejected() {
+  const store = createPresentationStore();
+  const base = liveSnapshotFixture();
+  const frames = buildPresentation(base);
+  for (const frame of [frames.identity, frames.catalog, frames.live, frames.environment, frames.interpretation]) {
+    store.apply(frame);
+  }
+  const droppedBefore = store.dropped;
+  const liveTickBefore = store.getView().live?.tick;
+  const future = {
+    ...frames.live,
+    readModelVersion: (READ_MODEL_VERSION + 1) as typeof READ_MODEL_VERSION,
+    tick: (liveTickBefore ?? 0) + 100,
+  };
+  store.apply(future);
+  assert.equal(store.getView().live?.tick, liveTickBefore, "a version-mismatched frame never composes");
+  assert.equal(store.dropped, droppedBefore + 1, "version mismatches are counted for tests");
+}
+
+function testSameChannelOlderTicksAreRejected() {
+  const store = createPresentationStore();
+  store.apply(liveFrame(1, 50));
+  const droppedBefore = store.dropped;
+  store.apply(liveFrame(1, 49));
+  assert.equal(store.getView().live?.tick, 50, "a same-channel older tick never moves the channel backwards");
+  assert.equal(store.dropped, droppedBefore + 1, "stale ticks are counted");
+  // Equal ticks re-apply idempotently: a refused command re-emits the
+  // unchanged world, and that must still release backpressure, not drop.
+  store.apply(liveFrame(1, 50));
+  assert.equal(store.getView().live?.tick, 50, "an equal tick still applies");
+  assert.equal(store.dropped, droppedBefore + 1, "and the re-application is not counted as dropped");
+}
+
+function testIdentityArrivalResetsCoherenceToTheNewWorld() {
+  const store = createPresentationStore();
+  const first = liveSnapshotFixture();
+  const one = buildPresentation(first);
+  for (const frame of [one.identity, one.catalog, one.live, one.environment, one.interpretation]) {
+    store.apply(frame);
+  }
+  assert.ok(store.getView().live !== null, "the first world composes");
+  const other = liveSession();
+  assert.notEqual(other.worldId, first.worldId, "the fixture holds two distinct worlds");
+  const two = buildPresentation(other.snapshot());
+  // Create/restore announces the new world via its identity frame first.
+  store.apply(two.identity);
+  const cleared = store.getView();
+  assert.equal(cleared.live, null, "identity arrival clears the prior world's live channel");
+  assert.equal(cleared.catalog, null, "identity arrival clears the prior world's catalog");
+  assert.equal(cleared.identity?.worldId, two.identity.worldId, "identity carries the new world");
+  // A stale late arrival from the superseded world never recomposes.
+  store.apply(one.live);
+  assert.equal(store.getView().live, null, "stale frames never recompose into the cleared view");
+  for (const frame of [two.catalog, two.live, two.environment, two.interpretation]) {
+    store.apply(frame);
+  }
+  assert.equal(store.getView().live?.worldId, two.identity.worldId, "the new world's frames compose after its identity");
+}
+
+/**
+ * Fix-wave Task 5 (AC14): payload evidence. Live movement delivery must scale
+ * with live presentation information rather than repeated serialization of
+ * all retained product state. Measured over ALL messages actually sent per
+ * advance — the summed bytes of every emitted class, legacy snapshot vs new
+ * total — not just the live frame: with the staggered cadence the total must
+ * stay under half of the equivalent legacy snapshots on the fixture.
+ */
+function testLiveDeliveryScalesWithLiveInformation() {
+  // Through the worker path: every live command's responses over K advances.
+  const session = liveSession();
+  session.handle({ type: "ADVANCE_TICKS", ticks: 1 }); // first-advance full set, outside the measured window
+  let newBytes = 0;
+  let legacyBytes = 0;
+  const counts: Record<string, number> = { identity: 0, catalog: 0, live: 0, environment: 0, interpretation: 0 };
+  const count = (responses: unknown[]) => {
+    for (const r of responses as { type: string; frame?: PresentationFrame }[]) {
+      if (r.type !== "PRESENTATION") continue;
+      const frame = r.frame!;
+      newBytes += Buffer.byteLength(JSON.stringify(frame));
+      if ("config" in frame) counts.identity!++;
+      else if ("entries" in frame) counts.catalog!++;
+      else if ("population" in frame) counts.live!++;
+      else if ("resources" in frame) counts.environment!++;
+      else counts.interpretation!++;
+    }
+  };
+  // A no-change probe opens the window: by construction (same snapshot, same
+  // tick) it emits live alone, so every strict inequality below holds
+  // regardless of engine churn later in the run.
+  count(session.handle({ type: "ADVANCE_TICKS", ticks: 0 }));
+  const K = 10;
+  for (let i = 0; i < K; i++) {
+    const responses = session.handle({ type: "ADVANCE_TICKS", ticks: 1 });
+    assert.ok(!responses.some((r) => r.type === "SNAPSHOT"), "no legacy snapshot rides the live path");
+    const presented = responses
+      .filter((r) => r.type === "PRESENTATION")
+      .map((r) => (r as { frame: PresentationFrame }).frame);
+    const live = presented.find((f) => "organisms" in f && "population" in f);
+    assert.ok(live, "a live frame is among the emitted frames");
+    count(responses);
+    legacyBytes += Buffer.byteLength(JSON.stringify(session.snapshot()));
+  }
+  const total = K + 1;
+  assert.ok(legacyBytes > 0 && newBytes > 0, "both sides measured nonzero payload");
+  assert.ok(
+    newBytes < 0.5 * legacyBytes,
+    `staggered delivery (${newBytes}B over ${total} advances) stays under half of equivalent legacy snapshots (${legacyBytes}B)`,
+  );
+  // The AC5 pin as message counts by class: the live heartbeat emits on every
+  // advance; no stable class does (catalog only on membership change,
+  // environment on its bounded period, interpretation only on payload change).
+  assert.equal(counts.live, total, `live emits every advance (${counts.live}/${total})`);
+  assert.ok(counts.catalog! < total, `catalog is NOT sent every advance (${counts.catalog}/${total})`);
+  assert.ok(counts.environment! < total, `environment is NOT sent every advance (${counts.environment}/${total})`);
+  assert.ok(counts.interpretation! < total, `interpretation is NOT sent every advance (${counts.interpretation}/${total})`);
+  assert.equal(counts.identity, 0, "identity never resends mid-world");
+
+  // Live bytes grow with organism count...
+  const snap = session.snapshot();
+  assert.ok(snap.organisms.length > 0, "the fixture holds living organisms");
+  const baseBytes = Buffer.byteLength(JSON.stringify(buildLive(snap)));
+  const doubled: RenderSnapshot = { ...snap, organisms: [...snap.organisms, ...snap.organisms] };
+  const doubledBytes = Buffer.byteLength(JSON.stringify(buildLive(doubled)));
+  const ratio = doubledBytes / baseBytes;
+  assert.ok(ratio > 1.8 && ratio < 2.2, `live bytes scale with organisms (doubling organisms scales bytes x${ratio.toFixed(2)})`);
+
+  // ...not with retained payload.
+  const heavyEvents = Array.from({ length: 500 }, (_, i) => ({ tick: i, label: `retained event ${i}` }));
+  const heavyDecisions = Array.from({ length: 50 }, (_, i) => ({ commandId: `cmd-${i}` })) as unknown as RenderSnapshot["resolvedDecisions"];
+  const heavyAnalysis = JSON.parse(JSON.stringify(snap.analysis)) as { records: unknown[] };
+  if (Array.isArray(heavyAnalysis.records)) {
+    heavyAnalysis.records = [...heavyAnalysis.records, ...heavyAnalysis.records, ...heavyAnalysis.records];
+  }
+  const heavy: RenderSnapshot = {
+    ...snap,
+    events: heavyEvents,
+    resolvedDecisions: heavyDecisions,
+    metrics: { ...snap.metrics, retainedNote: "x".repeat(10000) },
+    analysis: heavyAnalysis,
+  } as RenderSnapshot;
+  assert.equal(
+    Buffer.byteLength(JSON.stringify(buildLive(heavy))),
+    baseBytes,
+    "retained event/decision/analysis payload never enters live bytes",
+  );
+}
+
+/**
+ * Task 6 (retained/detail path): REQUEST_DETAIL answers with the current
+ * retained detail as a pure correlated read — full analysis records plus the
+ * full decision history — advancing zero ticks and emitting no live frames,
+ * so History stays truthful during pure-advance play without retained history
+ * entering live-frame traffic.
+ */
+function testDetailRequestReturnsCurrentRetainedDetailWithoutAdvancing() {
+  const session = liveSession();
+  session.handle({ type: "ADVANCE_TICKS", ticks: 5 });
+  const before = session.snapshot();
+  const responses = session.handle({ type: "REQUEST_DETAIL", requestId: "detail-1" });
+  assert.equal(responses.length, 1, "a detail request answers with exactly one correlated reply");
+  const reply = responses[0]!;
+  assert.equal(reply.type, "DETAIL", "the reply is the detail envelope, not a live push");
+  assert.equal((reply as { requestId: string }).requestId, "detail-1", "carrying the request id the caller awaits");
+  const detail = (reply as { snapshot: RenderSnapshot }).snapshot;
+  assert.equal(detail.tick, before.tick, "detail reports the current tick");
+  assert.deepEqual(detail.analysis.records, before.analysis.records, "detail carries the current retained records");
+  assert.deepEqual(detail.resolvedDecisions, before.resolvedDecisions, "and the current full decision history");
+  assert.equal(session.snapshot().tick, before.tick, "a detail request advances zero ticks");
+  assert.ok(!responses.some((r) => r.type === "PRESENTATION"), "a pure detail query emits no live frames");
+}
+
+/** Task 6: the on-demand detail request settles exactly once on its reply. */
+async function testDetailRequestSettlesOnItsCorrelatedReply() {
+  const fake = new FakeWorker();
+  const client = new WorkerRuntimeClient(() => fake, { requestTimeoutMs: 10_000 });
+  const request = tracked(client.requestDetail());
+  const posted = fake.posted.at(-1) as { type: string; requestId: string };
+  assert.equal(posted.type, "REQUEST_DETAIL", "detail is requested as a command");
+  assert.equal(typeof posted.requestId, "string", "the detail request carries a request id");
+  fake.deliver({ type: "DETAIL", requestId: posted.requestId, snapshot: snap(9) });
+  await tick();
+  assert.equal(request.state.settled, true, "the correlated detail reply settles the request");
+  assert.equal((request.state.value as RenderSnapshot).tick, 9, "and resolves with the retained detail");
+}
+
 async function main() {
+  testDetailRequestReturnsCurrentRetainedDetailWithoutAdvancing();
+  await testDetailRequestSettlesOnItsCorrelatedReply();
+  testLiveDeliveryScalesWithLiveInformation();
+  testStaggeredEmissionCadence();
+  testCladeEstablishmentReemitsCatalogWithConstantMembership();
+  testFirstPaintConvergesAndStaysConverged();
+  testIdentityArrivalResetsCoherenceToTheNewWorld();
+  testSameChannelOlderTicksAreRejected();
+  testVersionMismatchIsRejected();
+  testSupersededWorldFramesAreRejected();
+  testStoreJoinMatchesSnapshotAndRemovalResolvesToNull();
+  testStoreExposesEffectiveTickPerChannel();
+  await testPresentationRoutingIsIsolatedFromLegacy();
+  await testRoutedFramesKeepTheirCoherenceEnvelope();
+  testWorkerFramesMatchDirectBuild();
+  testLiveFramesArriveWithoutLegacyPayload();
   await testPackageRootExposesNoMutableSessionAuthority();
+  testLiveFrameExcludesNonLivePayloads();
+  testRemovedEntitiesResolveToNothing();
   await testTerminalSignalFiresExactlyOnceAcrossBothFailureKinds();
   await testDestroyDoesNotEmitTerminalSignal();
   await testOrdinaryFailuresDoNotEmitTerminalSignal();
@@ -955,7 +1603,8 @@ async function main() {
   await testSameTickSnapshotCannotCompleteALoad();
   await testStaleReplyCannotSatisfyALiveLoad();
   await testASecondLoadSupersedesTheFirst();
-  testSubscribersAreStillNotified();
+  testLegacySubscribePathIsGone();
+  testPresentationSubscribersReceiveFrames();
   testTransportIsInjectable();
   testLoadCompletionIsCorrelatedByRequestId();
   testUnknownTagIsAStructuredFailure();
