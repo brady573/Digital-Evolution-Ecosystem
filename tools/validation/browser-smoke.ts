@@ -762,6 +762,22 @@ async function main(){
     console.log("toroidal pan moves the camera and keeps the substrate visible: PASS");
 
   await runLandscapeChecks(context);
+    // Fatal runtime path (Tranche B item 6): a dead worker must read as stopped,
+    // never as playing-while-dead.
+    await page.goto(`${baseUrl}?deeTest=1`, { waitUntil: "networkidle" });
+    await page.getByLabel("Evolution world").waitFor();
+    await page.getByRole("button", { name: "Play" }).click();
+    await page.waitForTimeout(900);
+    await page.evaluate(() => (window as any).__DEE_TEST__.killWorker());
+    await page.getByRole("button", { name: "Play" }).waitFor({ timeout: 5000 }); // running false => Play shown
+    assert.match(await page.getByTestId("runtime-status").innerText(), /stopped/i, "fatal status names the stopped state");
+    const frozenAt = await tick(page);
+    await page.waitForTimeout(900);
+    assert.equal(await tick(page), frozenAt, "no snapshot advances the dead world");
+    await page.getByRole("button", { name: "Play" }).click(); // AC8: scheduler must not feed the dead runtime
+    await page.waitForTimeout(900);
+    assert.equal(await tick(page), frozenAt, "Play after death issues no advance");
+    console.log("fatal worker path reads as stopped: PASS");
     console.log("browser smoke: PASS");
   }finally{
     await browser.close();
