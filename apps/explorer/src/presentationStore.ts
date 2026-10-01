@@ -30,13 +30,21 @@ import { READ_MODEL_VERSION } from "@digital-evolution/contracts";
  * (contracts §F2a: `config` / `entries` / `organisms` / `resources` /
  * `metrics`). Unknown shapes are ignored, never crash the subscriber.
  *
- * INTERIM coherence (stated, not hidden): slots are last-write-wins per
- * channel. A transient view may therefore mix channels at different
- * effective ticks, so every view carries each channel's effective tick
- * (`channelTicks`) and consumers must never imply slower state is newer
- * than its tick. Full supersede-rejection — refusing to compose state from
- * a superseded world — lands in Task 5; this store documents the interim
- * rather than silently assuming it.
+ * Coherence gates (handoff §7, AC9/AC10): every frame carries its world's
+ * identity, an effective tick, and the read-model version, and `apply`
+ * enforces all three before a frame may compose into the view —
+ * - a frame whose read-model version differs is dropped and counted;
+ * - a frame from a superseded (numerically older) world is dropped and
+ *   counted, so cross-world state can never compose;
+ * - a frame from a newer world (create/restore mints a larger
+ *   process-unique id) resets coherence via `reset()` — the same reset an
+ *   arriving identity frame triggers explicitly;
+ * - a same-channel frame at an older tick than the slot holds is dropped
+ *   and counted; an equal tick re-applies idempotently (a refused command
+ *   re-emits the unchanged world, and that must still release backpressure).
+ * A transient view may still mix channels at different effective ticks, so
+ * every view carries each channel's effective tick (`channelTicks`) and
+ * consumers must never imply slower state is newer than its tick.
  *
  * Join semantics: `organisms` pairs each live entry with its catalog entry
  * in live-frame order, producing RenderOrganism-shaped records (the exact
@@ -86,6 +94,15 @@ export interface PresentationView {
 export interface PresentationStore {
   /** Apply one frame to its channel slot; other channels are untouched. */
   apply(frame: PresentationFrame): void;
+  /**
+   * Reset coherence to a new world, clearing every channel slot. A no-op for
+   * the current world, and never moves coherence backwards: an explicit reset
+   * to a superseded world is ignored, so a stale identity frame cannot wipe a
+   * newer view. Wired to identity-frame arrival inside `apply`.
+   */
+  reset(worldId: WorldId): void;
+  /** Frames dropped by the coherence gates since creation. Tests-only. */
+  readonly dropped: number;
   /** A fresh coherent view over the current slots (safe to mirror into state). */
   getView(): PresentationView;
 }
@@ -96,15 +113,62 @@ export function createPresentationStore(): PresentationStore {
   let live: WorldLiveFrame | null = null;
   let environment: WorldEnvironmentFrame | null = null;
   let interpretation: WorldInterpretationState | null = null;
+  /** First-seen world wins until an explicit newer-world reset. */
+  let currentWorld: WorldId | null = null;
+  let droppedCount = 0;
+
+  function reset(worldId: WorldId): void {
+    if (currentWorld !== null && worldId <= currentWorld) return;
+    currentWorld = worldId;
+    identity = catalog = live = environment = interpretation = null;
+  }
 
   return {
     apply(frame: PresentationFrame): void {
-      if ("config" in frame) identity = frame;
-      else if ("entries" in frame) catalog = frame;
-      else if ("organisms" in frame) live = frame;
-      else if ("resources" in frame) environment = frame;
-      else if ("metrics" in frame) interpretation = frame;
+      // Version gate first: a frame from an incompatible read model can never
+      // compose, regardless of which world or tick it names.
+      if (frame.readModelVersion !== READ_MODEL_VERSION) {
+        droppedCount++;
+        return;
+      }
+      // Identity frames announce create/restore: an explicit coherence reset.
+      // Same-world is a no-op and a superseded world never moves coherence
+      // backwards, both by reset's own guard.
+      if ("config" in frame) reset(frame.worldId);
+      if (currentWorld === null) {
+        currentWorld = frame.worldId;
+      } else if (frame.worldId !== currentWorld) {
+        if (frame.worldId > currentWorld) {
+          // A newer world whose identity has not applied yet (defense in
+          // depth; the ordered transport always delivers identity first).
+          reset(frame.worldId);
+        } else {
+          droppedCount++;
+          return;
+        }
+      }
+      // Same-world, same-channel older ticks are stale retransmissions.
       // Unknown shapes are ignored: a future class must not crash a subscriber.
+      if ("config" in frame) {
+        if (frame.tick < (identity?.tick ?? Number.NEGATIVE_INFINITY)) { droppedCount++; return; }
+        identity = frame;
+      } else if ("entries" in frame) {
+        if (frame.tick < (catalog?.tick ?? Number.NEGATIVE_INFINITY)) { droppedCount++; return; }
+        catalog = frame;
+      } else if ("organisms" in frame) {
+        if (frame.tick < (live?.tick ?? Number.NEGATIVE_INFINITY)) { droppedCount++; return; }
+        live = frame;
+      } else if ("resources" in frame) {
+        if (frame.tick < (environment?.tick ?? Number.NEGATIVE_INFINITY)) { droppedCount++; return; }
+        environment = frame;
+      } else if ("metrics" in frame) {
+        if (frame.tick < (interpretation?.tick ?? Number.NEGATIVE_INFINITY)) { droppedCount++; return; }
+        interpretation = frame;
+      }
+    },
+    reset,
+    get dropped(): number {
+      return droppedCount;
     },
     getView(): PresentationView {
       const statics = new Map<OrganismId, WorldEntityCatalog["entries"][number]>();

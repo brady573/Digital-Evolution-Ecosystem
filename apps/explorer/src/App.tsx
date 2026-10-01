@@ -497,14 +497,14 @@ export function App(){
   },[]);
   const repository=useMemo(()=>new IndexedDbWorldRepository(),[]);
   const [snapshot,setSnapshot]=useState<RenderSnapshot|null>(null);
-  // Lane 3 F2b consumer cutover: the presentation store composes the bounded
-  // read-model frames; maintained surfaces render from `view`, mirrored into
-  // state on every frame (same subscribe-into-state pattern as the legacy
-  // path). The legacy snapshot subscription below is unchanged: it still
-  // releases advance backpressure, clears status, owns the decision-gate
-  // control flow, and serves the retained-detail reads (analysis records and
-  // full decision history) that the read model deliberately excludes from
-  // live traffic. It stays until Task 5.
+  // Lane 3 Task 5: read-model-only transport. The legacy snapshot subscription
+  // is gone (RuntimeClient.subscribe removed): backpressure release, status
+  // clearing, and the decision-gate control flow below live on the
+  // interpretation frame. The `snapshot` state stays, but only as retained
+  // detail: it is fed by request-correlated replies (restore/resolve/
+  // acknowledge returns), never by a live push — analysis records and the full
+  // decision history deliberately stay out of live-frame traffic (handoff §6),
+  // and the Task 6 detail channel replaces this feed.
   const store=useMemo(()=>createPresentationStore(),[]);
   const [presentation,setPresentation]=useState<PresentationView>(()=>store.getView());
   const [surface,setSurface]=useState<Surface>("world");
@@ -557,9 +557,26 @@ export function App(){
   const advanceDebt=useRef(false);
   const deadRef=useRef(false);
 
+  // Newest announced world, so a create/restore batch never wipes the status
+  // its own flow sets. CHECKPOINT_LOADED resolves (and the flow sets e.g.
+  // "Checkpoint restored") before the restore's frames arrive; clearing status
+  // on those frames would wipe it, repeating the PR #84 defect class.
+  const knownWorldRef=useRef<WorldId|null>(null);
   useEffect(()=>{
-    const unsub=runtime.subscribe(s=>{
-      advanceDebt.current=false;setSnapshot(s);setStatus("");
+    // Read-model delivery only. The interpretation frame is the last of each
+    // batch, so one advance releases backpressure exactly once, with the
+    // freshest pending/aftermath state — the same atomicity the legacy
+    // per-snapshot callback had. Earlier frames only compose the store.
+    const unsubPresentation=runtime.subscribePresentation(frame=>{
+      store.apply(frame);
+      const view=store.getView();
+      setPresentation(view);
+      if(!("metrics" in frame))return;
+      advanceDebt.current=false;
+      const transition=knownWorldRef.current!==null&&view.worldId!==knownWorldRef.current;
+      knownWorldRef.current=view.worldId;
+      if(!transition)setStatus("");
+      const interp=view.interpretation;
       // A pending decision is a visible pause: the player must choose before
       // time moves again (A13). Runtime enforces the same gate independently.
       //
@@ -567,10 +584,10 @@ export function App(){
       // running outright loses the difference between "was playing" and "was
       // deliberately paused", and only the former should resume by itself once
       // the choice resolves.
-      if(s.pendingDecision){
+      if(interp?.pendingDecision){
         setWasPlaying(w=>w||runningRef.current);
         setRunning(false);
-      }else if(s.aftermath&&wasPlayingRef.current){
+      }else if(interp?.aftermath&&wasPlayingRef.current){
         // Playback resumes automatically at the prior bounded speed. The impact
         // sheet overlays a running world from here, and its evidence is pinned
         // to the resolution tick, so this cannot invalidate what it shows.
@@ -585,16 +602,8 @@ export function App(){
       advanceDebt.current=false;
       setStatus("Simulation stopped — reload to continue");
     });
-    // Read-model delivery beside the legacy transport. This mirrors the
-    // composed view into state and never touches status/backpressure: the
-    // PRESENTATION frames for a restore arrive after CHECKPOINT_LOADED, so
-    // clearing status here would wipe "Checkpoint restored".
-    const unsubPresentation=runtime.subscribePresentation(frame=>{
-      store.apply(frame);
-      setPresentation(store.getView());
-    });
     runtime.create(configFromSettings(DEFAULT_SETTINGS));
-    return()=>{unsub();unsubPresentation();onFatal();runtime.destroy()};
+    return()=>{unsubPresentation();onFatal();runtime.destroy()};
   },[runtime,store]);
 
   useEffect(()=>{
@@ -657,7 +666,9 @@ export function App(){
     const pending=presentation.interpretation?.pendingDecision;if(!pending)return;
     setStatus("Recording your decision…");
     try{
-      await runtime.resolveEventDecision(pending.opportunityId,choiceId);
+      // The correlated reply feeds retained detail (full decision history);
+      // live presentation already composed from the frames beside it.
+      setSnapshot(await runtime.resolveEventDecision(pending.opportunityId,choiceId));
       setStatus("Decision recorded. The world stays paused until you resume.");
     }catch(error){
       setStatus(`Decision failed: ${error instanceof Error?error.message:String(error)}`);
@@ -674,7 +685,7 @@ export function App(){
     if(!presentation.interpretation?.aftermath)return;
     setAcknowledging(true);
     try{
-      await runtime.acknowledgeAftermath();
+      setSnapshot(await runtime.acknowledgeAftermath());
       setStatus("Aftermath observed. Watching the world.");
     }catch(error){
       setStatus(`Could not continue: ${error instanceof Error?error.message:String(error)}`);
@@ -707,6 +718,9 @@ export function App(){
       // fresh identity. Null (old saves) means a clean presentation break.
       phenotypeCache.stageAnchors(await repository.loadAnchors("current")??{});
       const restored=await runtime.loadCheckpoint(checkpoint);
+      // The correlated reply feeds retained detail (records + full decision
+      // history) until the Task 6 detail channel replaces this feed.
+      setSnapshot(restored);
       // A3: the resumed universe becomes the active recipe; pending resets to
       // match it so staged settings can never be mistaken for the live world.
       const mapped=settingsFromConfig(restored.config);
@@ -751,11 +765,12 @@ export function App(){
     setStatus(`Exported ${filename}`);
   };
 
-  // Lane 3 F2b: maintained surfaces render from the read-model view below.
-  // The first paint waits for every channel plus the legacy detail snapshot,
-  // so no surface ever renders a half-composed world.
+  // Lane 3 Task 5: maintained surfaces render from the read-model view below.
+  // The first paint waits for every channel, so no surface ever renders a
+  // half-composed world. The legacy detail snapshot is no longer part of the
+  // gate: it arrives only with request-correlated replies now.
   const live=presentation.live,env=presentation.environment,interp=presentation.interpretation,ident=presentation.identity,catalog=presentation.catalog;
-  if(!snapshot||!live||!env||!interp||!ident||!catalog)return <main className="loading">{status}</main>;
+  if(!live||!env||!interp||!ident||!catalog)return <main className="loading">{status}</main>;
   const m=interp.metrics;
   const pending=interp.pendingDecision;
   // A pending decision outranks an aftermath (AC15); the aftermath yields the
@@ -765,10 +780,12 @@ export function App(){
   // Retained detail path: analysis records and the full decision history are
   // deliberately excluded from live read-model traffic (handoff §6 history
   // rule — never push retained history into live frames), so History keeps
-  // reading them from the legacy snapshot detail until the Task 5 detail
-  // channel lands. Bounded live needs (recent-event refs, control summary)
-  // come from the interpretation frame instead; see below.
-  const records=snapshot.analysis.records;
+  // reading them from the reply-fed detail snapshot until the Task 6 detail
+  // channel lands. Until the first restore/resolve/acknowledge there is no
+  // detail yet, so the reads below tolerate null. Bounded live needs
+  // (recent-event refs, control summary) come from the interpretation frame
+  // instead; see below.
+  const records=snapshot?.analysis.records??[];
   const clades=m.clades?.top||[];
   const selected=selectedId===null?null:presentation.organismById(selectedId);
   const accounting=m.nutrient_field?.accounting?.absolute_residual??[];
@@ -879,7 +896,7 @@ export function App(){
         <div className="panel-head"><div><span className="eyebrow">What happened here?</span><h2>History</h2></div><span>{records.length} durable ecological records</span></div>
         {(()=>{const story=records.find((r)=>r.id===selectedStoryId);if(!story)return null;const ev=story.evidence;const niche=story.kind==="niche";return<article key={story.id} className="story-detail"><span>{formatTickAge(story.tick)} · {story.phase}</span><h3>{story.title}</h3><p>{story.summary}</p>{niche&&<dl className="evidence"><div><dt>Waste load then</dt><dd>{typeof ev.waste_fraction==="number"?`${Math.round(ev.waste_fraction*100)}% of waste-field capacity`:"not measured"}</dd></div><div><dt>Waste load when the regime first formed</dt><dd>{typeof ev.base_waste==="number"?`${Math.round(ev.base_waste*100)}%`:"not measured"}</dd></div><div><dt>Organisms in burden-relevant cells</dt><dd>{typeof ev.waste_exposed_share==="number"?`${Math.round(ev.waste_exposed_share*100)}%`:"not measured"}</dd></div><div><dt>Waste tolerance mean</dt><dd>{typeof ev.tolerance_mean==="number"?ev.tolerance_mean.toFixed(3):"not measured"}</dd></div><div><dt>Waste cleanup mean</dt><dd>{typeof ev.cleanup_mean==="number"?ev.cleanup_mean.toFixed(3):"not measured"}</dd></div></dl>}{niche&&<p className="causal-note"><strong>Observational.</strong> This record pairs the environmental change with a measured strategy shift in the same run. It is not a matched comparison, so it cannot show that the modification caused the shift. Matched evidence for waste reliance exists only in the Slice 2 validation survey, where one of 24 surveyed worlds established such a regime — possible, not typical.</p>}{!niche&&<dl className="evidence"><div><dt>Population then</dt><dd>{ev.population}</dd></div><div><dt>Dormant share</dt><dd>{Math.round((ev.dormant_fraction||0)*100)}%</dd></div><div><dt>Metabolite C energy</dt><dd>{Math.round((ev.c_energy_share||0)*100)}%</dd></div><div><dt>Leading way of life</dt><dd>{String(ev.dominant_role||"—")}</dd></div></dl>}{(()=>{const named=typedRefs(story.entity_refs).map(r=>r.kind==="clade"?formatCladeId(cladeId(r.id)):r.kind==="lineage"?formatLineageId(lineageId(r.id)):null).filter((s):s is string=>s!==null);if(named.length>0)return <p>Entities involved: {named.join(", ")}</p>;if(niche)return <p>No lineage or clade accounted for enough of the interval waste flow to be named.</p>;return null})()}<button onClick={()=>setSelectedStoryId(null)}>Back to all stories</button></article>})()}
         {records.length===0?<><p>No durable ecological arc has been established yet.</p><h3>Recent simulation events</h3>{interp.events.slice(-8).reverse().map((e,i)=><article key={`${e.tick}-${i}`}><span>Tick {e.tick.toLocaleString()}</span><p>{e.label}</p></article>)}</>:records.slice().reverse().map((r)=><article key={r.id}><button className="record-button" onClick={()=>setSelectedStoryId(r.id)}><span>{formatTickAge(r.tick)} · {r.phase}</span><h3>{r.title}</h3><p>{r.summary}</p></button></article>)}
-        {snapshot.resolvedDecisions.length>0&&<>
+        {snapshot!==null&&snapshot.resolvedDecisions.length>0&&<>
           <h3>Your decisions</h3>
           <p>Actions you took, in order. A decision is an action followed by later outcomes, not a proven cause.</p>
           {snapshot.resolvedDecisions.slice().reverse().map(d=>{

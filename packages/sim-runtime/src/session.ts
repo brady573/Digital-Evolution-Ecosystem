@@ -188,38 +188,24 @@ const canonicalizationContext = (): CanonicalizationContext => {
 };
 
 /**
- * Lane 3 migration: compat — legacy SNAPSHOT still authoritative for current consumers.
- *
- * Every snapshot the session emits goes out beside its five read-model frames,
- * in PresentationFrames order (identity, catalog, live, environment,
- * interpretation), with no cadence-splitting in this task: identical behavior
- * first, splitting is a later optimization. The legacy responses are
- * byte-identical and stay first; frame emission is purely additive.
- *
- * Dedupe is by snapshot identity: a correlated reply and its trailing bare
- * SNAPSHOT carry the same object, and one frame set describes both. Frames
- * are derived from the same snapshot object the legacy response carries, so
- * worker-round-tripped frames equal a direct buildPresentation of that world.
+ * Lane 3 Task 5: read-model-only live transport. The legacy SNAPSHOT push
+ * transport is removed: fire-and-forget commands emit the five read-model
+ * frames and nothing else. `RenderSnapshot` the TYPE is retained — the pure
+ * builders above derive every frame from it, the request-correlated replies
+ * below still carry it per the frozen contracts, and Explorer's retained
+ * detail reads reuse its `RenderOrganism` shapes — but it is no longer a
+ * live transport. (AC9/AC10/AC14/AC15; handoff §7, §10.)
  */
-function withPresentationFrames(responses: RuntimeResponse[]): RuntimeResponse[] {
-  const out: RuntimeResponse[] = [];
-  const framed = new Set<RenderSnapshot>();
-  for (const response of responses) {
-    out.push(response);
-    const snapshot = (response as { readonly snapshot?: RenderSnapshot }).snapshot;
-    if (snapshot === undefined || framed.has(snapshot)) continue;
-    framed.add(snapshot);
-    const frames = buildPresentation(snapshot);
-    const classes: readonly PresentationFrame[] = [
-      frames.identity,
-      frames.catalog,
-      frames.live,
-      frames.environment,
-      frames.interpretation,
-    ];
-    for (const frame of classes) out.push({ type: "PRESENTATION", frame });
-  }
-  return out;
+function presentationResponses(snapshot: RenderSnapshot): RuntimeResponse[] {
+  const frames = buildPresentation(snapshot);
+  const classes: readonly PresentationFrame[] = [
+    frames.identity,
+    frames.catalog,
+    frames.live,
+    frames.environment,
+    frames.interpretation,
+  ];
+  return classes.map((frame) => ({ type: "PRESENTATION", frame }));
 }
 
 export class UniverseSession {
@@ -769,49 +755,59 @@ export class UniverseSession {
       // it is validated before dispatch and before any simulation loop can run.
       const validation=validateRuntimeCommand(command);
       if(!validation.ok){
-        // A refused command must not mutate anything, but Explorer clears its
-        // advanceDebt backpressure flag only inside the subscribe callback, so a
-        // rejection that emitted no SNAPSHOT would wedge the time controls
-        // permanently. The echoed snapshot reports the world unchanged; it
-        // grants no authority and advances nothing.
+        // A refused command must not mutate anything, but Explorer releases
+        // its advanceDebt backpressure flag only on the interpretation frame,
+        // so a rejection that emitted no frames would wedge the time controls
+        // permanently. The echoed frames report the world unchanged (same
+        // tick, same biology); they grant no authority and advance nothing.
         const echoed=this.#currentOrNull();
-        return echoed
-          ?withPresentationFrames([{type:"ERROR",message:validation.message},{type:"SNAPSHOT",snapshot:echoed}])
-          :[{type:"ERROR",message:validation.message}];
+        const refused: RuntimeResponse[] = [{type:"ERROR",message:validation.message}];
+        if(echoed)refused.push(...presentationResponses(echoed));
+        return refused;
       }
       command=validation.command;
       switch(command.type){
-        case "CREATE_UNIVERSE":return withPresentationFrames([{type:"SNAPSHOT",snapshot:this.create(command.config)}]);
-        case "ADVANCE_TICKS":return withPresentationFrames([{type:"SNAPSHOT",snapshot:this.advance(command.ticks)}]);
-        case "RUN_TO_NEXT_EVENT":return withPresentationFrames([{type:"SNAPSHOT",snapshot:this.runToNextEvent(command.maxTicks)}]);
-        case "CREATE_CONTROL_FORK":return withPresentationFrames([{type:"SNAPSHOT",snapshot:this.createControlFork()}]);
-        case "APPLY_INTERVENTION":return withPresentationFrames([{type:"SNAPSHOT",snapshot:this.intervene(command.intervention)}]);
+        case "CREATE_UNIVERSE":return presentationResponses(this.create(command.config));
+        case "ADVANCE_TICKS":return presentationResponses(this.advance(command.ticks));
+        case "RUN_TO_NEXT_EVENT":return presentationResponses(this.runToNextEvent(command.maxTicks));
+        case "CREATE_CONTROL_FORK":return presentationResponses(this.createControlFork());
+        case "APPLY_INTERVENTION":return presentationResponses(this.intervene(command.intervention));
         case "RESOLVE_EVENT_DECISION":{
           const snapshot=this.resolveEventDecision(command.opportunityId,command.choiceId);
-          return withPresentationFrames(command.requestId
-            ?[{type:"DECISION_RESOLVED",requestId:command.requestId,snapshot},{type:"SNAPSHOT",snapshot}]
-            :[{type:"SNAPSHOT",snapshot}]);
+          const out: RuntimeResponse[] = [];
+          if(command.requestId)out.push({type:"DECISION_RESOLVED",requestId:command.requestId,snapshot});
+          out.push(...presentationResponses(snapshot));
+          return out;
         }
         case "ACKNOWLEDGE_AFTERMATH":{
           const snapshot=this.acknowledgeAftermath();
-          return withPresentationFrames(command.requestId
-            ?[{type:"AFTERMATH_ACKNOWLEDGED",requestId:command.requestId,snapshot},{type:"SNAPSHOT",snapshot}]
-            :[{type:"SNAPSHOT",snapshot}]);
+          const out: RuntimeResponse[] = [];
+          if(command.requestId)out.push({type:"AFTERMATH_ACKNOWLEDGED",requestId:command.requestId,snapshot});
+          // Trailing bare SNAPSHOT retained ONLY for the out-of-scope blocking
+          // settlement assertion (tools/validation/aftermath-runtime.ts:341,
+          // "subscribers are still notified with a snapshot"), which this lane
+          // may not edit. No live consumer reads it: the client drops bare
+          // SNAPSHOTs and composes from PRESENTATION frames. Retire together
+          // with that assertion (Task 6 / Owner).
+          out.push({type:"SNAPSHOT",snapshot});
+          out.push(...presentationResponses(snapshot));
+          return out;
         }
         case "LOAD_CHECKPOINT":{
           // restore() is unchanged: A3.3 preflight then A3.4 canonical
           // validation, in that order, in the same place. A second restore path
           // for worker convenience is forbidden. The correlated reply is what
-          // lets the awaiting caller settle; the trailing SNAPSHOT keeps the
-          // render stream and Explorer backpressure behaving exactly as before.
+          // lets the awaiting caller settle; the read-model frames announce the
+          // restored world to presentation.
           //
-          // One message, not two. postMessage delivers each as its own task, so a
-          // trailing bare SNAPSHOT would reach subscribers AFTER the load's
-          // .then() had run - and Explorer clears its status string on every
-          // snapshot, wiping "Checkpoint restored". The client notifies
-          // subscribers from this one correlated reply instead.
+          // One correlated message plus frames, never a trailing bare SNAPSHOT.
+          // postMessage delivers each as its own task, and Explorer sets its
+          // status string when the load resolves — a trailing snapshot arriving
+          // after that (or any subscriber fan-out from this reply) would wipe
+          // "Checkpoint restored". The client resolves the awaiting load from
+          // this reply alone and routes only the frames to presentation.
           const snapshot=this.restore(command.checkpoint);
-          return withPresentationFrames([{type:"CHECKPOINT_LOADED",requestId:command.requestId,snapshot}]);
+          return [{type:"CHECKPOINT_LOADED",requestId:command.requestId,snapshot},...presentationResponses(snapshot)];
         }
         case "REQUEST_CHECKPOINT":return[{type:"CHECKPOINT",requestId:command.requestId,checkpoint:this.checkpoint()}];
         case "REQUEST_EXPORT":return[{type:"EXPORT",requestId:command.requestId,data:this.exportEvidence()}];

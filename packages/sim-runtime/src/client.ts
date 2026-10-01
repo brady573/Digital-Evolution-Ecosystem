@@ -45,11 +45,14 @@ export interface TerminalFailure {
 
 export interface RuntimeClient {
   onTerminal(listener: (failure: TerminalFailure) => void): () => void;
-  subscribe(listener: (snapshot: RenderSnapshot) => void): () => void;
   /**
-   * Lane 3 F2a publisher: read-model frame delivery beside the legacy
-   * transport. PRESENTATION traffic routes here; the legacy subscribe path is
-   * byte-identical and neither direction leaks into the other.
+   * Lane 3 Task 5: read-model frame delivery is the ONLY live transport. The
+   * legacy snapshot `subscribe` path is removed: no live consumer reads bare
+   * SNAPSHOTs anymore (a trailing one still rides beside
+   * AFTERMATH_ACKNOWLEDGED for a pinned out-of-scope settlement assertion,
+   * and the client drops it). Request-correlated replies still carry their
+   * snapshots per the frozen contracts — those settle awaiting callers, they
+   * are not a push transport.
    */
   subscribePresentation(listener: (frame: PresentationFrame) => void): () => void;
   loadCheckpoint(checkpoint: SupportedUniverseCheckpoint): Promise<RenderSnapshot>;
@@ -86,10 +89,9 @@ export function createWorkerTransport():WorkerLike{
 
 export class WorkerRuntimeClient implements RuntimeClient {
   #worker:Worker;
-  #listeners=new Set<(snapshot:RenderSnapshot)=>void>();
-  /** Lane 3 F2a: presentation-frame subscribers. Apart from snapshot
-   *  subscribers so the fatal path can drop both: a dead worker can never
-   *  deliver another frame either. */
+  /** Lane 3 Task 5: presentation-frame subscribers are the only live
+   *  subscribers. A dead worker can never deliver another frame, so the fatal
+   *  path drops them. */
   #presentationListeners=new Set<(frame:PresentationFrame)=>void>();
   /** Test/diagnostic seam: how many request ids the pending map still holds.
    *  AC5 is a claim about retained state, so it must be observable rather than
@@ -105,8 +107,8 @@ export class WorkerRuntimeClient implements RuntimeClient {
   readonly #requestTimeoutMs:number;
   #terminal:TerminalFailure|null=null;
   #terminalFired=false;
-  /** Terminal listeners live apart from snapshot subscribers so the fatal
-   *  path's #listeners.clear() cannot drop them: a dead worker's one signal
+  /** Terminal listeners live apart from presentation subscribers so the fatal
+   *  path's listener clear cannot drop them: a dead worker's one signal
    *  must still reach the product. */
   #terminalListeners=new Set<(failure:TerminalFailure)=>void>();
 
@@ -139,9 +141,9 @@ export class WorkerRuntimeClient implements RuntimeClient {
   /**
    * The single terminal-failure path. Rejects every pending request, fails any
    * pending checkpoint load, clears the pending map so no entry survives, and
-   * drops subscribers - a dead worker can never deliver another snapshot, so
-   * retaining listeners would leave the UI holding a subscription only a new
-   * client could satisfy.
+   * drops presentation subscribers - a dead worker can never deliver another
+   * frame, so retaining listeners would leave the UI holding a subscription
+   * only a new client could satisfy.
    *
    * When signal is true (worker error/messageerror, never destroy), the
    * terminal state is recorded and terminal listeners fire exactly once per
@@ -155,7 +157,6 @@ export class WorkerRuntimeClient implements RuntimeClient {
     }
     this.#pending.clear();
     this.#failPendingLoad(reason);
-    this.#listeners.clear();
     this.#presentationListeners.clear();
     if(signal&&!this.#terminalFired){
       this.#terminalFired=true;
@@ -222,17 +223,8 @@ export class WorkerRuntimeClient implements RuntimeClient {
    *  happened without widening the production RuntimeClient interface. */
   get terminal(){return this.#terminal}
 
-  subscribe(listener:(snapshot:RenderSnapshot)=>void){
-    // A dead client accepts no new subscribers: no later snapshot can arrive,
-    // so retaining the listener would only leak it and mislead the caller
-    // into holding a subscription only a new client could satisfy.
-    if(this.#terminalFired)return()=>{};
-    this.#listeners.add(listener);
-    return()=>this.#listeners.delete(listener);
-  }
-
   subscribePresentation(listener:(frame:PresentationFrame)=>void){
-    // Same dead-client rule as subscribe: no later frame can arrive after a
+    // A dead client accepts no new subscribers: no later frame can arrive after a
     // terminal failure, so a post-death subscription is dead on arrival.
     if(this.#terminalFired)return()=>{};
     this.#presentationListeners.add(listener);
@@ -272,16 +264,14 @@ export class WorkerRuntimeClient implements RuntimeClient {
   }
 
   #receive(response:RuntimeResponse){
-    if(response.type==="SNAPSHOT"){
-      // A bare snapshot only notifies subscribers. It can never complete a
-      // load: settling on tick equality is what let an unrelated live frame at
-      // the same tick satisfy a restore.
-      for(const listener of this.#listeners)listener(response.snapshot);
-      return;
-    }
+    // No bare-SNAPSHOT branch remains: the legacy push transport is removed,
+    // so a bare SNAPSHOT (still emitted beside AFTERMATH_ACKNOWLEDGED for a
+    // pinned out-of-scope settlement assertion) is dead on arrival — it
+    // reaches no listener and settles nothing. Request-correlated replies
+    // below still carry their snapshots per the frozen contracts.
     if(response.type==="PRESENTATION"){
-      // Lane 3 F2a: read-model traffic routes only to presentation listeners.
-      // The legacy subscribe path is untouched, in both directions.
+      // Lane 3 Task 5: read-model traffic routes only to presentation
+      // listeners. This is the only live delivery path.
       for(const listener of this.#presentationListeners)listener(response.frame);
       return;
     }
@@ -293,12 +283,13 @@ export class WorkerRuntimeClient implements RuntimeClient {
       // failed must not silently swap what the player is looking at.
       if(!pendingLoad||pendingLoad.requestId!==response.requestId)return;
       pendingLoad.resolve(response.snapshot);
-      // This reply IS the announcement. The session does not also send a bare
-      // SNAPSHOT for a restore, because postMessage delivers each message as
-      // its own task: a second delivery would reach subscribers after the load's
-      // .then() had run, and Explorer clears its status string on every snapshot,
-      // wiping "Checkpoint restored".
-      for(const listener of this.#listeners)listener(response.snapshot);
+      // This reply IS the announcement a restore needs: the awaiting load
+      // settles from it, and the PRESENTATION frames that follow compose the
+      // restored world in the presentation store. No subscriber fan-out
+      // remains — and deliberately no trailing bare SNAPSHOT either, because
+      // postMessage delivers each message as its own task: a second delivery
+      // would arrive after the load's .then() had run, and Explorer would no
+      // longer have a subscriber to distinguish it from live traffic.
       return;
     }
     if(response.type==="DECISION_RESOLVED"||response.type==="AFTERMATH_ACKNOWLEDGED"){

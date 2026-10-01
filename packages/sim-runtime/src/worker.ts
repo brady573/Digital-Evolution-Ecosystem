@@ -7,8 +7,7 @@ const scope=self as DedicatedWorkerGlobalScope;
 
 scope.onmessage=(event:MessageEvent<RuntimeCommand>)=>{
   const responses=session.handle(event.data);
-  // Lane 3 migration: compat — one loop forwards legacy and PRESENTATION
-  // responses alike, with no per-type branch, so a new frame class needs no
-  // transport change here. Legacy SNAPSHOT flow is untouched.
+  // Read-model-only forwarding: one loop posts every response with no
+  // per-type branch, so a new frame class needs no transport change here.
   for(const response of responses)scope.postMessage(response satisfies RuntimeResponse);
 };
