@@ -15,8 +15,9 @@ import type { EngineConfig } from "../../packages/contracts/src/index.ts";
  *   plus three extra balanced seeds for range evidence.
  * - Per run records secretion/resistance mean trajectories, inhibitor field
  *   fraction, exposed share, per-stride acquisition-suppression share, and a
- *   descriptive outcome label (spread / recede-or-floor / coexistence /
- *   extinction). Labels are reporting conveniences with documented
+ *   descriptive outcome label (secretion-receded / secretion-elevated /
+ *   secretion-floor + resistance-rose / resistance-fell / resistance-stable,
+ *   plus extinction). Labels are reporting conveniences with documented
  *   thresholds, never gates: this file asserts nothing about frequency.
  * - Matched assays use raw-sim clone()+step only (the niche-survey pattern):
  *   no intervene/createControlFork, so nothing here depends on the
