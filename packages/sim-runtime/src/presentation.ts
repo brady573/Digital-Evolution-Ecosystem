@@ -40,11 +40,12 @@ export function buildIdentity(snapshot: RenderSnapshot): WorldPresentationIdenti
     worldId: snapshot.worldId,
     tick: snapshot.tick,
     seed: snapshot.seed,
-    // EngineConfig is treated as an immutable value here: copied by reference
-    // because the session never mutates the resolved config it hands out, and
-    // every snapshot of one world already shares it. Copying it per frame
-    // would buy nothing; the read-only type is the guard.
-    config: snapshot.config,
+    // EngineConfig is cloned, not shared: a dozen scalars, so the copy is
+    // negligible, and sharing would let a downstream frame mutation corrupt
+    // the live session's resolved config across the authority boundary. This
+    // also matches the worker-boundary crossing, where postMessage would clone
+    // it anyway.
+    config: structuredClone(snapshot.config),
     engineVersion: RUNTIME_IDENTITY.engineVersion,
     appVersion: RUNTIME_IDENTITY.appVersion,
   };
