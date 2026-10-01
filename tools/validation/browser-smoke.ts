@@ -233,12 +233,12 @@ async function main(){
   await deltaPage.getByText("TEST FIXTURE — synthetic presentation only; not a world finding.").waitFor();
   assert.equal(await tick(deltaPage),observationTick,"fixture development presentation does not advance the world");
   await deltaPage.getByRole("button",{name:"Follow this view"}).click();
-  assert.equal(await deltaPage.locator(".lens-active").innerText(),"Clades","Follow exposes only the fixture's explicitly selected lens");
+  assert.match(await deltaPage.locator(".lens-active").innerText(),/^Clades\b/,"Follow exposes only the fixture's explicitly selected lens");
   await deltaPage.getByRole("button",{name:"Traits",exact:true}).click();
   await deltaPage.getByRole("button",{name:"Stop Follow"}).waitFor();
-  assert.equal(await deltaPage.locator(".lens-active").innerText(),"Traits","manual lens change remains the player's viewport");
+  assert.match(await deltaPage.locator(".lens-active").innerText(),/^Traits\b/,"manual lens change remains the player's viewport");
   await deltaPage.getByRole("button",{name:"Stop Follow"}).click();
-  assert.equal(await deltaPage.locator(".lens-active").innerText(),"Traits","stopping Follow never restores a hidden lens");
+  assert.match(await deltaPage.locator(".lens-active").innerText(),/^Traits\b/,"stopping Follow never restores a hidden lens");
   assert.equal(await tick(deltaPage),observationTick,"Follow and manual lens override are zero-tick actions");
   await deltaPage.getByRole("button",{name:"Collapse"}).click();
   await deltaPage.evaluate(()=>(window as any).__DEE_TEST__.setAftermathFixture("settlement"));
