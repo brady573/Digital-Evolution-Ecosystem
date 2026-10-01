@@ -525,6 +525,7 @@ export function App(){
   // the previous one. Without this, high speeds pile up work faster than the
   // worker can drain it and the UI stalls instead of running fast.
   const advanceDebt=useRef(false);
+  const deadRef=useRef(false);
 
   useEffect(()=>{
     const unsub=runtime.subscribe(s=>{
@@ -547,8 +548,15 @@ export function App(){
         setWasPlaying(false);
       }
     });
+    const onFatal=runtime.onTerminal(()=>{
+      deadRef.current=true;
+      setRunning(false);
+      setWasPlaying(false);
+      advanceDebt.current=false;
+      setStatus("Simulation stopped — reload to continue");
+    });
     runtime.create(configFromSettings(DEFAULT_SETTINGS));
-    return()=>{unsub();runtime.destroy()};
+    return()=>{unsub();onFatal();runtime.destroy()};
   },[runtime]);
 
   useEffect(()=>{
@@ -562,6 +570,7 @@ export function App(){
     let raf=0,carry=0,last=performance.now();
     const frame=(now:number)=>{
       const elapsed=now-last;last=now;
+      if(deadRef.current)return;
       if(!advanceDebt.current){
         const slice=sliceFor(normalizeSpeedMode(speed),elapsed,carry);
         carry=slice.carry;
@@ -588,6 +597,7 @@ export function App(){
       runToNextEvent:()=>runtime.runToNextEvent(),
       acknowledgeAftermath:()=>runtime.acknowledgeAftermath(),
       resolve:(opportunityId:string,choiceId:string)=>runtime.resolveEventDecision(opportunityId,choiceId),
+      killWorker:()=>runtime.simulateWorkerFailureForTest("error"),
     };
     (window as any).__DEE_TEST__=hook;
     return()=>{delete (window as any).__DEE_TEST__};
@@ -890,7 +900,7 @@ export function App(){
         <button onClick={load}>Resume</button>
         <button onClick={exportEvidence}>Export</button>
       </span>
-      <span className="status">{status}</span>
+      <span className="status" data-testid="runtime-status">{status}</span>
     </footer>
 
     {settingsOpen&&<div className="modal-backdrop" role="presentation"><section className="modal" role="dialog" aria-modal="true" aria-label="World settings">
