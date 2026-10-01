@@ -34,8 +34,9 @@ dependency and reconciliation rules.
 
 ## In Progress
 
-- Remaining Tranche A hardening: downstream runtime-boundary work against the
-  active pre-M7 handoff
+- Tranche A is complete. Issue #54 items 6-12 belong to Tranche B and are not
+  remaining Tranche A work; they need a fresh bounded handoff after A7
+  acceptance
 - Issue #54 production-hardening chain remains open
 
 ## Blocked
@@ -75,12 +76,23 @@ satisfied: A3.4 merged as PR #76.
   browser correctness proof blocking/merge-gating. This is preparation, not
   production World cutover.
 - PR #70 merged the strict 0.4 checkpoint boundary.
+- A7 closed the runtime trust boundary at the worker transport, and recorded
+  what it establishes: a malformed command is refused before any simulation
+  loop begins and mutates no tick, biology, decision, or analysis state; every
+  worker request settles exactly once, through one fatal path shared by worker
+  error, messageerror, and destroy, with no pending entry surviving; and a
+  checkpoint load completes only through its own request identity, so a
+  same-tick, stale, or unrelated live snapshot cannot satisfy it. Bounds are
+  transport safety reused from existing constants (MAX_SLICE_TICKS 2000 and the
+  100_000 event-scan default), not simulation or population limits.
 
 ## Next Recommended Task
 
-Continue the remaining Tranche A runtime-boundary units from the active pre-M7
-handoff against current main. Do not treat repository slice labels for Pixi
-preparation as release of the production cutover gate.
+Accept A7 (PR #84), then stop. Issue #54 items 6-12 are Tranche B work and
+require a fresh bounded handoff against then-current main — do not roll forward
+into them, and do not begin the Tranche B bounded live-snapshot redesign. Do not
+treat repository slice labels for Pixi preparation as release of the production
+cutover gate.
 
 ## Last Updated
 

@@ -53,6 +53,7 @@ import {
   selectCatalystWindow,
 } from "@digital-evolution/sim-decisions";
 import { readInjectedSource, resolveSourceProvenance } from "./provenance";
+import { validateRuntimeCommand } from "./command-validation";
 
 /**
  * The schema this build writes. DERIVED from contracts' single declaration, not
@@ -716,8 +717,32 @@ export class UniverseSession {
     return renderSnapshot(this.#experiment,this.#analysis,this.#control,this.#pendingDecision,this.#decisionResolutions,this.#worldId,this.#aftermath);
   }
 
+  /**
+   * The current world, or null when no universe exists yet. Used to answer a
+   * refused command without mutating anything: it reports, it does not act.
+   */
+  #currentOrNull():RenderSnapshot|null{
+    try{return this.snapshot()}catch{return null}
+  }
+
   handle(command:RuntimeCommand):RuntimeResponse[]{
     try{
+      // The worker boundary is a trust boundary. A payload arriving from it is
+      // unknown in reality even though the transport type claims otherwise, so
+      // it is validated before dispatch and before any simulation loop can run.
+      const validation=validateRuntimeCommand(command);
+      if(!validation.ok){
+        // A refused command must not mutate anything, but Explorer clears its
+        // advanceDebt backpressure flag only inside the subscribe callback, so a
+        // rejection that emitted no SNAPSHOT would wedge the time controls
+        // permanently. The echoed snapshot reports the world unchanged; it
+        // grants no authority and advances nothing.
+        const echoed=this.#currentOrNull();
+        return echoed
+          ?[{type:"ERROR",message:validation.message},{type:"SNAPSHOT",snapshot:echoed}]
+          :[{type:"ERROR",message:validation.message}];
+      }
+      command=validation.command;
       switch(command.type){
         case "CREATE_UNIVERSE":return[{type:"SNAPSHOT",snapshot:this.create(command.config)}];
         case "ADVANCE_TICKS":return[{type:"SNAPSHOT",snapshot:this.advance(command.ticks)}];
@@ -736,9 +761,29 @@ export class UniverseSession {
             ?[{type:"AFTERMATH_ACKNOWLEDGED",requestId:command.requestId,snapshot},{type:"SNAPSHOT",snapshot}]
             :[{type:"SNAPSHOT",snapshot}];
         }
-        case "LOAD_CHECKPOINT":return[{type:"SNAPSHOT",snapshot:this.restore(command.checkpoint)}];
+        case "LOAD_CHECKPOINT":{
+          // restore() is unchanged: A3.3 preflight then A3.4 canonical
+          // validation, in that order, in the same place. A second restore path
+          // for worker convenience is forbidden. The correlated reply is what
+          // lets the awaiting caller settle; the trailing SNAPSHOT keeps the
+          // render stream and Explorer backpressure behaving exactly as before.
+          //
+          // One message, not two. postMessage delivers each as its own task, so a
+          // trailing bare SNAPSHOT would reach subscribers AFTER the load's
+          // .then() had run - and Explorer clears its status string on every
+          // snapshot, wiping "Checkpoint restored". The client notifies
+          // subscribers from this one correlated reply instead.
+          const snapshot=this.restore(command.checkpoint);
+          return[{type:"CHECKPOINT_LOADED",requestId:command.requestId,snapshot}];
+        }
         case "REQUEST_CHECKPOINT":return[{type:"CHECKPOINT",requestId:command.requestId,checkpoint:this.checkpoint()}];
         case "REQUEST_EXPORT":return[{type:"EXPORT",requestId:command.requestId,data:this.exportEvidence()}];
+        // Unreachable while the guard above holds, and kept deliberately: it is
+        // what makes handle total. Without it an unrecognised tag falls out of
+        // the switch and returns undefined, which worker.ts then iterates over,
+        // throwing outside this try/catch and killing the worker.
+        default:
+          return[{type:"ERROR",message:`unsupported command tag: ${JSON.stringify((command as {readonly type:unknown}).type)}`}];
       }
     }catch(error){
       // Attribute errors to the caller when the command carried a requestId.

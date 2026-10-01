@@ -8,6 +8,28 @@ import type {
   UniverseCheckpoint,
 } from "@digital-evolution/contracts";
 
+/**
+ * The slice of Worker this client actually uses.
+ *
+ * Issue #54 item 4 requires the transport be injectable enough to prove
+ * failure behaviour without a browser crash harness. Node has no Worker global,
+ * so without this the entire settlement contract would be untestable there.
+ */
+export interface WorkerLike {
+  postMessage(message:unknown):void;
+  terminate():void;
+  addEventListener(type:"message"|"error"|"messageerror",listener:(event:never)=>void):void;
+}
+
+export type WorkerFactory=()=>WorkerLike;
+
+export interface WorkerRuntimeOptions{
+  /** Bounded lifetime for ordinary requests. A worker that never answers must
+   *  not leave a promise pending forever. Not product-visible: every caller
+   *  already awaits inside a handler that catches and reports. */
+  readonly requestTimeoutMs?:number;
+}
+
 export interface RuntimeClient {
   command(command: RuntimeCommand): void;
   subscribe(listener: (snapshot: RenderSnapshot) => void): () => void;
@@ -24,18 +46,63 @@ export interface RuntimeClient {
 }
 
 const LOAD_TIMEOUT_MS = 10_000;
+/** Bounded lifetime for an ordinary request. Chosen far above any observed
+ *  worker turnaround: a stalled worker should fail visibly, not linger. */
+const REQUEST_TIMEOUT_MS = 30_000;
+
+/** Best-effort description of a transport failure event, for the log line. */
+const describe=(event:unknown):string=>{
+  const message=(event as {message?:unknown})?.message;
+  return typeof message==="string"&&message.length>0?message:"no detail";
+};
 
 export class WorkerRuntimeClient implements RuntimeClient {
   #worker:Worker;
   #listeners=new Set<(snapshot:RenderSnapshot)=>void>();
-  #pending=new Map<string,{resolve:(value:any)=>void,reject:(reason?:any)=>void}>();
-  #pendingLoad:{expectedTick:number,resolve:(snapshot:RenderSnapshot)=>void,reject:(reason?:any)=>void,timer:ReturnType<typeof setTimeout>}|null=null;
+  /** Test/diagnostic seam: how many request ids the pending map still holds.
+   *  AC5 is a claim about retained state, so it must be observable rather than
+   *  inferred from "nothing crashed". */
+  get pendingRequestCount(){return this.#pending.size}
+  #pending=new Map<string,{resolve:(value:any)=>void,reject:(reason?:any)=>void,timer:ReturnType<typeof setTimeout>}>();
+  /** A load in flight. Keyed by the requestId the worker echoes in
+   *  CHECKPOINT_LOADED, never by a tick: matching on tick let any live frame at
+   *  the same tick satisfy a restore. `requestId` of the superseded load is
+   *  remembered so its late reply is ignored rather than misattributed. */
+  #pendingLoad:{requestId:string,resolve:(snapshot:RenderSnapshot)=>void,reject:(reason?:any)=>void,timer:ReturnType<typeof setTimeout>}|null=null;
   #seq=0;
+  readonly #requestTimeoutMs:number;
 
-  constructor(){
-    this.#worker=new Worker(new URL("./worker.ts",import.meta.url),{type:"module",name:"digital-evolution-sim"});
+  constructor(factory?:WorkerFactory,options:WorkerRuntimeOptions={}){
+    this.#worker=(factory?.()??new Worker(new URL("./worker.ts",import.meta.url),{type:"module",name:"digital-evolution-sim"}))as unknown as Worker;
+    this.#requestTimeoutMs=options.requestTimeoutMs??REQUEST_TIMEOUT_MS;
+    this.#register();
+  }
+
+  /**
+   * One place the transport's failure surface is attached, so error and
+   * messageerror cannot drift apart: both must enter the same fatal path.
+   */
+  #register(){
     this.#worker.addEventListener("message",(event:MessageEvent<RuntimeResponse>)=>this.#receive(event.data));
-    this.#worker.addEventListener("error",(event)=>console.error("Simulation worker error",event));
+    this.#worker.addEventListener("error",(event)=>this.#failAll(new Error(`Simulation worker failed: ${describe(event)}`)));
+    this.#worker.addEventListener("messageerror",(event)=>this.#failAll(new Error(`Simulation worker failed: ${describe(event)}`)));
+  }
+
+  /**
+   * The single terminal-failure path. Rejects every pending request, fails any
+   * pending checkpoint load, clears the pending map so no entry survives, and
+   * drops subscribers - a dead worker can never deliver another snapshot, so
+   * retaining listeners would leave the UI holding a subscription only a new
+   * client could satisfy.
+   */
+  #failAll(reason:Error){
+    for(const pending of this.#pending.values()){
+      clearTimeout(pending.timer);
+      pending.reject(reason);
+    }
+    this.#pending.clear();
+    this.#failPendingLoad(reason);
+    this.#listeners.clear();
   }
 
   create(config:EngineConfig){this.command({type:"CREATE_UNIVERSE",config})}
@@ -53,14 +120,21 @@ export class WorkerRuntimeClient implements RuntimeClient {
     // Acknowledged restore: resolves only after the worker has restored the
     // checkpoint and emitted the corresponding snapshot. Rejects on worker
     // error or timeout instead of silently falling back.
+    // Supersession is explicit and deterministic: a second load rejects the
+    // first rather than letting one request quietly satisfy another. The
+    // message is byte-for-byte the previous behaviour.
     if(this.#pendingLoad){
       clearTimeout(this.#pendingLoad.timer);
       this.#pendingLoad.reject(new Error("Superseded by a newer restore request"));
       this.#pendingLoad=null;
     }
     return new Promise<RenderSnapshot>((resolve,reject)=>{
+      // Completion is correlated by request identity, never by tick equality:
+      // the worker echoes this requestId in CHECKPOINT_LOADED and nothing else
+      // can settle the promise.
+      const requestId=`load-${++this.#seq}`;
       this.#pendingLoad={
-        expectedTick:checkpoint.createdTick,
+        requestId,
         resolve:(snapshot)=>{
           if(this.#pendingLoad){clearTimeout(this.#pendingLoad.timer);this.#pendingLoad=null}
           resolve(snapshot);
@@ -71,7 +145,7 @@ export class WorkerRuntimeClient implements RuntimeClient {
         },
         timer:setTimeout(()=>this.#failPendingLoad(new Error(`Restore timed out waiting for tick ${checkpoint.createdTick}`)),LOAD_TIMEOUT_MS),
       };
-      this.command({type:"LOAD_CHECKPOINT",checkpoint});
+      this.command({type:"LOAD_CHECKPOINT",requestId,checkpoint});
     });
   }
 
@@ -92,10 +166,7 @@ export class WorkerRuntimeClient implements RuntimeClient {
 
   destroy(){
     this.#worker.terminate();
-    for(const pending of this.#pending.values())pending.reject(new Error("Runtime destroyed"));
-    this.#pending.clear();
-    this.#failPendingLoad(new Error("Runtime destroyed"));
-    this.#listeners.clear();
+    this.#failAll(new Error("Runtime destroyed"));
   }
 
   #failPendingLoad(reason:Error){
@@ -107,15 +178,37 @@ export class WorkerRuntimeClient implements RuntimeClient {
   #request<T>(type:"REQUEST_CHECKPOINT"|"REQUEST_EXPORT"|"RESOLVE_EVENT_DECISION"|"ACKNOWLEDGE_AFTERMATH",extra:Record<string,unknown>={}):Promise<T>{
     const requestId=`r-${++this.#seq}`;
     return new Promise<T>((resolve,reject)=>{
-      this.#pending.set(requestId,{resolve,reject});
+      const timer=setTimeout(()=>{
+        // Delete before rejecting: a late reply must not settle a settled request.
+        this.#pending.delete(requestId);
+        reject(new Error(`${type} timed out after ${this.#requestTimeoutMs}ms`));
+      },this.#requestTimeoutMs);
+      this.#pending.set(requestId,{resolve,reject,timer});
       this.command({type,requestId,...extra} as RuntimeCommand);
     });
   }
 
   #receive(response:RuntimeResponse){
     if(response.type==="SNAPSHOT"){
+      // A bare snapshot only notifies subscribers. It can never complete a
+      // load: settling on tick equality is what let an unrelated live frame at
+      // the same tick satisfy a restore.
+      for(const listener of this.#listeners)listener(response.snapshot);
+      return;
+    }
+    if(response.type==="CHECKPOINT_LOADED"){
       const pendingLoad=this.#pendingLoad;
-      if(pendingLoad&&response.snapshot.tick===pendingLoad.expectedTick)pendingLoad.resolve(response.snapshot);
+      // A reply that does not match the live load belongs to a settled or
+      // superseded restore, and is dropped rather than misattributed. Its
+      // world is deliberately NOT announced: a restore that was superseded or
+      // failed must not silently swap what the player is looking at.
+      if(!pendingLoad||pendingLoad.requestId!==response.requestId)return;
+      pendingLoad.resolve(response.snapshot);
+      // This reply IS the announcement. The session does not also send a bare
+      // SNAPSHOT for a restore, because postMessage delivers each message as
+      // its own task: a second delivery would reach subscribers after the load's
+      // .then() had run, and Explorer clears its status string on every snapshot,
+      // wiping "Checkpoint restored".
       for(const listener of this.#listeners)listener(response.snapshot);
       return;
     }
@@ -123,6 +216,7 @@ export class WorkerRuntimeClient implements RuntimeClient {
       const pending=this.#pending.get(response.requestId);
       if(!pending)return;
       this.#pending.delete(response.requestId);
+      clearTimeout(pending.timer);
       pending.resolve(response.snapshot);
       return;
     }
@@ -130,18 +224,37 @@ export class WorkerRuntimeClient implements RuntimeClient {
       const pending=this.#pending.get(response.requestId);
       if(!pending)return;
       this.#pending.delete(response.requestId);
+      clearTimeout(pending.timer);
       pending.resolve(response.type==="CHECKPOINT"?response.checkpoint:response.data);
       return;
     }
     if(response.type==="ERROR"){
-      // A fire-and-forget command (e.g. LOAD_CHECKPOINT) reports errors
-      // without a requestId. Attribute such errors to a pending restore so
-      // failures surface explicitly instead of falling back silently.
-      if(!response.requestId)this.#failPendingLoad(new Error(response.message));
+      const failure=new Error(response.message);
+      // Attribute by identity first. A load is tracked in #pendingLoad, not
+      // #pending, and a failed restore's error always carries the load's own
+      // requestId now that the field is required. Looking only in #pending would
+      // drop it, and the load would hang until its timeout reported a generic
+      // "restore timed out" instead of the real reason.
       if(response.requestId){
+        const pendingLoad=this.#pendingLoad;
+        if(pendingLoad&&pendingLoad.requestId===response.requestId){
+          this.#failPendingLoad(failure);
+          return;
+        }
         const pending=this.#pending.get(response.requestId);
-        if(pending){this.#pending.delete(response.requestId);pending.reject(new Error(response.message))}
-      }else console.error(response.message);
+        if(pending){
+          this.#pending.delete(response.requestId);
+          clearTimeout(pending.timer);
+          pending.reject(failure);
+          return;
+        }
+        // Addressed to a request that has already settled or been superseded.
+        return;
+      }
+      // No requestId: a fire-and-forget command failed. It belongs to no
+      // request, so it must not be misattributed to an in-flight load; report
+      // it and leave every pending request alone.
+      console.error(response.message);
     }
   }
 }
