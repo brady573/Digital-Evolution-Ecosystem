@@ -286,3 +286,326 @@ testSaturationLossIsExplicit();
 testDiffusionConservesMass();
 testInhibitorCheckpointAndClone();
 console.log("interference validation (task 2): PASS");
+
+// --- Task 3: costly secretion, costly resistance, exposure, suppression. ---
+
+// White-box single-organism harness: drop all founders but one so interval
+// and lineage accounting attribute to exactly one organism. Founder ids are
+// sequential from 1 regardless of seed; cell (5,5) center maps to index 0.
+function isolateFirst(sim: any): any {
+  const o = (sim as any).o[0] as any;
+  (sim as any).o = [o];
+  return o;
+}
+
+function zeroStocks(sim: any): void {
+  const rs = (sim as any).resources as any;
+  for (let k = 0; k < 3; k++) {
+    ((rs.stock as Float32Array[])[k] as Float32Array).fill(0);
+    (rs.totalStock as number[])[k] = 0;
+  }
+}
+
+function setCellStock(sim: any, kind: number, x: number, y: number, mass: number): number {
+  const rs = (sim as any).resources as any;
+  const i = (rs.idx as (x: number, y: number) => number)(x, y);
+  const arr = (rs.stock as Float32Array[])[kind] as Float32Array;
+  const before = arr[i]!;
+  arr[i] = mass;
+  (rs.totalStock as number[])[kind]! += mass - before;
+  return i;
+}
+
+function inhSum(sim: any): number {
+  const st = (sim as any).resources.inhibitor.stock as Float32Array;
+  let s = 0;
+  for (let i = 0; i < st.length; i++) s += st[i]!;
+  return s;
+}
+
+// Existing physiology cost shapes, replicated to isolate the NEW secretion
+// term in the organism energy delta (movement + base + diet + size + byproduct).
+function otherPhysiology(o: any, press: number): number {
+  const pc = 0.8 * o.me + 0.0055 / o.me;
+  const mc = 0.01 * o.sp * o.sp + 0.004 * o.sp ** 4;
+  const dc = 0.008 * o.di * o.di;
+  const sc = 0.000035 * Math.max(0, o.en - 100) ** 2;
+  const buc = 0.01 * (o.bu || 0) * (o.bu || 0);
+  return (pc + mc + dc + sc + buc) * press;
+}
+
+function testSecretionCostsAndDeposits() {
+  const sim = new Simulation(config(777001)) as any;
+  zeroStocks(sim);
+  const o = isolateFirst(sim);
+  o.x = 5; o.y = 5; o.h = 0; o.sp = 0.3; o.en = 200;
+  o.in = 1.0; o.re = 0; o.to = 0; o.cu = 0; o.bu = 0.2;
+  const press = sim.c.press as number;
+  const enBefore = o.en as number;
+  const other = otherPhysiology(o, press);
+  const prodBefore = sim.resources.inhibitor.produced as number;
+  sim.step();
+  const cur = sim.cur as any;
+  assert.ok(cur.secretion_energy > 0, "secretion costs energy while active");
+  assert.ok(cur.secreted_i > 0, "active secretor deposits inhibitor mass");
+  assert.ok(
+    Math.abs((sim.resources.inhibitor.produced as number) - prodBefore - cur.secreted_i) < 1e-6,
+    "field gains exactly the recorded secreted_i",
+  );
+  assert.ok(
+    Math.abs(inhSum(sim) - cur.secreted_i) < 1e-6,
+    "fresh-field stock sum equals secreted mass (no decay/diffusion on tick 1)",
+  );
+  // No food, no waste, no resistance: energy delta is other physiology plus
+  // exactly the recorded secretion cost.
+  assert.ok(
+    Math.abs(enBefore - (o.en as number) - (other + cur.secretion_energy)) < 1e-9,
+    "organism loses energy exactly equal to recorded secretion_energy plus known costs",
+  );
+  const flows = sim.readIntervalFlows();
+  assert.ok(
+    Math.abs(flows.totals.secretion_energy - cur.secretion_energy) < 1e-12,
+    "lineage secretion_energy reconciles to the interval total",
+  );
+  assert.ok(
+    Math.abs(flows.totals.secreted_i - cur.secreted_i) < 1e-12,
+    "lineage secreted_i reconciles to the interval total",
+  );
+
+  // Zero-energy organisms deposit nothing: no free production.
+  const sim2 = new Simulation(config(777002)) as any;
+  zeroStocks(sim2);
+  const z = isolateFirst(sim2);
+  z.x = 5; z.y = 5; z.h = 0; z.sp = 0.3; z.en = 0;
+  z.in = 1.5; z.re = 0; z.to = 0; z.cu = 0;
+  sim2.step();
+  assert.equal(sim2.cur.secreted_i, 0, "broke organism secretes nothing");
+  assert.equal(sim2.cur.secretion_energy, 0, "broke organism pays no secretion cost");
+  assert.equal(sim2.resources.inhibitor.produced, 0, "no free production enters the field");
+  console.log("testSecretionCostsAndDeposits: PASS");
+}
+
+function testNoProducerImmunity() {
+  // Same seed, same cell, same dose, same resistance: the only difference
+  // is the secretion trait. The secretor must be exposed under the same
+  // rule — it additionally feels its own exhaust, proving no exemption.
+  const mk = (ino: number): any => {
+    const sim = new Simulation(config(888001)) as any;
+    zeroStocks(sim);
+    const o = isolateFirst(sim);
+    o.x = 5; o.y = 5; o.h = 0; o.sp = 0.3; o.en = 200;
+    o.in = ino; o.re = 0.5; o.to = 0; o.cu = 0;
+    const perCell = (sim.resources.inhibitor.cap as Float32Array)[0]!;
+    sim.resources.inhibitor.deposit(5, 5, perCell * 0.4, null);
+    return sim;
+  };
+  const simS = mk(1.5);
+  const simN = mk(0);
+  simS.step();
+  simN.step();
+  const effS = simS.cur.exposure_i as number;
+  const effN = simN.cur.exposure_i as number;
+  assert.ok(effN > 0, "non-secretor placed at a dosed cell is exposed");
+  assert.ok(effS > effN, "secretor feels its own exhaust too: no producer immunity");
+  assert.ok(Number.isFinite(effS) && Number.isFinite(effN), "exposures are finite");
+  const flowsN = simN.readIntervalFlows();
+  assert.ok(
+    Math.abs(flowsN.totals.exposure_i - effN) < 1e-12,
+    "lineage exposure_i reconciles to the interval total",
+  );
+  console.log("testNoProducerImmunity: PASS");
+}
+
+function testSuppressionAppliesToABC() {
+  // Same dose, same resistance, one substrate stocked per run: the realized
+  // take must fall under one coherent rule, and suppressed mass must never
+  // leave the stock (stock delta + suppressed = full take).
+  const PHI = 0.5;
+  const keys = [
+    { c: "consumed_a", s: "suppressed_a", e: "suppressed_ea", g: "energy_a" },
+    { c: "consumed_b", s: "suppressed_b", e: "suppressed_eb", g: "energy_b" },
+    { c: "consumed_c", s: "suppressed_c", e: "suppressed_ec", g: "energy_c" },
+  ];
+  const runFor = (setup: (o: any) => void, k: number): number => {
+    const sim = new Simulation(config(999001)) as any;
+    zeroStocks(sim);
+    const o = isolateFirst(sim);
+    o.x = 5; o.y = 5; o.h = 0; o.sp = 0.3; o.en = 200;
+    o.in = 0; o.re = 0; o.to = 0; o.cu = 0;
+    setup(o);
+    const rs = sim.resources as any;
+    const idx = rs.idx(5, 5) as number;
+    const cap = (rs.cap[k] as Float32Array)[idx]!;
+    const S0 = cap * 0.8;
+    setCellStock(sim, k, 5, 5, S0);
+    const perCell = (rs.inhibitor.cap as Float32Array)[0]!;
+    rs.inhibitor.deposit(5, 5, PHI * perCell, null);
+    sim.step();
+    const S1 = (rs.stock[k] as Float32Array)[idx]!;
+    const cur = sim.cur as any;
+    const actual = S0 - S1;
+    assert.ok(
+      Math.abs(actual - (cur[keys[k]!.c] as number)) < 1e-6,
+      `substrate ${k}: stock delta reconciles to ${keys[k]!.c}`,
+    );
+    const full = Math.min(S0, (rs.uptake as number) * (0.55 + 0.45 * Math.min(1, Math.max(0, S0 / cap))));
+    const supp = cur[keys[k]!.s] as number;
+    assert.ok(supp > 0 && actual < full, `substrate ${k}: exposure suppresses the take`);
+    assert.ok(
+      Math.abs(actual + supp - full) < 1e-6,
+      `substrate ${k}: suppressed mass stays in stock (actual + suppressed = full take)`,
+    );
+    // Forgone energy accrues at exactly the realized gain rate. Tolerance is
+    // 1e-4, not 1e-9: `actual` comes from Float32 field stock, so its
+    // rounding (~1e-7 relative) dominates the rate comparison; the engine
+    // values forgone from f64 supp/take exactly.
+    const gain = cur[keys[k]!.g] as number;
+    const forgone = cur[keys[k]!.e] as number;
+    assert.ok(
+      Math.abs(forgone / supp - gain / actual) < 1e-4,
+      `substrate ${k}: suppressed energy is forgone at the realized rate`,
+    );
+    return actual / full;
+  };
+  const fA = runFor((o) => { o.di = -1.5; o.ha = -1.5; o.bu = 0; }, 0);
+  const fB = runFor((o) => { o.di = 1.5; o.ha = 1.5; o.bu = 0; }, 1);
+  const fC = runFor((o) => { o.di = 0; o.ha = 0; o.bu = 1.5; }, 2);
+  for (const [name, f] of [["A", fA], ["B", fB], ["C", fC]] as const) {
+    assert.ok(f > 0 && f <= 1, `substrate ${name}: factor stays in (0, 1], got ${f}`);
+  }
+  // Tolerance is 1e-5: the factor divides a Float32 stock delta, so the
+  // comparison carries field precision (~1e-6 at these stock levels), not
+  // f64 precision. A different rule per substrate would diverge by O(1).
+  assert.ok(Math.abs(fA - fB) < 1e-5 && Math.abs(fB - fC) < 1e-5, `one coherent rule across A/B/C: ${fA} ${fB} ${fC}`);
+  console.log("testSuppressionAppliesToABC: PASS");
+}
+
+function testSuppressionMonotonicBounded() {
+  // Fixed food, rising dose: the realized fraction of the full take must
+  // never improve, must stay in (0, 1], and must equal 1 at zero exposure.
+  const fs = [0, 0.1, 0.25, 0.5].map((m) => {
+    const sim = new Simulation(config(666001)) as any;
+    zeroStocks(sim);
+    const o = isolateFirst(sim);
+    o.x = 5; o.y = 5; o.h = 0; o.sp = 0.3; o.en = 200;
+    o.in = 0; o.re = 0; o.to = 0; o.cu = 0; o.di = -1.5; o.ha = -1.5; o.bu = 0;
+    const rs = sim.resources as any;
+    const idx = rs.idx(5, 5) as number;
+    const cap = (rs.cap[0] as Float32Array)[idx]!;
+    const S0 = cap * 0.8;
+    setCellStock(sim, 0, 5, 5, S0);
+    const perCell = (rs.inhibitor.cap as Float32Array)[0]!;
+    if (m > 0) rs.inhibitor.deposit(5, 5, m * perCell, null);
+    sim.step();
+    const S1 = (rs.stock[0] as Float32Array)[idx]!;
+    const actual = S0 - S1;
+    const full = Math.min(S0, (rs.uptake as number) * (0.55 + 0.45 * Math.min(1, Math.max(0, S0 / cap))));
+    return { f: actual / full, supp: (sim.cur as any).suppressed_a as number };
+  });
+  assert.ok(Math.abs(fs[0]!.f - 1) < 1e-6, `factor is 1 at zero exposure, got ${fs[0]!.f}`);
+  assert.equal(fs[0]!.supp, 0, "nothing suppressed at zero exposure");
+  for (let j = 1; j < fs.length; j++) {
+    assert.ok(fs[j]!.f > 0 && fs[j]!.f <= 1, `dose ${j}: factor stays in (0, 1], got ${fs[j]!.f}`);
+    assert.ok(fs[j]!.f < fs[j - 1]!.f, `greater effective exposure never improves acquisition (${fs[j - 1]!.f} -> ${fs[j]!.f})`);
+  }
+  console.log("testSuppressionMonotonicBounded: PASS");
+}
+
+function testResistanceMitigatesButCosts() {
+  // Same dose, rising resistance: effective exposure must fall but stay
+  // positive (mitigates, never immunizes), and resistance must cost energy
+  // even where there is nothing to resist.
+  const exposures: number[] = [];
+  for (const re of [0, 0.75, 1.5]) {
+    const sim = new Simulation(config(555001)) as any;
+    zeroStocks(sim);
+    const o = isolateFirst(sim);
+    o.x = 5; o.y = 5; o.h = 0; o.sp = 0.3; o.en = 200;
+    o.in = 0; o.re = re; o.to = 0; o.cu = 0;
+    const perCell = (sim.resources.inhibitor.cap as Float32Array)[0]!;
+    sim.resources.inhibitor.deposit(5, 5, perCell * 0.4, null);
+    sim.step();
+    exposures.push((sim.cur as any).exposure_i as number);
+    if (re > 0) assert.ok((sim.cur as any).resistance_energy > 0, `re=${re}: resistance costs energy`);
+    else assert.equal((sim.cur as any).resistance_energy, 0, "re=0 pays no resistance cost");
+  }
+  assert.ok(exposures[0]! > exposures[1]!, `higher re lowers exposure (${exposures[0]} -> ${exposures[1]})`);
+  assert.ok(exposures[1]! > exposures[2]!, `higher re lowers exposure (${exposures[1]} -> ${exposures[2]})`);
+  assert.ok(exposures[2]! > 0, "max resistance still leaves positive exposure: no immunity");
+
+  const clean = new Simulation(config(555002)) as any;
+  zeroStocks(clean);
+  const c = isolateFirst(clean);
+  c.x = 5; c.y = 5; c.h = 0; c.sp = 0.3; c.en = 200;
+  c.in = 0; c.re = 1.0; c.to = 0; c.cu = 0;
+  clean.step();
+  assert.ok((clean.cur as any).resistance_energy > 0, "resistance costs even in a clean field while active");
+  assert.equal((clean.cur as any).exposure_i, 0, "no exposure in a clean field");
+  assert.equal((clean.cur as any).secreted_i, 0, "no secretion without the secretion trait");
+  console.log("testResistanceMitigatesButCosts: PASS");
+}
+
+function testDormancyInteraction() {
+  // Founder id 5: dormancy checks ((t+5)%40) first fire at t=35, so ticks
+  // 1..25 run check-free — dormancy persists trivially while the field
+  // still decays (inhibitor bucket 0 processes at t=20).
+  const sim = new Simulation(config(444001)) as any;
+  zeroStocks(sim);
+  const o = ((sim as any).o as any[]).find((f: any) => f.id === 5);
+  assert.ok(o, "founder id 5 exists");
+  (sim as any).o = [o];
+  o.x = 5; o.y = 5; o.h = 0; o.sp = 0.3; o.en = 200;
+  o.in = 1.5; o.re = 1.5; o.to = 0; o.cu = 0; o.di = -1.5; o.ha = -1.5;
+  o.activity = "dormant";
+  o.dormantSince = 0;
+  const rs = sim.resources as any;
+  const idx = rs.idx(5, 5) as number;
+  const capA = (rs.cap[0] as Float32Array)[idx]!;
+  setCellStock(sim, 0, 5, 5, capA * 0.8);
+  const perCell = (rs.inhibitor.cap as Float32Array)[0]!;
+  rs.inhibitor.deposit(5, 5, perCell * 0.4, null);
+  const inhBefore = inhSum(sim);
+  for (let t = 0; t < 25; t++) sim.step();
+  assert.equal(o.activity, "dormant", "dormant organism stays dormant");
+  assert.equal((sim.cur as any).secreted_i, 0, "dormant organisms secrete nothing");
+  assert.equal((sim.cur as any).secretion_energy, 0, "dormant organisms pay no secretion cost");
+  assert.equal((sim.cur as any).resistance_energy, 0, "dormant organisms pay no resistance cost");
+  assert.equal((sim.cur as any).consumed_a, 0, "dormant organisms acquire nothing");
+  assert.ok(inhSum(sim) < inhBefore, "field keeps evolving (decay) while dormant");
+  assert.ok((rs.inhibitor.decayed as number) > 0, "decay is recorded while dormant");
+  // Wake resumes the full physiology: exposure, secretion, acquisition.
+  o.activity = "active";
+  sim.step();
+  assert.ok((sim.cur as any).exposure_i > 0, "exposure resumes on wake");
+  assert.ok((sim.cur as any).secreted_i > 0, "secretion resumes on wake");
+  assert.ok((sim.cur as any).consumed_a > 0, "acquisition resumes on wake");
+  console.log("testDormancyInteraction: PASS");
+}
+
+function testSnapshotMeansAndOutTraits() {
+  const sim = new Simulation(config(31337)) as any;
+  for (let t = 0; t < 300; t++) sim.step();
+  const m = sim.metrics();
+  assert.ok(m.inhibitor && Number.isFinite(m.inhibitor.fraction), "metrics carries inhibitor totals");
+  assert.ok((m.inhibitor.produced as number) > 0, "founders secrete over 300 ticks");
+  const snap = sim.observerSnapshot(m, sim.cur);
+  for (const k of ["secretion_mean", "resistance_mean", "inhibitor_fraction", "inhibitor_exposed_share"]) {
+    assert.ok(Number.isFinite(snap[k]), `observerSnapshot carries finite ${k}`);
+  }
+  assert.ok(snap.secretion_mean > 0 && snap.resistance_mean > 0, "trait means positive");
+  assert.ok(snap.inhibitor_fraction > 0 && snap.inhibitor_exposed_share > 0, "secretion registers in the field");
+  const out = sim.out();
+  assert.equal(out.interpretation_model.trait_diversity, "mean normalized standard deviation across twelve evolvable traits", "trait-count prose fixed (12)");
+  const cr = out.living_creatures[0];
+  assert.ok(Number.isFinite(cr.traits.secretion) && Number.isFinite(cr.traits.resistance), "out() living-creature traits include secretion/resistance");
+  console.log("testSnapshotMeansAndOutTraits: PASS");
+}
+
+testSecretionCostsAndDeposits();
+testNoProducerImmunity();
+testSuppressionAppliesToABC();
+testSuppressionMonotonicBounded();
+testResistanceMitigatesButCosts();
+testDormancyInteraction();
+testSnapshotMeansAndOutTraits();
+console.log("interference validation (task 3): PASS");
