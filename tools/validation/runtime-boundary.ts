@@ -258,6 +258,7 @@ function testRequiredFieldsAreChecked() {
   rejects({ type: "LOAD_CHECKPOINT", checkpoint: {} }, "LOAD_CHECKPOINT with no requestId");
   rejects({ type: "REQUEST_CHECKPOINT" }, "REQUEST_CHECKPOINT with no requestId");
   rejects({ type: "REQUEST_EXPORT" }, "REQUEST_EXPORT with no requestId");
+  rejects({ type: "REQUEST_DETAIL" }, "REQUEST_DETAIL with no requestId");
 
   // Every supported tag is reachable, so a valid command is never refused.
   const session = liveSession();
@@ -485,8 +486,8 @@ const realCheckpoint = () => engineFixture().checkpoint;
 /**
  * A same-tick live frame that is not the correlated reply must not complete a
  * load. The client routes completion only by request identity: a bare
- * SNAPSHOT (still emitted beside AFTERMATH_ACKNOWLEDGED for a pinned
- * out-of-scope settlement assertion) reaches no listener and settles nothing.
+ * SNAPSHOT (emitted by no command since Task 6 retired the ACK trailing
+ * emission) reaches no listener and settles nothing.
  */
 async function testSameTickSnapshotCannotCompleteALoad() {
   const fake = new FakeWorker();
@@ -618,6 +619,7 @@ async function testEveryRequestHasABoundedLifetime() {
   const cases: [string, (c: WorkerRuntimeClient) => Promise<unknown>][] = [
     ["requestCheckpoint", (c) => c.requestCheckpoint()],
     ["requestExport", (c) => c.requestExport()],
+    ["requestDetail", (c) => c.requestDetail()],
     ["resolveEventDecision", (c) => c.resolveEventDecision("opp-1", "choice-1")],
     ["acknowledgeAftermath", (c) => c.acknowledgeAftermath()],
   ];
@@ -924,7 +926,7 @@ function testProductionSurfaceHasNoGenericCommand() {
   const fake = new FakeWorker();
   const client = new WorkerRuntimeClient(() => fake);
   assert.equal("command" in client, false, "no generic raw command escape hatch on the production surface");
-  for (const op of ["create", "advance", "runToNextEvent", "intervene", "createControlFork", "resolveEventDecision", "acknowledgeAftermath", "loadCheckpoint", "requestCheckpoint", "requestExport", "subscribePresentation", "destroy", "onTerminal"] as const) {
+  for (const op of ["create", "advance", "runToNextEvent", "intervene", "createControlFork", "resolveEventDecision", "acknowledgeAftermath", "loadCheckpoint", "requestCheckpoint", "requestExport", "requestDetail", "subscribePresentation", "destroy", "onTerminal"] as const) {
     assert.equal(typeof (client as unknown as Record<string, unknown>)[op], "function", `${op} remains an explicit typed product operation`);
   }
 }
@@ -1087,9 +1089,9 @@ async function testRoutedFramesKeepTheirCoherenceEnvelope() {
 
 /**
  * Task 5 (read-model-only transport): presentation routing stands alone. A
- * bare SNAPSHOT — still emitted beside AFTERMATH_ACKNOWLEDGED for the pinned
- * out-of-scope settlement assertion — reaches no listener and disturbs
- * nothing on its way through the client.
+ * bare SNAPSHOT — emitted by no command since Task 6 retired the ACK trailing
+ * emission — reaches no listener and disturbs nothing on its way through the
+ * client.
  */
 async function testPresentationRoutingIsIsolatedFromLegacy() {
   const fake = new FakeWorker();
@@ -1303,7 +1305,47 @@ function testLiveDeliveryScalesWithLiveInformation() {
   );
 }
 
+/**
+ * Task 6 (retained/detail path): REQUEST_DETAIL answers with the current
+ * retained detail as a pure correlated read — full analysis records plus the
+ * full decision history — advancing zero ticks and emitting no live frames,
+ * so History stays truthful during pure-advance play without retained history
+ * entering live-frame traffic.
+ */
+function testDetailRequestReturnsCurrentRetainedDetailWithoutAdvancing() {
+  const session = liveSession();
+  session.handle({ type: "ADVANCE_TICKS", ticks: 5 });
+  const before = session.snapshot();
+  const responses = session.handle({ type: "REQUEST_DETAIL", requestId: "detail-1" });
+  assert.equal(responses.length, 1, "a detail request answers with exactly one correlated reply");
+  const reply = responses[0]!;
+  assert.equal(reply.type, "DETAIL", "the reply is the detail envelope, not a live push");
+  assert.equal((reply as { requestId: string }).requestId, "detail-1", "carrying the request id the caller awaits");
+  const detail = (reply as { snapshot: RenderSnapshot }).snapshot;
+  assert.equal(detail.tick, before.tick, "detail reports the current tick");
+  assert.deepEqual(detail.analysis.records, before.analysis.records, "detail carries the current retained records");
+  assert.deepEqual(detail.resolvedDecisions, before.resolvedDecisions, "and the current full decision history");
+  assert.equal(session.snapshot().tick, before.tick, "a detail request advances zero ticks");
+  assert.ok(!responses.some((r) => r.type === "PRESENTATION"), "a pure detail query emits no live frames");
+}
+
+/** Task 6: the on-demand detail request settles exactly once on its reply. */
+async function testDetailRequestSettlesOnItsCorrelatedReply() {
+  const fake = new FakeWorker();
+  const client = new WorkerRuntimeClient(() => fake, { requestTimeoutMs: 10_000 });
+  const request = tracked(client.requestDetail());
+  const posted = fake.posted.at(-1) as { type: string; requestId: string };
+  assert.equal(posted.type, "REQUEST_DETAIL", "detail is requested as a command");
+  assert.equal(typeof posted.requestId, "string", "the detail request carries a request id");
+  fake.deliver({ type: "DETAIL", requestId: posted.requestId, snapshot: snap(9) });
+  await tick();
+  assert.equal(request.state.settled, true, "the correlated detail reply settles the request");
+  assert.equal((request.state.value as RenderSnapshot).tick, 9, "and resolves with the retained detail");
+}
+
 async function main() {
+  testDetailRequestReturnsCurrentRetainedDetailWithoutAdvancing();
+  await testDetailRequestSettlesOnItsCorrelatedReply();
   testLiveDeliveryScalesWithLiveInformation();
   testIdentityArrivalResetsCoherenceToTheNewWorld();
   testSameChannelOlderTicksAreRejected();

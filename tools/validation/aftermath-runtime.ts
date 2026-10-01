@@ -327,7 +327,7 @@ function testAftermathIsDeterministicAcrossReplay() {
 // --- The awaiting caller must actually settle -----------------------------------
 
 function testResumeReplySettlesTheAwaitingCaller() {
-  const { session } = resolvedWithInterveningChoice();
+  const { session, aftermath } = resolvedWithInterveningChoice();
   // Regression guard for a real defect: RESUME_AFTERMATH originally replied
   // with a bare SNAPSHOT, which only notifies subscribers. The awaiting caller
   // never settled, so the Resume button stayed disabled forever and the impact
@@ -336,9 +336,20 @@ function testResumeReplySettlesTheAwaitingCaller() {
   const requestId="aftermath-req-1";
   const responses=session.handle({type:"ACKNOWLEDGE_AFTERMATH",requestId});
   const reply=responses.find(r=>r.type==="AFTERMATH_ACKNOWLEDGED");
-  assert.ok(reply,"acknowledgement produces a request-correlated reply, not just a snapshot");
+  assert.ok(reply,"acknowledgement produces a request-correlated reply, not just frames");
   assert.equal((reply as any).requestId,requestId,"the reply carries the requestId the caller awaits");
-  assert.ok(responses.some(r=>r.type==="SNAPSHOT"),"subscribers are still notified with a snapshot");
+  // PR #84 exactly-once lesson, Lane 3 Task 6: the announcement subscribers
+  // read is the correlated reply plus the interpretation frame — never a
+  // trailing bare snapshot. Both carry the same release, so assert the pair.
+  assert.ok(!responses.some(r=>r.type==="SNAPSHOT"),"no trailing bare snapshot rides beside the acknowledgement");
+  const frames=responses.filter(r=>r.type==="PRESENTATION").map(r=>(r as any).frame);
+  assert.equal(frames.length,5,"the acknowledgement still announces all five read-model classes");
+  const interp=frames.find((f:any)=>"metrics" in f);
+  assert.ok(interp,"subscribers are notified through the interpretation frame");
+  assert.equal(interp.aftermath?.phase,"observation","the frame announces the released aftermath");
+  assert.equal(interp.aftermath?.commandId,(reply as any).snapshot.aftermath?.commandId,
+    "the frame carries the same aftermath the reply settles with");
+  assert.equal(interp.aftermath?.commandId,aftermath.commandId,"and it is the aftermath that was acknowledged");
   // A fire-and-forget command must not invent a reply nobody is waiting for.
   const plain=session.handle({type:"CREATE_UNIVERSE",config:config(FIXTURE_SEED)});
   assert.ok(!plain.some(r=>r.type==="AFTERMATH_ACKNOWLEDGED"),"an unrelated command never emits an aftermath reply");

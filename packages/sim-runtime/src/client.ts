@@ -48,16 +48,20 @@ export interface RuntimeClient {
   /**
    * Lane 3 Task 5: read-model frame delivery is the ONLY live transport. The
    * legacy snapshot `subscribe` path is removed: no live consumer reads bare
-   * SNAPSHOTs anymore (a trailing one still rides beside
-   * AFTERMATH_ACKNOWLEDGED for a pinned out-of-scope settlement assertion,
-   * and the client drops it). Request-correlated replies still carry their
-   * snapshots per the frozen contracts — those settle awaiting callers, they
-   * are not a push transport.
+   * SNAPSHOTs anymore (the client drops one if it ever arrives — no command
+   * emits it since Task 6 retired the ACK trailing emission). Request-correlated
+   * replies still carry their snapshots per the frozen contracts — those settle
+   * awaiting callers, they are not a push transport.
    */
   subscribePresentation(listener: (frame: PresentationFrame) => void): () => void;
   loadCheckpoint(checkpoint: SupportedUniverseCheckpoint): Promise<RenderSnapshot>;
   requestCheckpoint(): Promise<UniverseCheckpoint>;
   requestExport(): Promise<EvidenceExport>;
+  /** On-demand retained detail (Task 6, handoff §5–§6): the current snapshot
+   *  as a pure correlated read — full analysis records plus the full decision
+   *  history — for History/investigation surfaces during pure-advance play.
+   *  Advances nothing, emits no live frames; rejects on worker failure. */
+  requestDetail(): Promise<RenderSnapshot>;
   /** Resolves the pending opportunity; rejects on validation failure. */
   resolveEventDecision(opportunityId: string, choiceId: string): Promise<RenderSnapshot>;
   /** Acknowledges the aftermath impact state, moving it to observation so the
@@ -239,6 +243,10 @@ export class WorkerRuntimeClient implements RuntimeClient {
     return this.#request<EvidenceExport>("REQUEST_EXPORT");
   }
 
+  requestDetail(){
+    return this.#request<RenderSnapshot>("REQUEST_DETAIL");
+  }
+
   destroy(){
     this.#worker.terminate();
     this.#failAll(new Error("Runtime destroyed"),false);
@@ -250,7 +258,7 @@ export class WorkerRuntimeClient implements RuntimeClient {
     if(pending){clearTimeout(pending.timer);pending.reject(reason)}
   }
 
-  #request<T>(type:"REQUEST_CHECKPOINT"|"REQUEST_EXPORT"|"RESOLVE_EVENT_DECISION"|"ACKNOWLEDGE_AFTERMATH",extra:Record<string,unknown>={}):Promise<T>{
+  #request<T>(type:"REQUEST_CHECKPOINT"|"REQUEST_EXPORT"|"REQUEST_DETAIL"|"RESOLVE_EVENT_DECISION"|"ACKNOWLEDGE_AFTERMATH",extra:Record<string,unknown>={}):Promise<T>{
     const requestId=`r-${++this.#seq}`;
     return new Promise<T>((resolve,reject)=>{
       const timer=setTimeout(()=>{
@@ -264,11 +272,11 @@ export class WorkerRuntimeClient implements RuntimeClient {
   }
 
   #receive(response:RuntimeResponse){
-    // No bare-SNAPSHOT branch remains: the legacy push transport is removed,
-    // so a bare SNAPSHOT (still emitted beside AFTERMATH_ACKNOWLEDGED for a
-    // pinned out-of-scope settlement assertion) is dead on arrival — it
-    // reaches no listener and settles nothing. Request-correlated replies
-    // below still carry their snapshots per the frozen contracts.
+    // No bare-SNAPSHOT branch remains: the legacy push transport is removed
+    // (no command emits one since Task 6 retired the ACK trailing emission),
+    // so a bare SNAPSHOT is dead on arrival — it reaches no listener and
+    // settles nothing. Request-correlated replies below still carry their
+    // snapshots per the frozen contracts.
     if(response.type==="PRESENTATION"){
       // Lane 3 Task 5: read-model traffic routes only to presentation
       // listeners. This is the only live delivery path.
@@ -306,6 +314,14 @@ export class WorkerRuntimeClient implements RuntimeClient {
       this.#pending.delete(response.requestId);
       clearTimeout(pending.timer);
       pending.resolve(response.type==="CHECKPOINT"?response.checkpoint:response.data);
+      return;
+    }
+    if(response.type==="DETAIL"){
+      const pending=this.#pending.get(response.requestId);
+      if(!pending)return;
+      this.#pending.delete(response.requestId);
+      clearTimeout(pending.timer);
+      pending.resolve(response.snapshot);
       return;
     }
     if(response.type==="ERROR"){

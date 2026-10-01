@@ -783,13 +783,11 @@ export class UniverseSession {
           const snapshot=this.acknowledgeAftermath();
           const out: RuntimeResponse[] = [];
           if(command.requestId)out.push({type:"AFTERMATH_ACKNOWLEDGED",requestId:command.requestId,snapshot});
-          // Trailing bare SNAPSHOT retained ONLY for the out-of-scope blocking
-          // settlement assertion (tools/validation/aftermath-runtime.ts:341,
-          // "subscribers are still notified with a snapshot"), which this lane
-          // may not edit. No live consumer reads it: the client drops bare
-          // SNAPSHOTs and composes from PRESENTATION frames. Retire together
-          // with that assertion (Task 6 / Owner).
-          out.push({type:"SNAPSHOT",snapshot});
+          // Lane 3 Task 6: no trailing bare SNAPSHOT. The correlated reply
+          // settles the awaiting caller and the PRESENTATION frames announce
+          // the release to subscribers (PR #84 exactly-once lesson: assert via
+          // the correlated reply, not a trailing snapshot). Retired together
+          // with the aftermath-runtime settlement assertion that required it.
           out.push(...presentationResponses(snapshot));
           return out;
         }
@@ -811,6 +809,12 @@ export class UniverseSession {
         }
         case "REQUEST_CHECKPOINT":return[{type:"CHECKPOINT",requestId:command.requestId,checkpoint:this.checkpoint()}];
         case "REQUEST_EXPORT":return[{type:"EXPORT",requestId:command.requestId,data:this.exportEvidence()}];
+        // Lane 3 Task 6 retained/detail path: a pure retained-detail read.
+        // snapshot() advances nothing and mutates nothing; a missing universe
+        // throws into the shared catch and answers as a correlated ERROR, the
+        // same contract the other pure queries keep. No frames are emitted:
+        // detail is pulled on demand, never pushed into live traffic.
+        case "REQUEST_DETAIL":return[{type:"DETAIL",requestId:command.requestId,snapshot:this.snapshot()}];
         // Unreachable while the guard above holds, and kept deliberately: it is
         // what makes handle total. Without it an unrecognised tag falls out of
         // the switch and returns undefined, which worker.ts then iterates over,

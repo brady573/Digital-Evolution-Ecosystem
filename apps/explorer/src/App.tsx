@@ -497,14 +497,14 @@ export function App(){
   },[]);
   const repository=useMemo(()=>new IndexedDbWorldRepository(),[]);
   const [snapshot,setSnapshot]=useState<RenderSnapshot|null>(null);
-  // Lane 3 Task 5: read-model-only transport. The legacy snapshot subscription
+  // Lane 3 Task 6: read-model-only transport. The legacy snapshot subscription
   // is gone (RuntimeClient.subscribe removed): backpressure release, status
   // clearing, and the decision-gate control flow below live on the
   // interpretation frame. The `snapshot` state stays, but only as retained
   // detail: it is fed by request-correlated replies (restore/resolve/
-  // acknowledge returns), never by a live push — analysis records and the full
-  // decision history deliberately stay out of live-frame traffic (handoff §6),
-  // and the Task 6 detail channel replaces this feed.
+  // acknowledge returns) and by the on-demand detail pull when History or
+  // Experiments opens — never by a live push. Analysis records and the full
+  // decision history deliberately stay out of live-frame traffic (handoff §6).
   const store=useMemo(()=>createPresentationStore(),[]);
   const [presentation,setPresentation]=useState<PresentationView>(()=>store.getView());
   const [surface,setSurface]=useState<Surface>("world");
@@ -650,6 +650,20 @@ export function App(){
     return()=>{delete (window as any).__DEE_TEST__};
   },[runtime]);
 
+  // Lane 3 Task 6: retained/detail path (handoff §5–§6). Analysis records and
+  // the full decision history deliberately stay out of live-frame traffic,
+  // so the History and Experiments history reads below pull them on demand
+  // when those surfaces open — truthful during pure-advance play, with no
+  // retained history pushed into live frames. A rejection (dead worker, no
+  // universe yet) keeps the previous detail: the reads below stay
+  // null-tolerant, so History falls back to the live interpretation refs.
+  useEffect(()=>{
+    if(surface!=="history"&&surface!=="experiments")return;
+    let live=true;
+    runtime.requestDetail().then(detail=>{if(live)setSnapshot(detail)}).catch(()=>{});
+    return()=>{live=false};
+  },[surface,runtime]);
+
   const updateSettings=(patch:Partial<WorldSettings>)=>{
     setSettings(v=>({...v,...patch}));setPreset("Custom");
   };
@@ -718,8 +732,9 @@ export function App(){
       // fresh identity. Null (old saves) means a clean presentation break.
       phenotypeCache.stageAnchors(await repository.loadAnchors("current")??{});
       const restored=await runtime.loadCheckpoint(checkpoint);
-      // The correlated reply feeds retained detail (records + full decision
-      // history) until the Task 6 detail channel replaces this feed.
+      // The correlated reply refreshes retained detail (records + full decision
+      // history); the on-demand detail pull covers pure-advance play between
+      // such replies.
       setSnapshot(restored);
       // A3: the resumed universe becomes the active recipe; pending resets to
       // match it so staged settings can never be mistaken for the live world.
@@ -779,10 +794,11 @@ export function App(){
   const showAftermath=!pending&&!!interp.aftermath&&interp.aftermath.phase==="impact";
   // Retained detail path: analysis records and the full decision history are
   // deliberately excluded from live read-model traffic (handoff §6 history
-  // rule — never push retained history into live frames), so History keeps
-  // reading them from the reply-fed detail snapshot until the Task 6 detail
-  // channel lands. Until the first restore/resolve/acknowledge there is no
-  // detail yet, so the reads below tolerate null. Bounded live needs
+  // rule — never push retained history into live frames). History reads them
+  // from the detail snapshot: request-correlated replies refresh it, and the
+  // on-demand pull above refreshes it whenever History or Experiments opens,
+  // so fresh-world History is truthful during pure-advance play. Before any
+  // detail has arrived the reads below tolerate null. Bounded live needs
   // (recent-event refs, control summary) come from the interpretation frame
   // instead; see below.
   const records=snapshot?.analysis.records??[];

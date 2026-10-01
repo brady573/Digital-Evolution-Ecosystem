@@ -20,7 +20,7 @@ const reject = (message: string): CommandValidation => ({ ok: false, message });
 /**
  * The cast below is earned, not a shortcut: every field this function checks
  * is the only way a value reaches the cast, and the switch is exhaustive over
- * the ten supported tags. A widening `any` here would defeat the purpose.
+ * the eleven supported tags. A widening `any` here would defeat the purpose.
  */
 const accept = (command: RuntimeCommand): CommandValidation => ({ ok: true, command });
 
@@ -137,7 +137,8 @@ export function validateRuntimeCommand(input: unknown): CommandValidation {
     }
 
     case "REQUEST_CHECKPOINT":
-    case "REQUEST_EXPORT": {
+    case "REQUEST_EXPORT":
+    case "REQUEST_DETAIL": {
       if (typeof input["requestId"] !== "string") {
         return reject(`${type}.requestId: expected a string`);
       }

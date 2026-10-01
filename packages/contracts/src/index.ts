@@ -2638,7 +2638,14 @@ export type RuntimeCommand =
    *  inferred from snapshot tick equality. */
   | { readonly type: "LOAD_CHECKPOINT"; readonly requestId: string; readonly checkpoint: SupportedUniverseCheckpoint }
   | { readonly type: "REQUEST_CHECKPOINT"; readonly requestId: string }
-  | { readonly type: "REQUEST_EXPORT"; readonly requestId: string };
+  | { readonly type: "REQUEST_EXPORT"; readonly requestId: string }
+  /** Lane 3 Task 6 retained/detail path (handoff §5–§6): on-demand read of the
+   *  current retained detail (full analysis records, full decision history).
+   *  A pure query — advances zero ticks, mutates nothing, emits no live
+   *  frames — so retained history reaches History without being pushed into
+   *  live-frame traffic. Carries a request id like the other pure queries, so
+   *  completion is correlated by identity. */
+  | { readonly type: "REQUEST_DETAIL"; readonly requestId: string };
 
 export type RuntimeResponse =
   | { readonly type: "SNAPSHOT"; readonly snapshot: RenderSnapshot }
@@ -2655,6 +2662,11 @@ export type RuntimeResponse =
    *  proves which request completed; the carried snapshot's tick proves where
    *  the world landed. */
   | { readonly type: "CHECKPOINT_LOADED"; readonly requestId: string; readonly snapshot: RenderSnapshot }
+  /** Correlated reply for REQUEST_DETAIL. Reuses RenderSnapshot as the detail
+   *  payload deliberately (no new detail envelope): it is pulled on demand,
+   *  never pushed into live traffic, so the live-transport separation holds
+   *  while History reads keep their existing shape. */
+  | { readonly type: "DETAIL"; readonly requestId: string; readonly snapshot: RenderSnapshot }
   /**
    * Lane 3 F2a publisher: one read-model class beside the legacy transport.
    *
