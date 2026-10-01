@@ -68,6 +68,15 @@ const describe=(event:unknown):string=>{
   return typeof message==="string"&&message.length>0?message:"no detail";
 };
 
+/**
+ * Canonical production worker construction. The client's default transport.
+ * The constructor takes an injected factory instead so failure behaviour is
+ * provable through a fake transport; the default here is what ships.
+ */
+export function createWorkerTransport():WorkerLike{
+  return new Worker(new URL("./worker.ts",import.meta.url),{type:"module",name:"digital-evolution-sim"}) as unknown as WorkerLike;
+}
+
 export class WorkerRuntimeClient implements RuntimeClient {
   #worker:Worker;
   #listeners=new Set<(snapshot:RenderSnapshot)=>void>();
@@ -91,7 +100,7 @@ export class WorkerRuntimeClient implements RuntimeClient {
   #terminalListeners=new Set<(failure:TerminalFailure)=>void>();
 
   constructor(factory?:WorkerFactory,options:WorkerRuntimeOptions={}){
-    this.#worker=(factory?.()??new Worker(new URL("./worker.ts",import.meta.url),{type:"module",name:"digital-evolution-sim"}))as unknown as Worker;
+    this.#worker=(factory?.()??createWorkerTransport())as unknown as Worker;
     this.#requestTimeoutMs=options.requestTimeoutMs??REQUEST_TIMEOUT_MS;
     this.#register();
   }
@@ -108,8 +117,9 @@ export class WorkerRuntimeClient implements RuntimeClient {
 
   /**
    * Shared transport-failure entry: error and messageerror must enter the same
-   * fatal path. The test seam drives this method directly with a synthetic
-   * event, so injected failures settle exactly like real ones.
+   * fatal path. Tests drive it through an injected fake transport's
+   * fail(kind, detail), which invokes the registered listeners exactly as a
+   * real worker failure would.
    */
   #onTransportFailure(event:unknown){
     this.#failAll(new Error(`Simulation worker failed: ${describe(event)}`),true);
@@ -199,15 +209,6 @@ export class WorkerRuntimeClient implements RuntimeClient {
    *  Class-only, like pendingRequestCount: lets late subscribers query what
    *  happened without widening the production RuntimeClient interface. */
   get terminal(){return this.#terminal}
-
-  /**
-   * Test-only seam driving the same handler path as a real worker
-   * error/messageerror event. Not on the RuntimeClient interface
-   * (pendingRequestCount precedent): production code never simulates failure.
-   */
-  simulateWorkerFailureForTest(kind:"error"|"messageerror"){
-    this.#onTransportFailure({message:`simulated ${kind} failure for test`,kind});
-  }
 
   subscribe(listener:(snapshot:RenderSnapshot)=>void){
     // A dead client accepts no new subscribers: no later snapshot can arrive,

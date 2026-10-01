@@ -777,6 +777,11 @@ async function main(){
     await page.getByRole("button", { name: "Play" }).click(); // AC8: scheduler must not feed the dead runtime
     await page.waitForTimeout(900);
     assert.equal(await tick(page), frozenAt, "Play after death issues no advance");
+    // Finding 2: the dead runtime stays visibly stopped — post-death Play never
+    // flips the toggle to Pause, and the stopped status survives the click.
+    assert.equal(await page.getByRole("button",{name:"Play"}).count(), 1, "post-death Play still offers Play");
+    assert.equal(await page.getByRole("button",{name:"Pause"}).count(), 0, "no Pause affordance on a dead runtime");
+    assert.match(await page.getByTestId("runtime-status").innerText(), /stopped/i, "stopped status survives Play after death");
     console.log("fatal worker path reads as stopped: PASS");
     console.log("browser smoke: PASS");
   }finally{
