@@ -101,9 +101,19 @@ function sample(session: UniverseSession): any {
   };
 }
 
-// Descriptive outcome label. Thresholds are reporting conveniences chosen
-// before the runs (founder secretion/resistance means are ~0.16, so +/-0.03
-// is well above sampling noise); they gate nothing.
+// Descriptive outcome label. Survey-local reporting vocabulary -- deliberately
+// DISTINCT from the emitter's ecological_outcome field (which classifies
+// niche partitioning: "A-adapted dominance", "Mixed eco-strategies", ...).
+// These labels describe only secretion/resistance mean movement and gate
+// nothing. Threshold rationale (asymmetric by construction, documented here
+// instead of asserted): founder secretion/resistance means sit at ~0.16 with
+// a hard floor at 0, so recession is range-compressed (a -0.03 move is ~20%
+// of the founder value and well above sampling noise at pop 150-380, while
+// larger sustained drops are common); elevation is unbounded above (range to
+// 1.5), so claiming "elevated" requires a +0.05 move that survives 40k ticks
+// of mutation-selection balance. Resistance uses symmetric +/-0.02 because
+// it moves in both directions across runs with no floor compression
+// (founders ~0.16-0.20, observed range 0.15-0.22).
 function labelOutcome(first: any, last: any): string {
   if (last.population === 0) return "extinction";
   const dSec = last.secretionMean - first.secretionMean;
@@ -199,6 +209,12 @@ function perfProbe(): any {
   const sim: any = session.simulation;
   const active = sim.clone();
   const silent = sim.clone();
+  // Like-for-like: evolution frozen in BOTH branches (mr-confound fix --
+  // previously only the silent branch was frozen, so the active branch kept
+  // evolving during the timed window while the silent branch did not; the
+  // timed difference now isolates trait EXPRESSION only). Active keeps its
+  // evolved secretion/resistance; silent pins both to zero.
+  active.c.mr = 0;
   silent.c.mr = 0;
   for (const o of silent.o as any[]) { o.in = 0; o.re = 0; }
   const popBefore = active.o.length;
@@ -290,13 +306,16 @@ result.observations = {
   secretionHiStrainShareEnd: strains.filter((a: any) => a.trait === "in").map((a: any) => `${a.regime}/${a.seed}:${a.hiShareEnd}`),
   resistanceHiStrainShareEnd: strains.filter((a: any) => a.trait === "re").map((a: any) => `${a.regime}/${a.seed}:${a.hiShareEnd}`),
   forcedExposureDelta: forced.map((a: any) => `${a.regime}/${a.seed}:${a.delta}`),
-  // DESIGN TENSION (not a failure of the survey): no run and no assay shows
-  // secretion paying for its bearer. Secretor strains go extinct within-world
-  // (0.000 share) and secretor branches lose population-level comparisons, so
-  // the "secretion advantageous" leg is EVIDENCE NEEDED, not demonstrated.
-  secretionAdvantageDemonstrated: false,
-  costFailureDemonstrated: true,
-  resistanceCounterAdvantageDemonstrated: true,
+  // Legs below are DERIVED from the retained assay data by the stated rules
+  // (not author verdicts): secretionAdvantage holds iff any secretion-hi
+  // strain ends above 0.5 share; costFailure holds iff every secretion-hi
+  // strain ends below 0.5; resistanceCounterAdvantage holds iff every
+  // resistance-hi strain ends above 0.5. Follow-up combo-genotype and
+  // local-field investigations (probe3/7/8/9) are reported in task-6-report
+  // follow-up; none overturns these readings (see DESIGN TENSION note).
+  secretionAdvantageDemonstrated: strains.filter((a: any) => a.trait === "in").some((a: any) => (a.hiShareEnd ?? 0) > 0.5),
+  costFailureDemonstrated: strains.filter((a: any) => a.trait === "in").every((a: any) => (a.hiShareEnd ?? 1) < 0.5),
+  resistanceCounterAdvantageDemonstrated: strains.filter((a: any) => a.trait === "re").every((a: any) => (a.hiShareEnd ?? 0) > 0.5),
   of: runs.length,
 };
 writeFileSync(OUT, JSON.stringify(result, null, 2));
