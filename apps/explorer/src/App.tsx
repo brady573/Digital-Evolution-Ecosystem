@@ -2,9 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CladeId, EngineConfig, HistoryRecordId, OrganismId, RenderOrganism, RenderSnapshot } from "@digital-evolution/contracts";
 import { CHECKPOINT_PLAYER_NOTICE, CheckpointRejectionError } from "@digital-evolution/contracts";
 import { cladeId, formatCladeId, formatLineageId, lineageId, typedRefs } from "@digital-evolution/contracts";
-import { ENGINE_VERSION } from "@digital-evolution/sim-core";
-import { WorkerRuntimeClient, normalizeSpeedMode, sliceFor } from "@digital-evolution/sim-runtime";
-import type { WorkerLike } from "../../../packages/sim-runtime/src/client";
+import { RUNTIME_IDENTITY, WorkerRuntimeClient, createInstrumentedTransport, normalizeSpeedMode, sliceFor } from "@digital-evolution/sim-runtime";
+import type { WorkerLike } from "@digital-evolution/sim-runtime";
 import { Capacitor } from "@capacitor/core";
 import { Directory, Encoding, Filesystem } from "@capacitor/filesystem";
 import { Share } from "@capacitor/share";
@@ -474,48 +473,19 @@ function Slider({label,value,min,max,step,onChange}:{label:string;value:number;m
   return <label className="slider"><span>{label}<b>{value}</b></span><input type="range" min={min} max={max} step={step} value={value} onChange={e=>onChange(Number(e.target.value))}/></label>;
 }
 
-/**
- * Test-only transport wrapper (?deeTest only; never instantiated in production).
- * Wraps a real worker transport, records the client's error/messageerror
- * listeners as they register, and replays a synthetic failure through them —
- * driving the same registered-listener path as a real worker failure, with no
- * kill seam on the production client class.
- */
-class InstrumentedTransport implements WorkerLike{
-  #inner:Worker;
-  #listeners=new Map<"message"|"error"|"messageerror",Array<(event:never)=>void>>();
-  constructor(inner:Worker){this.#inner=inner}
-  postMessage(message:unknown):void{this.#inner.postMessage(message)}
-  terminate():void{this.#inner.terminate()}
-  addEventListener(type:"message"|"error"|"messageerror",listener:(event:never)=>void):void{
-    const existing=this.#listeners.get(type)??[];
-    existing.push(listener);
-    this.#listeners.set(type,existing);
-    this.#inner.addEventListener(type,listener as unknown as EventListener);
-  }
-  /** Replay a synthetic transport failure through the recorded listeners. */
-  fail(kind:"error"|"messageerror"):void{
-    for(const listener of this.#listeners.get(kind)??[]){
-      (listener as (event:unknown)=>void)({message:`simulated ${kind} failure for test`,kind});
-    }
-  }
-}
-
 export function App(){
   // Test-only instrumented transport (?deeTest only; stays null in production,
   // where the client is constructed with no factory and owns its transport).
-  const instrumentedRef=useRef<InstrumentedTransport|null>(null);
+  const instrumentedRef=useRef<{transport:WorkerLike;fail:(kind:"error"|"messageerror")=>void}|null>(null);
   const runtime=useMemo(()=>{
     if(typeof window!=="undefined"&&new URLSearchParams(window.location.search).has("deeTest")){
-      // Test-only construction path. The worker expression below duplicates the
-      // canonical construction in packages/sim-runtime/src/client.ts
-      // createWorkerTransport, which is canonical: the package exports map
-      // exposes only the root entry, so no deep subpath import typechecks or
-      // bundles here. The default (production) path below is unchanged.
-      const inner=new Worker(new URL("../../../packages/sim-runtime/src/worker.ts",import.meta.url),{type:"module",name:"digital-evolution-sim"});
-      const instrumented=new InstrumentedTransport(inner);
+      // Test-only construction path. Real worker construction is owned by the
+      // runtime boundary's instrumented-transport factory, so Explorer never
+      // names the worker implementation path. The default (production) path
+      // below is unchanged.
+      const instrumented=createInstrumentedTransport();
       instrumentedRef.current=instrumented;
-      return new WorkerRuntimeClient(()=>instrumented);
+      return new WorkerRuntimeClient(()=>instrumented.transport);
     }
     return new WorkerRuntimeClient();
   },[]);
@@ -963,7 +933,7 @@ export function App(){
       <div className="actions"><button className="primary" onClick={newUniverse}>Create universe</button><button onClick={()=>setDiagnosticsOpen(v=>!v)}>Developer diagnostics</button></div>
       {pendingDirty?<p className="pending-note" data-testid="pending-note">Unapplied changes — Create universe to apply</p>:<p className="active-note" data-testid="active-note">Settings match the running universe</p>}
       {diagnosticsOpen&&<div className="diagnostics">
-        <strong>Engine {ENGINE_VERSION}</strong>
+        <strong>Engine {RUNTIME_IDENTITY.engineVersion}</strong>
         <span>Resource accounting residuals: {accounting.length?accounting.map((v:number)=>Number(v).toExponential(2)).join(" / "):"—"}</span>
         <span>Analysis records: {records.length}</span>
         <span>Biology target population rule: none</span>

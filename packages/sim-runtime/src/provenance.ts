@@ -3,6 +3,14 @@ import type { Cleanliness, SourceProvenance } from "@digital-evolution/contracts
 // values only, never the engine module graph directly.
 import { APP_VERSION, ENGINE_VERSION, EXPORT_FORMAT_VERSION } from "@digital-evolution/sim-core";
 
+/**
+ * Display/runtime provenance for presentation consumers (Lane 3 F1, AC1).
+ * Explorer reads versions through this runtime boundary surface, never
+ * through a direct sim-core import. Values only, no new authority: both
+ * fields are the existing sim-core version facts republished for display.
+ */
+export const RUNTIME_IDENTITY = { engineVersion: ENGINE_VERSION, appVersion: APP_VERSION } as const;
+
 // Build-time injected source facts. Vite replaces these textually via the
 // `define` in apps/explorer/vite.config.ts; the `declare` emits nothing, so
 // under tsx/Node (no defines) the bare identifiers stay unbound and the

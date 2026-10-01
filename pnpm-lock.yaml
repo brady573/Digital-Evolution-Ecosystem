@@ -202,9 +202,6 @@ importers:
       '@digital-evolution/phenotype':
         specifier: workspace:*
         version: link:../../packages/phenotype
-      '@digital-evolution/sim-analysis':
-        specifier: workspace:*
-        version: link:../../packages/sim-analysis
       '@digital-evolution/sim-core':
         specifier: workspace:*
         version: link:../../packages/sim-core

@@ -16,6 +16,12 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { GROUPS, GROUP_BY_ID, UNITS, UNIT_BY_ID } from "./manifest.ts";
+// Value-level provenance pin (Lane 3 F1): these version facts are imported
+// in validation tooling ONLY. Production source must never import sim-core
+// for display provenance (see checkExplorerSource); Explorer reads versions
+// through RUNTIME_IDENTITY from the sim-runtime root instead.
+import { APP_VERSION, ENGINE_VERSION } from "../../packages/sim-core/src/version.ts";
+import { RUNTIME_IDENTITY } from "../../packages/sim-runtime/src/provenance.ts";
 
 export const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const WORKFLOWS_DIR = join(REPO_ROOT, ".github/workflows");
@@ -217,6 +223,72 @@ export const verifyFromManifest = (): string[] => {
   return GROUPS.filter((g) => !g.ci && !excluded.has(g.id) && !g.id.startsWith("android"))
     .flatMap((g) => [...g.unitIds]);
 };
+
+/**
+ * Explorer dependency-direction boundary (Lane 3 F1, AC1/AC2).
+ *
+ * Pure over the passed source text so the rules stay testable without
+ * touching the filesystem; `checkArchitecture` wires them to the real
+ * Explorer files below. Scoped deliberately to import expressions and the
+ * worker implementation path, so prose comments about the boundary cannot
+ * trip the gate.
+ */
+const EXPLORER_APP = "apps/explorer/src/App.tsx";
+
+/** AC1/AC2: no sim-core import, no sim-runtime deep import, no worker-path bind. */
+export function checkExplorerSource(source: string): string[] {
+  const failures: string[] = [];
+  if (/from\s+["']@digital-evolution\/sim-core["']/.test(source)) {
+    failures.push(
+      `${EXPLORER_APP} imports @digital-evolution/sim-core directly; display/runtime provenance must come through the runtime boundary (RUNTIME_IDENTITY), never sim-core`,
+    );
+  }
+  const deep = /from\s+["'][^"']*sim-runtime\/src\/[^"']*["']/.exec(source);
+  if (deep) {
+    failures.push(
+      `${EXPLORER_APP} deep-imports a private sim-runtime module (${deep[0]}); Explorer must use the package root boundary only`,
+    );
+  }
+  if (/sim-runtime\/src\/worker\.ts/.test(source)) {
+    failures.push(
+      `${EXPLORER_APP} binds to the private worker implementation path (sim-runtime/src/worker.ts); worker construction must come through the runtime boundary factory`,
+    );
+  }
+  return failures;
+}
+
+/** F1: the confirmed-unused sim-analysis package dependency must stay removed. */
+export function checkExplorerPackage(pkg: { dependencies?: Record<string, string> }): string[] {
+  if (pkg.dependencies?.["@digital-evolution/sim-analysis"] !== undefined) {
+    return [
+      `apps/explorer/package.json depends on @digital-evolution/sim-analysis, which maintained Explorer source does not use; remove the dependency`,
+    ];
+  }
+  return [];
+}
+
+/**
+ * Value-level provenance pin: RUNTIME_IDENTITY must track the engine/app
+ * versions. The sim-core version import lives in validation tooling only --
+ * production source must never import it (see checkExplorerSource above).
+ */
+export function checkRuntimeIdentity(
+  identity: { readonly engineVersion: string; readonly appVersion: string },
+  engine: { readonly engineVersion: string; readonly appVersion: string },
+): string[] {
+  const failures: string[] = [];
+  if (identity.engineVersion !== engine.engineVersion) {
+    failures.push(
+      `RUNTIME_IDENTITY.engineVersion (${identity.engineVersion}) does not match sim-core ENGINE_VERSION (${engine.engineVersion}); the runtime provenance surface must track the engine version`,
+    );
+  }
+  if (identity.appVersion !== engine.appVersion) {
+    failures.push(
+      `RUNTIME_IDENTITY.appVersion (${identity.appVersion}) does not match sim-core APP_VERSION (${engine.appVersion}); the runtime provenance surface must track the app version`,
+    );
+  }
+  return failures;
+}
 
 export function checkArchitecture(): CheckResult {
   const failures: string[] = [];
@@ -520,6 +592,34 @@ export function checkArchitecture(): CheckResult {
     for (const need of unit.needs) {
       if (!UNIT_BY_ID.has(need)) failures.push(`unit ${unit.id} needs unknown unit: ${need}`);
     }
+  }
+
+  // --- Explorer dependency direction (Lane 3 F1: AC1/AC2) ------------------
+  // Explorer production source must not import sim-core directly for
+  // display/runtime orchestration (AC1) and must not deep-import private
+  // sim-runtime implementation modules or bind to the worker implementation
+  // path (AC2). The confirmed-unused sim-analysis package dependency must
+  // stay removed. The value-level pin below asserts the republished surface
+  // tracks the sim-core version facts it republishes.
+  for (const failure of checkExplorerSource(readFileSync(join(REPO_ROOT, EXPLORER_APP), "utf8"))) {
+    failures.push(failure);
+  }
+  for (
+    const failure of checkExplorerPackage(
+      JSON.parse(readFileSync(join(REPO_ROOT, "apps/explorer/package.json"), "utf8")) as {
+        dependencies?: Record<string, string>;
+      },
+    )
+  ) {
+    failures.push(failure);
+  }
+  for (
+    const failure of checkRuntimeIdentity(
+      RUNTIME_IDENTITY,
+      { engineVersion: ENGINE_VERSION, appVersion: APP_VERSION },
+    )
+  ) {
+    failures.push(failure);
   }
 
   // --- Merge-gating results must not wait on non-gating evidence -----------
