@@ -18,7 +18,7 @@ import { ENGINE_VERSION } from "../../packages/sim-core/src/index.ts";
  * in tools/validation/niche.ts checks the retained artifact in.
  */
 
-const OUT = "testdata/niche-survey-0.22.json";
+const OUT = "testdata/niche-survey-0.24.json";
 const SEEDS = [24681357, 821947219, 3543950664, 111111111, 222222222, 333333333, 444444444, 555555555];
 const HORIZON = 150000;
 const ASSAY_TICKS = 15000;

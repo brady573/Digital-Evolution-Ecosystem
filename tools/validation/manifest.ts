@@ -57,6 +57,14 @@
  * Measured on CI runner `ubuntu-latest`, not estimated, and used to balance
  * shards. Sources are runs 36580426436, 36516033777, and 36508723384
  * (medians; refreshed 2026-09-29 after flows/possibility/decisions drifted).
+ * Slice 1 (engine 0.24.0) values are a SINGLE sample from run 37056021706
+ * (2026-10-02, commit 890175b): decisions 58, catalysts 77, flows 200,
+ * time-controls 16, niche 90, spatial-occupancy 257 (was a 300 provisional),
+ * aftermath 34, dependency-arc 92, dependency-possibility 251,
+ * dependency-tradeoff 405. Untouched units keep their old medians.
+ * Possibility's jump (94 -> 251) is the 60k -> 150k horizon; tradeoff's
+ * (275 -> 405) tracks higher sustained populations per tick. sim-b now
+ * budgets ~451s; rebalancing shards is left to a follow-up.
  *
  * Two caveats worth knowing. A unit's cost varies run to run on a shared
  * runner -- `flows` measured 164s then 149s twice (median 149, was 81),
@@ -237,7 +245,7 @@ export const UNITS: readonly ValidationUnit[] = [
     domains: withApparatus("contracts", "sim-core", "sim-decisions", "sim-runtime", "explorer"),
     needs: [],
     parallelSafe: true,
-    baselineSeconds: 77,
+    baselineSeconds: 58,
     claim:
       "Events still map to exactly the same offered choices as before, and an entity reference whose kind was never recorded yields no L- or C- claim rather than a guessed one.",
   },
@@ -251,7 +259,7 @@ export const UNITS: readonly ValidationUnit[] = [
     domains: withApparatus("contracts", "sim-core", "sim-decisions", "sim-runtime", "explorer"),
     needs: [],
     parallelSafe: true,
-    baselineSeconds: 75,
+    baselineSeconds: 77,
     claim: "The offered interventions produce their exact documented effects.",
   },
   {
@@ -264,7 +272,7 @@ export const UNITS: readonly ValidationUnit[] = [
     domains: withApparatus("contracts", "sim-core", "sim-analysis", "sim-decisions", "sim-runtime", "explorer"),
     needs: [],
     parallelSafe: true,
-    baselineSeconds: 149,
+    baselineSeconds: 200,
     claim:
       "Session lifecycle, forking, and pause gating behave exactly as specified; every named checkpoint migration rule is well-formed, hazard-classified and still matches the code that absorbs it; a save written before entity references carried their kind restores with the same reference count and no guessed namespace, and the current schema refuses that same bare-reference shape; a checkpoint from the maintained save path is accepted; each of the six rejection conditions refuses with the field named; a suppressed major-catalyst cooldown stays suppressed across restore from both the current schema and a real 0.3 save, while a 0.2 save predating the field migrates to the historically correct value; a source-schema preflight on the raw payload accepts each evidenced historical omission for its own schema and refuses every field its writer was required to emit, so a 0.3 save preserves its persisted lastDecisionTick and cannot omit it and a 0.2 save reconstructs the historically absent tick; present wrong-typed, malformed, non-finite, or self-contradicting values are refused at every supported schema across the encoded simulation with its resource, waste, organism, interval and identity state, the observer's detectors, history records and eras, entity references, and decision records, so named historical absence cannot excuse an invalid checked value; a preflight refusal leaves an existing running session unchanged; a preflighted source is then canonicalised into ONE restore representation and that representation is held to the current non-simulation contract before any state becomes live, with the candidate/validated distinction enforced by the compiler rather than by a runtime call; and the Owner-facing supported-save boundary document is generated rather than transcribed, carrying the live current schema version, no supported-version literal in code that could go stale behind it, the two independent schema and engine-version gates named separately, and the canonical ordering the implementation actually performs. export carries a versioned provenance block; dirty build → dirty; undeterminable revision → unknown, never clean.",
   },
@@ -296,7 +304,7 @@ export const UNITS: readonly ValidationUnit[] = [
     domains: withApparatus("contracts", "sim-core", "sim-runtime", "explorer"),
     needs: [],
     parallelSafe: true,
-    baselineSeconds: 26,
+    baselineSeconds: 16,
     claim: "Playback speed changes advance exactly the tick counts they claim.",
   },
   {
@@ -335,9 +343,23 @@ export const UNITS: readonly ValidationUnit[] = [
     domains: withApparatus("contracts", "sim-core", "sim-analysis", "sim-runtime"),
     needs: [],
     parallelSafe: true,
-    baselineSeconds: 93,
+    baselineSeconds: 90,
     claim:
       "Niche differentiation is possible and typical where claimed, its limits still hold, and the lineages it names are asserted as lineages rather than as untyped numbers.",
+  },
+  {
+    id: "spatial-occupancy",
+    title: "Spatial opportunity and occupancy (Slice 1)",
+    script: "test:spatial-occupancy",
+    cls: "deterministic",
+    enforcement: "blocking",
+    mergeGate: true,
+    domains: withApparatus("contracts", "sim-core", "sim-runtime"),
+    needs: [],
+    parallelSafe: true,
+    baselineSeconds: 257,
+    claim:
+      "Local space is finite identity-free opportunity: settlement and birth placement resolve deterministically by seniority with deflection and atomic discard, vacancy recolonizes, lineage never steers, and throughput stays viable at thousands scale.",
   },
   {
     id: "aftermath",
@@ -351,7 +373,7 @@ export const UNITS: readonly ValidationUnit[] = [
     parallelSafe: false,
     claim:
       "An impact pause retains both sides of the effect at one tick and auto-resume never loses them.",
-    baselineSeconds: 11,
+    baselineSeconds: 34,
   },
   // --- Dependency shards ----------------------------------------------------
   // `pnpm test:dependency` was 647s on CI and, as a single shard, the entire
@@ -393,7 +415,7 @@ export const UNITS: readonly ValidationUnit[] = [
     parallelSafe: true,
     claim:
       "One deterministic run establishes and then loses a dependency, resume from a checkpoint reproduces it, and each named entity reference asserts the kind it denotes rather than a bare id.",
-    baselineSeconds: 90,
+    baselineSeconds: 92,
   },
   {
     id: "dependency-possibility",
@@ -405,7 +427,7 @@ export const UNITS: readonly ValidationUnit[] = [
     domains: withApparatus("contracts", "sim-core", "sim-decisions", "sim-runtime"),
     needs: [],
     parallelSafe: true,
-    baselineSeconds: 94,
+    baselineSeconds: 251,
     claim: "Cross-feeding is genuinely possible across seeds, not just in one lucky world.",
   },
   {
@@ -418,7 +440,7 @@ export const UNITS: readonly ValidationUnit[] = [
     domains: withApparatus("contracts", "sim-core", "sim-decisions", "sim-runtime"),
     needs: [],
     parallelSafe: true,
-    baselineSeconds: 275,
+    baselineSeconds: 405,
     claim: "Cross-feeding carries a real energetic cost rather than being free.",
   },
   {
@@ -788,6 +810,7 @@ export const GROUPS: readonly ValidationGroup[] = [
       "dependency-possibility",
       "dependency-tradeoff",
       "dependency-washout",
+      "spatial-occupancy",
     ],
     ci: false,
   },
@@ -867,7 +890,7 @@ export const GROUPS: readonly ValidationGroup[] = [
   {
     id: "ci-sim-c",
     title: "Deterministic suites C (niche, ecology, runtime boundary)",
-    unitIds: ["niche", "ecology", "runtime-boundary"],
+    unitIds: ["niche", "ecology", "runtime-boundary", "spatial-occupancy"],
     ci: true,
   },
   {

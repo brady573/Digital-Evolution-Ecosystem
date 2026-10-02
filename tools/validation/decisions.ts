@@ -187,9 +187,13 @@ function testVerticalSliceAndGate() {
   const { session, pending } = atDecision();
   const triggerTick = session.snapshot().tick;
   assert.equal(pending.createdTick, triggerTick, "opportunity created at the current tick");
+  // Slice 1 re-pin (af9ad23 precedent): occupancy settlement + atomic birth
+  // placement shift energy/trajectories slightly; the first durable
+  // formation lands @6777 rather than @7279. Counts/structure unchanged:
+  // still the earliest formation.
   assert.equal(
     pending.sourceEventId,
-    "eco-seedbank-1-established-7279",
+    "eco-seedbank-1-established-6777",
     "first decision comes from the earliest durable formation (deterministic)",
   );
   // The policy saw the same context the evidence supports: contextSnapshot must
@@ -310,9 +314,10 @@ function testForwardCompatPolicyVersion() {
     "window resolution stamped current",
   );
 
-  // The decision-eligible era event at 113,954 is produced while the fourth
-  // foreground Aftermath is protected. It remains durable analysis evidence,
-  // not a deferred prompt. Catalyst generation resumes after that horizon.
+  // The decision-eligible crossfeeding event at 78,312 is produced while
+  // foreground Aftermath is protected (see below). It remains durable
+  // analysis evidence, not a deferred prompt. Catalyst generation resumes
+  // after that horizon.
   let next = session.advance(200_000).pendingDecision as CatalystOpportunity;
   for (let i = 0; i < 3; i++) {
     assert.ok(next, "the next eligible catalyst window resumes after protection");
@@ -327,18 +332,28 @@ function testForwardCompatPolicyVersion() {
   session.resolveEventDecision(next.opportunityId, "keep-watching");
 
   const protectedSnapshot = session.advance(12_000);
+
+
+  // Slice 1 re-pin: no second era forms under occupancy (no era event
+  // through 1.3M ticks), so the protected-observation fixture moves to the
+  // decision-eligible crossfeeding establishment @78312. Protection math
+  // (probe-verified resolutions [6777,31877,56977,...]): the @56977
+  // keep-watching resolution opens a 25k Aftermath covering to ~81977, and
+  // 78312 falls inside it — observed during protection, never prompted
+  // (the flow resolves only catalyst windows afterwards). Same claim:
+  // protected observation stays durable evidence, not a prompt.
   const protectedEra = session.analysis.observedEvents().find(
-    event => event.eventId === "eco-era-2-established-113954",
+    event => event.eventId === "eco-crossfeeding-1-established-78312",
   );
-  assert.ok(protectedEra, "the known era event is durably observed during the foreground Aftermath");
+  assert.ok(protectedEra, "the known crossfeeding event is durably observed during the foreground Aftermath");
   assert.equal(protectedSnapshot.pendingDecision, null,
     "a decision-eligible event observed during protection is not promoted or deferred");
   const newHorizon = session.aftermath!.resolutionTick + 25_000;
   assert.equal(session.advance(newHorizon - 1 - protectedSnapshot.tick).tick, newHorizon - 1,
-    "the protected era event remains consumed through T+24,999");
+    "the protected crossfeeding event remains consumed through T+24,999");
   const atNewHorizon = session.advance(1);
   assert.equal(atNewHorizon.tick, newHorizon, "the later Aftermath reaches its exact horizon");
-  assert.equal(atNewHorizon.pendingDecision, null, "the protected era event is not replayed at the boundary");
+  assert.equal(atNewHorizon.pendingDecision, null, "the protected crossfeeding event is not replayed at the boundary");
   const afterNewHorizon = session.advance(EVENT_STRIDE);
   assert.equal(afterNewHorizon.pendingDecision?.source, "world_catalyst",
     "a new automatic opportunity still resumes after the later protected interval");
