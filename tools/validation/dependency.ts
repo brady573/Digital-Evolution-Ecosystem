@@ -344,11 +344,12 @@ if (!SKIP_POLICY) {
 
 // --- Integration: full arc on one deterministic run --------------------------
 // Balanced seed 24681357 on current biology: drought_b @~60k delays the
-// guild (suppression during the shock), which then establishes @91615 with a
-// diffuse consumer base. Disruption/recovery do NOT occur here: established
-// guilds ride out shocks on 0.22 as under drought_a on 0.21. The full arc
-// machinery stays unit-covered (and 0.21-pinned historically); integration
-// proves what the current biology actually does.
+// guild, which then establishes @276100 with a diffuse consumer base.
+// Disruption/recovery do NOT occur here: established guilds ride out shocks
+// on 0.24 as under drought_a on 0.21. The full arc machinery stays
+// unit-covered (and 0.21-pinned historically); integration proves what the
+// current biology actually does. (0.24.0 re-pin: was @91615; occupancy
+// friction slows post-shock buildup ~3x.)
 
 const FIXTURE_SEED = 24681357;
 function fixtureConfig(seed: number): EngineConfig {
@@ -402,11 +403,16 @@ function testFixtureArc() {
     { schemaVersion: 1, kind: "nutrient_disturbance", mode: "drought_b" },
     "dependency validation",
   );
-  settle(session, 120000);
+  // Slice 1 re-pin (af9ad23 precedent): drought-shocked guild buildup is
+  // markedly slower under occupancy friction, so establishment lands
+  // @276100 rather than @91615 (probe-verified to 400k; same single diffuse
+  // record, still no disruption). Horizon follows the trajectory 120k ->
+  // 300k; structure unchanged.
+  settle(session, 300000);
   const records = (session.analysis as any).records.filter((r: any) => r.kind === "cuse");
   assert.equal(records.length, 1, "one establishment record (no disruption on this run)");
   assert.equal(records[0].phase, "established", "record establishes");
-  assert.equal(records[0].tick, 91615, "establishment is deterministic under the current catalyst policy");
+  assert.equal(records[0].tick, 276100, "establishment is deterministic under the current catalyst policy");
   assert.deepEqual(records[0].entity_refs, [], "diffuse founding names nobody");
   console.log("dependency fixture arc: PASS");
 }
@@ -442,10 +448,16 @@ function testMultiSeedPossibility() {
   // required everywhere. Non-establishment on other seeds is retained
   // evidence, not failure. Pinned deterministically on fixed seeds.
   const established: string[] = [];
+  // Slice 1 re-pin (af9ad23 precedent): guild establishment is delayed
+  // (~2-5x later across all four seeds: 74k/105k/71k/126k at 150k horizon)
+  // by occupancy friction slowing guild buildup, so the horizon extends
+  // 60k -> 150k and the pinned seed moves 55973 -> 70531. Same seed (no
+  // seed-shopping); possibility structure unchanged (realizable somewhere,
+  // required nowhere).
   for (const seed of [821947219, 2088626459, 3543950664, 2121676508]) {
     const session = new UniverseSession();
     session.create(fixtureConfig(seed));
-    settle(session, 60000);
+    settle(session, 150000);
     const records = (session.analysis as any).records.filter(
       (r: any) => r.kind === "cuse" && r.phase === "established",
     );
@@ -453,7 +465,7 @@ function testMultiSeedPossibility() {
   }
   assert.ok(established.length >= 1, "dependency establishment must be realizable");
   assert.ok(
-    established.some((s) => s === "3543950664@55973"),
+    established.some((s) => s === "3543950664@70531"),
     "pinned establishment reproduces exactly",
   );
   console.log(`dependency multi-seed possibility [${established.join(", ")}]: PASS`);

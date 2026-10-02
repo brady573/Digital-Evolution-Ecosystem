@@ -187,9 +187,13 @@ function testVerticalSliceAndGate() {
   const { session, pending } = atDecision();
   const triggerTick = session.snapshot().tick;
   assert.equal(pending.createdTick, triggerTick, "opportunity created at the current tick");
+  // Slice 1 re-pin (af9ad23 precedent): occupancy settlement + atomic birth
+  // placement shift energy/trajectories slightly; the first durable
+  // formation lands @6777 rather than @7279. Counts/structure unchanged:
+  // still the earliest formation.
   assert.equal(
     pending.sourceEventId,
-    "eco-seedbank-1-established-7279",
+    "eco-seedbank-1-established-6777",
     "first decision comes from the earliest durable formation (deterministic)",
   );
   // The policy saw the same context the evidence supports: contextSnapshot must
@@ -327,6 +331,7 @@ function testForwardCompatPolicyVersion() {
   session.resolveEventDecision(next.opportunityId, "keep-watching");
 
   const protectedSnapshot = session.advance(12_000);
+
   const protectedEra = session.analysis.observedEvents().find(
     event => event.eventId === "eco-era-2-established-113954",
   );
