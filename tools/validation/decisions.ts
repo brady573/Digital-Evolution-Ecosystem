@@ -124,6 +124,7 @@ function testPolicyLayer() {
   assert.ok(opportunity, "mapped event produces an opportunity");
   assert.equal(opportunity.opportunityId, "dop:eco-crossfeeding-1-established-55000", "deterministic opportunity id");
   assert.equal(opportunity.status, "pending", "opportunity starts pending");
+  assert.equal(opportunity.policyVersion, DECISION_POLICY_VERSION, "new event opportunities use the current policy version");
   assert.equal(opportunity.choices.length, 4, "keep watching plus the three current interventions");
   assert.equal(opportunity.choices[0]!.intervention, null, "leave-unchanged is offered first");
   assert.deepEqual(
@@ -285,13 +286,22 @@ function testForwardCompatPolicyVersion() {
     "resolution inherits the opportunity's version, not the generator's",
   );
 
-  // A catalyst window now intercedes (quiet satisfied, stocks eligible): it is
-  // stamped with the current catalyst catalog, proving new generation is never
-  // mislabeled by the aged restore.
-  const window = session.advance(120_000).pendingDecision as CatalystOpportunity;
+  // The first quiet catalyst window is eligible at tick 17,319 but the resolved
+  // decision's Aftermath protects automatic prompts through its 25,000-tick
+  // horizon. The existing catalyst policy resumes at the first stride after it.
+  const resolutionTick = session.decisionResolutions[0]!.tick;
+  const horizon = resolutionTick + 25_000;
+  const protectedRun = session.advance(24_999);
+  assert.equal(protectedRun.tick, horizon - 1, "the aged decision's Aftermath reaches T+24,999");
+  assert.equal(protectedRun.pendingDecision, null, "no catalyst window interrupts protected observation");
+  const atBoundary = session.advance(1);
+  assert.equal(atBoundary.tick, horizon, "the observation horizon is reached exactly");
+  const firstPostHorizonStride = Math.ceil(horizon / EVENT_STRIDE) * EVENT_STRIDE;
+  const window = session.advance(EVENT_STRIDE).pendingDecision as CatalystOpportunity;
   assert.ok(window, "a catalyst window follows");
   assert.equal(window.source, "world_catalyst", "interceding decision is a catalyst window");
-  assert.equal(window.createdTick, 17_319, "first window opens at the first quiet stride");
+  assert.equal(window.createdTick, firstPostHorizonStride,
+    "first window opens at the first eligible stride after Aftermath protection");
   assert.equal(window.policyVersion, CATALYST_POLICY_VERSION, "new window stamped current");
   session.resolveEventDecision(window.opportunityId, "keep-watching");
   assert.equal(
@@ -300,34 +310,40 @@ function testForwardCompatPolicyVersion() {
     "window resolution stamped current",
   );
 
-  // Windows recur at every quiet stride until the next natural event: drain
-  // them all (keep watching throughout) to reach it. Each must carry the
-  // current catalog version.
-  let second = session.advance(200_000).pendingDecision as DecisionOpportunity | CatalystOpportunity;
-  while (second && second.source === "world_catalyst") {
-    assert.equal(second.policyVersion, CATALYST_POLICY_VERSION, "every window stamped current");
-    session.resolveEventDecision(second.opportunityId, "keep-watching");
-    second = session.advance(200_000).pendingDecision as DecisionOpportunity | CatalystOpportunity;
+  // The decision-eligible era event at 113,954 is produced while the fourth
+  // foreground Aftermath is protected. It remains durable analysis evidence,
+  // not a deferred prompt. Catalyst generation resumes after that horizon.
+  let next = session.advance(200_000).pendingDecision as CatalystOpportunity;
+  for (let i = 0; i < 3; i++) {
+    assert.ok(next, "the next eligible catalyst window resumes after protection");
+    assert.equal(next.source, "world_catalyst", "post-horizon opportunity remains a catalyst");
+    assert.equal(next.policyVersion, CATALYST_POLICY_VERSION, "every resumed window is stamped current");
+    session.resolveEventDecision(next.opportunityId, "keep-watching");
+    next = session.advance(200_000).pendingDecision as CatalystOpportunity;
   }
-  // The next natural event is stamped with the current policy version, and so
-  // is its resolution: no stale labels leak into new decisions or evidence.
-  assert.ok(second && second.source === "observed_event", "a second natural decision follows");
-  const natural = second as DecisionOpportunity;
-  assert.equal(natural.sourceEventId, "eco-era-2-established-113954", "second decision is deterministic");
-  assert.equal(natural.policyVersion, DECISION_POLICY_VERSION, "new opportunity stamped current");
-  assert.equal(
-    natural.contextSnapshot.cEnergyShare,
-    session.exportEvidence().observed_events.find((e) => e.eventId === natural.sourceEventId)!.evidence
-      .c_energy_share,
-    "second context matches its triggering evidence",
+  assert.ok(next, "a fourth eligible post-horizon catalyst window is reached");
+  assert.equal(next.source, "world_catalyst", "the fourth opportunity is still policy-generated");
+  assert.equal(next.policyVersion, CATALYST_POLICY_VERSION, "the fourth window is stamped current");
+  session.resolveEventDecision(next.opportunityId, "keep-watching");
+
+  const protectedSnapshot = session.advance(12_000);
+  const protectedEra = session.analysis.observedEvents().find(
+    event => event.eventId === "eco-era-2-established-113954",
   );
-  session.resolveEventDecision(natural.opportunityId, "drought-a");
-  const resolutions = session.decisionResolutions;
-  assert.equal(
-    resolutions[resolutions.length - 1]!.policyVersion,
-    DECISION_POLICY_VERSION,
-    "new resolution stamped current",
-  );
+  assert.ok(protectedEra, "the known era event is durably observed during the foreground Aftermath");
+  assert.equal(protectedSnapshot.pendingDecision, null,
+    "a decision-eligible event observed during protection is not promoted or deferred");
+  const newHorizon = session.aftermath!.resolutionTick + 25_000;
+  assert.equal(session.advance(newHorizon - 1 - protectedSnapshot.tick).tick, newHorizon - 1,
+    "the protected era event remains consumed through T+24,999");
+  const atNewHorizon = session.advance(1);
+  assert.equal(atNewHorizon.tick, newHorizon, "the later Aftermath reaches its exact horizon");
+  assert.equal(atNewHorizon.pendingDecision, null, "the protected era event is not replayed at the boundary");
+  const afterNewHorizon = session.advance(EVENT_STRIDE);
+  assert.equal(afterNewHorizon.pendingDecision?.source, "world_catalyst",
+    "a new automatic opportunity still resumes after the later protected interval");
+  assert.equal(afterNewHorizon.pendingDecision!.policyVersion, CATALYST_POLICY_VERSION,
+    "the resumed opportunity still uses the current generator version");
   console.log("forward-compat policy version: PASS");
 }
 

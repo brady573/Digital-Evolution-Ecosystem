@@ -24,7 +24,7 @@ import type {
   SupportedUniverseCheckpoint,
   UniverseCheckpoint,
 } from "../../packages/contracts/src/index.ts";
-import { ENGINE_VERSION } from "../../packages/sim-core/src/index.ts";
+import { ENGINE_VERSION, EVENT_STRIDE } from "../../packages/sim-core/src/index.ts";
 import { UniverseSession, CHECKPOINT_SCHEMA_VERSION } from "../../packages/sim-runtime/src/session.ts";
 import {
   CATALYST_POLICY_VERSION,
@@ -32,6 +32,7 @@ import {
   MAJOR_CATALYST_COOLDOWN_TICKS,
   catalystIds,
   diagnoseCatalysts,
+  isDecisionEligible,
   isMajorCooldownClear,
   selectCatalystWindow,
 } from "../../packages/sim-decisions/src/index.ts";
@@ -251,12 +252,10 @@ testEligibilityBoundaries();
 testQuietAndCooldown();
 
 // --- Integration: first window, priority, gate, resolution -------------------
-// Pinned deterministic chain, balanced seed 24681357 (keep watching):
-// dormancy @7279 -> window @17319 [drought-a, drought-b, global-crash] ->
-// windows @27359/@37399/@47439/@57981/@68523 -> era-2 @113954 ->
-// crossfeeding @123994. Applied drought-a @17319 instead shifts the arc:
-// era-2 @26857 -> window @42419 [drought-b, global-crash] (cooldown clears
-// exactly at the stride) -> crossfeeding @48694.
+// Deterministic seed 24681357 (keep watching): dormancy @7279; the first
+// catalyst window now waits until the first eligible stride after the active
+// Aftermath's 25,000-tick horizon. Events observed before that remain evidence
+// but are not deferred into later decision prompts.
 
 /** Fresh session paused on the first catalyst window (dormancy resolved). */
 function atFirstWindow(): { session: UniverseSession; window: CatalystOpportunity } {
@@ -272,16 +271,20 @@ function atFirstWindow(): { session: UniverseSession; window: CatalystOpportunit
 
 function testFirstWindow() {
   const { session, window } = atFirstWindow();
-  assert.equal(window.createdTick, 17_319, "first window opens at the first quiet stride");
-  assert.equal(window.opportunityId, "wcat:17319", "stable window id");
+  const horizon = session.aftermath!.resolutionTick + 25_000;
+  const firstPostHorizonStride = Math.ceil(horizon / EVENT_STRIDE) * EVENT_STRIDE;
+  assert.equal(window.createdTick, firstPostHorizonStride,
+    "first window opens at the first quiet stride after Aftermath protection");
+  assert.equal(window.opportunityId, `wcat:${firstPostHorizonStride}`, "stable window id");
   assert.equal(window.policyVersion, CATALYST_POLICY_VERSION, "stamped with the catalyst catalog");
-  assert.deepEqual(window.catalystIds, ["drought-a", "drought-b", "global-crash"], "only eligible catalysts offered");
+  assert.deepEqual(window.catalystIds, ["drought-a", "drought-b"],
+    "only catalysts still eligible after continued Aftermath observation are offered");
   assert.deepEqual(
     window.choices.map((c) => c.choiceId),
-    ["keep-watching", "drought-a", "drought-b", "global-crash"],
+    ["keep-watching", "drought-a", "drought-b"],
     "keep watching first, then catalog order",
   );
-  assert.equal(session.snapshot().tick, 17_319, "gate stopped exactly at the window tick");
+  assert.equal(session.snapshot().tick, firstPostHorizonStride, "gate stopped exactly at the window tick");
   assert.equal(session.snapshot().pendingDecision, window as any, "window is pending");
   console.log("first catalyst window: PASS");
 }
@@ -295,25 +298,30 @@ function testSameTickPriority() {
   const session = new UniverseSession();
   session.create(config(FIXTURE_SEED));
   session.resolveEventDecision(session.advance(120_000).pendingDecision!.opportunityId, "keep-watching");
-  session.advance(10_000);
-  assert.equal(session.snapshot().tick, 17_279, "positioned just before the window tick");
+  const firstHorizon = session.aftermath!.resolutionTick + 25_000;
+  session.advance(24_999);
+  assert.equal(session.snapshot().tick, firstHorizon - 1, "protected interval consumes the first quiet catalyst cadence");
+  assert.equal(session.advance(1).tick, firstHorizon, "the active Aftermath reaches its horizon");
+  const coincidenceTick = Math.ceil(firstHorizon / EVENT_STRIDE) * EVENT_STRIDE;
+  session.advance(coincidenceTick - firstHorizon - 1);
+  assert.equal(session.snapshot().tick, coincidenceTick - 1, "positioned just before the first post-horizon stride");
   assert.equal(session.snapshot().pendingDecision, null, "nothing pending yet");
   (session.analysis as any).records.push({
-    id: "eco-crossfeeding-9-established-17279",
+    id: `eco-crossfeeding-9-established-${coincidenceTick}`,
     arc_id: "eco-crossfeeding-9",
     kind: "crossfeeding",
     phase: "established",
-    tick: 17_279,
+    tick: coincidenceTick,
     level: "major",
     title: "Synthetic ordering-test event",
     summary: "Test-only record proving same-tick priority; not a biological claim.",
     evidence: { c_energy_share: 0.06, crossfeeder_fraction: 0.07 },
     entity_refs: [],
   });
-  const pending = session.advance(100).pendingDecision as any;
+  const pending = session.advance(1).pendingDecision as any;
   assert.ok(pending, "the boundary produced a decision");
   assert.equal(pending.source, "observed_event", "the event wins over the eligible catalyst");
-  assert.equal(pending.opportunityId, "dop:eco-crossfeeding-9-established-17279", "the event is the synthetic one");
+  assert.equal(pending.opportunityId, `dop:eco-crossfeeding-9-established-${coincidenceTick}`, "the event is the synthetic one");
   // The catalyst was genuinely ready: quiet satisfied and eligible at this tick.
   const diagnosis = session.describeCatalystEligibility();
   assert.ok(
@@ -325,9 +333,14 @@ function testSameTickPriority() {
   // catalyst window at the shifted cadence: the event waited its turn and the
   // catalyst waited its turn.
   session.resolveEventDecision(pending.opportunityId, "keep-watching");
-  const later = session.advance(30_000).pendingDecision as any;
+  const eventHorizon = coincidenceTick + 25_000;
+  assert.equal(session.advance(24_999).tick, eventHorizon - 1,
+    "the event's own Aftermath protects its new observation interval");
+  assert.equal(session.advance(1).tick, eventHorizon, "the event's Aftermath reaches its exact horizon");
+  const later = session.advance(EVENT_STRIDE).pendingDecision as any;
   assert.equal(later?.source, "world_catalyst", "catalyst follows once the event clears");
-  assert.equal(later?.createdTick, 27_359, "window opens at the shifted quiet stride");
+  assert.equal(later?.createdTick, Math.ceil(eventHorizon / EVENT_STRIDE) * EVENT_STRIDE,
+    "window opens at the first shifted quiet stride after the event Aftermath");
   console.log("same-tick event priority: PASS");
 }
 
@@ -375,25 +388,36 @@ function testCatalystGateAndChoices() {
 }
 
 function testCrashAndCooldown() {
-  // Reproduce the pinned chain: drought-a first, so the second window offers
-  // the global crash once the cooldown clears exactly.
+  // Applying drought-a starts the existing 25,000-tick major cooldown. The
+  // Aftermath gate lasts for the same interval, during which an eligible era
+  // event is retained but not promoted. Catalyst evaluation resumes normally
+  // at the first stride after both boundaries.
   const session = new UniverseSession();
   session.create(config(FIXTURE_SEED));
   session.resolveEventDecision(session.advance(120_000).pendingDecision!.opportunityId, "keep-watching");
   const w1 = session.advance(120_000).pendingDecision as CatalystOpportunity;
-  assert.equal(w1.createdTick, 17_319, "first window opens on its deterministic tick");
+  const firstHorizon = session.aftermath!.resolutionTick + 25_000;
+  assert.equal(w1.createdTick, Math.ceil(firstHorizon / EVENT_STRIDE) * EVENT_STRIDE,
+    "first window opens at its post-horizon deterministic stride");
   session.resolveEventDecision(w1.opportunityId, "drought-a");
   const appliedTick = w1.createdTick;
 
-  // An unrelated era establishes mid-cooldown: events are unaffected by it.
-  const mid = session.advance(200_000).pendingDecision as any;
-  assert.equal(mid?.source, "observed_event", "events still fire during the catalyst cooldown");
-  assert.equal(mid?.sourceEventId, "eco-era-2-established-26857", "drought shifts the era deterministically");
-  session.resolveEventDecision(mid.opportunityId, "keep-watching");
+  const protectedHorizon = appliedTick + 25_000;
+  const protectedRun = session.advance(24_999);
+  assert.equal(protectedRun.tick, protectedHorizon - 1,
+    "the cooldown/Aftermath interval advances without an automatic prompt");
+  const protectedEvents = session.analysis.observedEvents().filter(event =>
+    event.tick > appliedTick && event.tick < protectedHorizon && isDecisionEligible(event));
+  assert.ok(protectedEvents.length > 0,
+    "the era event is still detected and retained while the decision gate is protected");
+  assert.equal(protectedRun.pendingDecision, null,
+    "the detected event is not deferred as a stale prompt");
+  assert.equal(session.advance(1).tick, protectedHorizon, "the Aftermath and catalyst cooldown end at the same horizon");
 
-  const w2 = session.advance(200_000).pendingDecision as CatalystOpportunity;
-  assert.equal(w2.source, "world_catalyst", "second window opens after cooldown");
-  assert.equal(w2.createdTick, 42_419, "cooldown clears exactly at the stride");
+  const w2 = session.advance(EVENT_STRIDE).pendingDecision as CatalystOpportunity;
+  assert.equal(w2.source, "world_catalyst", "the next eligible window opens after protection");
+  assert.equal(w2.createdTick, Math.ceil(protectedHorizon / EVENT_STRIDE) * EVENT_STRIDE,
+    "the unchanged cooldown clears at the first eligible stride");
   assert.ok(
     w2.createdTick >= appliedTick + MAJOR_CATALYST_COOLDOWN_TICKS,
     `cooldown respected (applied ${appliedTick}, window ${w2.createdTick})`,

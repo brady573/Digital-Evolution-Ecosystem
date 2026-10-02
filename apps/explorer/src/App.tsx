@@ -724,6 +724,7 @@ export function App(){
     if(!new URLSearchParams(window.location.search).has("deeTest"))return;
     const hook={
       runToNextEvent:()=>runtime.runToNextEvent(),
+      advanceTicks:(ticks:number)=>runtime.advance(ticks),
       acknowledgeAftermath:()=>runtime.acknowledgeAftermath(),
       resolve:(opportunityId:string,choiceId:string)=>runtime.resolveEventDecision(opportunityId,choiceId),
       setAftermathFixture:(fixture:AftermathStage2Fixture|null)=>setAftermathFixture(fixture),
