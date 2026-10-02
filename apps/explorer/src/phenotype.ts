@@ -23,7 +23,7 @@
  * keep the legacy voxel rendering path exactly, so analytical meaning always
  * outranks decorative morphology.
  */
-import type { RenderOrganism, RenderSnapshot } from "@digital-evolution/contracts";
+import type { RenderOrganism, WorldId } from "@digital-evolution/contracts";
 import {
   FAMILY_ORDER,
   drawGridToCanvas,
@@ -121,12 +121,20 @@ export class PhenotypeCache {
    * ancestry) fall back to founder resolution — deterministic, never a crash —
    * unless a staged save anchor names the organism's own prior resolution.
    *
+   * Lane 3 F2b consumer cutover: the input is the presentation store's joined
+   * organism rows (RenderOrganism-shaped catalog+live entries), not a legacy
+   * RenderSnapshot. Only worldId (cache scoping) and the organism rows are
+   * read; family resolution, cache scoping, pruning, cap, and anchor
+   * semantics are untouched. A full RenderSnapshot remains assignable, so
+   * existing detail paths keep compiling.
+   *
    * Cross-universe isolation (review blocker 1): the cache is keyed to the
    * displayed world's identity. A new worldId clears all entries and adopts
    * staged anchors; ids recurring across universes can never inherit a prior
    * universe's resolution.
    */
-  resolveSnapshot(snapshot: RenderSnapshot): Map<number, ResolvedPhenotype> {
+  resolveSnapshot(input: { readonly worldId: WorldId; readonly organisms: readonly RenderOrganism[] }): Map<number, ResolvedPhenotype> {
+    const snapshot = input;
     if (snapshot.worldId !== this.worldId) {
       this.byId.clear();
       this.worldId = snapshot.worldId;

@@ -1,4 +1,4 @@
-import type { RenderResourceField, RenderWasteField } from "@digital-evolution/contracts";
+import type { RenderResourceField, RenderWasteField, WorldEnvironmentFrame } from "@digital-evolution/contracts";
 
 /**
  * Ecological landscape rendering (Slice 2 product integration).
@@ -194,6 +194,29 @@ export function fillWaste(
     const cap = waste.capacity[i] ?? 0;
     out[i] = cap > 1e-9 ? (waste.stock[i] ?? 0) / cap : 0;
   }
+}
+
+/**
+ * Lane 3 F2b consumer cutover: fill the renderer's scratch arrays from one
+ * read-model environment frame instead of a legacy snapshot's fields.
+ *
+ * The frame carries the same RenderResourceField/RenderWasteField shapes the
+ * per-kind helpers below already read, so this is purely a calling-convention
+ * change — no field resolution, mapping, or palette behavior moves. Callers
+ * pass the frame; the frame's tick/worldId stay available to the caller for
+ * smoother scoping, which remains the caller's business.
+ */
+export function fillEnvironmentFractions(
+  env: WorldEnvironmentFrame,
+  a: Float32Array,
+  b: Float32Array,
+  c: Float32Array,
+  waste: Float32Array,
+): void {
+  fracArray(env.resources.stock, env.resources.capacity, 0, a);
+  fracArray(env.resources.stock, env.resources.capacity, 1, b);
+  fracArray(env.resources.stock, env.resources.capacity, 2, c);
+  fillWaste(env.waste, waste);
 }
 
 export function fillResources(

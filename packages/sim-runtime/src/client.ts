@@ -1,6 +1,7 @@
 import type {
   EngineConfig,
   EvidenceExport,
+  PresentationFrame,
   RenderSnapshot,
   RuntimeCommand,
   RuntimeResponse,
@@ -30,12 +31,37 @@ export interface WorkerRuntimeOptions{
   readonly requestTimeoutMs?:number;
 }
 
+/** Typed terminal state for a dead worker transport.
+ *
+ *  A worker error/messageerror ends the WorkerRuntimeClient instance: no later
+ *  snapshot can arrive, so the product needs an explicit "runtime stopped"
+ *  signal rather than a silently frozen UI. The detail is a plain string, never
+ *  a raw browser event object.
+ */
+export interface TerminalFailure {
+  readonly kind: "worker-error";
+  readonly detail: string;
+}
+
 export interface RuntimeClient {
-  command(command: RuntimeCommand): void;
-  subscribe(listener: (snapshot: RenderSnapshot) => void): () => void;
+  onTerminal(listener: (failure: TerminalFailure) => void): () => void;
+  /**
+   * Lane 3 Task 5: read-model frame delivery is the ONLY live transport. The
+   * legacy snapshot `subscribe` path is removed: no live consumer reads bare
+   * SNAPSHOTs anymore (the client drops one if it ever arrives — no command
+   * emits it since Task 6 retired the ACK trailing emission). Request-correlated
+   * replies still carry their snapshots per the frozen contracts — those settle
+   * awaiting callers, they are not a push transport.
+   */
+  subscribePresentation(listener: (frame: PresentationFrame) => void): () => void;
   loadCheckpoint(checkpoint: SupportedUniverseCheckpoint): Promise<RenderSnapshot>;
   requestCheckpoint(): Promise<UniverseCheckpoint>;
   requestExport(): Promise<EvidenceExport>;
+  /** On-demand retained detail (Task 6, handoff §5–§6): the current snapshot
+   *  as a pure correlated read — full analysis records plus the full decision
+   *  history — for History/investigation surfaces during pure-advance play.
+   *  Advances nothing, emits no live frames; rejects on worker failure. */
+  requestDetail(): Promise<RenderSnapshot>;
   /** Resolves the pending opportunity; rejects on validation failure. */
   resolveEventDecision(opportunityId: string, choiceId: string): Promise<RenderSnapshot>;
   /** Acknowledges the aftermath impact state, moving it to observation so the
@@ -56,9 +82,21 @@ const describe=(event:unknown):string=>{
   return typeof message==="string"&&message.length>0?message:"no detail";
 };
 
+/**
+ * Canonical production worker construction. The client's default transport.
+ * The constructor takes an injected factory instead so failure behaviour is
+ * provable through a fake transport; the default here is what ships.
+ */
+export function createWorkerTransport():WorkerLike{
+  return new Worker(new URL("./worker.ts",import.meta.url),{type:"module",name:"digital-evolution-sim"}) as unknown as WorkerLike;
+}
+
 export class WorkerRuntimeClient implements RuntimeClient {
   #worker:Worker;
-  #listeners=new Set<(snapshot:RenderSnapshot)=>void>();
+  /** Lane 3 Task 5: presentation-frame subscribers are the only live
+   *  subscribers. A dead worker can never deliver another frame, so the fatal
+   *  path drops them. */
+  #presentationListeners=new Set<(frame:PresentationFrame)=>void>();
   /** Test/diagnostic seam: how many request ids the pending map still holds.
    *  AC5 is a claim about retained state, so it must be observable rather than
    *  inferred from "nothing crashed". */
@@ -71,9 +109,15 @@ export class WorkerRuntimeClient implements RuntimeClient {
   #pendingLoad:{requestId:string,resolve:(snapshot:RenderSnapshot)=>void,reject:(reason?:any)=>void,timer:ReturnType<typeof setTimeout>}|null=null;
   #seq=0;
   readonly #requestTimeoutMs:number;
+  #terminal:TerminalFailure|null=null;
+  #terminalFired=false;
+  /** Terminal listeners live apart from presentation subscribers so the fatal
+   *  path's listener clear cannot drop them: a dead worker's one signal
+   *  must still reach the product. */
+  #terminalListeners=new Set<(failure:TerminalFailure)=>void>();
 
   constructor(factory?:WorkerFactory,options:WorkerRuntimeOptions={}){
-    this.#worker=(factory?.()??new Worker(new URL("./worker.ts",import.meta.url),{type:"module",name:"digital-evolution-sim"}))as unknown as Worker;
+    this.#worker=(factory?.()??createWorkerTransport())as unknown as Worker;
     this.#requestTimeoutMs=options.requestTimeoutMs??REQUEST_TIMEOUT_MS;
     this.#register();
   }
@@ -84,32 +128,52 @@ export class WorkerRuntimeClient implements RuntimeClient {
    */
   #register(){
     this.#worker.addEventListener("message",(event:MessageEvent<RuntimeResponse>)=>this.#receive(event.data));
-    this.#worker.addEventListener("error",(event)=>this.#failAll(new Error(`Simulation worker failed: ${describe(event)}`)));
-    this.#worker.addEventListener("messageerror",(event)=>this.#failAll(new Error(`Simulation worker failed: ${describe(event)}`)));
+    this.#worker.addEventListener("error",(event)=>this.#onTransportFailure(event));
+    this.#worker.addEventListener("messageerror",(event)=>this.#onTransportFailure(event));
+  }
+
+  /**
+   * Shared transport-failure entry: error and messageerror must enter the same
+   * fatal path. Tests drive it through an injected fake transport's
+   * fail(kind, detail), which invokes the registered listeners exactly as a
+   * real worker failure would.
+   */
+  #onTransportFailure(event:unknown){
+    this.#failAll(new Error(`Simulation worker failed: ${describe(event)}`),true);
   }
 
   /**
    * The single terminal-failure path. Rejects every pending request, fails any
    * pending checkpoint load, clears the pending map so no entry survives, and
-   * drops subscribers - a dead worker can never deliver another snapshot, so
-   * retaining listeners would leave the UI holding a subscription only a new
-   * client could satisfy.
+   * drops presentation subscribers - a dead worker can never deliver another
+   * frame, so retaining listeners would leave the UI holding a subscription
+   * only a new client could satisfy.
+   *
+   * When signal is true (worker error/messageerror, never destroy), the
+   * terminal state is recorded and terminal listeners fire exactly once per
+   * client lifetime. destroy() passes false: intentional teardown is not a
+   * terminal failure the product must surface.
    */
-  #failAll(reason:Error){
+  #failAll(reason:Error,signal:boolean){
     for(const pending of this.#pending.values()){
       clearTimeout(pending.timer);
       pending.reject(reason);
     }
     this.#pending.clear();
     this.#failPendingLoad(reason);
-    this.#listeners.clear();
+    this.#presentationListeners.clear();
+    if(signal&&!this.#terminalFired){
+      this.#terminalFired=true;
+      this.#terminal={kind:"worker-error",detail:reason.message};
+      for(const listener of [...this.#terminalListeners])listener(this.#terminal);
+    }
   }
 
-  create(config:EngineConfig){this.command({type:"CREATE_UNIVERSE",config})}
-  advance(ticks:number){this.command({type:"ADVANCE_TICKS",ticks})}
-  intervene(intervention:"global"|"droughtA"|"droughtB"){this.command({type:"APPLY_INTERVENTION",intervention})}
-  runToNextEvent(maxTicks=100_000){this.command({type:"RUN_TO_NEXT_EVENT",maxTicks})}
-  createControlFork(){this.command({type:"CREATE_CONTROL_FORK"})}
+  create(config:EngineConfig){this.#post({type:"CREATE_UNIVERSE",config})}
+  advance(ticks:number){this.#post({type:"ADVANCE_TICKS",ticks})}
+  intervene(intervention:"global"|"droughtA"|"droughtB"){this.#post({type:"APPLY_INTERVENTION",intervention})}
+  runToNextEvent(maxTicks=100_000){this.#post({type:"RUN_TO_NEXT_EVENT",maxTicks})}
+  createControlFork(){this.#post({type:"CREATE_CONTROL_FORK"})}
   resolveEventDecision(opportunityId:string,choiceId:string){
     return this.#request<RenderSnapshot>("RESOLVE_EVENT_DECISION",{opportunityId,choiceId});
   }
@@ -145,15 +209,30 @@ export class WorkerRuntimeClient implements RuntimeClient {
         },
         timer:setTimeout(()=>this.#failPendingLoad(new Error(`Restore timed out waiting for tick ${checkpoint.createdTick}`)),LOAD_TIMEOUT_MS),
       };
-      this.command({type:"LOAD_CHECKPOINT",requestId,checkpoint});
+      this.#post({type:"LOAD_CHECKPOINT",requestId,checkpoint});
     });
   }
 
-  command(command:RuntimeCommand){this.#worker.postMessage(command)}
+  /** Raw dispatch is private: production consumers use the typed product
+   *  operations above, never a generic command escape hatch. */
+  #post(command:RuntimeCommand){this.#worker.postMessage(command)}
 
-  subscribe(listener:(snapshot:RenderSnapshot)=>void){
-    this.#listeners.add(listener);
-    return()=>this.#listeners.delete(listener);
+  onTerminal(listener:(failure:TerminalFailure)=>void){
+    this.#terminalListeners.add(listener);
+    return()=>{this.#terminalListeners.delete(listener)};
+  }
+
+  /** The recorded terminal state, or null while the transport lives.
+   *  Class-only, like pendingRequestCount: lets late subscribers query what
+   *  happened without widening the production RuntimeClient interface. */
+  get terminal(){return this.#terminal}
+
+  subscribePresentation(listener:(frame:PresentationFrame)=>void){
+    // A dead client accepts no new subscribers: no later frame can arrive after a
+    // terminal failure, so a post-death subscription is dead on arrival.
+    if(this.#terminalFired)return()=>{};
+    this.#presentationListeners.add(listener);
+    return()=>this.#presentationListeners.delete(listener);
   }
 
   requestCheckpoint(){
@@ -164,9 +243,13 @@ export class WorkerRuntimeClient implements RuntimeClient {
     return this.#request<EvidenceExport>("REQUEST_EXPORT");
   }
 
+  requestDetail(){
+    return this.#request<RenderSnapshot>("REQUEST_DETAIL");
+  }
+
   destroy(){
     this.#worker.terminate();
-    this.#failAll(new Error("Runtime destroyed"));
+    this.#failAll(new Error("Runtime destroyed"),false);
   }
 
   #failPendingLoad(reason:Error){
@@ -175,7 +258,7 @@ export class WorkerRuntimeClient implements RuntimeClient {
     if(pending){clearTimeout(pending.timer);pending.reject(reason)}
   }
 
-  #request<T>(type:"REQUEST_CHECKPOINT"|"REQUEST_EXPORT"|"RESOLVE_EVENT_DECISION"|"ACKNOWLEDGE_AFTERMATH",extra:Record<string,unknown>={}):Promise<T>{
+  #request<T>(type:"REQUEST_CHECKPOINT"|"REQUEST_EXPORT"|"REQUEST_DETAIL"|"RESOLVE_EVENT_DECISION"|"ACKNOWLEDGE_AFTERMATH",extra:Record<string,unknown>={}):Promise<T>{
     const requestId=`r-${++this.#seq}`;
     return new Promise<T>((resolve,reject)=>{
       const timer=setTimeout(()=>{
@@ -184,16 +267,20 @@ export class WorkerRuntimeClient implements RuntimeClient {
         reject(new Error(`${type} timed out after ${this.#requestTimeoutMs}ms`));
       },this.#requestTimeoutMs);
       this.#pending.set(requestId,{resolve,reject,timer});
-      this.command({type,requestId,...extra} as RuntimeCommand);
+      this.#post({type,requestId,...extra} as RuntimeCommand);
     });
   }
 
   #receive(response:RuntimeResponse){
-    if(response.type==="SNAPSHOT"){
-      // A bare snapshot only notifies subscribers. It can never complete a
-      // load: settling on tick equality is what let an unrelated live frame at
-      // the same tick satisfy a restore.
-      for(const listener of this.#listeners)listener(response.snapshot);
+    // No bare-SNAPSHOT branch remains: the legacy push transport is removed
+    // (no command emits one since Task 6 retired the ACK trailing emission),
+    // so a bare SNAPSHOT is dead on arrival — it reaches no listener and
+    // settles nothing. Request-correlated replies below still carry their
+    // snapshots per the frozen contracts.
+    if(response.type==="PRESENTATION"){
+      // Lane 3 Task 5: read-model traffic routes only to presentation
+      // listeners. This is the only live delivery path.
+      for(const listener of this.#presentationListeners)listener(response.frame);
       return;
     }
     if(response.type==="CHECKPOINT_LOADED"){
@@ -204,12 +291,13 @@ export class WorkerRuntimeClient implements RuntimeClient {
       // failed must not silently swap what the player is looking at.
       if(!pendingLoad||pendingLoad.requestId!==response.requestId)return;
       pendingLoad.resolve(response.snapshot);
-      // This reply IS the announcement. The session does not also send a bare
-      // SNAPSHOT for a restore, because postMessage delivers each message as
-      // its own task: a second delivery would reach subscribers after the load's
-      // .then() had run, and Explorer clears its status string on every snapshot,
-      // wiping "Checkpoint restored".
-      for(const listener of this.#listeners)listener(response.snapshot);
+      // This reply IS the announcement a restore needs: the awaiting load
+      // settles from it, and the PRESENTATION frames that follow compose the
+      // restored world in the presentation store. No subscriber fan-out
+      // remains — and deliberately no trailing bare SNAPSHOT either, because
+      // postMessage delivers each message as its own task: a second delivery
+      // would arrive after the load's .then() had run, and Explorer would no
+      // longer have a subscriber to distinguish it from live traffic.
       return;
     }
     if(response.type==="DECISION_RESOLVED"||response.type==="AFTERMATH_ACKNOWLEDGED"){
@@ -226,6 +314,14 @@ export class WorkerRuntimeClient implements RuntimeClient {
       this.#pending.delete(response.requestId);
       clearTimeout(pending.timer);
       pending.resolve(response.type==="CHECKPOINT"?response.checkpoint:response.data);
+      return;
+    }
+    if(response.type==="DETAIL"){
+      const pending=this.#pending.get(response.requestId);
+      if(!pending)return;
+      this.#pending.delete(response.requestId);
+      clearTimeout(pending.timer);
+      pending.resolve(response.snapshot);
       return;
     }
     if(response.type==="ERROR"){

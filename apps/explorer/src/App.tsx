@@ -1,20 +1,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CladeId, EngineConfig, HistoryRecordId, OrganismId, RenderOrganism, RenderSnapshot } from "@digital-evolution/contracts";
+import type { CladeId, EngineConfig, HistoryRecordId, OrganismId, RenderOrganism, RenderSnapshot, WorldEnvironmentFrame, WorldId } from "@digital-evolution/contracts";
 import { CHECKPOINT_PLAYER_NOTICE, CheckpointRejectionError } from "@digital-evolution/contracts";
 import { cladeId, formatCladeId, formatLineageId, lineageId, typedRefs } from "@digital-evolution/contracts";
-import { ENGINE_VERSION } from "@digital-evolution/sim-core";
-import { WorkerRuntimeClient, normalizeSpeedMode, sliceFor } from "@digital-evolution/sim-runtime";
+import { WorkerRuntimeClient, createInstrumentedTransport, normalizeSpeedMode, sliceFor } from "@digital-evolution/sim-runtime";
+import type { WorkerLike } from "@digital-evolution/sim-runtime";
 import { Capacitor } from "@capacitor/core";
 import { Directory, Encoding, Filesystem } from "@capacitor/filesystem";
 import { Share } from "@capacitor/share";
 import { IndexedDbWorldRepository } from "./persistence";
 import { formatTickAge, formatYear, glossOutcome } from "./language";
 import {
-  LandscapeSmoother, fillWaste, fracArray, landscapeCell, landscapeTileLayout,
+  LandscapeSmoother, fillEnvironmentFractions, landscapeCell, landscapeTileLayout,
   microTexture, nutrientOverlayCell, wasteOverlayCell,
 } from "./landscape";
 import { cladeColor, dormantChannel, organismColor, type OrganismLens } from "./organismEncoding";
 import { AftermathPanel } from "./AftermathPanel";
+import { createPresentationStore, type PresentationView } from "./presentationStore";
+import { AftermathStage2Panel } from "./AftermathStage2Panel";
+import { projectAftermath } from "./experience/aftermath/project";
+import { transitionAftermath } from "./experience/aftermath/lifecycle";
+import type { AftermathLifecycleEvent, AftermathPresentationState, AftermathStage2Fixture, DevelopmentEvidence } from "./experience/aftermath/model";
 import { drawPhenotypeOrganism, phenotypeCache, tierForZoom } from "./phenotype";
 import { familyArtwork } from "./familyArt";
 
@@ -172,9 +177,13 @@ const wrapCoord=(v:number)=>((v%WORLD_EXTENT)+WORLD_EXTENT)%WORLD_EXTENT;
 const landscapeSmoother=new LandscapeSmoother();
 
 function WorldCanvas({
-  snapshot,lens,resourceView,traitView,selectedId,onSelect,cam,zoom,onCamera,onView,
+  worldId,tick,env,organisms,lens,resourceView,traitView,selectedId,onSelect,cam,zoom,onCamera,onView,
 }:{
-  snapshot:RenderSnapshot;lens:Lens;resourceView:ResourceView;traitView:TraitView;
+  // Lane 3 F2b read-model inputs: identity (worldId/tick for smoother
+  // scoping), the environment frame, and the store's joined organism rows.
+  // Same RenderOrganism-shaped entries selection and phenotype read.
+  worldId:WorldId;tick:number;env:WorldEnvironmentFrame;organisms:readonly RenderOrganism[];
+  lens:Lens;resourceView:ResourceView;traitView:TraitView;
   selectedId:OrganismId|null;onSelect:(id:OrganismId|null)=>void;
   cam:Camera;zoom:number;onCamera:(c:Camera)=>void;onView:(u:{w:number;h:number})=>void;
 }){
@@ -198,7 +207,7 @@ function WorldCanvas({
   useEffect(()=>{
     const canvas=ref.current;if(!canvas)return;
     const ctx=canvas.getContext("2d");if(!ctx)return;
-    const w=canvas.width,h=canvas.height,n=snapshot.resources.gridSize;
+    const w=canvas.width,h=canvas.height,n=env.resources.gridSize;
     // Uniform scale, never a stretch. Portrait stages fit by height so the
     // world fills the frame; the zoomed-out baseline on wide stages still
     // shows the whole 600x600 field.
@@ -211,7 +220,6 @@ function WorldCanvas({
     // Report the visible window (in world units) so the minimap can mark it.
     onView({w:w/s,h:h/s});
 
-    const stocks=snapshot.resources.stock,caps=snapshot.resources.capacity;
     const drawEnvironment=lens==="normal"||lens==="nutrients"||lens==="waste";
     if(drawEnvironment){
       // Analytical lenses read exact fields: no smoothing, no texture, flat
@@ -223,8 +231,7 @@ function WorldCanvas({
       // real simulation structure with smooth transitions, not cells.
       const analytical=lens!=="normal";
       const a=new Float32Array(n*n),b=new Float32Array(n*n),c=new Float32Array(n*n),wf=new Float32Array(n*n);
-      fracArray(stocks,caps,0,a);fracArray(stocks,caps,1,b);fracArray(stocks,caps,2,c);
-      fillWaste(snapshot.waste,wf);
+      fillEnvironmentFractions(env,a,b,c,wf);
       let av=a,bv=b,cv=c,wv=wf;
       if(lens==="normal"){
         // Presentation-only inertia, scoped by the universe's presentation
@@ -233,8 +240,8 @@ function WorldCanvas({
         // primes from the current fields on a new identity, so a created or
         // restored world shows its real environment on the first frame
         // instead of a fictitious depleted one.
-        const id=`w${snapshot.worldId}`;
-        const sm=landscapeSmoother.advance(id,snapshot.tick,a,b,c,wf,0.35);
+        const id=`w${worldId}`;
+        const sm=landscapeSmoother.advance(id,tick,a,b,c,wf,0.35);
         av=new Float32Array(n*n);bv=new Float32Array(n*n);cv=new Float32Array(n*n);wv=new Float32Array(n*n);
         for(let i=0;i<n*n;i++){const j=i*4;av[i]=sm[j]!;bv[i]=sm[j+1]!;cv[i]=sm[j+2]!;wv[i]=sm[j+3]!}
       }
@@ -294,26 +301,24 @@ function WorldCanvas({
       }
     }
 
-    const traitRange=TRAIT_RANGES[traitView];
     // Lane 2 M4B: normal-lens morphology delegates to the phenotype engine.
     // Every other lens keeps the legacy voxel path exactly, so analytical
     // meaning always outranks decorative morphology. Phenotype resolutions
     // are memoized per organism across snapshots (traits/ancestry are fixed
     // at birth); only the visible tier renders each frame.
     const phenoTier=tierForZoom(zoom);
-    const pheno=lens==="normal"?phenotypeCache.resolveSnapshot(snapshot):null;
+    const pheno=lens==="normal"?phenotypeCache.resolveSnapshot({worldId,organisms}):null;
     const unit=Math.max(2,s*2.2);
-    for(const o of snapshot.organisms){
+    const traitRange=TRAIT_RANGES[traitView];
+    for(const o of organisms){
       const px=toX(o.x),py=toY(o.y);
       if(px<-24||py<-24||px>w+24||py>h+24)continue;
       // §21.2: the lens encoding wins, including for dormant organisms, so
       // Clades and Traits always encode what they claim. Dormancy rides the
       // separate alpha/hollow channel below and never replaces the encoding.
       const color=organismColor(o as never,lens as OrganismLens,traitView,[traitRange[0],traitRange[1]]);
-      // Dormancy is its own channel (§21.2), so it never displaces the lens
-      // colour. One source of truth for alpha/hollow, asserted in validation.
       const chan=dormantChannel(o as never);
-
+      const dormant=chan.dormant;
       if(lens==="normal"&&pheno){
         // Phenotype morphology: grid shape encodes family/traits/dormancy,
         // lens color and dormancy dimming stay exactly as before.
@@ -327,7 +332,7 @@ function WorldCanvas({
       // texture is a deterministic function of organism id (stable per frame),
       // and density follows diet family. Positions are untouched, so
       // click-selection mapping is unchanged.
-      const energyClass=chan.dormant?0:(o.energy>120?2:o.energy>60?1:0);
+      const energyClass=dormant?0:(o.energy>120?2:o.energy>60?1:0);
       const span=2+energyClass;
       let hsh=Math.imul(o.id,2654435761)^0x9e3779b9;hsh^=hsh>>>15;hsh=Math.imul(hsh,0x85ebca6b)>>>0;
       ctx.fillStyle=color;ctx.strokeStyle=color;ctx.lineWidth=1;
@@ -342,7 +347,7 @@ function WorldCanvas({
         }
         if(!solid)continue;
         const bx=px+(gx-span/2)*unit,by=py+(gy-span/2)*unit;
-        if(chan.dormant)ctx.strokeRect(bx,by,unit,unit);else ctx.fillRect(bx,by,unit,unit);
+        if(dormant)ctx.strokeRect(bx,by,unit,unit);else ctx.fillRect(bx,by,unit,unit);
       }
       ctx.globalAlpha=1;
       }
@@ -367,7 +372,7 @@ function WorldCanvas({
         ctx.lineWidth=1;
       }
     }
-  },[snapshot,lens,resourceView,traitView,selectedId,size,cam,zoom,onView]);
+  },[worldId,tick,env,organisms,lens,resourceView,traitView,selectedId,size,cam,zoom,onView]);
 
   // Screen-space helpers for pointer input (CSS pixels, not backing store).
   const viewOf=(canvas:HTMLCanvasElement)=>{
@@ -382,7 +387,7 @@ function WorldCanvas({
     // Constant on-screen hit radius, so zooming never changes feel. Distance is
     // toroidal: an organism across the seam is one tap away, not across the map.
     let best:RenderOrganism|null=null,bestD=26/s;
-    for(const o of snapshot.organisms){
+    for(const o of organisms){
       const d=Math.hypot(wrapDelta(o.x,x),wrapDelta(o.y,y));
       if(d<bestD){bestD=d;best=o}
     }
@@ -416,8 +421,11 @@ function WorldCanvas({
     onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={()=>{drag.current=null}}/>;
 }
 
-function WorldMinimap({snapshot,cam,view}:{
-  snapshot:RenderSnapshot;cam:Camera;view:{w:number;h:number}|null;
+function WorldMinimap({resources,organisms,cam,view}:{
+  // Lane 3 F2b read-model inputs: the environment frame's resource field plus
+  // the store's joined organism rows (positions only are read here).
+  resources:WorldEnvironmentFrame["resources"];organisms:readonly RenderOrganism[];
+  cam:Camera;view:{w:number;h:number}|null;
 }){
   const ref=useRef<HTMLCanvasElement>(null);
   // Single source for the drawn marker geometry and the published geometry.
@@ -431,7 +439,7 @@ function WorldMinimap({snapshot,cam,view}:{
     // Coarse real resource field (every other cell) - an overview, not a claim.
     // Grid indices are scaled by the world size of one cell, not by k alone,
     // or the field collapses into the top-left tenth of the minimap.
-    const n=snapshot.resources.gridSize,stocks=snapshot.resources.stock,caps=snapshot.resources.capacity;
+    const n=resources.gridSize,stocks=resources.stock,caps=resources.capacity;
     const cellWorld=WORLD_EXTENT/n,step=n>40?2:1,px=cellWorld*step*k;
     for(let y=0;y<n;y+=step)for(let x=0;x<n;x+=step){
       const i=y*n+x;
@@ -442,10 +450,10 @@ function WorldMinimap({snapshot,cam,view}:{
       ctx.fillRect(x*cellWorld*k,y*cellWorld*k,px+1,px+1);
     }
     // Real organisms; thinned above 2500 so a 5k world stays cheap on a phone.
-    const thin=snapshot.organisms.length>2500?2:1;
+    const thin=organisms.length>2500?2:1;
     ctx.fillStyle="#cfeede";
-    for(let i=0;i<snapshot.organisms.length;i+=thin){
-      const o=snapshot.organisms[i];if(!o)continue;
+    for(let i=0;i<organisms.length;i+=thin){
+      const o=organisms[i];if(!o)continue;
       ctx.fillRect(o.x*k,o.y*k,1,1);
     }
     // Visible window marker. WorldCanvas already reports the visible size in
@@ -460,7 +468,7 @@ function WorldMinimap({snapshot,cam,view}:{
         ctx.strokeRect(x+.5,y+.5,rect.w*k,rect.h*k);
       }
     }
-  },[snapshot,cam,view]);
+  },[resources,organisms,cam,view]);
   // data-* publishes the geometry the marker is actually drawn from, so the
   // smoke test can assert it against the canvas instead of trusting the code.
   return <canvas aria-label="World minimap" className="minimap-canvas" ref={ref} width={108} height={108}
@@ -474,9 +482,33 @@ function Slider({label,value,min,max,step,onChange}:{label:string;value:number;m
 }
 
 export function App(){
-  const runtime=useMemo(()=>new WorkerRuntimeClient(),[]);
+  // Test-only instrumented transport (?deeTest only; stays null in production,
+  // where the client is constructed with no factory and owns its transport).
+  const instrumentedRef=useRef<{transport:WorkerLike;fail:(kind:"error"|"messageerror")=>void}|null>(null);
+  const runtime=useMemo(()=>{
+    if(typeof window!=="undefined"&&new URLSearchParams(window.location.search).has("deeTest")){
+      // Test-only construction path. Real worker construction is owned by the
+      // runtime boundary's instrumented-transport factory, so Explorer never
+      // names the worker implementation path. The default (production) path
+      // below is unchanged.
+      const instrumented=createInstrumentedTransport();
+      instrumentedRef.current=instrumented;
+      return new WorkerRuntimeClient(()=>instrumented.transport);
+    }
+    return new WorkerRuntimeClient();
+  },[]);
   const repository=useMemo(()=>new IndexedDbWorldRepository(),[]);
   const [snapshot,setSnapshot]=useState<RenderSnapshot|null>(null);
+  // Lane 3 Task 6: read-model-only transport. The legacy snapshot subscription
+  // is gone (RuntimeClient.subscribe removed): backpressure release, status
+  // clearing, and the decision-gate control flow below live on the
+  // interpretation frame. The `snapshot` state stays, but only as retained
+  // detail: it is fed by request-correlated replies (restore/resolve/
+  // acknowledge returns) and by the on-demand detail pull when History or
+  // Experiments opens — never by a live push. Analysis records and the full
+  // decision history deliberately stay out of live-frame traffic (handoff §6).
+  const store=useMemo(()=>createPresentationStore(),[]);
+  const [presentation,setPresentation]=useState<PresentationView>(()=>store.getView());
   const [surface,setSurface]=useState<Surface>("world");
   const [running,setRunning]=useState(false);
   // Play intent across a decision gate (AC22). The decision pause must not
@@ -507,6 +539,8 @@ export function App(){
   const [traitView,setTraitView]=useState<TraitView>("speed");
   const [selectedId,setSelectedId]=useState<OrganismId|null>(null);
   const [selectedStoryId,setSelectedStoryId]=useState<HistoryRecordId|null>(null);
+  const [aftermathPresentation,setAftermathPresentation]=useState<AftermathPresentationState|null>(null);
+  const [aftermathFixture,setAftermathFixture]=useState<AftermathStage2Fixture|null>(null);
   const [selectedCladeId,setSelectedCladeId]=useState<CladeId|null>(null);
   // Camera: uniform zoom + toroidal pan into the same 600x600 world.
   const [cam,setCam]=useState<Camera>({x:300,y:300});
@@ -525,10 +559,106 @@ export function App(){
   // the previous one. Without this, high speeds pile up work faster than the
   // worker can drain it and the UI stalls instead of running fast.
   const advanceDebt=useRef(false);
+  const deadRef=useRef(false);
+
+  // Newest announced world, so a create/restore batch never wipes the status
+  // its own flow sets. CHECKPOINT_LOADED resolves (and the flow sets e.g.
+  // "Checkpoint restored") before the restore's frames arrive; clearing status
+  // on those frames would wipe it, repeating the PR #84 defect class.
+  const knownWorldRef=useRef<WorldId|null>(null);
+
+  // Lane 2 aftermath-stage2 projection, adapted to the Lane 3 retained-detail
+  // snapshot: the DETAIL snapshot may be null during pure-advance play, so a
+  // null snapshot yields a null projection (no stage2 UI) rather than a crash.
+  // The top guard covers every snapshot read below; no bare dereference.
+  const aftermathProjection=useMemo(()=>{
+    if(snapshot==null||snapshot.aftermath==null)return null;
+    const testMode=typeof window!=="undefined"&&new URLSearchParams(window.location.search).has("deeTest");
+    const resolution=snapshot.resolvedDecisions.find(item=>item.commandId===snapshot.aftermath!.commandId);
+    const originRecord=resolution?.sourceEventId
+      ?snapshot.analysis.records.find(record=>String(record.id)===resolution.sourceEventId)
+      :undefined;
+    const fixtureEnabled=testMode&&aftermathFixture!==null;
+    const fixtureEvidence:DevelopmentEvidence[] = fixtureEnabled&&aftermathFixture==="development"?[{
+      aftermathCommandId:snapshot.aftermath.commandId,
+      source:"matched-comparison",
+      sourceId:"deeTest-stage2-development",
+      title:"Synthetic development fixture",
+      summary:"This test-only card exercises presentation and makes no claim about the running world.",
+      followLens:"clades",
+      fixtureOnly:true,
+    }]:[];
+    return projectAftermath({
+      aftermath:snapshot.aftermath,
+      currentTick:fixtureEnabled&&aftermathFixture==="settlement"
+        ?snapshot.aftermath.resolutionTick+25_000
+        :snapshot.tick,
+      population:snapshot.population,
+      originHistoryRecordId:originRecord?.id??null,
+      fixtureOnly:fixtureEnabled,
+      // Current contracts do not carry a stable relationship from later
+      // developments to this command. Do not use chronology or originating
+      // event provenance as a substitute.
+      candidates:fixtureEvidence,
+    });
+  },[snapshot,aftermathFixture]);
 
   useEffect(()=>{
-    const unsub=runtime.subscribe(s=>{
-      advanceDebt.current=false;setSnapshot(s);setStatus("");
+    const aftermath=snapshot?.aftermath;
+    setAftermathFixture(null);
+    if(!aftermath){setAftermathPresentation(null);return}
+    setAftermathPresentation(previous=>previous?.commandId===aftermath.commandId?previous:{
+      commandId:aftermath.commandId,
+      stage:aftermath.phase==="impact"?"impact":"observation",
+      expanded:aftermath.phase==="impact",
+      suspended:!!snapshot?.pendingDecision,
+      dismissed:false,
+      following:false,
+      automaticLens:null,
+      manualLensOverride:false,
+    });
+  },[snapshot?.aftermath?.commandId]);
+
+  useEffect(()=>{
+    setAftermathPresentation(previous=>previous?transitionAftermath(previous,{
+      type:snapshot?.pendingDecision?"suspend":"resume-presentation",
+    }):previous);
+  },[!!snapshot?.pendingDecision]);
+
+  // Runtime releases its pinned impact phase on an explicit acknowledgment or
+  // when a resumed session executes its first tick. In either case the
+  // Explorer presentation moves to the compact observation affordance; it
+  // never leaves an expanded sheet behind as a playback gate.
+  useEffect(()=>{
+    const aftermath=snapshot?.aftermath;
+    if(aftermath?.phase!=="observation")return;
+    setAftermathPresentation(previous=>previous?.commandId===aftermath.commandId&&previous.stage==="impact"
+      ?transitionAftermath(previous,{type:"acknowledge-impact"})
+      :previous);
+  },[snapshot?.aftermath?.commandId,snapshot?.aftermath?.phase]);
+
+  const aftermathEvent=(event:AftermathLifecycleEvent)=>{
+    setAftermathPresentation(previous=>previous?transitionAftermath(previous,event):previous);
+    if(event.type==="follow"&&event.lens)setLens(event.lens);
+  };
+  useEffect(()=>{
+    // Read-model delivery only. The live frame is the per-advance heartbeat —
+    // it emits on every advance — so one advance releases backpressure exactly
+    // once, on the freshest composed view. Status clearing and the
+    // decision-gate control flow below still live on the interpretation frame,
+    // which emits only when its bounded payload changes (staggered cadence):
+    // a suppressed interpretation must never stall the time controls.
+    // Earlier frames only compose the store.
+    const unsubPresentation=runtime.subscribePresentation(frame=>{
+      store.apply(frame);
+      const view=store.getView();
+      setPresentation(view);
+      if("organisms" in frame)advanceDebt.current=false;
+      if(!("metrics" in frame))return;
+      const transition=knownWorldRef.current!==null&&view.worldId!==knownWorldRef.current;
+      knownWorldRef.current=view.worldId;
+      if(!transition)setStatus("");
+      const interp=view.interpretation;
       // A pending decision is a visible pause: the player must choose before
       // time moves again (A13). Runtime enforces the same gate independently.
       //
@@ -536,10 +666,10 @@ export function App(){
       // running outright loses the difference between "was playing" and "was
       // deliberately paused", and only the former should resume by itself once
       // the choice resolves.
-      if(s.pendingDecision){
+      if(interp?.pendingDecision){
         setWasPlaying(w=>w||runningRef.current);
         setRunning(false);
-      }else if(s.aftermath&&wasPlayingRef.current){
+      }else if(interp?.aftermath&&wasPlayingRef.current){
         // Playback resumes automatically at the prior bounded speed. The impact
         // sheet overlays a running world from here, and its evidence is pinned
         // to the resolution tick, so this cannot invalidate what it shows.
@@ -547,9 +677,16 @@ export function App(){
         setWasPlaying(false);
       }
     });
+    const onFatal=runtime.onTerminal(()=>{
+      deadRef.current=true;
+      setRunning(false);
+      setWasPlaying(false);
+      advanceDebt.current=false;
+      setStatus("Simulation stopped — reload to continue");
+    });
     runtime.create(configFromSettings(DEFAULT_SETTINGS));
-    return()=>{unsub();runtime.destroy()};
-  },[runtime]);
+    return()=>{unsubPresentation();onFatal();runtime.destroy()};
+  },[runtime,store]);
 
   useEffect(()=>{
     if(!running)return;
@@ -562,6 +699,7 @@ export function App(){
     let raf=0,carry=0,last=performance.now();
     const frame=(now:number)=>{
       const elapsed=now-last;last=now;
+      if(deadRef.current)return;
       if(!advanceDebt.current){
         const slice=sliceFor(normalizeSpeedMode(speed),elapsed,carry);
         carry=slice.carry;
@@ -588,10 +726,26 @@ export function App(){
       runToNextEvent:()=>runtime.runToNextEvent(),
       acknowledgeAftermath:()=>runtime.acknowledgeAftermath(),
       resolve:(opportunityId:string,choiceId:string)=>runtime.resolveEventDecision(opportunityId,choiceId),
+      setAftermathFixture:(fixture:AftermathStage2Fixture|null)=>setAftermathFixture(fixture),
+      killWorker:()=>instrumentedRef.current?.fail("error"),
     };
     (window as any).__DEE_TEST__=hook;
     return()=>{delete (window as any).__DEE_TEST__};
   },[runtime]);
+
+  // Lane 3 Task 6: retained/detail path (handoff §5–§6). Analysis records and
+  // the full decision history deliberately stay out of live-frame traffic,
+  // so the History and Experiments history reads below pull them on demand
+  // when those surfaces open — truthful during pure-advance play, with no
+  // retained history pushed into live frames. A rejection (dead worker, no
+  // universe yet) keeps the previous detail: the reads below stay
+  // null-tolerant, so History falls back to the live interpretation refs.
+  useEffect(()=>{
+    if(surface!=="history"&&surface!=="experiments")return;
+    let live=true;
+    runtime.requestDetail().then(detail=>{if(live)setSnapshot(detail)}).catch(()=>{});
+    return()=>{live=false};
+  },[surface,runtime]);
 
   const updateSettings=(patch:Partial<WorldSettings>)=>{
     setSettings(v=>({...v,...patch}));setPreset("Custom");
@@ -606,27 +760,30 @@ export function App(){
   // A7/A8: record the choice through runtime. It applies at most one
   // intervention, clears the gate, and never advances a tick.
   const resolveDecision=async(choiceId:string)=>{
-    const pending=snapshot?.pendingDecision;if(!pending)return;
+    const pending=presentation.interpretation?.pendingDecision;if(!pending)return;
     setStatus("Recording your decision…");
     try{
-      await runtime.resolveEventDecision(pending.opportunityId,choiceId);
+      // The correlated reply feeds retained detail (full decision history);
+      // live presentation already composed from the frames beside it.
+      setSnapshot(await runtime.resolveEventDecision(pending.opportunityId,choiceId));
       setStatus("Decision recorded. The world stays paused until you resume.");
     }catch(error){
       setStatus(`Decision failed: ${error instanceof Error?error.message:String(error)}`);
     }
   };
   // While a decision is pending these must not advance time; they focus it.
-  const blockWhilePending=()=>{if(!snapshot?.pendingDecision)return false;setStatus("A decision is waiting — choose how to respond.");return true};
+  const blockWhilePending=()=>{if(!presentation.interpretation?.pendingDecision)return false;setStatus("A decision is waiting — choose how to respond.");return true};
   // M3 aftermath impact state. Playback is NOT gated on the sheet (AC22):
   // resolving a choice restores whatever the player had going, so the sheet
   // usually overlays a world that is already running. All the affordance does
   // is release the presentation slot.
   const [acknowledging,setAcknowledging]=useState(false);
   const acknowledgeAftermath=async()=>{
-    if(!snapshot?.aftermath)return;
+    if(!presentation.interpretation?.aftermath)return;
+    aftermathEvent({type:"acknowledge-impact"});
     setAcknowledging(true);
     try{
-      await runtime.acknowledgeAftermath();
+      setSnapshot(await runtime.acknowledgeAftermath());
       setStatus("Aftermath observed. Watching the world.");
     }catch(error){
       setStatus(`Could not continue: ${error instanceof Error?error.message:String(error)}`);
@@ -659,6 +816,10 @@ export function App(){
       // fresh identity. Null (old saves) means a clean presentation break.
       phenotypeCache.stageAnchors(await repository.loadAnchors("current")??{});
       const restored=await runtime.loadCheckpoint(checkpoint);
+      // The correlated reply refreshes retained detail (records + full decision
+      // history); the on-demand detail pull covers pure-advance play between
+      // such replies.
+      setSnapshot(restored);
       // A3: the resumed universe becomes the active recipe; pending resets to
       // match it so staged settings can never be mistaken for the live world.
       const mapped=settingsFromConfig(restored.config);
@@ -676,7 +837,7 @@ export function App(){
   const exportEvidence=async()=>{
     const data=await runtime.requestExport();
     const text=JSON.stringify(data,null,2);
-    const filename=`ecosystem-v030-tick-${snapshot?.tick??0}.json`;
+    const filename=`ecosystem-v030-tick-${presentation.live?.tick??0}.json`;
     setStatus("Preparing evidence export…");
     try{
       // Blob-anchor downloads do not work inside the native WebView, so on
@@ -685,8 +846,8 @@ export function App(){
       if(Capacitor.isNativePlatform()){
         const saved=await Filesystem.writeFile({path:filename,data:text,directory:Directory.Cache,encoding:Encoding.UTF8});
         try{
-          await Share.share({title:"Ecosystem evidence export",text:`Digital Evolution evidence export, tick ${snapshot?.tick??0}`,files:[saved.uri],dialogTitle:"Share evidence export"});
-          setStatus(`Export shared (tick ${(snapshot?.tick??0).toLocaleString()})`);
+          await Share.share({title:"Ecosystem evidence export",text:`Digital Evolution evidence export, tick ${presentation.live?.tick??0}`,files:[saved.uri],dialogTitle:"Share evidence export"});
+          setStatus(`Export shared (tick ${(presentation.live?.tick??0).toLocaleString()})`);
         }finally{
           await Filesystem.deleteFile({path:filename,directory:Directory.Cache}).catch(()=>{});
         }
@@ -703,22 +864,45 @@ export function App(){
     setStatus(`Exported ${filename}`);
   };
 
-  if(!snapshot)return <main className="loading">{status}</main>;
-  const m=snapshot.metrics;
-  const pending=snapshot.pendingDecision;
+  // Lane 3 Task 5: maintained surfaces render from the read-model view below.
+  // The first paint waits for every channel, so no surface ever renders a
+  // half-composed world. The legacy detail snapshot is no longer part of the
+  // gate: it arrives only with request-correlated replies now.
+  const live=presentation.live,env=presentation.environment,interp=presentation.interpretation,ident=presentation.identity,catalog=presentation.catalog;
+  if(!live||!env||!interp||!ident||!catalog)return <main className="loading">{status}</main>;
+  const m=interp.metrics;
+  const pending=interp.pendingDecision;
   // A pending decision outranks an aftermath (AC15); the aftermath yields the
   // slot without being discarded, so it returns after the decision resolves.
   const showDecision=!!pending;
-  const showAftermath=!pending&&!!snapshot.aftermath&&snapshot.aftermath.phase==="impact";
-  const records=snapshot.analysis.records;
+  const showAftermath=!pending&&!!interp.aftermath&&interp.aftermath.phase==="impact";
+  const showAftermathStage2=!pending&&surface==="world"&&!!aftermathProjection&&!!aftermathPresentation
+    &&aftermathProjection.stage!=="impact"&&aftermathPresentation.stage!=="impact"&&aftermathPresentation.expanded&&!aftermathPresentation.dismissed;
+  const showCompactAftermath=!pending&&surface==="world"&&!!aftermathProjection&&!!aftermathPresentation
+    &&aftermathProjection.stage!=="impact"&&aftermathPresentation.stage!=="impact"&&!aftermathPresentation.expanded&&!aftermathPresentation.dismissed;
+  // Retained detail path: analysis records and the full decision history are
+  // deliberately excluded from live read-model traffic (handoff §6 history
+  // rule — never push retained history into live frames). History reads them
+  // from the detail snapshot: request-correlated replies refresh it, and the
+  // on-demand pull above refreshes it whenever History or Experiments opens,
+  // so fresh-world History is truthful during pure-advance play. Before any
+  // detail has arrived the reads below tolerate null. Bounded live needs
+  // (recent-event refs, control summary) come from the interpretation frame
+  // instead; see below.
+  const records=snapshot?.analysis.records??[];
+  const reviewAftermathHistory=(recordId:HistoryRecordId)=>{
+    if(!records.some(record=>record.id===recordId))return;
+    setSelectedStoryId(recordId);
+    setSurface("history");
+  };
   const clades=m.clades?.top||[];
-  const selected=snapshot.organisms.find(o=>o.id===selectedId)??null;
+  const selected=selectedId===null?null:presentation.organismById(selectedId);
   const accounting=m.nutrient_field?.accounting?.absolute_residual??[];
 
   return <div className="app-shell">
     <header className="topbar">
       <div className="hud-cell brand-cell"><span className="eyebrow">Living Evolution Explorer</span><strong className="world-name">Digital Evolution Ecosystem</strong></div>
-      <div className="hud"><div className="hud-cell"><span className="hud-label">Tick</span><span className="hud-value" data-testid="tick">{snapshot.tick.toLocaleString()}</span><span className="hud-sub">{formatYear(snapshot.tick)}</span></div><div className="hud-cell"><span className="hud-label">Living</span><span className="hud-value">{snapshot.population}</span></div><div className="hud-cell"><span className="hud-label">Dormant</span><span className="hud-value">{snapshot.dormantPopulation}</span></div><button className="hud-settings" onClick={()=>setSettingsOpen(true)}>World settings{pendingDirty&&<span className="pending-dot" data-testid="settings-pending" aria-hidden="true"/>}</button></div>
+      <div className="hud"><div className="hud-cell"><span className="hud-label">Tick</span><span className="hud-value" data-testid="tick">{live.tick.toLocaleString()}</span><span className="hud-sub">{formatYear(live.tick)}</span></div><div className="hud-cell"><span className="hud-label">Living</span><span className="hud-value">{live.population}</span></div><div className="hud-cell"><span className="hud-label">Dormant</span><span className="hud-value">{live.dormantPopulation}</span></div><button className="hud-settings" onClick={()=>setSettingsOpen(true)}>World settings{pendingDirty&&<span className="pending-dot" data-testid="settings-pending" aria-hidden="true"/>}</button></div>
     </header>
 
     <nav className="rail" aria-label="Primary">
@@ -739,7 +923,7 @@ export function App(){
             <span>{LENS_LABELS[lens]}</span><span className="lens-caret" aria-hidden="true">{lensMenuOpen?"▴":"▾"}</span>
           </button>
           <div className="lens-options" role="group" aria-label="Lens">
-          {(["normal","nutrients","waste","clades","traits"] as Lens[]).map(v=><button key={v} className={lens===v?"active":""} aria-pressed={lens===v} onClick={()=>{setLens(v);setLensMenuOpen(false)}}>{LENS_LABELS[v]}</button>)}
+          {(["normal","nutrients","waste","clades","traits"] as Lens[]).map(v=><button key={v} className={lens===v?"active":""} aria-pressed={lens===v} onClick={()=>{aftermathEvent({type:"manual-lens-change"});setLens(v);setLensMenuOpen(false)}}>{LENS_LABELS[v]}</button>)}
           </div>
           {lens==="nutrients"&&<select aria-label="Resource view" value={resourceView} onChange={e=>setResourceView(e.target.value as ResourceView)}><option value="combined">Combined</option><option value="a">Nutrient A</option><option value="b">Nutrient B</option><option value="c">Metabolite C</option></select>}
           {lens==="waste"&&<span className="lensnote" role="note">Metabolic Waste, exact and untextured: brighter means more waste in that cell (a luminance ramp, so the reading does not depend on hue). The Landscape lens shows the same field differently — loaded ground loses its green cast and settles toward pale, desaturated ash, lifted well clear of barren soil and stippled so the texture reads without colour.</span>}
@@ -747,14 +931,21 @@ export function App(){
         </div>
         <div className="world-wrap">
           <div className="world-scene" aria-hidden="true"><div className="glow g-a"/><div className="glow g-b"/><div className="glow g-c"/><div className="ambient"/></div>
-          <WorldCanvas snapshot={snapshot} lens={lens} resourceView={resourceView} traitView={traitView} selectedId={selectedId} onSelect={setSelectedId} cam={cam} zoom={zoom} onCamera={setCam} onView={reportView}/>
+          <WorldCanvas worldId={ident.worldId} tick={live.tick} env={env} organisms={presentation.organisms} lens={lens} resourceView={resourceView} traitView={traitView} selectedId={selectedId} onSelect={setSelectedId} cam={cam} zoom={zoom} onCamera={setCam} onView={reportView}/>
+          {showCompactAftermath&&aftermathProjection&&aftermathPresentation&&snapshot!=null&&<AftermathStage2Panel
+            projection={aftermathProjection}
+            presentation={aftermathPresentation}
+            remainingTicks={Math.max(0,(snapshot.aftermath?.resolutionTick??live.tick)+25_000-live.tick)}
+            onEvent={aftermathEvent}
+            onReviewHistory={recordId=>reviewAftermathHistory(recordId)}
+          />}
           {/* A pending decision outranks inspection, so it also yields the view
               overlay: leaving the minimap/zoom controls under the sheet made
               zoom unreachable (AC8). The world canvas itself stays visible as
               context. View state is untouched, so the controls return exactly
               as they were when the decision resolves. */}
           {!pending&&<div className="world-overlay">
-            <div className="minimap-frame"><WorldMinimap snapshot={snapshot} cam={cam} view={view}/></div>
+            <div className="minimap-frame"><WorldMinimap resources={env.resources} organisms={presentation.organisms} cam={cam} view={view}/></div>
             <div className="zoom-controls" role="group" aria-label="World view">
               <button aria-label="Zoom out" onClick={()=>setZoomClamped(zoom-.5)} disabled={zoom<=ZOOM_MIN}>−</button>
               <span className="zoom-readout" data-testid="zoom-level">{zoom.toFixed(1)}×</span>
@@ -770,9 +961,9 @@ export function App(){
               is continuous. A pending decision always outranks an aftermath
               (AC15): it takes the slot and the aftermath record survives
               underneath, to be shown again once this decision resolves. */}
-          {(showDecision||showAftermath)&&<section className="decision-sheet" role="dialog" aria-modal="false"
+          {(showDecision||showAftermath||showAftermathStage2)&&<section className="decision-sheet" role="dialog" aria-modal="false"
             aria-label={showDecision?(pending!.source==="world_catalyst"?"World catalyst":"Event decision"):"Aftermath"}
-            data-testid="sheet-slot" data-mode={showDecision?"decision":"aftermath"}>
+            data-testid="sheet-slot" data-mode={showDecision?"decision":showAftermath?"aftermath":"aftermath-stage2"}>
             {showDecision
               ? <div data-testid="decision-sheet" data-source={pending!.source}>
                   <span className="eyebrow">{pending!.source==="world_catalyst"?"World catalyst — your move":"A decision is waiting"}</span>
@@ -788,7 +979,15 @@ export function App(){
                   </div>
                   <p className="decision-foot">Time stays paused until you choose. Leaving an intervention out changes nothing.</p>
                 </div>
-              : <AftermathPanel snapshot={snapshot} onAcknowledge={acknowledgeAftermath} busy={acknowledging}/>}
+              : showAftermath
+                ? <AftermathPanel aftermath={interp.aftermath} capacity={env.resources.capacity} onAcknowledge={acknowledgeAftermath} busy={acknowledging}/>
+                : aftermathProjection&&aftermathPresentation&&snapshot!=null&&<AftermathStage2Panel
+                  projection={aftermathProjection}
+                  presentation={aftermathPresentation}
+                  remainingTicks={Math.max(0,(snapshot.aftermath?.resolutionTick??live.tick)+25_000-live.tick)}
+                  onEvent={aftermathEvent}
+                  onReviewHistory={recordId=>reviewAftermathHistory(recordId)}
+                />}
           </section>}
         </div>
       </section>
@@ -799,7 +998,7 @@ export function App(){
             remains visible as context, and the simulation stays paused exactly
             as the decision contract already guarantees. Nothing about the
             simulation changes; this only decides what is painted. */}
-        {surface==="world"&&!pending&&<div className={inspectorOpen?"inspector sheet":"inspector sheet collapsed"}>
+        {surface==="world"&&!pending&&!showAftermath&&!showAftermathStage2&&<div className={inspectorOpen?"inspector sheet":"inspector sheet collapsed"}>
           {/* Progressive disclosure: with nothing selected there is no handle
               at all, and with something selected it is a small chip naming
               it — not a permanently expanded full-width bar. */}
@@ -808,8 +1007,8 @@ export function App(){
           </button>}
           {inspectorOpen&&<>{selected?<SelectedOrganismCard selected={selected} onViewLineage={()=>{setSelectedCladeId(selected.cladeId);setSurface("tree")}} onClear={()=>setSelectedId(null)}/>:<>
             <span className="eyebrow">World now</span><h2>{m.ecological_outcome}</h2><p className="gloss">{glossOutcome(m.ecological_outcome)}</p><p>{m.population} living · peak {m.peak_population}</p><dl>
-              <div><dt>Active</dt><dd>{snapshot.activePopulation}</dd></div>
-              <div><dt>Dormant</dt><dd>{snapshot.dormantPopulation}</dd></div>
+              <div><dt>Active</dt><dd>{live.activePopulation}</dd></div>
+              <div><dt>Dormant</dt><dd>{live.dormantPopulation}</dd></div>
               <div><dt>Effective niches</dt><dd>{Number(m.effective_niches||0).toFixed(2)}</dd></div>
               <div><dt>Metabolite C</dt><dd>{((m.metabolite_c?.fraction||0)*100).toFixed(0)}%</dd></div>
               <div><dt>Cross-feeders</dt><dd>{((m.metabolic_roles?.crossfeeder_fraction||0)*100).toFixed(0)}%</dd></div>
@@ -820,8 +1019,8 @@ export function App(){
         {surface==="history"&&<section className="panel">
         <div className="panel-head"><div><span className="eyebrow">What happened here?</span><h2>History</h2></div><span>{records.length} durable ecological records</span></div>
         {(()=>{const story=records.find((r)=>r.id===selectedStoryId);if(!story)return null;const ev=story.evidence;const niche=story.kind==="niche";return<article key={story.id} className="story-detail"><span>{formatTickAge(story.tick)} · {story.phase}</span><h3>{story.title}</h3><p>{story.summary}</p>{niche&&<dl className="evidence"><div><dt>Waste load then</dt><dd>{typeof ev.waste_fraction==="number"?`${Math.round(ev.waste_fraction*100)}% of waste-field capacity`:"not measured"}</dd></div><div><dt>Waste load when the regime first formed</dt><dd>{typeof ev.base_waste==="number"?`${Math.round(ev.base_waste*100)}%`:"not measured"}</dd></div><div><dt>Organisms in burden-relevant cells</dt><dd>{typeof ev.waste_exposed_share==="number"?`${Math.round(ev.waste_exposed_share*100)}%`:"not measured"}</dd></div><div><dt>Waste tolerance mean</dt><dd>{typeof ev.tolerance_mean==="number"?ev.tolerance_mean.toFixed(3):"not measured"}</dd></div><div><dt>Waste cleanup mean</dt><dd>{typeof ev.cleanup_mean==="number"?ev.cleanup_mean.toFixed(3):"not measured"}</dd></div></dl>}{niche&&<p className="causal-note"><strong>Observational.</strong> This record pairs the environmental change with a measured strategy shift in the same run. It is not a matched comparison, so it cannot show that the modification caused the shift. Matched evidence for waste reliance exists only in the Slice 2 validation survey, where one of 24 surveyed worlds established such a regime — possible, not typical.</p>}{!niche&&<dl className="evidence"><div><dt>Population then</dt><dd>{ev.population}</dd></div><div><dt>Dormant share</dt><dd>{Math.round((ev.dormant_fraction||0)*100)}%</dd></div><div><dt>Metabolite C energy</dt><dd>{Math.round((ev.c_energy_share||0)*100)}%</dd></div><div><dt>Leading way of life</dt><dd>{String(ev.dominant_role||"—")}</dd></div></dl>}{(()=>{const named=typedRefs(story.entity_refs).map(r=>r.kind==="clade"?formatCladeId(cladeId(r.id)):r.kind==="lineage"?formatLineageId(lineageId(r.id)):null).filter((s):s is string=>s!==null);if(named.length>0)return <p>Entities involved: {named.join(", ")}</p>;if(niche)return <p>No lineage or clade accounted for enough of the interval waste flow to be named.</p>;return null})()}<button onClick={()=>setSelectedStoryId(null)}>Back to all stories</button></article>})()}
-        {records.length===0?<><p>No durable ecological arc has been established yet.</p><h3>Recent simulation events</h3>{snapshot.events.slice(-8).reverse().map((e,i)=><article key={`${e.tick}-${i}`}><span>Tick {e.tick.toLocaleString()}</span><p>{e.label}</p></article>)}</>:records.slice().reverse().map((r)=><article key={r.id}><button className="record-button" onClick={()=>setSelectedStoryId(r.id)}><span>{formatTickAge(r.tick)} · {r.phase}</span><h3>{r.title}</h3><p>{r.summary}</p></button></article>)}
-        {snapshot.resolvedDecisions.length>0&&<>
+        {records.length===0?<><p>No durable ecological arc has been established yet.</p><h3>Recent simulation events</h3>{interp.events.slice(-8).reverse().map((e,i)=><article key={`${e.tick}-${i}`}><span>Tick {e.tick.toLocaleString()}</span><p>{e.label}</p></article>)}</>:records.slice().reverse().map((r)=><article key={r.id}><button className="record-button" onClick={()=>setSelectedStoryId(r.id)}><span>{formatTickAge(r.tick)} · {r.phase}</span><h3>{r.title}</h3><p>{r.summary}</p></button></article>)}
+        {snapshot!==null&&snapshot.resolvedDecisions.length>0&&<>
           <h3>Your decisions</h3>
           <p>Actions you took, in order. A decision is an action followed by later outcomes, not a proven cause.</p>
           {snapshot.resolvedDecisions.slice().reverse().map(d=>{
@@ -846,14 +1045,14 @@ export function App(){
       {surface==="tree"&&<section className="panel">
         <div className="panel-head"><div><span className="eyebrow">Evolutionary branches</span><h2>Tree</h2></div><span>{m.clades?.active??0} active clades</span></div>
         <p>{m.clades?.definition}</p>
-        {(()=>{const clade=clades.find((c)=>c.id===selectedCladeId);if(!clade)return null;const members=snapshot.organisms.filter(o=>o.cladeId===clade.id);return<article key={`detail-${clade.id}`} className="lineage-detail"><span className="breadcrumb">Tree → Clade {formatCladeId(clade.id)}</span><h3>{formatCladeId(clade.id)}</h3><p>{clade.count} living · {((clade.share||0)*100).toFixed(0)}% of the world · {members.filter(o=>o.activity==="dormant").length} dormant right now</p><p>{(clade.mutations||[]).join(" + ")||"founder ancestry"} · {formatTickAge(Number(clade.age||0))} old</p><p className="gloss">{clade.count>0?"This family is alive in the world right now.":"No living members — this branch survives only in history."}</p><button onClick={()=>{const first=members[0];if(first){setSelectedId(first.id);setSurface("world")}}}>Locate in world</button><button onClick={()=>setSelectedCladeId(null)}>Back to all clades</button></article>})()}
+        {(()=>{const clade=clades.find((c)=>c.id===selectedCladeId);if(!clade)return null;const members=presentation.organisms.filter(o=>o.cladeId===clade.id);return<article key={`detail-${clade.id}`} className="lineage-detail"><span className="breadcrumb">Tree → Clade {formatCladeId(clade.id)}</span><h3>{formatCladeId(clade.id)}</h3><p>{clade.count} living · {((clade.share||0)*100).toFixed(0)}% of the world · {members.filter(o=>o.activity==="dormant").length} dormant right now</p><p>{(clade.mutations||[]).join(" + ")||"founder ancestry"} · {formatTickAge(Number(clade.age||0))} old</p><p className="gloss">{clade.count>0?"This family is alive in the world right now.":"No living members — this branch survives only in history."}</p><button onClick={()=>{const first=members[0];if(first){setSelectedId(first.id);setSurface("world")}}}>Locate in world</button><button onClick={()=>setSelectedCladeId(null)}>Back to all clades</button></article>})()}
         <div className="cards">{clades.map((c)=><article key={c.id} style={{borderTopColor:cladeColor(c.id)}}><button className="record-button" onClick={()=>setSelectedCladeId(c.id)}><h3>{formatCladeId(c.id)}</h3><p>{c.count} living · {(c.share*100).toFixed(0)}%</p><small>{(c.mutations||[]).join(" + ")||"founder ancestry"} · {formatTickAge(Number(c.age||0))} old</small></button></article>)}</div>
       </section>}
 
       {surface==="experiments"&&<section className="panel">
         {/* impl: REQ-UX-001 (World/History/Tree/Experiments investigation surfaces) */}
         <span className="eyebrow">What if this world changed?</span><h2>Experiments</h2>
-        {snapshot.control?<div className="compare"><div><strong>Experiment</strong><span>{snapshot.population} living</span><span>{m.ecological_outcome}</span><span>{formatYear(snapshot.tick)}</span></div><div><strong>Untouched twin</strong><span>{snapshot.control.population} living</span><span>{snapshot.control.metrics.ecological_outcome}</span><span>{formatYear(snapshot.control.tick)}</span></div></div>:<p>No matched control exists yet. Applying an intervention creates an exact twin first.</p>}
+        {interp.control?<div className="compare"><div><strong>Experiment</strong><span>{live.population} living</span><span>{m.ecological_outcome}</span><span>{formatYear(live.tick)}</span></div><div><strong>Untouched twin</strong><span>{interp.control.population} living</span><span>{interp.control.metrics.ecological_outcome}</span><span>{formatYear(interp.control.tick)}</span></div></div>:<p>No matched control exists yet. Applying an intervention creates an exact twin first.</p>}
         <div className="actions"><button onClick={()=>{if(blockWhilePending())return;runtime.intervene("global")}}>Global nutrient crash</button><button onClick={()=>{if(blockWhilePending())return;runtime.intervene("droughtA")}}>Nutrient A drought</button><button onClick={()=>{if(blockWhilePending())return;runtime.intervene("droughtB")}}>Nutrient B drought</button></div>
         {records.length>0&&<><h3>Histories so far</h3><p>What the experiment branch has lived through — the untouched twin keeps its own time.</p>{records.slice(-4).reverse().map((r)=><article key={r.id}><span>{formatTickAge(r.tick)} · {r.phase}</span><h3>{r.title}</h3></article>)}</>}
       </section>}
@@ -871,7 +1070,7 @@ export function App(){
           The wrappers are `display:contents` on desktop, so the desktop
           control bar is unchanged. */}
       <span className="control-row control-row-primary">
-        <button onClick={()=>{if(blockWhilePending())return;setRunning(v=>!v)}}>{running?"Pause":"Play"}</button>
+        <button onClick={()=>{if(deadRef.current){setStatus("Simulation stopped — reload to continue");return}if(blockWhilePending())return;setRunning(v=>!v)}}>{running?"Pause":"Play"}</button>
         {/* AC21: bounded speeds only. Max is gone from the product - it was a
             throughput ceiling the player could not read, not a speed, and its
             ratio assertion was the flaky part of #46. The internal
@@ -890,7 +1089,7 @@ export function App(){
         <button onClick={load}>Resume</button>
         <button onClick={exportEvidence}>Export</button>
       </span>
-      <span className="status">{status}</span>
+      <span className="status" data-testid="runtime-status">{status}</span>
     </footer>
 
     {settingsOpen&&<div className="modal-backdrop" role="presentation"><section className="modal" role="dialog" aria-modal="true" aria-label="World settings">
@@ -909,7 +1108,7 @@ export function App(){
       <div className="actions"><button className="primary" onClick={newUniverse}>Create universe</button><button onClick={()=>setDiagnosticsOpen(v=>!v)}>Developer diagnostics</button></div>
       {pendingDirty?<p className="pending-note" data-testid="pending-note">Unapplied changes — Create universe to apply</p>:<p className="active-note" data-testid="active-note">Settings match the running universe</p>}
       {diagnosticsOpen&&<div className="diagnostics">
-        <strong>Engine {ENGINE_VERSION}</strong>
+        <strong>Engine {ident.engineVersion}</strong>
         <span>Resource accounting residuals: {accounting.length?accounting.map((v:number)=>Number(v).toExponential(2)).join(" / "):"—"}</span>
         <span>Analysis records: {records.length}</span>
         <span>Biology target population rule: none</span>
