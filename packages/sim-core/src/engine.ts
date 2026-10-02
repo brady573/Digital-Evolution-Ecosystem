@@ -42,15 +42,22 @@ const WASTE_YIELD=.15,WASTE_CAP_FRACTION=.25,WASTE_DIFFUSION=.20,WASTE_DECAY=.00
  * INHIBITOR_DIFFUSION = WASTE_DIFFUSION (.20): same toroidal neighbor-flux
  * algorithm as WasteField, so the same rate keeps spatial semantics (signal
  * range vs locality) comparable between the two substances.
- * INHIBITOR_DECAY = WASTE_DECAY (.0001): same slow passive loss, so an
- * unreplenished signal persists on the same timescale as waste while Task 3+
- * measures whether interference needs faster/slower clearing.
+ * INHIBITOR_DECAY = 0.005 (RETUNED 0.23.1, was WASTE_DECAY .0001):
+ * the inhibitor has no active sink — waste is cleared by evolved cleanup,
+ * but nothing consumes the inhibitor, so passive decay is its ONLY
+ * clearance. At .0001 the field integrated ~10k ticks of deposits and
+ * saturated globally (0.96 @70k on the patchwork fixture) under founder
+ * secretion alone, erasing the waste/niche pathway on 8/8 surveyed seeds
+ * (Correction 2 DESIGN TENSION, option b). At .005 a local signal clears
+ * on a ~200-tick timescale, so interference stays local and transient
+ * unless secretion is sustained — a costly conditional strategy, never a
+ * universal background pressure. Per-cell headroom and diffusion unchanged.
  * INHIBITOR_CAP_FRACTION = WASTE_CAP_FRACTION (.25): same per-cell headroom
  * relative to total capacity, so saturation (explicit saturated loss) only
  * binds under genuinely concentrated secretion, never under background flux.
  */
 // impl: REQ-SLICE-001 (Slice 1 inhibitor-field calibration anchors)
-const INHIBITOR_DIFFUSION=WASTE_DIFFUSION,INHIBITOR_DECAY=WASTE_DECAY,INHIBITOR_CAP_FRACTION=WASTE_CAP_FRACTION;
+const INHIBITOR_DIFFUSION=WASTE_DIFFUSION,INHIBITOR_DECAY=0.005,INHIBITOR_CAP_FRACTION=WASTE_CAP_FRACTION;
 /**
  * Slice 1 interference (Task 3) physiology calibration. Each constant anchors
  * to a proven Slice 2 scale; the choices are viable tradeoffs, never target
@@ -593,7 +600,7 @@ class S{
   this.rInit=R((c.seed^0xA341316C)>>>0);this.rFood=R((c.seed^0xC8013EA4)>>>0);this.rMove=R((c.seed^0xAD90777D)>>>0);this.rMut=R((c.seed^0x7E95761E)>>>0);this.rCat=R((c.seed^0x9E3779B9)>>>0);
   this.t=0;this.o=[];this.ev=[];this.sn=[];this.long=[];this.longStride=2503;this.eventSn=[];this.L=new Map;this.FAM=new Map;this.nL=1;this.nO=1;this.peakPopulation=0;this.peakPopulationTick=0;this.tb=B();this.last=I();this.cur=I();this.totalUse=[0,0,0];this.totalEnergy=[0,0,0];this.totalReproSupport=[0,0,0,0];this.resources=new RS(this.c);this.drought=null;this.response=null;this.extinctTick=null;this.extinctionContext=null;this.nh=[];this.lineageInterval=new Map();this.lastLineageFlows=null;
   let ri=this.rInit;
-  for(let k=0;k<c.pop;k++){let z=c.div,l=this.newL(0,[]),di=Q((ri()*2-1)*z,-1,1),ha=Q(di*.45+(ri()*2-1)*z*.75,-1,1);let matureAt=FOUNDER_MATURITY_MIN+Math.floor(ri()*FOUNDER_MATURITY_SPAN),id=this.nO++,bu=this.c.enable_byproduct?Q(.04+.28*H01(c.seed,id,17),0,1.5):0,dr=this.c.enable_dormancy?Q(.18+.62*H01(c.seed,id,29),0,1.5):0,to=Q(.05+.25*H01(c.seed,id,41),0,1.5),cu=Q(.05+.25*H01(c.seed,id,53),0,1.5),sec=Q(.05+.25*H01(c.seed,id,61),0,1.5),rst=Q(.05+.25*H01(c.seed,id,67),0,1.5);this.o.push({id,parent:null,generation:0,born:0,matureAt,readyAt:matureAt,x:ri()*600,y:ri()*600,en:60,h:ri()*6.28,sp:Q(1.15*(1+(ri()*2-1)*z),.25,4),se:Q(55*(1+(ri()*2-1)*z),10,180),me:Q(.16*(1+(ri()*2-1)*z),.04,.5),rp:Q(92*(1+(ri()*2-1)*z),55,220),di,ha,bu,dr,to,cu,in:sec,re:rst,activity:'active',dormantSince:null,wakeCount:0,lastWakeTick:null,ma:0,mb:0,mc:0,pc:0,ga:0,gb:0,gc:0,ra:0,rb:0,rc:0,l})}
+  for(let k=0;k<c.pop;k++){let z=c.div,l=this.newL(0,[]),di=Q((ri()*2-1)*z,-1,1),ha=Q(di*.45+(ri()*2-1)*z*.75,-1,1);let matureAt=FOUNDER_MATURITY_MIN+Math.floor(ri()*FOUNDER_MATURITY_SPAN),id=this.nO++,bu=this.c.enable_byproduct?Q(.04+.28*H01(c.seed,id,17),0,1.5):0,dr=this.c.enable_dormancy?Q(.18+.62*H01(c.seed,id,29),0,1.5):0,to=Q(.05+.25*H01(c.seed,id,41),0,1.5),cu=Q(.05+.25*H01(c.seed,id,53),0,1.5),sec=Q(.0+.02*H01(c.seed,id,61),0,1.5),rst=Q(.0+.02*H01(c.seed,id,67),0,1.5); /* RETUNED 0.23.1 (was .05+.25, mean ~0.175): interference strategies evolve from naive founders, never arrive as founding conditions — secretion CREATES pressure (unlike to/cu, which mitigate an absent one), so founding at 0.175 saturated the field before evolution could act. Range and mutation reach unchanged. */this.o.push({id,parent:null,generation:0,born:0,matureAt,readyAt:matureAt,x:ri()*600,y:ri()*600,en:60,h:ri()*6.28,sp:Q(1.15*(1+(ri()*2-1)*z),.25,4),se:Q(55*(1+(ri()*2-1)*z),10,180),me:Q(.16*(1+(ri()*2-1)*z),.04,.5),rp:Q(92*(1+(ri()*2-1)*z),55,220),di,ha,bu,dr,to,cu,in:sec,re:rst,activity:'active',dormantSince:null,wakeCount:0,lastWakeTick:null,ma:0,mb:0,mc:0,pc:0,ga:0,gb:0,gc:0,ra:0,rb:0,rc:0,l})}
   this.peakPopulation=this.o.length;this.updateLineageHistory();this.updateFamilyHistory();this.log('Universe created');if(!this.study)this.long.push(this.pack());
  }
  newL(p:number,m:string[]):number{let id=this.nL++;this.L.set(id,{id,parent:p,born:this.t,mutations:m,peak:0,last:this.t,established:false});return id}

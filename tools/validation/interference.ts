@@ -627,7 +627,7 @@ import {
 function testCheckpointRoundTripWithInterference() {
   // Version anchors first: these fail before the Task 4 bump, giving the
   // required red run (version/schema mismatch).
-  assert.equal(ENGINE_VERSION, "0.23.0", "engine version bumped for interference persistence");
+  assert.equal(ENGINE_VERSION, "0.23.1", "engine version bumped for interference persistence + retune");
   assert.equal(CURRENT_SCHEMA, "0.5", "current checkpoint schema is 0.5");
   assert.ok(
     (SUPPORTED_SCHEMAS as readonly string[]).includes("0.5"),
@@ -726,7 +726,7 @@ function testOldSavesRefusedExplicitly() {
   session.create(config(424242));
   const payload: any = JSON.parse(JSON.stringify(session.checkpoint()));
   assert.equal(payload.checkpointSchemaVersion, "0.5", "fresh checkpoints declare 0.5");
-  assert.equal(payload.engineVersion, "0.23.0", "fresh checkpoints carry engine 0.23.0");
+  assert.equal(payload.engineVersion, "0.23.1", "fresh checkpoints carry engine 0.23.1");
 
   // Faithful 0.4 shape: schema + engine downgraded consistently, interference
   // state absent — no 0.22.0 build ever wrote it.
