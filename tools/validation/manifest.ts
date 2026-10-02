@@ -340,6 +340,34 @@ export const UNITS: readonly ValidationUnit[] = [
       "Niche differentiation is possible and typical where claimed, its limits still hold, and the lineages it names are asserted as lineages rather than as untyped numbers.",
   },
   {
+    id: "local-retention",
+    title: "Local opportunity retention factorial (R0b)",
+    script: "test:local-retention",
+    cls: "deterministic",
+    enforcement: "blocking",
+    mergeGate: true,
+    domains: withApparatus("contracts", "sim-core", "sim-runtime"),
+    needs: [],
+    parallelSafe: true,
+    baselineSeconds: 150,
+    claim:
+      "Denied A/B opportunity persists longer under zero redistribution than fast redistribution, with closed accounting and exact determinism. Competitive outcomes across the retention/mixing factorial are REPORTED, not asserted: R0b found no conditional advantage (DESIGN TENSION), so this gate must never be read as claiming one.",
+  },
+  {
+    id: "inducible-interference",
+    title: "Inducible interference mechanism (R0)",
+    script: "test:inducible-interference",
+    cls: "deterministic",
+    enforcement: "blocking",
+    mergeGate: true,
+    domains: withApparatus("contracts", "sim-core", "sim-runtime"),
+    needs: [],
+    parallelSafe: true,
+    baselineSeconds: 32,
+    claim:
+      "Inducible secretion is gated by crowding and scarcity through an order-free pre-step context, stays local, pays proportional costs, and suppresses only acquisition — all deterministically, with default-off parity. Competitive outcome is REPORTED, not asserted: R0 found no conditional advantage (DESIGN TENSION), so this gate must never be read as claiming one.",
+  },
+  {
     id: "aftermath",
     title: "Aftermath state and comparison",
     script: "test:aftermath",
@@ -776,6 +804,7 @@ export const GROUPS: readonly ValidationGroup[] = [
     // appear in exactly one group, so that `verify` executes it once.
     unitIds: [
       "catalysts",
+      "inducible-interference",
       "flows",
       "runtime-boundary",
       "time-controls",
@@ -783,6 +812,7 @@ export const GROUPS: readonly ValidationGroup[] = [
       "ecology",
       "niche",
       "aftermath",
+      "local-retention",
       "dependency-policy",
       "dependency-arc",
       "dependency-possibility",
@@ -867,7 +897,7 @@ export const GROUPS: readonly ValidationGroup[] = [
   {
     id: "ci-sim-c",
     title: "Deterministic suites C (niche, ecology, runtime boundary)",
-    unitIds: ["niche", "ecology", "runtime-boundary"],
+    unitIds: ["niche", "ecology", "runtime-boundary", "inducible-interference", "local-retention"],
     ci: true,
   },
   {

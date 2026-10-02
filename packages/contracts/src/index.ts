@@ -34,6 +34,11 @@ export interface EngineConfig {
   readonly resource_grid: number;
   readonly enable_byproduct: boolean;
   readonly enable_dormancy: boolean;
+  /** R0 inducible interference (default off): inducible secretion capacity,
+   * induction-gated expression, inhibitor field, acquisition suppression.
+   * Absent/false = bit-identical 0.22.0 biology (no trait draws, no field
+   * activity); R0 assays opt in explicitly. */
+  readonly enable_interference?: boolean;
   readonly study?: boolean;
 }
 
@@ -1037,6 +1042,7 @@ const CHECKPOINT_TAGS: readonly string[] = [
   "simulation",
   "resource-system",
   "waste-field",
+  "inhibitor-field",
   "legacy-observer",
   "map",
   "undefined",
@@ -1082,7 +1088,7 @@ function validateEncodedSimulation(value: unknown, path: string, source: Checkpo
       if (typeof tag !== "string" || !CHECKPOINT_TAGS.includes(tag)) {
         reject(at, "unsupported-tag", `unrecognised checkpoint tag ${JSON.stringify(tag)}`);
       }
-      if (["simulation", "resource-system", "waste-field", "legacy-observer"].includes(tag)) {
+      if (["simulation", "resource-system", "waste-field", "inhibitor-field", "legacy-observer"].includes(tag)) {
         if (!isPlainObject(node.props)) reject(`${at}.props`, "malformed-container", "tagged state needs object props");
         for (const [key, item] of Object.entries(node.props)) walk(item, `${at}.props.${key}`);
       } else if (tag === "map") {
@@ -1306,6 +1312,23 @@ function validateResourceSystem(value: unknown, at: string): void {
     }
   }
   validateWasteField(props.waste, `${at}.props.waste`);
+  // R0: pre-inhibitor saves genuinely lack the container; absence is restored
+  // as an empty field, never refused. A present container must validate.
+  if (props.inhibitor !== undefined) validateInhibitorField(props.inhibitor, `${at}.props.inhibitor`);
+}
+
+/** The inhibitor signal field is read cell-by-cell in the biological step. */
+function validateInhibitorField(value: unknown, at: string): void {
+  if (!isPlainObject(value) || value[CHECKPOINT_TAG_KEY] !== "inhibitor-field") {
+    reject(at, "malformed-container", "expected tagged inhibitor-field state");
+  }
+  const props = (value as Record<string, unknown>).props as Record<string, unknown>;
+  if (!isPlainObject(props)) reject(`${at}.props`, "malformed-container", "inhibitor field needs object props");
+  for (const field of ["n", "cell", "size", "produced", "decayed", "discarded", "clampAdj", "diffusionRate", "decayRate", "updateStride"] as const) {
+    if (!isFiniteNumber(props[field])) reject(`${at}.props.${field}`, "wrong-type", "expected a finite number");
+  }
+  for (const field of ["stock", "cap", "right", "down", "delta", "decayLast"] as const) validateTypedArray(props[field], `${at}.props.${field}`);
+  if (props.decayBuckets !== undefined && !Array.isArray(props.decayBuckets)) reject(`${at}.props.decayBuckets`, "malformed-container", "expected decay buckets");
 }
 
 /** The waste field is read cell-by-cell in the biological step. */
@@ -1349,6 +1372,14 @@ function validateOrganism(value: unknown, at: string, source: CheckpointSchemaVe
   }
   if (organism.activity !== "active" && organism.activity !== "dormant") {
     reject(`${at}.activity`, "unsupported-tag", "unknown organism activity");
+  }
+  for (const field of ["in", "re"] as const) {
+    const v = organism[field];
+    // R0: pre-interference saves genuinely lack both traits; absence reads
+    // as zero capacity at runtime and is never refused. Present values must
+    // be finite.
+    if (v === undefined) continue;
+    if (!isFiniteNumber(v)) reject(`${at}.${field}`, "wrong-type", "expected a finite trait value");
   }
   for (const [field, introduced] of [["pc", "0.4"], ["to", "0.3"], ["cu", "0.3"]] as const) {
     const value = organism[field];
