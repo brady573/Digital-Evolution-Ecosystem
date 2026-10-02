@@ -28,6 +28,30 @@ async function tick(page:Page){
   return Number(text.replace(/[^0-9]/g,""));
 }
 
+/**
+ * Wait until the world has genuinely stopped moving.
+ *
+ * Clicking Pause stops the requestAnimationFrame scheduler on the next effect
+ * teardown, which is not synchronous with the click: one further advance can
+ * still be in flight, and the HUD it lands on repaints a frame later. Anything
+ * that then computes `target - tick(page)` from that lagging read sends one tick
+ * too many and lands one tick past its target.
+ *
+ * Two consecutive identical reads is the smallest honest condition: a moving
+ * world cannot produce the same tick twice at this cadence.
+ */
+async function settlePaused(page:Page,timeoutMs=10_000){
+  const deadline=Date.now()+timeoutMs;
+  let previous=await tick(page);
+  while(Date.now()<deadline){
+    await page.waitForTimeout(120);
+    const current=await tick(page);
+    if(current===previous)return current;
+    previous=current;
+  }
+  throw new Error(`world never settled after Pause (last tick ${previous})`);
+}
+
 async function waitForTickOrDecision(page:Page,target:number,timeoutMs=120_000){
   const deadline=Date.now()+timeoutMs;
   while(Date.now()<deadline){
@@ -88,6 +112,7 @@ async function main(){
     await page.getByRole("button",{name:"Play"}).click();
     await page.waitForTimeout(900);
     await page.getByRole("button",{name:"Pause"}).click();
+    await settlePaused(page);
     const advanced=await tick(page);
     assert.ok(advanced>0,"worker-owned simulation advances");
 
@@ -617,6 +642,7 @@ async function main(){
     // Back to paused for the exact-tick assertions that follow, sampled here so
     // the baseline is taken at a known-paused moment.
     if(await page.getByRole("button",{name:"Pause"}).count())await page.getByRole("button",{name:"Pause"}).click();
+    await settlePaused(page);
     await page.waitForTimeout(300);
     };
 
@@ -879,6 +905,9 @@ async function main(){
     assert.match(await compactAfterFirstAdvance.innerText(),/observing/,
       "null retained detail also leaves live observation visible");
     await decisionPage.getByRole("button",{name:"Pause"}).click();
+    // The HUD can still be a frame behind the scheduler's teardown, so wait for
+    // the world to actually stop before computing a bounded advance from it.
+    await settlePaused(decisionPage);
 
     // Reach real T+25,000 through ordinary bounded runtime advances, without
     // opening History/Experiments or refreshing retained detail in observation.
@@ -950,6 +979,7 @@ async function main(){
     await decisionPage.waitForTimeout(900);
     assert.ok(await tick(decisionPage)>catalystTick,"explicit play resumes after a catalyst choice");
     await decisionPage.getByRole("button",{name:"Pause"}).click();
+    await settlePaused(decisionPage);
     await decisionPage.getByRole("button",{name:"History"}).click();
     await decisionPage.getByText(/World catalyst offered at tick/).waitFor();
     // A deliberate manual intervention remains available and clears the old
@@ -1111,6 +1141,7 @@ async function runLandscapeChecks(context:import("playwright").BrowserContext){
   await page.getByRole("button",{name:"Play"}).click();
   await page.waitForTimeout(1200);
   await page.getByRole("button",{name:"Pause"}).click();
+  await settlePaused(page);
   const world=page.getByLabel("Evolution world");
 
   // Ink statistics over the drawn canvas: a mean/contrast pair that would
@@ -1270,6 +1301,7 @@ async function runLandscapeChecks(context:import("playwright").BrowserContext){
   await mobile.getByRole("button",{name:"Play"}).click();
   await mobile.waitForTimeout(1000);
   await mobile.getByRole("button",{name:"Pause"}).click();
+  await settlePaused(mobile);
   const mWorld=mobile.getByLabel("Evolution world");
   const mBox=await mWorld.boundingBox();
   const mvp=mobile.viewportSize()??{width:390,height:844};
