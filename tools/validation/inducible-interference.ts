@@ -21,6 +21,8 @@ import {
   TRAIT_DEFINITIONS,
   computeInduction,
   lastCompetitionRecord,
+  createSimulationCheckpoint,
+  restoreSimulationCheckpoint,
 } from "../../packages/sim-core/src/engine.ts";
 
 function iconfig(seed: number, overrides: Partial<EngineConfig> = {}): EngineConfig {
@@ -403,6 +405,44 @@ function testNoDirectEffects() {
   console.log("testNoDirectEffects: PASS");
 }
 
+function testCheckpointRoundTrip() {
+  // R0 §11: inhibitor state affects future biology, so it must survive a
+  // checkpoint round-trip exactly and both branches must continue
+  // identically. Enabled world with real field mass (clustered secretors).
+  const sim = new Simulation(iconfig(41008, { pop: 60 })) as any;
+  const spots: Array<[number, number]> = [];
+  for (let gy = 0; gy < 6; gy++) for (let gx = 0; gx < 6; gx++) spots.push([80 + gx * 28, 80 + gy * 28]);
+  const orgs = sim.o as any[];
+  for (let i = 0; i < orgs.length && i < spots.length; i++) {
+    orgs[i].x = spots[i]![0]; orgs[i].y = spots[i]![1];
+  }
+  for (const o of orgs) { o.in = 1.0; o.re = 1.0; o.en = 300; }
+  for (let t = 0; t < 500; t++) sim.step();
+  assert.ok(sim.resources.inhibitor.produced > 0, "field holds mass before checkpoint");
+  const revived = restoreSimulationCheckpoint(
+    JSON.parse(JSON.stringify(createSimulationCheckpoint(sim))),
+  ) as any;
+  const stockOf = (x: any): number => {
+    let t = 0;
+    const st = x.resources.inhibitor.stock as Float32Array;
+    for (let i = 0; i < st.length; i++) t += st[i]!;
+    return t;
+  };
+  assert.ok(Math.abs(stockOf(revived) - stockOf(sim)) < 1e-9, "inhibitor stock survives round-trip");
+  for (let t = 0; t < 200; t++) { sim.step(); revived.step(); }
+  assert.deepStrictEqual(revived.o, sim.o, "branches continue identically through expiry window");
+  assert.ok(Math.abs(stockOf(revived) - stockOf(sim)) < 1e-6, "field stocks agree after continuation");
+  // Pre-inhibitor saves load: 0.22.0-shaped state without the container
+  // restores with an empty field and identical organisms.
+  const bare = JSON.parse(JSON.stringify(createSimulationCheckpoint(sim)));
+  delete (bare.state.props.resources.props as any).inhibitor;
+  const backfilled = restoreSimulationCheckpoint(bare) as any;
+  assert.ok(backfilled.resources.inhibitor, "missing container backfilled");
+  assert.equal(backfilled.resources.inhibitor.produced, 0, "backfill invents no mass");
+  assert.deepStrictEqual(backfilled.o, sim.o, "organisms untouched by backfill");
+  console.log("testCheckpointRoundTrip: PASS");
+}
+
 function testTraitDefinitions() {
   assert.ok(TRAIT_DEFINITIONS.secretion, "secretion trait defined");
   assert.ok(TRAIT_DEFINITIONS.resistance, "resistance trait defined");
@@ -412,6 +452,7 @@ function testTraitDefinitions() {
 }
 
 testTraitDefinitions();
+testCheckpointRoundTrip();
 testInductionGate();
 testOrderIndependence();
 testLocalityPulse();
