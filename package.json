@@ -33,6 +33,7 @@
     "test:dependency:washout": "tsx tools/validation/dependency.ts -- --skip-policy --only=washout",
     "test:catalysts:fast": "tsx tools/validation/catalysts.ts -- --fast",
     "test:niche": "tsx tools/validation/niche.ts",
+    "test:spatial-occupancy": "tsx tools/validation/spatial-occupancy.ts",
     "test:niche-survey": "tsx tools/validation/niche-survey.ts",
     "test:washout-reliance": "tsx tools/validation/washout-reliance.ts",
     "test:phenotype": "tsx tools/validation/phenotype.ts && tsx tools/validation/phenotype-world.ts",

@@ -47,8 +47,8 @@ const B=():Record<string,[number,number]>=>Object.fromEntries(Object.keys(T).map
 /** Per-stride biological interval counters (births, deaths, resource flows, dormancy transitions). */
 // impl: REQ-POP-001 (birth/death/flow counters drive emergent population arcs)
 interface LineageDelta{consumedA:number;consumedB:number;consumedC:number;energyA:number;energyB:number;energyC:number;producedC:number;births:number;deaths:number;wasteProduced:number;wasteRemoved:number;burdenEnergy:number;cleanupEnergy:number;cleanupExec:number}
-interface Interval{births:number;deaths:number;mutation_attempts:number;effective_mutations:number;resources_spawned:number;resources_suppressed:number;resources_consumed:number;spawned_a:number;spawned_b:number;consumed_a:number;consumed_b:number;consumed_c:number;produced_c:number;decayed_c:number;energy_a:number;energy_b:number;energy_c:number;repro_supported_a:number;repro_supported_b:number;repro_supported_mixed:number;repro_supported_c:number;dormancy_entries:number;wakes:number;wake_clades:Record<string,number>;proc_exec_a:number;proc_exec_b:number;proc_exec_c:number;produced_w:number;removed_w:number;decayed_w:number;burden_energy:number;cleanup_energy:number;cleanup_exec:number;[k:string]:number|Record<string,number>}
-const I=():Interval=>({births:0,deaths:0,mutation_attempts:0,effective_mutations:0,resources_spawned:0,resources_suppressed:0,resources_consumed:0,spawned_a:0,spawned_b:0,consumed_a:0,consumed_b:0,consumed_c:0,produced_c:0,decayed_c:0,energy_a:0,energy_b:0,energy_c:0,repro_supported_a:0,repro_supported_b:0,repro_supported_mixed:0,repro_supported_c:0,dormancy_entries:0,wakes:0,wake_clades:{},proc_exec_a:0,proc_exec_b:0,proc_exec_c:0,produced_w:0,removed_w:0,decayed_w:0,burden_energy:0,cleanup_energy:0,cleanup_exec:0});
+interface Interval{births:number;deaths:number;mutation_attempts:number;effective_mutations:number;resources_spawned:number;resources_suppressed:number;resources_consumed:number;spawned_a:number;spawned_b:number;consumed_a:number;consumed_b:number;consumed_c:number;produced_c:number;decayed_c:number;energy_a:number;energy_b:number;energy_c:number;repro_supported_a:number;repro_supported_b:number;repro_supported_mixed:number;repro_supported_c:number;dormancy_entries:number;wakes:number;wake_clades:Record<string,number>;proc_exec_a:number;proc_exec_b:number;proc_exec_c:number;movement_intents:number;movement_settled:number;movement_blocked:number;movement_redirected:number;repro_eligible:number;blocked_births:number;produced_w:number;removed_w:number;decayed_w:number;burden_energy:number;cleanup_energy:number;cleanup_exec:number;[k:string]:number|Record<string,number>}
+const I=():Interval=>({births:0,deaths:0,mutation_attempts:0,effective_mutations:0,resources_spawned:0,resources_suppressed:0,resources_consumed:0,spawned_a:0,spawned_b:0,consumed_a:0,consumed_b:0,consumed_c:0,produced_c:0,decayed_c:0,energy_a:0,energy_b:0,energy_c:0,repro_supported_a:0,repro_supported_b:0,repro_supported_mixed:0,repro_supported_c:0,dormancy_entries:0,wakes:0,wake_clades:{},proc_exec_a:0,proc_exec_b:0,proc_exec_c:0,movement_intents:0,movement_settled:0,movement_blocked:0,movement_redirected:0,repro_eligible:0,blocked_births:0,produced_w:0,removed_w:0,decayed_w:0,burden_energy:0,cleanup_energy:0,cleanup_exec:0});
 const H_STD=[50000,100000,200000,300000],H_DEEP=[100000,300000,500000,1000000];
 const SCI={disclaimer:'Sources inform experimental design and interpretation; the exact simulation equations remain deliberate abstractions.',sources:[
 {key:'avida',authors:'Ofria & Wilke',year:2004,title:'Avida: A Software Platform for Research in Computational Evolutionary Biology',doi:'10.1162/106454604773563612',url:'https://doi.org/10.1162/106454604773563612',informs:['digital evolution','controlled experiments']},
@@ -311,6 +311,20 @@ class EcologyObserver{
  export(){return{crossfeeding:{...this.cross},seed_bank:{...this.seedbank},eras:JSON.parse(JSON.stringify(this.eras)),records:JSON.parse(JSON.stringify(this.records)),rules:{crossfeed_form:CROSSFEED_FORM,crossfeed_established:CROSSFEED_EST,crossfeed_persistence_ticks:CROSSFEED_PERSIST,dormancy_persistence_ticks:DORMANCY_PERSIST,era_persistence_ticks:ERA_PERSIST}}}
 }
 const FIELD_N=60,FIELD_CELLS=FIELD_N*FIELD_N,FIELD_CELL=600/FIELD_N,FIELD_UPDATE=20,FIELD_UPTAKE=.16,INTERACTIVE_POP_SOFT_LIMIT=5000;
+/**
+ * Foundation Slice 1: bounded local occupancy (packing) capacity per field
+ * cell. Measured occupancy (seed 102, 3000-tick histograms): solitary cells
+ * dominate, pairs occur in ~10-15% of occupied-cell observations, triples
+ * rarely, quads almost never outside constructed setups. K=2 therefore
+ * binds exactly where aggregation is real — patch centers, feeding
+ * clusters, birth neighborhoods — while sparse life passes nearly
+ * untouched; the global ceiling (2 x 3600) never binds. Birth placement
+ * searches 9 cells (ring 0-1), so blocked births still require genuine
+ * neighborhood overcrowding, not a single full cell. Dormant organisms count as
+ * occupants: packing is physical and identity-free. Retune only on assay
+ * evidence (CI ecology verdict is the check against patch collapse).
+ */
+const LOCAL_OCCUPANCY_CAP=2;
 class RS{
  declare n:number;declare cell:number;declare size:number;declare updateStride:number;declare uptake:number;declare enabledByproduct:boolean;
  /** Waste-economy master switch. Internal default true; validation assays
@@ -454,6 +468,86 @@ class WasteField{
  export():{model:string;grid:number;cell_world_units:number;diffusion_rate:number;decay_rate:number;totals:unknown;accounting:unknown}{return{model:'spatial_waste_substance_field',grid:this.n,cell_world_units:this.cell,diffusion_rate:this.diffusionRate,decay_rate:this.decayRate,totals:this.totals(),accounting:this.accounting()}}
 }
 
+/**
+ * Foundation Slice 1: reusable deterministic spatial-neighborhood service
+ * (handoff §5). Cell-aligned to the resource field grid (60x60 toroidal),
+ * identity-free (counts only — never lineage/family/genotype), ephemeral
+ * (rebuilt per resolution phase from authoritative positions; never
+ * checkpointed). Later foundation slices reuse this seam rather than
+ * per-feature scans. No RNG anywhere; toroidal wrap is shared semantics.
+ */
+class SpatialIndex{
+ n:number;cell:number;counts:Int16Array;
+ constructor(n:number,cell:number){this.n=n;this.cell=cell;this.counts=new Int16Array(n*n)}
+ static build(rs:{n:number;cell:number},organisms:Array<{x:number;y:number}>):SpatialIndex{
+  let s=new SpatialIndex(rs.n,rs.cell);
+  for(const o of organisms)s.counts[s.cellOf(o.x,o.y)]!++;
+  return s;
+ }
+ cellOf(x:number,y:number):number{
+  let ix=Math.floor((((x%600)+600)%600)/this.cell)%this.n,iy=Math.floor((((y%600)+600)%600)/this.cell)%this.n;
+  return iy*this.n+ix;
+ }
+ cellXY(i:number):[number,number]{return[i%this.n,Math.floor(i/this.n)]}
+ countAt(x:number,y:number):number{return this.counts[this.cellOf(x,y)]!}
+ countCell(i:number):number{return this.counts[i]!}
+ roomAt(x:number,y:number,cap:number):boolean{return this.counts[this.cellOf(x,y)]!<cap}
+ occupy(i:number):void{this.counts[i]!++}
+ vacate(i:number):void{this.counts[i]!--}
+ /** Deterministic spiral placement search: parent cell, then ring 1 in
+  * fixed row-major cell order (toroidal wrap). First cell with room wins.
+  * Ring 0-1 (9 cells, ≤14 units) matches the maintained offspring dispersal
+  * scale (2-18 units); rings 1-2 would let births skip over genuine local
+  * crowding and made placement failure unobservable. Pure search — caller
+  * commits via occupy(). */
+ findPlacement(x:number,y:number,cap:number):number|null{
+  let n=this.n,self=this.cellOf(x,y);
+  if(this.counts[self]!<cap)return self;
+  for(let r=1;r<=1;r++){
+   let[cx,cy]=this.cellXY(self);
+   for(let dy=-r;dy<=r;dy++)for(let dx=-r;dx<=r;dx++){
+    if(Math.max(Math.abs(dx),Math.abs(dy))!==r)continue;
+    let i=((cy+dy+n)%n)*n+((cx+dx+n)%n);
+    if(this.counts[i]!<cap)return i;
+   }
+  }
+  return null;
+ }
+ /** Fixed clockwise 8-neighbor fallback order around a target cell
+  * (toroidal). Pure search — caller commits. */
+ fallbackCells(x:number,y:number):number[]{
+  let n=this.n,ix=Math.floor((((x%600)+600)%600)/this.cell)%n,iy=Math.floor((((y%600)+600)%600)/this.cell)%n;
+  const out:number[]=[];
+  for(const[dx,dy]of[[1,0],[1,1],[0,1],[-1,1],[-1,0],[-1,-1],[0,-1],[1,-1]] as Array<[number,number]>)out.push((((iy+dy+n)%n)*n+((ix+dx+n)%n)));
+  return out;
+ }
+}
+
+/**
+ * Movement settlement as a staged function (handoff §8/§11): all movers
+ * vacate first (order-free — each vacates exactly its own origin), then
+ * intents commit in organism-id order (deterministic stable allocation =
+ * seniority, lineage-blind). Target room → settle; fixed clockwise
+ * 8-neighbor fallback around the target → redirect; else stay + blocked.
+ * No RNG: draw streams are untouched by settlement. Exported for direct
+ * contention assays; S.step is its only production caller.
+ */
+function settleMovementClaims(live:Organism[],moveIntents:{o:Organism;tx:number;ty:number}[],rs:{n:number;cell:number},cur:any):void{
+ // Fast path: empty claim sets resolve trivially (all counts stay zero).
+ if(moveIntents.length===0)return;
+ let liveIds=new Set(live.map(o=>o.id));
+ let claims=moveIntents.filter(c=>liveIds.has(c.o.id)).sort((a,b)=>a.o.id-b.o.id);
+ let occ=SpatialIndex.build(rs,live as Array<{x:number;y:number}>);
+ for(const c of claims)occ.vacate(occ.cellOf(c.o.x,c.o.y));
+ for(const c of claims){
+  let ti=occ.cellOf(c.tx,c.ty);
+  if(occ.countCell(ti)<LOCAL_OCCUPANCY_CAP){c.o.x=c.tx;c.o.y=c.ty;occ.occupy(ti);cur.movement_settled=(cur.movement_settled as number||0)+1;continue}
+  let fb=occ.fallbackCells(c.tx,c.ty).find(i=>occ.countCell(i)<LOCAL_OCCUPANCY_CAP);
+  if(fb!==undefined){let ncxNcy=occ.cellXY(fb);c.o.x=ncxNcy[0]*occ.cell+occ.cell/2;c.o.y=ncxNcy[1]*occ.cell+occ.cell/2;occ.occupy(fb);cur.movement_redirected=(cur.movement_redirected as number||0)+1;continue}
+  occ.occupy(occ.cellOf(c.o.x,c.o.y));cur.movement_blocked=(cur.movement_blocked as number||0)+1;
+ }
+}
+
 class S{
  declare c:EngineConfig;declare study:boolean;
  declare rInit:LegacyRng;declare rFood:LegacyRng;declare rMove:LegacyRng;declare rMut:LegacyRng;declare rCat:LegacyRng;
@@ -520,7 +614,7 @@ class S{
  observerSnapshot(m:any,interval:Interval):any{let roles:Record<string,number>={},cross=0,dormClades:Record<string,number>={},cladeTotals:Record<string,number>={};for(const o of this.o){let role=metabolicRole(o);roles[role]=(roles[role]||0)+1;if(role==='byproduct_scavenger')cross++;let c=this.cladeRoot(o.l);cladeTotals[c]=(cladeTotals[c]||0)+1;if(o.activity==='dormant')dormClades[c]=(dormClades[c]||0)+1}let totalE=(m.resource_energy.a||0)+(m.resource_energy.b||0)+(m.resource_energy.c||0),fra:Record<string,number>={};for(const [c,n] of Object.entries(cladeTotals))fra[c]=(dormClades[c]||0)/n;let dominant=Object.entries(roles).sort((a,b)=>b[1]-a[1])[0]?.[0]||'unresolved';return{tick:this.t,population:m.population,starting_population:this.c.pop,active_population:m.active_population,dormant_population:m.dormant_population,dormant_fraction:m.dormant_fraction,c_energy_share:totalE?m.resource_energy.c/totalE:0,crossfeeder_fraction:m.population?cross/m.population:0,partitioned:m.niche_structure.persistent_partitioning,dominant_role:dominant,roles,wake_events:interval.wakes||0,wake_clades:{...(interval.wake_clades||{})},dormant_clade_fraction:fra,clade_totals:cladeTotals,waste_fraction:(m.waste?m.waste.fraction||0:0),waste_exposed_share:(()=>{let n=0;for(const o of this.o){if(this.resources.waste.fractionAt(o.x,o.y)>=WASTE_HALF_SAT)n++}return this.o.length?n/this.o.length:0})(),tolerance_mean:(m.traits&&m.traits.tolerance?m.traits.tolerance.mean||0:0),cleanup_mean:(m.traits&&m.traits.cleanup?m.traits.cleanup.mean||0:0),interval:{producedC:interval.produced_c||0,consumedA:interval.consumed_a||0,consumedB:interval.consumed_b||0,consumedC:interval.consumed_c||0,energyA:interval.energy_a||0,energyB:interval.energy_b||0,energyC:interval.energy_c||0,births:interval.births||0,deaths:interval.deaths||0,wasteProduced:interval.produced_w||0,wasteRemoved:interval.removed_w||0,wasteDecayed:interval.decayed_w||0,burdenEnergy:interval.burden_energy||0,cleanupEnergy:interval.cleanup_energy||0,cleanupExec:interval.cleanup_exec||0},flows:this.flowFacts(),intervalFlows:this.lastLineageFlows||EMPTY_INTERVAL_FLOWS}}
  step(){
   this.t++;if(this.c.st===this.t)this.catalyst(this.c.cat,'scheduled');if(this.drought&&this.t>=this.drought.end){this.log(`Nutrient ${this.drought.kind?'B':'A'} drought ended`);this.drought=null}if(this.resources.cSink&&this.t>=this.resources.cSink.end){this.log('Metabolite C sink dissipated');this.resources.cSink=null}
-  this.resources.step(this.t,this.drought,this.cur);let born=[],live=[];
+  this.resources.step(this.t,this.drought,this.cur);let born:(Organism)[]=[],live:(Organism)[]=[],moveIntents:{o:Organism;tx:number;ty:number}[]=[],pendingBirths:{parent:Organism;baby:Organism}[]=[];
   for(const o of this.o){
    if(o.activity==='dormant'){
     if(((this.t+o.id)%DORMANCY_CHECK)===0&&this.dormancyWake(o)){o.activity='active';o.lastWakeTick=this.t;o.wakeCount=(o.wakeCount||0)+1;o.dormantSince=null;this.cur.wakes++;let cid=this.cladeRoot(o.l);this.cur.wake_clades[cid]=(this.cur.wake_clades[cid]||0)+1}
@@ -528,7 +622,16 @@ class S{
    }
    if(((this.t+o.id)%DORMANCY_CHECK)===0&&this.dormancyEntry(o)){o.activity='dormant';o.dormantSince=this.t;this.cur.dormancy_entries++;o.en-=(PC(o.me)*DORMANT_MAINTENANCE)*this.c.press;if(o.en>0)live.push(o);else{this.cur.deaths++;this.lineageCredit(o.l,{deaths:1})}continue}
    if(((this.t+o.id)&3)===0){let sensed=this.resources.sense(o);if(sensed.score>.003)o.h=sensed.angle;else{let pull=.04+.12*Math.abs(o.ha);if(Math.abs(o.ha)>.08&&this.rMove()<pull){let kind=o.ha>0?1:0,cx=kind?445:155,cy=kind?390:210;o.h=Math.atan2(WD(o.y,cy),WD(o.x,cx))+(this.rMove()-.5)*.75}else if(this.rMove()<.10)o.h+=this.rMove()*1.6-.8}}
-   let mv=MV(o.sp);o.x=(o.x+Math.cos(o.h)*mv+600)%600;o.y=(o.y+Math.sin(o.h)*mv+600)%600;o.en-=(PC(o.me)+MC(o.sp)+DC(o.di)+SC(o.en)+(this.c.enable_byproduct?BUC(o.bu||0):0))*this.c.press;
+   // Slice 1: movement INTENT (§8). Same sensing/heading/math/draws as
+   // before, in loop order — but positions do not commit here. Settlement
+   // runs post-loop against pre-move occupancy (phase 2), so same-tick
+   // contention resolves deterministically instead of by array order.
+   // Consumption below therefore reads the pre-move cell; moves average
+   // <1 world unit against 10-unit cells, so this differs from eat-at-
+   // destination only on cell-boundary crossings (legitimate downstream
+   // spatial consequence, AC12).
+   let mv=MV(o.sp),ITX=(o.x+Math.cos(o.h)*mv+600)%600,ITY=(o.y+Math.sin(o.h)*mv+600)%600;o.en-=(PC(o.me)+MC(o.sp)+DC(o.di)+SC(o.en)+(this.c.enable_byproduct?BUC(o.bu||0):0))*this.c.press;
+   if(this.resources.idx(ITX,ITY)!==this.resources.idx(o.x,o.y)){moveIntents.push({o,tx:ITX,ty:ITY});this.cur.movement_intents=(this.cur.movement_intents as number||0)+1;}
    // Waste economy (Slice 2): gated by the resource system's internal switch
    // (validation assays may disable it on a fork; production always runs
    // the full economy). Cleanup is the waste_cleanup process: inherited
@@ -556,7 +659,41 @@ class S{
    counts. Interval deltas carry true mass. Do not 'fix' without an
    engine-version change. */
    if(eat.substance===0){o.ma++;o.ga+=eat.gain;o.ra+=eat.gain;this.cur.energy_a+=eat.gain;this.lineageCredit(o.l,{consumedA:eat.amount,energyA:eat.gain,producedC:eat.produced,wasteProduced:eat.wasteProduced})}else if(eat.substance===1){o.mb++;o.gb+=eat.gain;o.rb+=eat.gain;this.cur.energy_b+=eat.gain;this.lineageCredit(o.l,{consumedB:eat.amount,energyB:eat.gain,producedC:eat.produced,wasteProduced:eat.wasteProduced})}else{o.mc=(o.mc||0)+1;o.gc=(o.gc||0)+eat.gain;o.rc=(o.rc||0)+eat.gain;this.cur.energy_c+=eat.gain;this.lineageCredit(o.l,{consumedC:eat.amount,energyC:eat.gain})}this.totalUse[eat.substance]!+=eat.amount;this.totalEnergy[eat.substance]!+=eat.gain}
-   if(this.t>=(o.matureAt||0)&&this.t>=(o.readyAt||0)&&o.en>=o.rp){let support=this.reproSupport(o);this.totalReproSupport[support]!++;if(support===0)this.cur.repro_supported_a++;else if(support===1)this.cur.repro_supported_b++;else if(support===3)this.cur.repro_supported_c++;else this.cur.repro_supported_mixed++;o.ra=0;o.rb=0;o.rc=0;o.en*=.52;o.readyAt=this.t+REPRO_COOLDOWN;let baby=this.child(o);born.push(baby);this.cur.births++;this.lineageCredit(baby.l,{births:1})}if(o.en>0)live.push(o);else{this.cur.deaths++;this.lineageCredit(o.l,{deaths:1})}
+   if(this.t>=(o.matureAt||0)&&this.t>=(o.readyAt||0)&&o.en>=o.rp){let support=this.reproSupport(o);this.totalReproSupport[support]!++;if(support===0)this.cur.repro_supported_a++;else if(support===1)this.cur.repro_supported_b++;else if(support===3)this.cur.repro_supported_c++;else this.cur.repro_supported_mixed++;this.cur.repro_eligible=(this.cur.repro_eligible as number||0)+1;let baby=this.child(o);pendingBirths.push({parent:o,baby});}if(o.en>0)live.push(o);else{this.cur.deaths++;this.lineageCredit(o.l,{deaths:1})}
+  }
+  // Slice 1 movement settlement (§8, phase 2): simultaneous allocation
+  // against pre-move occupancy. Deaths are already known (live[] excludes
+  // them), so movers also see same-tick death vacancy. All movers vacate
+  // first (order-free — each vacates exactly its own origin), then intents
+  // commit in organism-id order (deterministic stable allocation =
+  // seniority; lineage-blind). Target room → settle; else fixed clockwise
+  // 8-neighbor fallback around the TARGET (movement continuity); else stay.
+  // No RNG here: draw streams are untouched by settlement.
+  settleMovementClaims(live,moveIntents,this.resources,this.cur);
+  // Slice 1 birth placement (§9, phase 3): atomic commit in parent-id order
+  // against settled post-mortality occupancy (movement + deaths committed
+  // above, so newborns see death vacancy same-tick). Spiral ring 0-1 around
+  // the parent's settled cell, first room wins; baby energy fixed to
+  // post-split x .92 (value-identical to pre-slice order on success).
+  // Failure discards: no energy split, no cooldown, no birth counters —
+  // only blocked_births records the attempt (AC7). No RNG here either.
+  // Empty pending sets skip the phase entirely (identical no-op).
+  if(pendingBirths.length){
+  {
+   let occ=SpatialIndex.build(this.resources,live);
+   let pend=pendingBirths.sort((a,b)=>a.parent.id-b.parent.id);
+   for(const p of pend){
+    let at=occ.findPlacement(p.parent.x,p.parent.y,LOCAL_OCCUPANCY_CAP);
+    if(at===null){this.cur.blocked_births=(this.cur.blocked_births as number||0)+1;continue}
+    let o=p.parent,baby=p.baby;
+    o.ra=0;o.rb=0;o.rc=0;o.en*=.52;o.readyAt=this.t+REPRO_COOLDOWN;
+    let[cx,cy]=occ.cellXY(at);
+    baby.en=o.en*.92;
+    baby.x=(cx*occ.cell+occ.cell/2+([-3,0,3][baby.id%3]!)+600)%600;
+    baby.y=(cy*occ.cell+occ.cell/2+([-3,0,3][Math.floor(baby.id/3)%3]!)+600)%600;
+    occ.occupy(at);born.push(baby);this.cur.births++;this.lineageCredit(baby.l,{births:1});
+   }
+  }
   }
   this.o=live.concat(born);if(this.o.length>this.peakPopulation){this.peakPopulation=this.o.length;this.peakPopulationTick=this.t}
   if(!this.o.length&&this.extinctTick===null){this.extinctTick=this.t;let prev=this.sn.length?this.sn[this.sn.length-1]:this.long[this.long.length-1];this.extinctionContext={tick:this.t,previous_snapshot:prev||null,nutrient_field:this.resources.totals(),interval:{...this.cur}};this.log('Population extinct')}
@@ -653,4 +790,6 @@ export {
   EVENT_STRIDE,
   createSimulationCheckpoint,
   restoreSimulationCheckpoint,
+  SpatialIndex,
+  settleMovementClaims,
 };

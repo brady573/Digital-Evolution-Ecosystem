@@ -340,6 +340,20 @@ export const UNITS: readonly ValidationUnit[] = [
       "Niche differentiation is possible and typical where claimed, its limits still hold, and the lineages it names are asserted as lineages rather than as untyped numbers.",
   },
   {
+    id: "spatial-occupancy",
+    title: "Spatial opportunity and occupancy (Slice 1)",
+    script: "test:spatial-occupancy",
+    cls: "deterministic",
+    enforcement: "blocking",
+    mergeGate: true,
+    domains: withApparatus("contracts", "sim-core", "sim-runtime"),
+    needs: [],
+    parallelSafe: true,
+    baselineSeconds: 300,
+    claim:
+      "Local space is finite identity-free opportunity: settlement and birth placement resolve deterministically by seniority with deflection and atomic discard, vacancy recolonizes, lineage never steers, and throughput stays viable at thousands scale.",
+  },
+  {
     id: "aftermath",
     title: "Aftermath state and comparison",
     script: "test:aftermath",
@@ -788,6 +802,7 @@ export const GROUPS: readonly ValidationGroup[] = [
       "dependency-possibility",
       "dependency-tradeoff",
       "dependency-washout",
+      "spatial-occupancy",
     ],
     ci: false,
   },
@@ -867,7 +882,7 @@ export const GROUPS: readonly ValidationGroup[] = [
   {
     id: "ci-sim-c",
     title: "Deterministic suites C (niche, ecology, runtime boundary)",
-    unitIds: ["niche", "ecology", "runtime-boundary"],
+    unitIds: ["niche", "ecology", "runtime-boundary", "spatial-occupancy"],
     ci: true,
   },
   {
