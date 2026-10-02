@@ -596,9 +596,18 @@ async function main(){
     await page.waitForTimeout(2_500);
     const afterRejected=await tick(page);
     assert.ok(afterRejected>beforeRejected,`playback intent is restored after an ordinary rejected load (${beforeRejected} -> ${afterRejected})`);
+    // Resumed playback may have reached a decision. That is ordinary and
+    // expected — and a pending decision hides the secondary chrome, including
+    // the play/pause control — so clear it before returning to a paused world,
+    // exactly as the world-chrome section below does.
+    const interrupted=page.getByTestId("decision-sheet");
+    if(await interrupted.count()){
+      await interrupted.getByText("Keep watching").click();
+      await interrupted.waitFor({state:"detached",timeout:15_000});
+    }
     // Back to paused for the exact-tick assertions that follow, sampled here so
     // the baseline is taken at a known-paused moment.
-    await page.getByRole("button",{name:"Pause"}).click();
+    if(await page.getByRole("button",{name:"Pause"}).count())await page.getByRole("button",{name:"Pause"}).click();
     await page.waitForTimeout(300);
     };
 
