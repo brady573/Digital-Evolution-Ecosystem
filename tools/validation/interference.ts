@@ -751,7 +751,7 @@ function testOldSavesRefusedExplicitly() {
   }
   assert.ok(refusal instanceof Error, "a 0.4/0.22.0 save is refused");
   assert.match((refusal as Error).message, /0\.22\.0/, "refusal names the save's engine version");
-  assert.match((refusal as Error).message, /0\.23\.0/, "refusal names the running engine version");
+  assert.match((refusal as Error).message, /0\.23\.1/, "refusal names the running engine version");
 
   // Same gate at the sim-core layer.
   const scp: any = JSON.parse(
@@ -766,7 +766,7 @@ function testOldSavesRefusedExplicitly() {
   }
   assert.ok(coreRefusal instanceof Error, "sim-core refuses a 0.22.0 payload");
   assert.match((coreRefusal as Error).message, /0\.22\.0/, "core refusal names the save's engine");
-  assert.match((coreRefusal as Error).message, /0\.23\.0/, "core refusal names the running engine");
+  assert.match((coreRefusal as Error).message, /0\.23\.1/, "core refusal names the running engine");
 
   // No migration rule defaults interference state: old worlds are refused,
   // never reinterpreted with invented traits or field mass.
@@ -1007,3 +1007,150 @@ testMassIdentityCloses();
 testReportedSuppressionMatchesBiology();
 testDiffusionIsRedistribution();
 console.log("interference validation (task 5): PASS");
+
+
+// --- Correction 3 (Design Partner classification): conditional
+// secretion-advantage assay. The Task 6 secretion-alone assay measured only
+// cost because uniform secretion under no-immunity harms the secretor's own
+// world. Advantage, if it exists, requires ASSORTMENT: a localized
+// secretion-capable + resistant patch harming susceptible neighbors more
+// than itself, with fast decay keeping the cloud local. This assay builds
+// exactly that: quadrant-seeded combo (in=1.0, re=1.0) vs sens (in=0, re=0)
+// under patchwork resource pressure, frozen evolution (mr:0), with uniform
+// all-sens (matched non-secreting control) and all-combo (uniform-cost)
+// arms. Mechanism is asserted; the competitive OUTCOME is reported, not
+// asserted — the Design Partner reads it from the log. No target winner or
+// prevalence is encoded.
+
+function pressureConfig(seed: number): EngineConfig {
+  return config(seed, {
+    start: 0.62, prod: 0.86, patch: 0.9, pop: 34, div: 0.45, mr: 0,
+  });
+}
+
+function testConditionalSecretionAdvantage() {
+  for (const seed of [24681357, 821947219]) {
+    for (const dose of [1.0, 0.2]) {
+    const arms: Record<string, any> = {};
+    const seedGroups: Record<string, Map<number, string>> = {};
+    for (const mode of ["mixed", "allsens", "allcombo"] as const) {
+      const sim = new Simulation(pressureConfig(seed)) as any;
+      for (let t = 0; t < 12000; t++) sim.step();
+      const groups = new Map<number, string>();
+      for (const o of sim.o as any[]) {
+        const g = mode === "allsens" ? "sens" : mode === "allcombo" ? "combo"
+          : o.x < 300 && o.y < 300 ? "combo" : "sens";
+        o.in = g === "combo" ? dose : 0;
+        o.re = g === "combo" ? 1.0 : 0;
+        groups.set(o.id, g);
+      }
+      arms[mode] = sim;
+      seedGroups[mode] = groups;
+    }
+    // Group membership propagates at birth: every step, newborns inherit
+    // the group of their living parent (parents dead within the same step
+    // window are the only unknowns, and founders are all seeded).
+    const extOf = (arm: string): Map<number, string> => {
+      const sim = arms[arm];
+      const ext = new Map(seedGroups[arm]);
+      return ext;
+    };
+    const trackMaps: Record<string, Map<number, string>> = {
+      mixed: extOf("mixed"), allsens: extOf("allsens"), allcombo: extOf("allcombo"),
+    };
+    const produced0: Record<string, number> = {
+      mixed: arms["mixed"].resources.inhibitor.produced,
+      allsens: arms["allsens"].resources.inhibitor.produced,
+      allcombo: arms["allcombo"].resources.inhibitor.produced,
+    };
+    const ASSAY = 8000;
+    let maxNear = 0, maxFar = 0;
+    const course: string[] = [];
+    const shareNow = () => {
+      let c = 0, n = 0;
+      const ext = trackMaps["mixed"];
+      for (const o of arms["mixed"].o as any[]) {
+        n++;
+        if ((ext.get(o.id) ?? "unknown") === "combo") c++;
+      }
+      return n ? c / n : 0;
+    };
+    for (let t = 0; t < ASSAY; t++) {
+      if (t % 2000 === 0) course.push(shareNow().toFixed(3));
+      for (const m of ["mixed", "allsens", "allcombo"] as const) {
+        arms[m].step();
+        const ext = trackMaps[m];
+        for (const o of arms[m].o as any[]) {
+          if (!ext.has(o.id)) {
+            const pg = o.parent === null || o.parent === undefined ? undefined : ext.get(o.parent);
+            ext.set(o.id, pg ?? "unknown");
+          }
+        }
+      }
+      if (t % 100 === 0) {
+        const inhNow = arms["mixed"].resources.inhibitor;
+        maxNear = Math.max(maxNear, inhNow.fractionAt(150, 150));
+        maxFar = Math.max(maxFar, inhNow.fractionAt(450, 450));
+      }
+    }
+    // Determinism twin of the mixed arm, built and seeded identically.
+    const twin = new Simulation(pressureConfig(seed)) as any;
+    for (let t = 0; t < 12000; t++) twin.step();
+    for (const o of twin.o as any[]) {
+      const g = o.x < 300 && o.y < 300 ? "combo" : "sens";
+      o.in = g === "combo" ? dose : 0;
+      o.re = g === "combo" ? 1.0 : 0;
+    }
+    for (let t = 0; t < ASSAY; t++) twin.step();
+    assert.deepStrictEqual(twin.o, arms["mixed"].o, `mixed arm reproduces exactly (seed ${seed})`);
+
+    const produced = (m: string) => arms[m].resources.inhibitor.produced - produced0[m];
+    assert.ok(produced("mixed") > 0, `mixed world secreted mass (seed ${seed})`);
+    assert.ok(produced("allcombo") > 0, `uniform secretors secreted mass (seed ${seed})`);
+    assert.equal(produced("allsens"), 0, `non-secreting control secreted nothing (seed ${seed})`);
+
+    const ext = trackMaps["mixed"];
+    let combo = 0, sens = 0, unknown = 0, comboEn = 0, sensEn = 0;
+    for (const o of arms["mixed"].o as any[]) {
+      const g = ext.get(o.id) ?? "unknown";
+      if (g === "combo") { combo++; comboEn += o.en as number; }
+      else if (g === "sens") { sens++; sensEn += o.en as number; }
+      else unknown++;
+    }
+    const total = combo + sens + unknown;
+    assert.ok(total > 0, `mixed world alive at assay end (seed ${seed})`);
+    assert.ok(unknown / total < 0.05,
+      `birth-tracking covers the world (unknown=${unknown}/${total}, seed ${seed})`);
+    for (const o of arms["mixed"].o as any[]) {
+      assert.ok(
+        (o.in === dose && o.re === 1.0) || (o.in === 0 && o.re === 0),
+        `frozen genotypes only (seed ${seed})`,
+      );
+    }
+    // Locality: the dosed quadrant must have read hotter than the far
+    // quadrant at peak — fast decay keeps the cloud local, which is what
+    // assortment requires. Peak, not end-state: the strategy may lose and
+    // its cloud may clear by assay end, and that outcome is reported below.
+    const inh = arms["mixed"].resources.inhibitor;
+    const near = inh.fractionAt(150, 150);
+    const far = inh.fractionAt(450, 450);
+    assert.ok(maxNear > maxFar,
+      `inhibitor cloud localized at peak (maxNear=${maxNear} maxFar=${maxFar}, seed ${seed})`);
+
+    console.log(
+      `conditional-advantage seed=${seed} dose=${dose} ` +
+      `course=[${course.join(" ")}] ` +
+      `comboShare=${(combo / total).toFixed(3)} sensShare=${(sens / total).toFixed(3)} ` +
+      `comboEn=${(combo ? comboEn / combo : 0).toFixed(1)} sensEn=${(sens ? sensEn / sens : 0).toFixed(1)} ` +
+      `popMixed=${total} popSens=${(arms["allsens"].o as any[]).length} ` +
+      `popCombo=${(arms["allcombo"].o as any[]).length} ` +
+      `secMass=${produced("mixed").toFixed(1)} near=${near.toFixed(3)} far=${far.toFixed(3)} ` +
+      `peakNear=${maxNear.toFixed(3)} peakFar=${maxFar.toFixed(3)}`,
+    );
+  }
+  console.log("testConditionalSecretionAdvantage: PASS (mechanism asserted, outcome reported)");
+  } // end dose
+}
+
+testConditionalSecretionAdvantage();
+console.log("interference validation (correction 3): PASS");
