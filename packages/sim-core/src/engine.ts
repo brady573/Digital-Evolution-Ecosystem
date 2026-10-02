@@ -34,10 +34,30 @@ const C_BYPRODUCT_YIELD=.32,C_ENERGY_YIELD=9,C_DECAY_RATE=.00022,C_DIFFUSION_RAT
  */
 // impl: REQ-SLICE-002 (Slice 2 waste-field calibration)
 const WASTE_YIELD=.15,WASTE_CAP_FRACTION=.25,WASTE_DIFFUSION=.20,WASTE_DECAY=.0001,WASTE_HALF_SAT=.3,WASTE_BURDEN_MAX=.45,WASTE_TOL_EFFICACY=.75,WASTE_TOL_COST=.001,CU_STANDING=.0015,CU_ACTIVE=.6,CU_RATE=.09;
+/**
+ * R0 localized inducible interference calibration. The inherited secretion
+ * trait is maximum capacity, never continuous output: realized output per
+ * tick = capacity x induction x IN_SCALE, where induction is the
+ * conjunctive (crowding x scarcity) context signal. Anchors:
+ * field transport mirrors the WasteField algorithm with faster passive
+ * decay (.005 vs .0001): the inhibitor has no active sink (nothing consumes
+ * it, unlike waste+cleanup), so decay is its only clearance and must keep
+ * ordinary low expression local instead of integrating into background.
+ * IN_COST (1.5) sits between active-transport work (.6) and catabolic value
+ * (9): synthesis costs a few x pumping, a fraction of catabolism.
+ * RES_STANDING = CU_STANDING: resistance is costly while active.
+ * RE_EFFICACY (.75) mitigates, never immunizes. Suppression f in [.2,1]
+ * reuses the waste half-saturation scale. INDUCT_CROWD_REF (8 active
+ * neighbors in the 3x3 cell neighborhood) marks meaningful crowding;
+ * scarcity is 1 minus pre-suppression opportunity. Retune only on R0 assay
+ * evidence, never toward a target frequency.
+ */
+const INHIBITOR_DIFFUSION=.20,INHIBITOR_DECAY=.005,INHIBITOR_CAP_FRACTION=.25;
+const IN_SCALE=1.0,IN_COST=1.5,RES_STANDING=CU_STANDING,RE_EFFICACY=WASTE_TOL_EFFICACY,IN_SUPPRESS_MAX=.8,IN_SUPPRESS_HALF=WASTE_HALF_SAT,INDUCT_CROWD_REF=8;
 const H01=(seed:number,id:number,salt=0):number=>{let x=(seed^(Math.imul(id+salt,0x9E3779B1)))>>>0;x^=x>>>16;x=Math.imul(x,0x7FEB352D);x^=x>>>15;x=Math.imul(x,0x846CA68B);x^=x>>>16;return(x>>>0)/4294967296};
 const C_ACCESS=(bu:number):number=>{let v=Q(bu,0,1.5);return v<=0?0:(v*v)/(v*v+.1024)};
 const BUC=(bu:number):number=>BU_MAINT_COST*bu*bu;
-const T:Record<string,[string,number,number,string]>={speed:['sp',.25,4,'Movement speed'],sensing:['se',10,180,'Nutrient-sensing range'],metabolism:['me',.04,.5,'Baseline energy use'],reproduction:['rp',55,220,'Energy needed to reproduce'],diet:['di',-1.5,1.5,'Nutrient tendency'],habitat:['ha',-1.5,1.5,'Home-zone preference'],byproduct_use:['bu',0,1.5,'Byproduct use'],dormancy_response:['dr',0,1.5,'Dormancy response'],tolerance:['to',0,1.5,'Waste tolerance'],cleanup:['cu',0,1.5,'Waste cleanup']};
+const T:Record<string,[string,number,number,string]>={speed:['sp',.25,4,'Movement speed'],sensing:['se',10,180,'Nutrient-sensing range'],metabolism:['me',.04,.5,'Baseline energy use'],reproduction:['rp',55,220,'Energy needed to reproduce'],diet:['di',-1.5,1.5,'Nutrient tendency'],habitat:['ha',-1.5,1.5,'Home-zone preference'],byproduct_use:['bu',0,1.5,'Byproduct use'],dormancy_response:['dr',0,1.5,'Dormancy response'],tolerance:['to',0,1.5,'Waste tolerance'],cleanup:['cu',0,1.5,'Waste cleanup'],secretion:['in',0,1.5,'Interference secretion capacity'],resistance:['re',0,1.5,'Interference resistance']};
 // impl: REQ-SIM-002 (evolvable trait set incl. cross-feeding and dormancy)
 const STUDY_TRAITS=['speed','sensing','metabolism','reproduction','habitat','byproduct_use','dormancy_response','tolerance','cleanup'];
 // impl: REQ-CLADE-001 (clade persistence thresholds)
@@ -46,9 +66,9 @@ const F=(n:number):string=>`L-${String(n).padStart(4,'0')}`;
 const B=():Record<string,[number,number]>=>Object.fromEntries(Object.keys(T).map(k=>[k,[0,0]])) as Record<string,[number,number]>;
 /** Per-stride biological interval counters (births, deaths, resource flows, dormancy transitions). */
 // impl: REQ-POP-001 (birth/death/flow counters drive emergent population arcs)
-interface LineageDelta{consumedA:number;consumedB:number;consumedC:number;energyA:number;energyB:number;energyC:number;producedC:number;births:number;deaths:number;wasteProduced:number;wasteRemoved:number;burdenEnergy:number;cleanupEnergy:number;cleanupExec:number}
+interface LineageDelta{consumedA:number;consumedB:number;consumedC:number;energyA:number;energyB:number;energyC:number;producedC:number;births:number;deaths:number;wasteProduced:number;wasteRemoved:number;burdenEnergy:number;cleanupEnergy:number;cleanupExec:number;secreted_i:number;secretion_energy:number;resistance_energy:number;exposure_i:number;suppressed_a:number;suppressed_b:number;suppressed_c:number;suppressed_ea:number;suppressed_eb:number;suppressed_ec:number}
 interface Interval{births:number;deaths:number;mutation_attempts:number;effective_mutations:number;resources_spawned:number;resources_suppressed:number;resources_consumed:number;spawned_a:number;spawned_b:number;consumed_a:number;consumed_b:number;consumed_c:number;produced_c:number;decayed_c:number;energy_a:number;energy_b:number;energy_c:number;repro_supported_a:number;repro_supported_b:number;repro_supported_mixed:number;repro_supported_c:number;dormancy_entries:number;wakes:number;wake_clades:Record<string,number>;proc_exec_a:number;proc_exec_b:number;proc_exec_c:number;produced_w:number;removed_w:number;decayed_w:number;burden_energy:number;cleanup_energy:number;cleanup_exec:number;[k:string]:number|Record<string,number>}
-const I=():Interval=>({births:0,deaths:0,mutation_attempts:0,effective_mutations:0,resources_spawned:0,resources_suppressed:0,resources_consumed:0,spawned_a:0,spawned_b:0,consumed_a:0,consumed_b:0,consumed_c:0,produced_c:0,decayed_c:0,energy_a:0,energy_b:0,energy_c:0,repro_supported_a:0,repro_supported_b:0,repro_supported_mixed:0,repro_supported_c:0,dormancy_entries:0,wakes:0,wake_clades:{},proc_exec_a:0,proc_exec_b:0,proc_exec_c:0,produced_w:0,removed_w:0,decayed_w:0,burden_energy:0,cleanup_energy:0,cleanup_exec:0});
+const I=():Interval=>({births:0,deaths:0,mutation_attempts:0,effective_mutations:0,resources_spawned:0,resources_suppressed:0,resources_consumed:0,spawned_a:0,spawned_b:0,consumed_a:0,consumed_b:0,consumed_c:0,produced_c:0,decayed_c:0,energy_a:0,energy_b:0,energy_c:0,repro_supported_a:0,repro_supported_b:0,repro_supported_mixed:0,repro_supported_c:0,dormancy_entries:0,wakes:0,wake_clades:{},proc_exec_a:0,proc_exec_b:0,proc_exec_c:0,produced_w:0,removed_w:0,decayed_w:0,burden_energy:0,cleanup_energy:0,cleanup_exec:0,secreted_i:0,decayed_i:0,saturated_i:0,secretion_energy:0,resistance_energy:0,exposure_i:0,suppressed_a:0,suppressed_b:0,suppressed_c:0,suppressed_ea:0,suppressed_eb:0,suppressed_ec:0});
 const H_STD=[50000,100000,200000,300000],H_DEEP=[100000,300000,500000,1000000];
 const SCI={disclaimer:'Sources inform experimental design and interpretation; the exact simulation equations remain deliberate abstractions.',sources:[
 {key:'avida',authors:'Ofria & Wilke',year:2004,title:'Avida: A Software Platform for Research in Computational Evolutionary Biology',doi:'10.1162/106454604773563612',url:'https://doi.org/10.1162/106454604773563612',informs:['digital evolution','controlled experiments']},
@@ -72,7 +92,7 @@ const DC=(d:number):number=>.008*d*d;
 const WD=(a:number,b:number):number=>{let d=b-a;if(d>300)d-=600;else if(d<-300)d+=600;return d};
 const TD=(a:number,b:number):number=>Math.abs(WD(a,b));
 /** Living organism state: inherited traits (sp..dr), spatial/energy state, lifetime resource accounting (ma/mb/mc, ga/gb/gc, ra/rb/rc), lineage link (l). */
-interface Organism{id:number;parent:number|null;generation:number;born:number;matureAt:number;readyAt:number;x:number;y:number;en:number;h:number;sp:number;se:number;me:number;rp:number;di:number;ha:number;bu:number;dr:number;activity:string;dormantSince:number|null;wakeCount:number;lastWakeTick:number|null;ma:number;mb:number;mc:number;ga:number;gb:number;gc:number;ra:number;rb:number;rc:number;pc:number;to:number;cu:number;l:number;[k:string]:unknown}
+interface Organism{id:number;parent:number|null;generation:number;born:number;matureAt:number;readyAt:number;x:number;y:number;en:number;h:number;sp:number;se:number;me:number;rp:number;di:number;ha:number;bu:number;dr:number;activity:string;dormantSince:number|null;wakeCount:number;lastWakeTick:number|null;ma:number;mb:number;mc:number;ga:number;gb:number;gc:number;ra:number;rb:number;rc:number;pc:number;to:number;cu:number;in:number;re:number;l:number;[k:string]:unknown}
 const PATCH=(o:Organism):number=>{let da=TD(o.x,155)**2+TD(o.y,210)**2,db=TD(o.x,445)**2+TD(o.y,390)**2;return da<=db?0:1};
 const QNT=(a:number[],p:number):number=>{if(!a.length)return 0;let b=[...a].sort((x,y)=>x-y),x=(b.length-1)*p,i=Math.floor(x),f=x-i;return b[i]!+(b[Math.min(i+1,b.length-1)]!-b[i]!)*f};
 const MED=(a:number[]):number=>QNT(a,.5),SPREAD=(a:number[])=>({q1:QNT(a,.25),q3:QNT(a,.75),min:a.length?Math.min(...a):0,max:a.length?Math.max(...a):0});
@@ -83,7 +103,7 @@ const friendlyOutcome=(v:string):string=>({'Persistent dual-niche partitioning':
 const friendlyResilience=(v:string):string=>({Robust:'Large population',Established:'Established population',Vulnerable:'Small population',Fragile:'Very small population'} as Record<string,string>)[v]||v;
 const friendlyResourceState=(v:string):string=>({'Fully utilized':'being used as fast as it appears',Tight:'scarce',Abundant:'plentiful',Balanced:'balanced','Energy-limited':'not supplying enough usable energy'} as Record<string,string>)[v]||v;
 const friendlyResponse=(v:string):string=>String(v||'None').replace('Bottleneck ongoing','Population crash still unfolding').replace('Durable recovery after','Recovered and stayed recovered after').replace('No major bottleneck','No major population crash').replace('Moderate decline','Moderate population decline');
-const MUTATION_NAMES:Record<string,string>={speed:'movement',sensing:'nutrient-sensing',metabolism:'energy-use',reproduction:'reproduction-energy',diet:'nutrient-tendency',habitat:'home-zone',byproduct_use:'byproduct-use',dormancy_response:'dormancy-response',tolerance:'waste-tolerance',cleanup:'waste-cleanup'};
+const MUTATION_NAMES:Record<string,string>={speed:'movement',sensing:'nutrient-sensing',metabolism:'energy-use',reproduction:'reproduction-energy',diet:'nutrient-tendency',habitat:'home-zone',byproduct_use:'byproduct-use',dormancy_response:'dormancy-response',tolerance:'waste-tolerance',cleanup:'waste-cleanup',secretion:'interference-capacity',resistance:'interference-resistance'};
 const friendlyMutation=(a:string[]):string=>!a||!a.length?'founder':a.map(v=>MUTATION_NAMES[v]||v).join(' + ');
 
 const metabolicRole=(o:Organism):string=>{let total=(o.ga||0)+(o.gb||0)+(o.gc||0);if(total<REALIZED_MIN_GAIN)return'unresolved';let cs=(o.gc||0)/total;if(cs>=.15&&C_ACCESS(o.bu||0)>=.35)return'byproduct_scavenger';let p=(o.ga||0)+(o.gb||0);if(p<=0)return'unresolved';let a=(o.ga||0)/p;return a>=REALIZED_CUT?'primary_a':a<=1-REALIZED_CUT?'primary_b':'mixed_primary'};
@@ -93,7 +113,7 @@ type ProcessId='primary_a'|'primary_b'|'c_scavenge'|'waste_cleanup';
 /** Fixed substrate order, so substrate loops stay typed as NutrientSubstance. */
 const NUTRIENT_SUBSTANCES:readonly NutrientSubstance[]=[0,1,2];
 /** What a nutrient process execution transformed and produced. */
-interface NutrientExecution{substance:NutrientSubstance;amount:number;gain:number;produced:number;wasteProduced:number}
+interface NutrientExecution{substance:NutrientSubstance;amount:number;gain:number;produced:number;wasteProduced:number;suppressed:number;suppressedEnergy:number}
 /** What a waste process execution removed, and the active energy it cost. */
 interface WasteExecution{removed:number;activeCost:number}
 
@@ -128,7 +148,7 @@ interface NutrientProcess extends ProcessIdentity{
  transform:(rs:RS,o:Organism,amount:number,interval:Interval|null)=>{gain:number;produced:number;wasteProduced:number};
  /** Deterministic interval consumption/execution accounting, bound to this process identity. */
  account:(interval:Interval|null,amount:number)=>void;
- execute:(rs:RS,o:Organism,interval:Interval|null)=>NutrientExecution|null;
+ execute:(rs:RS,o:Organism,interval:Interval|null,f?:number)=>NutrientExecution|null;
 }
 
 /**
@@ -189,17 +209,21 @@ const nutrientProcess=(substance:NutrientSubstance,access:(o:Organism)=>number,p
    return{gain:amount*p.yieldOf(rs.defs)*p.yieldFactor(o),produced:made,wasteProduced:wmade};
   },
   account,
-  execute:(rs,o,interval)=>{
+  execute:(rs,o,interval,f=1)=>{
    let i=rs.idx(o.x,o.y),cap=rs.cap[substance]![i]!,conc=cap>1e-9?rs.stock[substance]![i]!/cap:0;
    let take=Math.min(rs.stock[substance]![i]!,rs.uptake*(.55+.45*Q(conc,0,1)));
    if(take<=1e-6)return null;
+   // Suppression scales the take BEFORE stock removal: suppressed mass never
+   // leaves the stock. f=1 (default, used whenever interference is disabled)
+   // is a bit-exact no-op (take*1.0===take, suppressed===0).
+   let scaled=take*f,suppressed=take-scaled;
    let before=rs.stock[substance]![i]!;
-   rs.stock[substance]![i]!-=take;
+   rs.stock[substance]![i]!-=scaled;
    rs.totalStock[substance]!+=rs.stock[substance]![i]!-before;
-   rs.consumed[substance]!+=take;
-   p.account(interval,take);
-   let out=p.transform(rs,o,take,interval);
-   return{substance,amount:take,gain:out.gain,produced:out.produced,wasteProduced:out.wasteProduced};
+   rs.consumed[substance]!+=scaled;
+   p.account(interval,scaled);
+   let out=p.transform(rs,o,scaled,interval);
+   return{substance,amount:scaled,gain:out.gain,produced:out.produced,wasteProduced:out.wasteProduced,suppressed,suppressedEnergy:suppressed*p.yieldOf(rs.defs)*p.yieldFactor(o)};
   },
  };
  return p;
@@ -322,7 +346,7 @@ class RS{
  declare stock:Float32Array[];declare cap:Float32Array[];declare source:Float32Array[];
  declare input:number[];declare biologicalProduction:number[];declare consumed:number[];declare decayed:number[];declare externalRemoved:number[];declare removalEvents:RemovalEvent[];declare diffusionAdjustment:number[];declare minFraction:number;declare maxFraction:number;declare lastInput:number[];declare diffusionRate:number[];declare delta:Float32Array[];
  declare sourceBoost:Float64Array[];declare right:Int32Array;declare down:Int32Array;declare minCapRight:Float64Array[];declare minCapDown:Float64Array[];declare totalStock:number[];declare totalCapacity:number[];declare regenLast:Int32Array;declare regenBuckets:number[][];
- declare regenRate:number;declare totalCapTarget:number;declare initialFraction:number;declare initialStock:number[];declare waste:WasteField;
+ declare regenRate:number;declare totalCapTarget:number;declare initialFraction:number;declare initialStock:number[];declare waste:WasteField;declare inhibitor:InhibitorField;
  /** Temporary external C sink (validation washout assays): multiplies C decay while active. Null when absent. */
  declare cSink:{end:number;factor:number}|null;
  constructor(c:EngineConfig){
@@ -343,7 +367,7 @@ class RS{
   for(let iy=0;iy<this.n;iy++)for(let ix=0;ix<this.n;ix++){let i=iy*this.n+ix;this.right[i]=iy*this.n+((ix+1)%this.n);this.down[i]=((iy+1)%this.n)*this.n+ix}
   let regenLoad=new Float64Array(this.updateStride);for(let i=0;i<this.size;i++){let phase=0;for(let q=1;q<this.updateStride;q++)if((regenLoad[q]!)<(regenLoad[phase]!))phase=q;this.regenBuckets[phase]!.push(i);regenLoad[phase]!+=this.cap[0]![i]!+this.cap[1]![i]!}
   for(let k=0;k<3;k++)for(let i=0;i<this.size;i++){this.minCapRight[k]![i]=Math.min(this.cap[k]![i]!,this.cap[k]![this.right[i]!]!);this.minCapDown[k]![i]=Math.min(this.cap[k]![i]!,this.cap[k]![this.down[i]!]!)}
-  this.initialStock=[...this.totalStock];this.cSink=null;this.waste=new WasteField(this.totalCapTarget,this.updateStride);this.recalcBounds();
+  this.initialStock=[...this.totalStock];this.cSink=null;this.waste=new WasteField(this.totalCapTarget,this.updateStride);this.inhibitor=new InhibitorField(this.totalCapTarget,this.updateStride);this.recalcBounds();
  }
  idx(x:number,y:number):number{let ix=Math.floor((((x%600)+600)%600)/this.cell)%this.n,iy=Math.floor((((y%600)+600)%600)/this.cell)%this.n;return iy*this.n+ix}
  fractionAt(kind:number,x:number,y:number):number{let i=this.idx(x,y),c=this.cap[kind]![i]!;return c>1e-9?this.stock[kind]![i]!/c:0}
@@ -364,11 +388,11 @@ class RS{
  opportunity(o:Organism):number{let i=this.idx(o.x,o.y),best=0,limit=this.enabledByproduct?3:2;for(let ki=0;ki<limit;ki++){let k=NUTRIENT_SUBSTANCES[ki]!;let c=this.cap[k]![i]!,f=c>1e-9?this.stock[k]![i]!/c:0;best=Math.max(best,f*this.access(o,k))}return best}
  sense(o:Organism){let best={score:0,substance:0 as NutrientSubstance,angle:o.h},ds=[Q(o.se*.45,15,75),Q(o.se,25,150)];for(const d of ds)for(let j=0;j<8;j++){let a=o.h+j*Math.PI/4,x=(o.x+Math.cos(a)*d+600)%600,y=(o.y+Math.sin(a)*d+600)%600,q=this.scoreIndex(o,this.idx(x,y));if(q.score>best.score){best={...q,angle:a}}}let local=this.scoreIndex(o,this.idx(o.x,o.y));if(local.score>best.score*1.12)best={...local,angle:o.h};return best}
  deposit(kind:number,x:number,y:number,amount:number,cause:string|null=null,interval:Interval|null=null):number{if(amount<=0||kind<0||kind>=this.stock.length)return 0;let i=this.idx(x,y),st=this.stock[kind]!,cp=this.cap[kind]!,room=Math.max(0,cp[i]!-st[i]!),add=Math.min(room,amount);if(add<=0)return 0;st[i]!+=add;this.totalStock[kind]!+=add;this.biologicalProduction[kind]!+=add;if(interval&&kind===2)interval.produced_c+=add;return add}
- consume(o:Organism,interval:Interval):NutrientExecution|null{let i=this.idx(o.x,o.y),best=-1,sub:NutrientSubstance=0,limit=this.enabledByproduct?3:2;for(let ki=0;ki<limit;ki++){let k=NUTRIENT_SUBSTANCES[ki]!;let amt=this.stock[k]![i]!;if(amt<=1e-9)continue;let score=amt*this.access(o,k);if(score>best){best=score;sub=k}}if(best<=0)return null;return NUTRIENT_PROCESSES[sub].execute(this,o,interval)}
+ consume(o:Organism,interval:Interval,f=1):NutrientExecution|null{let i=this.idx(o.x,o.y),best=-1,sub:NutrientSubstance=0,limit=this.enabledByproduct?3:2;for(let ki=0;ki<limit;ki++){let k=NUTRIENT_SUBSTANCES[ki]!;let amt=this.stock[k]![i]!;if(amt<=1e-9)continue;let score=amt*this.access(o,k);if(score>best){best=score;sub=k}}if(best<=0)return null;return NUTRIENT_PROCESSES[sub].execute(this,o,interval,f)}
  diffuse(k:number):void{let st=this.stock[k]!,cp=this.cap[k]!,d=this.delta[k]!,right=this.right,down=this.down,mr=this.minCapRight[k]!,md=this.minCapDown[k]!,rate=this.diffusionRate[k]!;d.fill(0);for(let i=0;i<this.size;i++){let ci=cp[i]!>1e-9?st[i]!/cp[i]!:0,j=right[i]!,cj=cp[j]!>1e-9?st[j]!/cp[j]!:0,flux=rate*(ci-cj)*mr[i]!;d[i]!-=flux;d[j]!+=flux;j=down[i]!;cj=cp[j]!>1e-9?st[j]!/cp[j]!:0;flux=rate*(ci-cj)*md[i]!;d[i]!-=flux;d[j]!+=flux}let adj=0;for(let i=0;i<this.size;i++){let before=st[i]!,raw=before+d[i]!,next=Q(raw,0,cp[i]!);st[i]=next;adj+=next-before}this.totalStock[k]!+=adj;this.diffusionAdjustment[k]!+=adj}
  step(t:number,drought:DroughtState|null,interval:Interval):void{let added=[0,0,0],phase=t%this.updateStride,bucket=this.regenBuckets[phase]!,elapsed=new Int32Array(bucket.length);for(let j=0;j<bucket.length;j++){let i=bucket[j]!;elapsed[j]=Math.max(1,t-this.regenLast[i]!)}for(let k=0;k<2;k++){let factor=drought&&t<drought.end&&k===drought.kind?(1-drought.suppression):1,st=this.stock[k]!,cp=this.cap[k]!,boost=this.sourceBoost[k]!;for(let j=0;j<bucket.length;j++){let i=bucket[j]!,gap=cp[i]!-st[i]!;if(gap<=1e-9)continue;let inc=gap*(1-Math.exp(-this.regenRate*boost[i]!*factor*elapsed[j]!));if(inc>0){let before=st[i]!;st[i]!+=inc;this.totalStock[k]!+=st[i]!-before;added[k]!+=inc}}this.input[k]!+=added[k]!}
   if(this.enabledByproduct){let st=this.stock[2]!,dec=0,decayRate=(this.cSink&&t<this.cSink.end)?C_DECAY_RATE*this.cSink.factor:C_DECAY_RATE;for(let j=0;j<bucket.length;j++){let i=bucket[j]!,e=elapsed[j]!,before=st[i]!,next=before*Math.exp(-decayRate*e),loss=before-next;if(loss>0){st[i]=next;dec+=loss}}this.totalStock[2]!-=dec;this.decayed[2]!+=dec;if(interval)interval.decayed_c+=dec}
-  this.waste.stepWaste(t,interval);if(t%100===0){this.diffuse(0);this.diffuse(1);if(this.enabledByproduct)this.diffuse(2)}for(let j=0;j<bucket.length;j++)this.regenLast[bucket[j]!]=t;this.lastInput=added;if(interval){interval.resources_spawned+=added[0]!+added[1]!;interval.spawned_a+=added[0]!;interval.spawned_b+=added[1]!;if(drought&&t<drought.end&&t%this.updateStride===0)interval.resources_suppressed+=1}this.recalcBounds();
+  this.waste.stepWaste(t,interval);this.inhibitor.stepInhibitor(t,interval);if(t%100===0){this.diffuse(0);this.diffuse(1);if(this.enabledByproduct)this.diffuse(2)}for(let j=0;j<bucket.length;j++)this.regenLast[bucket[j]!]=t;this.lastInput=added;if(interval){interval.resources_spawned+=added[0]!+added[1]!;interval.spawned_a+=added[0]!;interval.spawned_b+=added[1]!;if(drought&&t<drought.end&&t%this.updateStride===0)interval.resources_suppressed+=1}this.recalcBounds();
  }
  scale(kind:null,factor:number,meta?:{tick:number|null;type:string|null;source:string|null;reason?:string}|null):number[];
  scale(kind:number,factor:number,meta?:{tick:number|null;type:string|null;source:string|null;reason?:string}|null):number;
@@ -376,7 +400,7 @@ class RS{
  totals(){let a=this.totalStock[0]!,b=this.totalStock[1]!,c=this.totalStock[2]!,ca=this.totalCapacity[0]!,cb=this.totalCapacity[1]!,cc=this.totalCapacity[2]!,primaryCap=ca+cb,primary=a+b,all=primary+c;return{a,b,c,a_capacity:ca,b_capacity:cb,c_capacity:cc,total:primary,total_with_byproduct:all,total_capacity:primaryCap,total_capacity_with_byproduct:primaryCap+cc,fraction:primaryCap?primary/primaryCap:0,c_fraction:cc?c/cc:0,min_fraction:this.minFraction,max_fraction:this.maxFraction}}
  recalcBounds(){let cap=this.totalCapacity[0]!+this.totalCapacity[1]!,tot=this.totalStock[0]!+this.totalStock[1]!,f=cap?tot/cap:0;this.minFraction=Math.min(this.minFraction,f);this.maxFraction=Math.max(this.maxFraction,f)}
  accounting(){let final=[...this.totalStock],residual=[0,1,2].map(k=>this.initialStock[k]!+this.input[k]!+this.biologicalProduction[k]!-this.consumed[k]!-this.decayed[k]!-this.externalRemoved[k]!+this.diffusionAdjustment[k]!-final[k]!);return{initial_stock:[...this.initialStock],environmental_input:[...this.input],biological_production:[...this.biologicalProduction],biological_consumption:[...this.consumed],decay:[...this.decayed],external_removal:[...this.externalRemoved],diffusion_clamp_adjustment:[...this.diffusionAdjustment],final_stock:final,residual,absolute_residual:residual.map(Math.abs),removal_events:this.removalEvents.map(v=>({...v,amounts:[...v.amounts]})),identity:'initial + environmental input + biological production - biological consumption - decay - external removal + diffusion clamp adjustment = final stock + residual'}}
- clone(){let n=Object.create(RS.prototype);for(const [k,v] of Object.entries(this)){if(v instanceof WasteField)n[k]=v.clone();else if(Array.isArray(v)&&v.length&&ArrayBuffer.isView(v[0]))n[k]=v.map(a=>new a.constructor(a));else if(ArrayBuffer.isView(v))n[k]=new (v.constructor as any)(v);else if(Array.isArray(v))n[k]=v.map(x=>x&&typeof x==='object'?JSON.parse(JSON.stringify(x)):x);else if(v&&typeof v==='object')n[k]=JSON.parse(JSON.stringify(v));else n[k]=v}return n}
+ clone(){let n=Object.create(RS.prototype);for(const [k,v] of Object.entries(this)){if(v instanceof WasteField)n[k]=v.clone();else if(v instanceof InhibitorField)n[k]=v.clone();else if(Array.isArray(v)&&v.length&&ArrayBuffer.isView(v[0]))n[k]=v.map(a=>new a.constructor(a));else if(ArrayBuffer.isView(v))n[k]=new (v.constructor as any)(v);else if(Array.isArray(v))n[k]=v.map(x=>x&&typeof x==='object'?JSON.parse(JSON.stringify(x)):x);else if(v&&typeof v==='object')n[k]=JSON.parse(JSON.stringify(v));else n[k]=v}return n}
  export(){let q=this.totals();return{model:'definition_driven_spatial_substance_field',grid:{width:this.n,height:this.n,cell_world_units:this.cell,toroidal:true},definitions:this.defs.map(v=>({...v})),update_stride_ticks:this.updateStride,uptake_per_tick:this.uptake,totals:q,environmental_input:[...this.input],biological_production:[...this.biologicalProduction],biological_consumption:[...this.consumed],decay:[...this.decayed],external_removal:[...this.externalRemoved],accounting:this.accounting(),stock_fields:this.stock.map(a=>Array.from(a)),capacity_fields:this.cap.map(a=>Array.from(a)),source_fields:this.source.map(a=>Array.from(a))}}
 }
 
@@ -454,6 +478,114 @@ class WasteField{
  export():{model:string;grid:number;cell_world_units:number;diffusion_rate:number;decay_rate:number;totals:unknown;accounting:unknown}{return{model:'spatial_waste_substance_field',grid:this.n,cell_world_units:this.cell,diffusion_rate:this.diffusionRate,decay_rate:this.decayRate,totals:this.totals(),accounting:this.accounting()}}
 }
 
+/**
+ * R0 inducible interference: local inhibitor signal field. Ported from the
+ * rejected PR #91 scaffolding (representation, closed accounting, diffusion
+ * as redistribution) with the continuous-expression production path removed:
+ * mass enters only through induction-gated realized secretion. Separate
+ * substance from nutrients and Waste; never an energy source; never damage.
+ */
+class InhibitorField{
+ declare n:number;declare cell:number;declare size:number;
+ declare stock:Float32Array;declare cap:Float32Array;
+ declare produced:number;declare decayed:number;declare discarded:number;declare clampAdj:number;
+ declare diffusionRate:number;declare decayRate:number;
+ declare right:Int32Array;declare down:Int32Array;declare delta:Float32Array;
+ declare updateStride:number;declare decayLast:Int32Array;declare decayBuckets:number[][];
+ constructor(totalCap:number,updateStride:number){
+  this.n=FIELD_N;this.cell=FIELD_CELL;this.size=FIELD_CELLS;this.updateStride=updateStride;
+  this.diffusionRate=INHIBITOR_DIFFUSION;this.decayRate=INHIBITOR_DECAY;
+  let per=totalCap*INHIBITOR_CAP_FRACTION/this.size;
+  this.stock=new Float32Array(this.size);this.cap=new Float32Array(this.size).fill(per);
+  this.produced=0;this.decayed=0;this.discarded=0;this.clampAdj=0;
+  this.right=new Int32Array(this.size);this.down=new Int32Array(this.size);this.delta=new Float32Array(this.size);
+  for(let iy=0;iy<this.n;iy++)for(let ix=0;ix<this.n;ix++){let i=iy*this.n+ix;this.right[i]=iy*this.n+((ix+1)%this.n);this.down[i]=((iy+1)%this.n)*this.n+ix}
+  this.decayLast=new Int32Array(this.size);this.decayBuckets=Array.from({length:this.updateStride},()=>[] as number[]);
+  for(let i=0;i<this.size;i++)this.decayBuckets[i%this.updateStride]!.push(i);
+ }
+ idx(x:number,y:number):number{let ix=Math.floor((((x%600)+600)%600)/this.cell)%this.n,iy=Math.floor((((y%600)+600)%600)/this.cell)%this.n;return iy*this.n+ix}
+ fractionAt(x:number,y:number):number{let i=this.idx(x,y),c=this.cap[i]!;return c>1e-9?this.stock[i]!/c:0}
+ amountAt(x:number,y:number):number{return this.stock[this.idx(x,y)]!}
+ deposit(x:number,y:number,amount:number,interval:Interval|null):number{
+  if(amount<=0)return 0;
+  let i=this.idx(x,y),room=Math.max(0,this.cap[i]!-this.stock[i]!),add=Math.min(room,amount);
+  let lost=amount-add;
+  if(lost>0){this.discarded+=lost;if(interval)interval.saturated_i=(interval.saturated_i as number||0)+lost;}
+  if(add<=0)return 0;
+  this.stock[i]!+=add;this.produced+=add;
+  if(interval)interval.secreted_i=(interval.secreted_i as number||0)+add;
+  return add;
+ }
+ diffuseOne():void{
+  let st=this.stock,cp=this.cap,d=this.delta,right=this.right,down=this.down,rate=this.diffusionRate,per=cp[0]!;
+  d.fill(0);
+  for(let i=0;i<this.size;i++){let ci=cp[i]!>1e-9?st[i]!/cp[i]!:0,j=right[i]!,cj=cp[j]!>1e-9?st[j]!/cp[j]!:0,flux=rate*(ci-cj)*per;d[i]!-=flux;d[j]!+=flux;j=down[i]!,cj=cp[j]!>1e-9?st[j]!/cp[j]!:0,flux=rate*(ci-cj)*per;d[i]!-=flux;d[j]!+=flux}
+  let adj=0;for(let i=0;i<this.size;i++){let before=st[i]!,next=Math.max(0,Math.min(cp[i]!,before+d[i]!));st[i]=next;adj+=next-before}
+  this.clampAdj+=adj;
+ }
+ stepInhibitor(t:number,interval:Interval|null):void{
+  let phase=t%this.updateStride,bucket=this.decayBuckets[phase]!,elapsed=new Int32Array(bucket.length);
+  for(let j=0;j<bucket.length;j++){let i=bucket[j]!;elapsed[j]=Math.max(1,t-this.decayLast[i]!)}
+  let st=this.stock,dec=0;
+  for(let j=0;j<bucket.length;j++){let i=bucket[j]!,e=elapsed[j]!,before=st[i]!,next=before*Math.exp(-this.decayRate*e),loss=before-next;if(loss>0){st[i]=next;dec+=loss}}
+  this.decayed+=dec;
+  if(interval)interval.decayed_i=(interval.decayed_i as number||0)+dec;
+  if(t%100===0)this.diffuseOne();
+  for(let j=0;j<bucket.length;j++)this.decayLast[bucket[j]!]=t;
+ }
+ totals():{stock:number;capacity:number;fraction:number}{let sm=0,cp=0;for(let i=0;i<this.size;i++){sm+=this.stock[i]!;cp+=this.cap[i]!}return{stock:sm,capacity:cp,fraction:cp>0?sm/cp:0}}
+ accounting():{identity:string;produced:number;decayed:number;saturated_loss:number;clamp_adjustment:number;final_stock:number;residual:number}{let f=this.totals().stock,res=this.produced-this.decayed+this.clampAdj-f;return{identity:'produced - decayed + clamp - final == 0',produced:this.produced,decayed:this.decayed,saturated_loss:this.discarded,clamp_adjustment:this.clampAdj,final_stock:f,residual:res}}
+ clone():InhibitorField{let n=Object.create(InhibitorField.prototype);for(const [k,v] of Object.entries(this)){if(ArrayBuffer.isView(v))n[k]=new (v.constructor as any)(v);else if(Array.isArray(v))n[k]=v.map(x=>Array.isArray(x)?[...x]:x);else n[k]=v}return n}
+ export():{model:string;grid:number;cell_world_units:number;diffusion_rate:number;decay_rate:number;totals:unknown;accounting:unknown}{return{model:'spatial_inhibitor_signal',grid:this.n,cell_world_units:this.cell,diffusion_rate:this.diffusionRate,decay_rate:this.decayRate,totals:this.totals(),accounting:this.accounting()}}
+}
+
+/** R0 inducible interference: pre-step competition context (handoff §4).
+ * Built once per step from pre-action state; every active organism reads the
+ * same immutable snapshot, so loop order cannot alter induction. No RNG.
+ * Density counts ACTIVE organisms only (dormant excluded); identity-free
+ * (counts per cell — no lineage/family/genotype inspection). Scarcity uses
+ * pre-suppression opportunity against a stock snapshot (never live stocks,
+ * never post-inhibition takes), so the inhibitor cannot induce itself.
+ */
+function buildCompetitionContext(rs:any,organisms:any[]):{density:Int16Array;stocks:Float32Array[];n:number;cell:number}{
+ let n=rs.n as number,cell=rs.cell as number,density=new Int16Array(n*n);
+ for(const o of organisms){
+  if(o.activity==='dormant')continue;
+  let ix=Math.floor((((o.x%600)+600)%600)/cell)%n,iy=Math.floor((((o.y%600)+600)%600)/cell)%n;
+  density[iy*n+ix]!++;
+ }
+ return{density,stocks:[rs.stock[0]!.slice(),rs.stock[1]!.slice(),rs.stock[2]!.slice()],n,cell};
+}
+function crowdingAt(ctx:{density:Int16Array;n:number},x:number,y:number,cell:number):number{
+ // 3x3 cell neighborhood sum (toroidal), normalized to INDUCT_CROWD_REF.
+ let n=ctx.n,ix=Math.floor((((x%600)+600)%600)/cell)%n,iy=Math.floor((((y%600)+600)%600)/cell)%n,s=0;
+ for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++)s+=ctx.density[(((iy+dy+n)%n)*n+((ix+dx+n)%n))]!;
+ return Q(s/INDUCT_CROWD_REF,0,1);
+}
+function scarcityAt(ctx:{stocks:Float32Array[]},rs:any,o:any):number{
+ // Pre-suppression opportunity replicated against the snapshot stocks:
+ // max over substrates of fraction x access. Identity-free (traits only).
+ let i=rs.idx(o.x,o.y),best=0,limit=rs.enabledByproduct?3:2;
+ for(let ki=0;ki<limit;ki++){let k=[0,1,2][ki]!;
+  let st=ctx.stocks[k]![i]!,cp=(rs.cap[k] as Float32Array)[i]!;
+  let f=cp>1e-9?st/cp:0;best=Math.max(best,f*rs.access(o,k));
+ }
+ return Q(1-best,0,1);
+}
+/** Conjunctive induction: bounded, smooth, monotonic in each factor once the
+ * other is present; weak when either factor alone is high; material when
+ * both are high. Multiplicative form per handoff §4.4. */
+function inductionFactor(crowd01:number,scarc01:number):number{
+ return Q(crowd01,0,1)*Q(scarc01,0,1);
+}
+/** Latest per-step context record, keyed weakly: assay introspection only,
+ * never checkpointed (deterministically reconstructed same-step). */
+const LAST_CONTEXT=new WeakMap<object,any>();
+/** Assay introspection into the latest per-step competition record
+ * (per-organism crowding/scarcity/induction/desired/realized). Never
+ * checkpointed; deterministically reconstructed every step. */
+function lastCompetitionRecord(sim:unknown):any{return LAST_CONTEXT.get(sim as object) ?? null;}
+
 class S{
  declare c:EngineConfig;declare study:boolean;
  declare rInit:LegacyRng;declare rFood:LegacyRng;declare rMove:LegacyRng;declare rMut:LegacyRng;declare rCat:LegacyRng;
@@ -470,13 +602,13 @@ class S{
   this.rInit=R((c.seed^0xA341316C)>>>0);this.rFood=R((c.seed^0xC8013EA4)>>>0);this.rMove=R((c.seed^0xAD90777D)>>>0);this.rMut=R((c.seed^0x7E95761E)>>>0);this.rCat=R((c.seed^0x9E3779B9)>>>0);
   this.t=0;this.o=[];this.ev=[];this.sn=[];this.long=[];this.longStride=2503;this.eventSn=[];this.L=new Map;this.FAM=new Map;this.nL=1;this.nO=1;this.peakPopulation=0;this.peakPopulationTick=0;this.tb=B();this.last=I();this.cur=I();this.totalUse=[0,0,0];this.totalEnergy=[0,0,0];this.totalReproSupport=[0,0,0,0];this.resources=new RS(this.c);this.drought=null;this.response=null;this.extinctTick=null;this.extinctionContext=null;this.nh=[];this.lineageInterval=new Map();this.lastLineageFlows=null;
   let ri=this.rInit;
-  for(let k=0;k<c.pop;k++){let z=c.div,l=this.newL(0,[]),di=Q((ri()*2-1)*z,-1,1),ha=Q(di*.45+(ri()*2-1)*z*.75,-1,1);let matureAt=FOUNDER_MATURITY_MIN+Math.floor(ri()*FOUNDER_MATURITY_SPAN),id=this.nO++,bu=this.c.enable_byproduct?Q(.04+.28*H01(c.seed,id,17),0,1.5):0,dr=this.c.enable_dormancy?Q(.18+.62*H01(c.seed,id,29),0,1.5):0,to=Q(.05+.25*H01(c.seed,id,41),0,1.5),cu=Q(.05+.25*H01(c.seed,id,53),0,1.5);this.o.push({id,parent:null,generation:0,born:0,matureAt,readyAt:matureAt,x:ri()*600,y:ri()*600,en:60,h:ri()*6.28,sp:Q(1.15*(1+(ri()*2-1)*z),.25,4),se:Q(55*(1+(ri()*2-1)*z),10,180),me:Q(.16*(1+(ri()*2-1)*z),.04,.5),rp:Q(92*(1+(ri()*2-1)*z),55,220),di,ha,bu,dr,to,cu,activity:'active',dormantSince:null,wakeCount:0,lastWakeTick:null,ma:0,mb:0,mc:0,pc:0,ga:0,gb:0,gc:0,ra:0,rb:0,rc:0,l})}
+  for(let k=0;k<c.pop;k++){let z=c.div,l=this.newL(0,[]),di=Q((ri()*2-1)*z,-1,1),ha=Q(di*.45+(ri()*2-1)*z*.75,-1,1);let matureAt=FOUNDER_MATURITY_MIN+Math.floor(ri()*FOUNDER_MATURITY_SPAN),id=this.nO++,bu=this.c.enable_byproduct?Q(.04+.28*H01(c.seed,id,17),0,1.5):0,dr=this.c.enable_dormancy?Q(.18+.62*H01(c.seed,id,29),0,1.5):0,to=Q(.05+.25*H01(c.seed,id,41),0,1.5),cu=Q(.05+.25*H01(c.seed,id,53),0,1.5),sec=c.enable_interference?Q(.0+.02*H01(c.seed,id,61),0,1.5):0,rst=c.enable_interference?Q(.0+.02*H01(c.seed,id,67),0,1.5):0;this.o.push({id,parent:null,generation:0,born:0,matureAt,readyAt:matureAt,x:ri()*600,y:ri()*600,en:60,h:ri()*6.28,sp:Q(1.15*(1+(ri()*2-1)*z),.25,4),se:Q(55*(1+(ri()*2-1)*z),10,180),me:Q(.16*(1+(ri()*2-1)*z),.04,.5),rp:Q(92*(1+(ri()*2-1)*z),55,220),di,ha,bu,dr,to,cu,in:sec,re:rst,activity:'active',dormantSince:null,wakeCount:0,lastWakeTick:null,ma:0,mb:0,mc:0,pc:0,ga:0,gb:0,gc:0,ra:0,rb:0,rc:0,l})}
   this.peakPopulation=this.o.length;this.updateLineageHistory();this.updateFamilyHistory();this.log('Universe created');if(!this.study)this.long.push(this.pack());
  }
  newL(p:number,m:string[]):number{let id=this.nL++;this.L.set(id,{id,parent:p,born:this.t,mutations:m,peak:0,last:this.t,established:false});return id}
  resourceKind(){return this.rFood()<this.c.resource_b_fraction?1:0}
- mut(n:string,v:number):[number,boolean]{let[k,lo,hi]=T[n]!,r=this.rMut;if((n==='byproduct_use'&&!this.c.enable_byproduct)||(n==='dormancy_response'&&!this.c.enable_dormancy))return[v,false];if(r()>=this.c.mr)return[v,false];this.cur.mutation_attempts++;let additive=n==='diet'||n==='habitat'||n==='byproduct_use'||n==='dormancy_response',p=additive?v+(r()*2-1)*this.c.ms*1.15:v*(1+(r()*2-1)*this.c.ms);if(p<lo)this.tb[n]![0]!++;if(p>hi)this.tb[n]![1]!++;let nv=Q(p,lo,hi),changed=Math.abs(nv-v)>1e-12;if(changed)this.cur.effective_mutations++;return[nv,changed]}
- child(o:Organism):Organism{let q:Record<string,number>={},m:string[]=[];for(let n in T){if((n==='byproduct_use'&&!this.c.enable_byproduct)||(n==='dormancy_response'&&!this.c.enable_dormancy)){q[T[n]![0]!]=(o[T[n]![0]!] as number)||0;continue}let[v,x]=this.mut(n,o[T[n]![0]!] as number);q[T[n]![0]!]=v;if(x)m.push(n)}let ang=this.rMove()*6.28,dist=2+18*Math.sqrt(this.rMove()),matureAt=this.t+OFFSPRING_MATURITY_MIN+Math.floor(this.rMove()*OFFSPRING_MATURITY_SPAN);return{id:this.nO++,parent:o.id,generation:(o.generation||0)+1,born:this.t,matureAt,readyAt:matureAt,x:(o.x+Math.cos(ang)*dist+600)%600,y:(o.y+Math.sin(ang)*dist+600)%600,en:o.en*.92,h:this.rMove()*6.28,sp:q.sp!,se:q.se!,me:q.me!,rp:q.rp!,di:q.di!,ha:q.ha!,bu:q.bu||0,dr:q.dr||0,to:q.to!,cu:q.cu!,activity:'active',dormantSince:null,wakeCount:0,lastWakeTick:null,ma:0,mb:0,mc:0,pc:0,ga:0,gb:0,gc:0,ra:0,rb:0,rc:0,l:m.length?this.newL(o.l,m):o.l}}
+ mut(n:string,v:number):[number,boolean]{let[k,lo,hi]=T[n]!,r=this.rMut;if((n==='secretion'||n==='resistance')&&!this.c.enable_interference)return[v,false];if((n==='byproduct_use'&&!this.c.enable_byproduct)||(n==='dormancy_response'&&!this.c.enable_dormancy))return[v,false];if(r()>=this.c.mr)return[v,false];this.cur.mutation_attempts++;let additive=n==='diet'||n==='habitat'||n==='byproduct_use'||n==='dormancy_response'||n==='secretion'||n==='resistance',p=additive?v+(r()*2-1)*this.c.ms*1.15:v*(1+(r()*2-1)*this.c.ms);if(p<lo)this.tb[n]![0]!++;if(p>hi)this.tb[n]![1]!++;let nv=Q(p,lo,hi),changed=Math.abs(nv-v)>1e-12;if(changed)this.cur.effective_mutations++;return[nv,changed]}
+ child(o:Organism):Organism{let q:Record<string,number>={},m:string[]=[];for(let n in T){if((n==='byproduct_use'&&!this.c.enable_byproduct)||(n==='dormancy_response'&&!this.c.enable_dormancy)){q[T[n]![0]!]=(o[T[n]![0]!] as number)||0;continue}let[v,x]=this.mut(n,o[T[n]![0]!] as number);q[T[n]![0]!]=v;if(x)m.push(n)}let ang=this.rMove()*6.28,dist=2+18*Math.sqrt(this.rMove()),matureAt=this.t+OFFSPRING_MATURITY_MIN+Math.floor(this.rMove()*OFFSPRING_MATURITY_SPAN);return{id:this.nO++,parent:o.id,generation:(o.generation||0)+1,born:this.t,matureAt,readyAt:matureAt,x:(o.x+Math.cos(ang)*dist+600)%600,y:(o.y+Math.sin(ang)*dist+600)%600,en:o.en*.92,h:this.rMove()*6.28,sp:q.sp!,se:q.se!,me:q.me!,rp:q.rp!,di:q.di!,ha:q.ha!,bu:q.bu||0,dr:q.dr||0,to:q.to!,cu:q.cu!,in:q.in!,re:q.re!,activity:'active',dormantSince:null,wakeCount:0,lastWakeTick:null,ma:0,mb:0,mc:0,pc:0,ga:0,gb:0,gc:0,ra:0,rb:0,rc:0,l:m.length?this.newL(o.l,m):o.l}}
  reproSupport(o:Organism):number{let t=(o.ra||0)+(o.rb||0)+(o.rc||0);if(t<=0)return 2;let c=(o.rc||0)/t;if(c>=.45)return 3;let p=(o.ra||0)+(o.rb||0),a=p?o.ra/p:.5;return a>=.65?0:a<=.35?1:2}
  catalyst(type:string,src:string):void{
   this.eventSn.push({...this.pack(),phase:'before_catalyst',source:src,catalyst:type});let pre=this.o.length,removed:number[];
@@ -489,12 +621,13 @@ class S{
  localOpportunity(o:Organism):number{return this.resources.opportunity(o)}
  dormancyEntry(o:Organism):boolean{if(!this.c.enable_dormancy||o.activity==='dormant')return false;let r=Q((o.dr||0)/1.5,0,1),energy=o.en/Math.max(55,o.rp),opp=this.localOpportunity(o),eThresh=.34+.20*r,oThresh=.10+.16*r;return energy<eThresh&&opp<oThresh}
  dormancyWake(o:Organism):boolean{let r=Q((o.dr||0)/1.5,0,1),opp=this.localOpportunity(o),wake=.22+.18*r;return opp>wake}
- lineageCredit(l:number,d:{consumedA?:number;consumedB?:number;consumedC?:number;energyA?:number;energyB?:number;energyC?:number;producedC?:number;births?:number;deaths?:number;wasteProduced?:number;wasteRemoved?:number;burdenEnergy?:number;cleanupEnergy?:number;cleanupExec?:number}){
+ lineageCredit(l:number,d:{consumedA?:number;consumedB?:number;consumedC?:number;energyA?:number;energyB?:number;energyC?:number;producedC?:number;births?:number;deaths?:number;wasteProduced?:number;wasteRemoved?:number;burdenEnergy?:number;cleanupEnergy?:number;cleanupExec?:number;secreted_i?:number;secretion_energy?:number;resistance_energy?:number;exposure_i?:number;suppressed_a?:number;suppressed_b?:number;suppressed_c?:number;suppressed_ea?:number;suppressed_eb?:number;suppressed_ec?:number}){
   let m=this.lineageInterval;if(!m)m=this.lineageInterval=new Map();
   let f=m.get(l);
-  if(!f){f={consumedA:0,consumedB:0,consumedC:0,energyA:0,energyB:0,energyC:0,producedC:0,births:0,deaths:0,wasteProduced:0,wasteRemoved:0,burdenEnergy:0,cleanupEnergy:0,cleanupExec:0};m.set(l,f)}
+  if(!f){f={consumedA:0,consumedB:0,consumedC:0,energyA:0,energyB:0,energyC:0,producedC:0,births:0,deaths:0,wasteProduced:0,wasteRemoved:0,burdenEnergy:0,cleanupEnergy:0,cleanupExec:0,secreted_i:0,secretion_energy:0,resistance_energy:0,exposure_i:0,suppressed_a:0,suppressed_b:0,suppressed_c:0,suppressed_ea:0,suppressed_eb:0,suppressed_ec:0};m.set(l,f)}
   if((f as any).wasteProduced===undefined){f.wasteProduced=0;f.wasteRemoved=0;f.burdenEnergy=0;f.cleanupEnergy=0;f.cleanupExec=0}
-  f.consumedA+=d.consumedA||0;f.consumedB+=d.consumedB||0;f.consumedC+=d.consumedC||0;f.energyA+=d.energyA||0;f.energyB+=d.energyB||0;f.energyC+=d.energyC||0;f.producedC+=d.producedC||0;f.births+=d.births||0;f.deaths+=d.deaths||0;f.wasteProduced+=d.wasteProduced||0;f.wasteRemoved+=d.wasteRemoved||0;f.burdenEnergy+=d.burdenEnergy||0;f.cleanupEnergy+=d.cleanupEnergy||0;f.cleanupExec+=d.cleanupExec||0;
+  if((f as any).secreted_i===undefined){f.secreted_i=0;f.secretion_energy=0;f.resistance_energy=0;f.exposure_i=0;f.suppressed_a=0;f.suppressed_b=0;f.suppressed_c=0;f.suppressed_ea=0;f.suppressed_eb=0;f.suppressed_ec=0}
+  f.consumedA+=d.consumedA||0;f.consumedB+=d.consumedB||0;f.consumedC+=d.consumedC||0;f.energyA+=d.energyA||0;f.energyB+=d.energyB||0;f.energyC+=d.energyC||0;f.producedC+=d.producedC||0;f.births+=d.births||0;f.deaths+=d.deaths||0;f.wasteProduced+=d.wasteProduced||0;f.wasteRemoved+=d.wasteRemoved||0;f.burdenEnergy+=d.burdenEnergy||0;f.cleanupEnergy+=d.cleanupEnergy||0;f.cleanupExec+=d.cleanupExec||0;f.secreted_i+=d.secreted_i||0;f.secretion_energy+=d.secretion_energy||0;f.resistance_energy+=d.resistance_energy||0;f.exposure_i+=d.exposure_i||0;f.suppressed_a+=d.suppressed_a||0;f.suppressed_b+=d.suppressed_b||0;f.suppressed_c+=d.suppressed_c||0;f.suppressed_ea+=d.suppressed_ea||0;f.suppressed_eb+=d.suppressed_eb||0;f.suppressed_ec+=d.suppressed_ec||0;
  }
  readIntervalFlows():IntervalFlowFacts{
   let lineages:{lineageId:number;netMembers:number;consumedA:number;consumedB:number;consumedC:number;energyA:number;energyB:number;energyC:number;producedC:number;births:number;deaths:number;wasteProduced:number;wasteRemoved:number;burdenEnergy:number;cleanupEnergy:number;cleanupExec:number}[]=[];
@@ -521,6 +654,16 @@ class S{
  step(){
   this.t++;if(this.c.st===this.t)this.catalyst(this.c.cat,'scheduled');if(this.drought&&this.t>=this.drought.end){this.log(`Nutrient ${this.drought.kind?'B':'A'} drought ended`);this.drought=null}if(this.resources.cSink&&this.t>=this.resources.cSink.end){this.log('Metabolite C sink dissipated');this.resources.cSink=null}
   this.resources.step(this.t,this.drought,this.cur);let born=[],live=[];
+  // R0 inducible interference (§4.1): one immutable competition-context
+  // snapshot per step, built from pre-action state BEFORE any organism
+  // secretes or acquires. All active organisms read the same snapshot, so
+  // loop order cannot alter induction. No RNG. Dormant organisms neither
+  // contribute to density nor express.
+  let compCtx:any=null,compRec:any=null;
+  if(this.c.enable_interference){
+   compCtx=buildCompetitionContext(this.resources,this.o);
+   compRec={byId:new Map(),density:compCtx.density,cell:compCtx.n};
+  }
   for(const o of this.o){
    if(o.activity==='dormant'){
     if(((this.t+o.id)%DORMANCY_CHECK)===0&&this.dormancyWake(o)){o.activity='active';o.lastWakeTick=this.t;o.wakeCount=(o.wakeCount||0)+1;o.dormantSince=null;this.cur.wakes++;let cid=this.cladeRoot(o.l);this.cur.wake_clades[cid]=(this.cur.wake_clades[cid]||0)+1}
@@ -551,16 +694,45 @@ class S{
     if(removed>0){this.lineageCredit(o.l,{wasteRemoved:removed,burdenEnergy:burden*this.c.press,cleanupEnergy:cleanCost*this.c.press,cleanupExec:1})}
     else this.lineageCredit(o.l,{burdenEnergy:burden*this.c.press,cleanupEnergy:cleanCost*this.c.press});
    }}
-   let eat=this.resources.consume(o,this.cur);if(eat){o.en+=eat.gain;/* Frozen counters (parity-protected): ma/mb/mc count consumption EVENTS,
+   // R0 inducible expression (§5): capacity x induction x scale, paid
+   // from energy, depositing only what was paid for. Exposure uses the same
+   // rule for every active organism (no producer immunity); resistance
+   // mitigates but never immunizes. Suppression acts ONLY through the
+   // acquisition take below.
+   let supf=1;
+   if(this.c.enable_interference){
+    let inQ=Q(o.in||0,0,1.5),reQ=Q(o.re||0,0,1.5);
+    let crowd=crowdingAt(compCtx,o.x,o.y,this.resources.cell);
+    let scarc=scarcityAt(compCtx,this.resources,o);
+    let ind=inductionFactor(crowd,scarc);
+    let want=inQ*ind*IN_SCALE,denom=IN_COST*this.c.press;
+    let afford=o.en>0&&denom>0?o.en/denom:0;
+    let real=Math.min(want,afford),secCost=real*IN_COST*this.c.press;
+    o.en-=secCost;
+    this.cur.secretion_energy=(this.cur.secretion_energy as number||0)+secCost;
+    let accepted=this.resources.inhibitor.deposit(o.x,o.y,real,this.cur);
+    let resCost=RES_STANDING*reQ*this.c.press;
+    o.en-=resCost;
+    this.cur.resistance_energy=(this.cur.resistance_energy as number||0)+resCost;
+    let ifr=this.resources.inhibitor.fractionAt(o.x,o.y);
+    let effI=ifr*(1-RE_EFFICACY*(reQ/1.5));
+    let f=1-IN_SUPPRESS_MAX*(effI/(effI+IN_SUPPRESS_HALF));
+    supf=Q(f,1-IN_SUPPRESS_MAX,1);
+    this.cur.exposure_i=(this.cur.exposure_i as number||0)+effI;
+    this.lineageCredit(o.l,{secreted_i:accepted,secretion_energy:secCost,resistance_energy:resCost,exposure_i:effI});
+    compRec.byId.set(o.id,{crowd,scarc,ind,desired:want,realized:real});
+   }
+   let eat=this.c.enable_interference?this.resources.consume(o,this.cur,supf):this.resources.consume(o,this.cur);if(eat){o.en+=eat.gain;/* Frozen counters (parity-protected): ma/mb/mc count consumption EVENTS,
    not mass. Only read by lineage flow attribution, which labels them as
    counts. Interval deltas carry true mass. Do not 'fix' without an
    engine-version change. */
-   if(eat.substance===0){o.ma++;o.ga+=eat.gain;o.ra+=eat.gain;this.cur.energy_a+=eat.gain;this.lineageCredit(o.l,{consumedA:eat.amount,energyA:eat.gain,producedC:eat.produced,wasteProduced:eat.wasteProduced})}else if(eat.substance===1){o.mb++;o.gb+=eat.gain;o.rb+=eat.gain;this.cur.energy_b+=eat.gain;this.lineageCredit(o.l,{consumedB:eat.amount,energyB:eat.gain,producedC:eat.produced,wasteProduced:eat.wasteProduced})}else{o.mc=(o.mc||0)+1;o.gc=(o.gc||0)+eat.gain;o.rc=(o.rc||0)+eat.gain;this.cur.energy_c+=eat.gain;this.lineageCredit(o.l,{consumedC:eat.amount,energyC:eat.gain})}this.totalUse[eat.substance]!+=eat.amount;this.totalEnergy[eat.substance]!+=eat.gain}
+   if(eat.substance===0){o.ma++;o.ga+=eat.gain;o.ra+=eat.gain;this.cur.energy_a+=eat.gain;this.lineageCredit(o.l,{consumedA:eat.amount,energyA:eat.gain,producedC:eat.produced,wasteProduced:eat.wasteProduced,suppressed_a:eat.suppressed,suppressed_ea:eat.suppressedEnergy})}else if(eat.substance===1){o.mb++;o.gb+=eat.gain;o.rb+=eat.gain;this.cur.energy_b+=eat.gain;this.lineageCredit(o.l,{consumedB:eat.amount,energyB:eat.gain,producedC:eat.produced,wasteProduced:eat.wasteProduced,suppressed_b:eat.suppressed,suppressed_eb:eat.suppressedEnergy})}else{o.mc=(o.mc||0)+1;o.gc=(o.gc||0)+eat.gain;o.rc=(o.rc||0)+eat.gain;this.cur.energy_c+=eat.gain;this.lineageCredit(o.l,{consumedC:eat.amount,energyC:eat.gain,suppressed_c:eat.suppressed,suppressed_ec:eat.suppressedEnergy})}this.totalUse[eat.substance]!+=eat.amount;this.totalEnergy[eat.substance]!+=eat.gain}
    if(this.t>=(o.matureAt||0)&&this.t>=(o.readyAt||0)&&o.en>=o.rp){let support=this.reproSupport(o);this.totalReproSupport[support]!++;if(support===0)this.cur.repro_supported_a++;else if(support===1)this.cur.repro_supported_b++;else if(support===3)this.cur.repro_supported_c++;else this.cur.repro_supported_mixed++;o.ra=0;o.rb=0;o.rc=0;o.en*=.52;o.readyAt=this.t+REPRO_COOLDOWN;let baby=this.child(o);born.push(baby);this.cur.births++;this.lineageCredit(baby.l,{births:1})}if(o.en>0)live.push(o);else{this.cur.deaths++;this.lineageCredit(o.l,{deaths:1})}
   }
   this.o=live.concat(born);if(this.o.length>this.peakPopulation){this.peakPopulation=this.o.length;this.peakPopulationTick=this.t}
   if(!this.o.length&&this.extinctTick===null){this.extinctTick=this.t;let prev=this.sn.length?this.sn[this.sn.length-1]:this.long[this.long.length-1];this.extinctionContext={tick:this.t,previous_snapshot:prev||null,nutrient_field:this.resources.totals(),interval:{...this.cur}};this.log('Population extinct')}
   if(this.response)this.trackResponse();
+  if(this.c.enable_interference&&compRec)LAST_CONTEXT.set(this,compRec);
   if(this.t%EVENT_STRIDE===0){this.updateLineageHistory();this.updateFamilyHistory();let obsM=this.metrics();this.last={...this.cur,wake_clades:{...this.cur.wake_clades}};this.lastLineageFlows=this.readIntervalFlows();this.lineageInterval=new Map();this.cur=I();let ns=obsM.niche_structure;this.nh.push({tick:this.t,partitioned:ns.partitioned_now,effective_niches:ns.effective_niches,coverage:ns.realized_coverage,alignment:ns.spatial.alignment});while(this.nh.length&&this.nh[0]!.tick<this.t-PART_WINDOW)this.nh.shift();if(!this.study){this.sn.push(this.pack());if(this.sn.length>120)this.sn.shift()}}
   if(!this.study&&this.t%this.longStride===0){this.long.push(this.pack());if(this.long.length>500){this.long=this.long.filter((_,i)=>i%2===0);this.longStride*=2}}
  }
@@ -606,6 +778,7 @@ function encodeCheckpointValue(v:any):any{
  if(v instanceof S)return{[CHECKPOINT_TAG]:"simulation",props:Object.fromEntries(Object.entries(v).map(([k,x])=>[k,encodeCheckpointValue(x)]))};
  if(v instanceof RS)return{[CHECKPOINT_TAG]:"resource-system",props:Object.fromEntries(Object.entries(v).map(([k,x])=>[k,encodeCheckpointValue(x)]))};
  if(v instanceof WasteField)return{[CHECKPOINT_TAG]:"waste-field",props:Object.fromEntries(Object.entries(v).map(([k,x])=>[k,encodeCheckpointValue(x)]))};
+ if(v instanceof InhibitorField)return{[CHECKPOINT_TAG]:"inhibitor-field",props:Object.fromEntries(Object.entries(v).map(([k,x])=>[k,encodeCheckpointValue(x)]))};
  if(v instanceof EcologyObserver)return{[CHECKPOINT_TAG]:"legacy-observer",props:Object.fromEntries(Object.entries(v).map(([k,x])=>[k,encodeCheckpointValue(x)]))};
  if(v instanceof Map)return{[CHECKPOINT_TAG]:"map",entries:[...v].map(([k,x])=>[encodeCheckpointValue(k),encodeCheckpointValue(x)])};
  if(ArrayBuffer.isView(v)&&!(v instanceof DataView))return{[CHECKPOINT_TAG]:"typed-array",ctor:v.constructor.name,values:Array.from(v as unknown as ArrayLike<number>)};
@@ -622,8 +795,8 @@ function decodeCheckpointValue(v:any):any{
  if(tag==="rng"){let r=R(0);r.setState(v.state);return r}
  if(tag==="typed-array"){let C:any={Float32Array,Float64Array,Int32Array,Uint32Array,Uint16Array,Uint8Array,Int16Array,Int8Array}[(v.ctor as string)];if(!C)throw new Error("Unsupported checkpoint typed array: "+v.ctor);return new C(v.values)}
  if(tag==="map")return new Map(v.entries.map(([k,x]:any)=>[decodeCheckpointValue(k),decodeCheckpointValue(x)]));
- if(tag==="simulation"||tag==="resource-system"||tag==="legacy-observer"||tag==="waste-field"){
-  let o=Object.create(tag==="simulation"?S.prototype:tag==="resource-system"?RS.prototype:tag==="waste-field"?WasteField.prototype:EcologyObserver.prototype);
+ if(tag==="simulation"||tag==="resource-system"||tag==="legacy-observer"||tag==="waste-field"||tag==="inhibitor-field"){
+  let o=Object.create(tag==="simulation"?S.prototype:tag==="resource-system"?RS.prototype:tag==="waste-field"?WasteField.prototype:tag==="inhibitor-field"?InhibitorField.prototype:EcologyObserver.prototype);
   for(const [k,x] of Object.entries(v.props))o[k]=decodeCheckpointValue(x);
   return o;
  }
@@ -637,6 +810,12 @@ function restoreSimulationCheckpoint(checkpoint:any):S{
  if(checkpoint.engine_version!==ENGINE_VERSION)throw new Error(`Checkpoint engine ${checkpoint.engine_version} cannot be restored by engine ${ENGINE_VERSION}`);
  let sim=decodeCheckpointValue(checkpoint.state);
  if(!(sim instanceof S))throw new Error("Checkpoint did not contain a simulation");
+ // R0: pre-inhibitor saves (0.22.0 and earlier) carry no inhibitor container;
+ // backfill an empty field rather than refusing — no old-world biology is
+ // invented (empty field, zero counters), and new saves always encode it.
+ if(sim.resources&&!(sim.resources.inhibitor instanceof InhibitorField)){
+  sim.resources.inhibitor=new InhibitorField(sim.resources.totalCapTarget,sim.resources.updateStride);
+ }
  return sim;
 }
 
@@ -646,6 +825,12 @@ export {
   EcologyObserver,
   R as createLegacyRng,
   T as TRAIT_DEFINITIONS,
+  InhibitorField as InhibitorFieldState,
+  inductionFactor as computeInduction,
+  buildCompetitionContext as buildCompetitionContext,
+  crowdingAt as crowdingAt,
+  scarcityAt as scarcityAt,
+  lastCompetitionRecord as lastCompetitionRecord,
   SCI as SCIENTIFIC_BASIS,
   FIELD_N,
   FIELD_CELLS,
