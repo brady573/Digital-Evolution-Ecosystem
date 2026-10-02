@@ -741,6 +741,14 @@ async function main(){
       "ordinary runtime advancement reaches the exact Aftermath horizon");
     assert.equal(await decisionPage.getByTestId("decision-sheet").count(),0,
       "the horizon boundary itself does not replay a protected-period event");
+    // Retained history/detail is intentionally pulled on the History surface,
+    // not streamed in live frames. Refresh it here before inspecting the
+    // production settlement projection at this exact horizon.
+    await decisionPage.getByRole("button",{name:"History",exact:true}).click();
+    const historyAfter=await historyRecordCount(decisionPage);
+    assert.ok(historyAfter>historyBefore,
+      "History records generated during protected observation remain durably inspectable");
+    await decisionPage.getByRole("button",{name:"World",exact:true}).click();
     const compactAftermath=decisionPage.getByTestId("aftermath-compact");
     await compactAftermath.waitFor({timeout:15_000});
     assert.match(await compactAftermath.innerText(),/settled/,
@@ -749,11 +757,6 @@ async function main(){
     await decisionPage.getByTestId("aftermath-settlement").waitFor({timeout:15_000});
     assert.match(await decisionPage.getByTestId("aftermath-settlement").innerText(),/observation window/i,
       "quiet settlement retains the approved observation-window meaning");
-    await decisionPage.getByRole("button",{name:"History",exact:true}).click();
-    const historyAfter=await historyRecordCount(decisionPage);
-    assert.ok(historyAfter>historyBefore,
-      "History records generated during protected observation remain durably inspectable");
-
     // C17 plus Aftermath protection: after the observation horizon the existing
     // catalyst policy resumes at its first eligible stride.
     await decisionPage.getByRole("button",{name:"World",exact:true}).click();
