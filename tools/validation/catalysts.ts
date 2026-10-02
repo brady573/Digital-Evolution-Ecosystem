@@ -252,7 +252,8 @@ testEligibilityBoundaries();
 testQuietAndCooldown();
 
 // --- Integration: first window, priority, gate, resolution -------------------
-// Deterministic seed 24681357 (keep watching): dormancy @7279; the first
+// Deterministic seed 24681357 (keep watching): dormancy @6777 (Slice 1
+// re-pin, was @7279); the first catalyst window now waits until the first
 // catalyst window now waits until the first eligible stride after the active
 // Aftermath's 25,000-tick horizon. Events observed before that remain evidence
 // but are not deferred into later decision prompts.

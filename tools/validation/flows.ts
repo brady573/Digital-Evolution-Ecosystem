@@ -994,9 +994,12 @@ function testPreA2EntityRefMigration() {
   );
 
   // End to end: a real save, stripped back to the pre-A2 shape, then restored.
+  // Slice 1 re-pin (delay pattern): the tagged recovered record now lands
+  // @28363 (was @18825), so the save is captured at 30k instead of 20k.
+  // Same claim — a real save carries tagged refs through the migration.
   const session = new UniverseSession();
   session.create(config(FIXTURE_SEED));
-  settle(session, 20000);
+  settle(session, 30000);
   const saved: any = JSON.parse(JSON.stringify(session.checkpoint()));
   // A pre-A2 reference list is a 0.3 save, because A2 changed the persisted
   // shape without bumping the schema. Relabelling a current save's stripped
