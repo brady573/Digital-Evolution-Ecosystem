@@ -491,6 +491,45 @@ async function main(){
     await page.waitForTimeout(150);
     assert.equal(await tick(page),saved,"IndexedDB checkpoint restores exact tick");
 
+    // F3a — a rejected load must leave the live world alone and put playback
+    // back. These run against the real IndexedDB, which is the only place the
+    // browser lane can prove: the Node double models transactions, not the
+    // engine's durability or the app's ordering.
+    //
+    // Corrupt the stored record through the page's own database, then attempt a
+    // load while playing. The player must get a truthful sentence, the world
+    // must stay usable, and playback must resume by itself.
+    await page.evaluate(async ()=>{
+      const open=(name:string)=>new Promise<IDBDatabase>((resolve,reject)=>{
+        const request=indexedDB.open(name);
+        request.onsuccess=()=>resolve(request.result);
+        request.onerror=()=>reject(request.error);
+      });
+      const db=await open("digital-evolution-ecosystem");
+      await new Promise<void>((resolve,reject)=>{
+        const tx=db.transaction("universes","readwrite");
+        tx.objectStore("universes").put({id:"current",savedAt:new Date().toISOString(),tick:1,engineVersion:"0.0.0",checkpoint:{not:"a checkpoint"}});
+        tx.oncomplete=()=>resolve();
+        tx.onerror=()=>reject(tx.error);
+        tx.onabort=()=>reject(tx.error);
+      });
+      db.close();
+    });
+    const beforeRejected=await tick(page);
+    await page.getByRole("button",{name:"Resume"}).click();
+    await page.getByText(/Restore failed/).waitFor({timeout:15_000});
+    assert.doesNotMatch(
+      await page.locator(".status").innerText(),
+      /not a checkpoint|undefined|\[object/i,
+      "the rejected-load message is player prose, not raw record text",
+    );
+    assert.equal(await tick(page),beforeRejected,"a rejected load does not move the live world");
+    // The world is still usable: inspection still works on the surviving world.
+    assert.ok(await page.getByLabel("Evolution world").isVisible(),"the world remains usable after a rejected load");
+    // AC9: the app paused only to attempt the load, so it must resume for itself.
+    await page.waitForTimeout(2_500);
+    assert.ok(await tick(page)>beforeRejected,"playback intent is restored after an ordinary rejected load");
+
     // World view: minimap + zoom controls (uniform zoom into the same world).
     // A pending decision yields the overlay by design (Lane A: secondary World
     // chrome may hide to prevent occlusion), so clear any decision first —

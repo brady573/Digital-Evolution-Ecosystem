@@ -54,6 +54,9 @@ import {
 } from "@digital-evolution/sim-decisions";
 import { readInjectedSource, resolveSourceProvenance } from "./provenance";
 import { ENVIRONMENT_PERIOD_TICKS } from "@digital-evolution/contracts";
+// A VALUE import, not a type: F3a classifies rejections by instanceof, so the
+// A3.3/A3.4 error must be the same class the validator throws.
+import { CheckpointRejectionError } from "@digital-evolution/contracts";
 import { buildLive, buildPresentation, catalogMembershipSignature, interpretationPayloadKey } from "./presentation";
 import { validateRuntimeCommand } from "./command-validation";
 
@@ -1029,12 +1032,24 @@ export class UniverseSession {
         // the switch and returns undefined, which worker.ts then iterates over,
         // throwing outside this try/catch and killing the worker.
         default:
-          return[{type:"ERROR",message:`unsupported command tag: ${JSON.stringify((command as {readonly type:unknown}).type)}`}];
+          return[{type:"ERROR",message:`unsupported command tag: ${JSON.stringify((command as {readonly type:unknown}).type)}`,rejectionKind:"unsupported-command"}];
       }
     }catch(error){
-      // Attribute errors to the caller when the command carried a requestId.
+      // Attribute errors to the caller when the command carried a requestId, and
+      // classify the failure (F3a) so Explorer can branch on a reason instead of
+      // matching message text. The engine-version guard throws a plain Error with
+      // a fixed shape; it is recognised here so that gate stays a DISTINCT
+      // classification rather than collapsing into "internal".
       const requestId=(command as {readonly requestId?:string}).requestId;
-      return[{type:"ERROR",message:error instanceof Error?error.message:String(error),...(requestId?{requestId}:{})}];
+      const message=error instanceof Error?error.message:String(error);
+      const classified=error instanceof CheckpointRejectionError
+        ?{rejectionKind:"checkpoint-rejected" as const,rejectionReason:error.reason,rejectionField:error.field}
+        :/^Checkpoint engine /.test(message)
+          ?{rejectionKind:"engine-mismatch" as const}
+          :(command as {readonly type?:unknown}).type===undefined
+            ?{rejectionKind:"unsupported-command" as const}
+            :{rejectionKind:"internal" as const};
+      return[{type:"ERROR",message,rejectionKind:classified.rejectionKind,...(classified.rejectionReason?{rejectionReason:classified.rejectionReason}:{}),...(classified.rejectionField?{rejectionField:classified.rejectionField}:{}),...(requestId?{requestId}:{})}];
     }
   }
 }

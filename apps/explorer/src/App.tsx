@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CladeId, EngineConfig, HistoryRecordId, OrganismId, RenderOrganism, RenderSnapshot, WorldEnvironmentFrame, WorldId } from "@digital-evolution/contracts";
-import { CHECKPOINT_PLAYER_NOTICE, CheckpointRejectionError } from "@digital-evolution/contracts";
+import { CHECKPOINT_PLAYER_NOTICE } from "@digital-evolution/contracts";
 import { cladeId, formatCladeId, formatLineageId, lineageId, typedRefs } from "@digital-evolution/contracts";
 import { WorkerRuntimeClient, createInstrumentedTransport, normalizeSpeedMode, sliceFor } from "@digital-evolution/sim-runtime";
 import type { WorkerLike } from "@digital-evolution/sim-runtime";
@@ -8,6 +8,7 @@ import { Capacitor } from "@capacitor/core";
 import { Directory, Encoding, Filesystem } from "@capacitor/filesystem";
 import { Share } from "@capacitor/share";
 import { IndexedDbWorldRepository } from "./persistence";
+import { restoreFailureMessage, storageFailureMessage } from "./persistenceMessages";
 import { formatTickAge, formatYear, glossOutcome } from "./language";
 import {
   LandscapeSmoother, fillEnvironmentFractions, landscapeCell, landscapeTileLayout,
@@ -813,22 +814,42 @@ export function App(){
   };
   const save=async()=>{
     setStatus("Saving exact checkpoint…");
-    const checkpoint=await runtime.requestCheckpoint();
-    // Presentation-side family anchors travel with the save record (never in
-    // biology) so a restored world reconstructs identical families.
-    const summary=await repository.save("current",checkpoint,phenotypeCache.snapshotAnchors());
-    setStatus(`Saved tick ${summary.tick.toLocaleString()}`);
+    try{
+      const checkpoint=await runtime.requestCheckpoint();
+      // Presentation-side family anchors travel with the save record (never in
+      // biology) so a restored world reconstructs identical families.
+      const summary=await repository.save("current",checkpoint,phenotypeCache.snapshotAnchors());
+      // F3a: reached only after the storage transaction committed. A failed
+      // write leaves the previously confirmed save intact and says so.
+      setStatus(`Saved tick ${summary.tick.toLocaleString()}`);
+    }catch(error){
+      setStatus(storageFailureMessage(error));
+    }
   };
   const load=async()=>{
-    const read=await repository.readSlot("current");
-    if(!read){setStatus("No saved universe found");return}
+    // F3a: an ordinary rejected load is not a request to pause. The runtime stops
+    // playback itself on a successful restore, so this path only pauses for the
+    // attempt and MUST put the player's prior intent back if it is refused. A
+    // terminal runtime failure is a different thing entirely and stays stopped.
+    const wasRunning=running;
+    let read;
+    try{
+      // One coherent read: the checkpoint and its adjuncts cannot come from
+      // different record generations.
+      read=await repository.readSlot("current");
+    }catch(error){
+      setStatus(storageFailureMessage(error));
+      if(wasRunning)setRunning(true);
+      return;
+    }
+    if(!read){setStatus("No saved universe found");if(wasRunning)setRunning(true);return}
     setRunning(false);
     setStatus("Restoring checkpoint…");
     try{
-      // F3a: checkpoint and adjuncts now come from ONE coherent record read.
-      // Staging still happens before restore here; Task 4 makes it transactional.
-      phenotypeCache.stageAnchors(read.phenotypeAnchors??{});
       const restored=await runtime.loadCheckpoint(read.checkpoint);
+      // Staged ONLY now, after the runtime accepted the restore. A rejected
+      // candidate can no longer leave its family anchors armed for the next world.
+      phenotypeCache.stageAnchors(read.phenotypeAnchors??{});
       // The correlated reply refreshes retained detail (records + full decision
       // history); the on-demand detail pull covers pure-advance play between
       // such replies.
@@ -839,12 +860,11 @@ export function App(){
       setSettings(mapped);setActiveSettings(mapped);setPreset(presetForSettings(mapped));
       setStatus("Checkpoint restored — active settings match the resumed universe");
     }catch(error){
-      // Branch on the typed reason, never on the message text. A3.3 makes an
-      // ordinary save fail to load for the first time, so this string is now
-      // something a player can meet: the developer message names a field, a
-      // quoted value and a reason code, which is right for a log and useless
-      // to someone who just wants their world back.
-      setStatus(`Restore failed: ${error instanceof CheckpointRejectionError?`${error.playerMessage} ${CHECKPOINT_PLAYER_NOTICE}`:error instanceof Error?error.message:String(error)}`);
+      // Typed classification, never message text. A3.3 makes an ordinary save
+      // fail to load for the first time, and F3a makes the worker boundary carry
+      // the reason, so this branch is now reachable with a real player message.
+      setStatus(restoreFailureMessage(error));
+      if(wasRunning)setRunning(true);
     }
   };
   const exportEvidence=async()=>{

@@ -1684,6 +1684,77 @@ function testNoFramesAreEmittedForAPrepareStepFailure() {
   }
 }
 
+/**
+ * F3a: the classification survives the worker boundary.
+ *
+ * Before this, `client.ts` re-wrapped every `ERROR` in a bare `Error`, so the
+ * `instanceof CheckpointRejectionError` branch in App.tsx could never fire
+ * through the worker: a player met the developer message naming a field, a
+ * quoted value, and a reason code. These pin that the typed rejection arrives.
+ */
+async function testWorkerRejectionRehydratesTypedError() {
+  const fake = new FakeWorker();
+  const client = new WorkerRuntimeClient(() => fake, { requestTimeoutMs: 10_000 });
+  const snapshot = engineFixture().checkpoint as never;
+  const request = tracked(client.loadCheckpoint(snapshot));
+  const posted = fake.posted.at(-1) as { requestId: string };
+  fake.deliver({
+    type: "ERROR",
+    message: "Checkpoint engine 0.22.0 does not match 0.23.0",
+    requestId: posted.requestId,
+    rejectionKind: "engine-mismatch",
+  });
+  await tick();
+  assert.equal(request.state.settled, true, "the correlated rejection settles the load");
+  const error = request.state.error as Error;
+  assert.equal(error.name, "RuntimeCommandRejection", "a non-checkpoint rejection arrives typed, not as a bare Error");
+  assert.equal((error as { kind?: string }).kind, "engine-mismatch", "carrying the worker's classification");
+  assert.ok(
+    !/does not match/.test((error as { playerMessage?: string }).playerMessage ?? ""),
+    "the player-facing message is not the developer message",
+  );
+}
+
+/** An ERROR with no classification (a pre-F3a worker) still fails, typed. */
+async function testWorkerRejectionWithoutKindIsStillTyped() {
+  const fake = new FakeWorker();
+  const client = new WorkerRuntimeClient(() => fake, { requestTimeoutMs: 10_000 });
+  const request = tracked(client.loadCheckpoint(engineFixture().checkpoint as never));
+  const posted = fake.posted.at(-1) as { requestId: string };
+  fake.deliver({ type: "ERROR", message: "something went wrong", requestId: posted.requestId });
+  await tick();
+  const error = request.state.error as Error;
+  assert.equal((error as { kind?: string }).kind, "internal", "an unclassified failure degrades to internal, not to a lost failure");
+}
+
+/**
+ * The A3.3 player message must actually reach the player through the worker.
+ * This is the branch that was dead before F3a.
+ */
+async function testCheckpointRejectionKeepsPlayerMessage() {
+  const fake = new FakeWorker();
+  const client = new WorkerRuntimeClient(() => fake, { requestTimeoutMs: 10_000 });
+  const request = tracked(client.loadCheckpoint(engineFixture().checkpoint as never));
+  const posted = fake.posted.at(-1) as { requestId: string };
+  fake.deliver({
+    type: "ERROR",
+    message: "checkpoint rejected: analysis.dep — not a state (invalid_value)",
+    requestId: posted.requestId,
+    rejectionKind: "checkpoint-rejected",
+    rejectionReason: "invalid_value",
+    rejectionField: "analysis.dep",
+  });
+  await tick();
+  const error = request.state.error as Error;
+  assert.ok(error instanceof CheckpointRejectionError, "a checkpoint rejection arrives as the class the UI branches on");
+  assert.equal((error as CheckpointRejectionError).field, "analysis.dep", "naming the field the validator rejected");
+  assert.equal((error as CheckpointRejectionError).reason, "invalid_value", "and its reason");
+  assert.ok(
+    !/not a state/.test((error as CheckpointRejectionError).playerMessage),
+    "the player message is plain language, not the developer detail",
+  );
+}
+
 /** The successful path is unchanged: a restore still adopts the new world. */
 function testSuccessfulRestoreStillAdoptsTheNewWorld() {
   const source = liveSession();
@@ -1783,6 +1854,9 @@ async function main() {
   testRejectedCommandMutatesNothingButStillReleasesBackpressure();
   testRefusedCommandIsReportedAndLeavesTheSessionWhereItWas();
   testRejectedRestoreLeavesSessionUntouched();
+  await testWorkerRejectionRehydratesTypedError();
+  await testWorkerRejectionWithoutKindIsStillTyped();
+  await testCheckpointRejectionKeepsPlayerMessage();
   testEveryPrepareStepIsAtomicWhenItThrows();
   testNoFramesAreEmittedForAPrepareStepFailure();
   testSuccessfulRestoreStillAdoptsTheNewWorld();

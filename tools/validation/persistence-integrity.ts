@@ -200,6 +200,10 @@ import {
   PersistenceFailure,
   createRepository,
 } from "../../apps/explorer/src/persistence.ts";
+import { PhenotypeCache } from "../../apps/explorer/src/phenotype.ts";
+import { restoreFailureMessage, storageFailureMessage } from "../../apps/explorer/src/persistenceMessages.ts";
+import { RuntimeCommandRejection } from "../../packages/sim-runtime/src/client.ts";
+import { CheckpointRejectionError } from "@digital-evolution/contracts";
 import type { SaveEnvelope, SlotRead } from "../../apps/explorer/src/persistence.ts";
 import type { UniverseCheckpoint } from "@digital-evolution/contracts";
 
@@ -319,6 +323,104 @@ async function testWriteSuccessIsNotReportedBeforeCommit() {
   assert.equal(await repository.readSlot("current"), null, "a request that never reached commit stored nothing");
 }
 
+// --- F3a: adjunct staging is transactional ----------------------------------
+
+/** An organism shaped enough for PhenotypeCache to resolve deterministically. */
+const mkOrganism = (id: number) => ({
+  parent: null, generation: 0, lineageId: 1, cladeId: 1, x: 300, y: 300, energy: 80,
+  activity: "active", speed: 1.5625, sensing: 69.5, metabolism: 0.224, reproduction: 100,
+  diet: 0.4, habitat: 0.4, byproductUse: 0, dormancyResponse: 1.0,
+  tolerance: 0, cleanup: 0, id,
+} as never);
+
+/**
+ * AC8: the primitives a transactional load depends on.
+ *
+ * `stageAnchors` is one-shot — consumed by the next world whose identity
+ * differs — which is what stops a resume-then-create sequence leaking one
+ * universe's families into another. The hazard F3a closes is the mirror image:
+ * staging BEFORE the restore succeeds arms a candidate's anchors for whatever
+ * world comes next, including one unrelated to the save that failed.
+ *
+ * What is provable here is the mechanism: staging is per-cache, adoption is
+ * one-shot, and a cache that was never staged resolves purely from its own
+ * traits. What is NOT provable here is App.load()'s ordering, because that
+ * component is not importable in Node — the browser lane proves the end-to-end
+ * behaviour with a real rejected load (Task 4 Step 6).
+ */
+function testFailedCandidateAnchorsAreNeverStaged() {
+  // The family these traits resolve to unaided. Asserting "not blob" would be
+  // vacuous if blob IS the natural resolution, so pin the natural value first.
+  const natural = new PhenotypeCache()
+    .resolveSnapshot({ worldId: 40 as never, organisms: [mkOrganism(1)] })
+    .get(1)?.family;
+  assert.ok(natural, "the organism resolves from its own traits with no anchor staged");
+
+  // A rejected load never calls stageAnchors, so a fresh cache has nothing armed.
+  const afterRejectedLoad = new PhenotypeCache();
+  const resolved = afterRejectedLoad.resolveSnapshot({ worldId: 41 as never, organisms: [mkOrganism(1)] });
+  assert.equal(resolved.get(1)?.family, natural, "a world after a rejected load inherits no family from the failed candidate");
+
+  // An unrelated NEW world created afterwards inherits nothing either — the
+  // failure did not leave the cache holding anything.
+  const laterWorld = afterRejectedLoad.resolveSnapshot({ worldId: 42 as never, organisms: [mkOrganism(1)] });
+  assert.equal(laterWorld.get(1)?.family, natural, "nor does a later, unrelated world");
+}
+
+/** The success path still reconstructs the anchored family (AC11). */
+function testSuccessfulRestoreAdoptsMatchingAnchors() {
+  const cache = new PhenotypeCache();
+  cache.stageAnchors({ 1: anchor("branching") });
+  const first = cache.resolveSnapshot({ worldId: 50 as never, organisms: [mkOrganism(1)] });
+  assert.equal(first.get(1)?.family, "branching", "the restored world reconstructs the saved family");
+  // Consumed once: a later, different world must not inherit it.
+  const second = cache.resolveSnapshot({ worldId: 51 as never, organisms: [mkOrganism(1)] });
+  assert.notEqual(second.get(1)?.family, "branching", "the anchor is consumed by one world, not inherited by the next");
+}
+
+// --- F3a: player-facing wording ---------------------------------------------
+
+/**
+ * Handoff §7 requires four outcomes a player can tell apart, and forbids raw
+ * storage exceptions as the primary message. The messages themselves are
+ * implementer freedom; the distinctions are not.
+ */
+async function testStorageFailuresAreDistinguishable() {
+  const copy = new PhenotypeCache(); // unused; keeps the import honest
+  void copy;
+  const read = new PersistenceFailure("storage-read-failed", new Error("QuotaExceededError: raw browser text"));
+  const write = new PersistenceFailure("storage-write-failed", new Error("QuotaExceededError: raw browser text"));
+  const none = new PersistenceFailure("no-save");
+
+  const readMessage = storageFailureMessage(read);
+  const writeMessage = storageFailureMessage(write);
+  const noneMessage = storageFailureMessage(none);
+  assert.notEqual(readMessage, writeMessage, "a read failure and a write failure read differently");
+  assert.notEqual(readMessage, noneMessage, "a failed read is not reported as no save at all");
+  assert.ok(!/QuotaExceededError/.test(readMessage), "raw storage text never reaches the player");
+  assert.ok(!/QuotaExceededError/.test(writeMessage), "raw storage text never reaches the player, write side either");
+  assert.ok(/previous save is unchanged/.test(writeMessage), "a failed write says the confirmed save survives");
+}
+
+async function testRestoreRejectionsAreDistinguishable() {
+  const fromAnotherEngine = new RuntimeCommandRejection("engine-mismatch", "Checkpoint engine 0.22.0 does not match 0.23.0", "This saved universe comes from a different version of the engine, so this build cannot restore it.");
+  const invalid = new CheckpointRejectionError("analysis.dep", "invalid_value", "not a state");
+  const internal = new RuntimeCommandRejection("internal", "boom", "Something went wrong.");
+
+  const engineMessage = restoreFailureMessage(fromAnotherEngine);
+  const invalidMessage = restoreFailureMessage(invalid);
+  const internalMessage = restoreFailureMessage(internal);
+  assert.notEqual(engineMessage, invalidMessage, "another engine's save reads differently from a corrupt one");
+  assert.notEqual(engineMessage, internalMessage, "and both differ from an internal fault");
+  assert.ok(!/does not match/.test(engineMessage), "the developer message is not the player message");
+  assert.ok(!/not a state/.test(invalidMessage), "nor is the developer detail for a corrupt save");
+  // The important one: an untyped failure must not leak whatever it happened to be.
+  const untyped = restoreFailureMessage(new Error("TypeError: cannot read properties of undefined"));
+  assert.ok(!/TypeError/.test(untyped), "an unclassified failure never shows raw text");
+  assert.ok(/current world is unchanged/.test(untyped), "and says what is actually true");
+  assert.ok(!/Checkpoint engine/.test(storageFailureMessage(fromAnotherEngine)), "a runtime rejection is not dressed up as a storage failure");
+}
+
 async function testPriorSaveSurvivesRepeatedFailedOverwrites() {
   reset();
   const first = fakeCheckpoint(11);
@@ -347,6 +449,10 @@ const tests: readonly (readonly [string, () => Promise<void>])[] = [
   ["failed overwrite preserves prior save", testFailedOverwritePreservesPriorSave],
   ["write success is not reported before commit", testWriteSuccessIsNotReportedBeforeCommit],
   ["prior save survives repeated failed overwrites", testPriorSaveSurvivesRepeatedFailedOverwrites],
+  ["storage failures are distinguishable", testStorageFailuresAreDistinguishable],
+  ["restore rejections are distinguishable", testRestoreRejectionsAreDistinguishable],
+  ["failed candidate anchors are never staged", testFailedCandidateAnchorsAreNeverStaged],
+  ["successful restore adopts matching anchors", testSuccessfulRestoreAdoptsMatchingAnchors],
 ];
 
 async function main() {
