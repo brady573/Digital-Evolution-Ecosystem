@@ -820,15 +820,15 @@ export function App(){
     setStatus(`Saved tick ${summary.tick.toLocaleString()}`);
   };
   const load=async()=>{
-    const checkpoint=await repository.load("current");
-    if(!checkpoint){setStatus("No saved universe found");return}
+    const read=await repository.readSlot("current");
+    if(!read){setStatus("No saved universe found");return}
     setRunning(false);
     setStatus("Restoring checkpoint…");
     try{
-      // Stage anchors BEFORE restore: consumed once, on the restored world's
-      // fresh identity. Null (old saves) means a clean presentation break.
-      phenotypeCache.stageAnchors(await repository.loadAnchors("current")??{});
-      const restored=await runtime.loadCheckpoint(checkpoint);
+      // F3a: checkpoint and adjuncts now come from ONE coherent record read.
+      // Staging still happens before restore here; Task 4 makes it transactional.
+      phenotypeCache.stageAnchors(read.phenotypeAnchors??{});
+      const restored=await runtime.loadCheckpoint(read.checkpoint);
       // The correlated reply refreshes retained detail (records + full decision
       // history); the on-demand detail pull covers pure-advance play between
       // such replies.
