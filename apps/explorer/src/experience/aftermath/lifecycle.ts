@@ -1,3 +1,4 @@
+import type { AftermathState } from "@digital-evolution/contracts";
 import type { AftermathLifecycleEvent, AftermathPresentationState } from "./model";
 
 /** Presentation-only reducer: it never owns simulation commands or ticks. */
@@ -48,4 +49,34 @@ export function transitionAftermath(
     case "navigate-history":
       return { ...state, expanded: false, following: false, automaticLens: null };
   }
+}
+
+/** Synchronously align presentation state with live lifecycle authority.
+ * Retained detail refreshes never participate in this transition. */
+export function synchronizeAftermathPresentation(
+  previous: AftermathPresentationState | null,
+  aftermath: AftermathState | null,
+  pendingDecision: boolean,
+): AftermathPresentationState | null {
+  if(!aftermath)return null;
+
+  let next=previous?.commandId===aftermath.commandId
+    ?previous
+    :{
+      commandId:aftermath.commandId,
+      stage:aftermath.phase==="impact"?"impact" as const:"observation" as const,
+      expanded:aftermath.phase==="impact",
+      suspended:false,
+      dismissed:false,
+      following:false,
+      automaticLens:null,
+      manualLensOverride:false,
+    };
+
+  if(aftermath.phase==="observation"&&next.stage==="impact"){
+    next=transitionAftermath(next,{type:"acknowledge-impact"});
+  }
+  if(pendingDecision&&!next.suspended)next=transitionAftermath(next,{type:"suspend"});
+  else if(!pendingDecision&&next.suspended)next=transitionAftermath(next,{type:"resume-presentation"});
+  return next;
 }

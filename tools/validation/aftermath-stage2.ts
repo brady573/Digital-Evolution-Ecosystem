@@ -3,12 +3,14 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { AftermathState, HistoryRecordId } from "../../packages/contracts/src/index.ts";
 import { AftermathStage2Panel } from "../../apps/explorer/src/AftermathStage2Panel.tsx";
-import { projectAftermath } from "../../apps/explorer/src/experience/aftermath/project.ts";
-import { transitionAftermath } from "../../apps/explorer/src/experience/aftermath/lifecycle.ts";
+import * as aftermathProjection from "../../apps/explorer/src/experience/aftermath/project.ts";
+import * as aftermathLifecycle from "../../apps/explorer/src/experience/aftermath/lifecycle.ts";
 import type { AftermathPresentationState, DevelopmentEvidence } from "../../apps/explorer/src/experience/aftermath/model.ts";
 
 const commandId = "decision-command-7" as AftermathState["commandId"];
 const recordId = "history-record-7" as HistoryRecordId;
+const projectAftermath=aftermathProjection.projectAftermath;
+const transitionAftermath=aftermathLifecycle.transitionAftermath;
 const aftermath = {
   schemaVersion: 1,
   opportunityId: "opportunity-7",
@@ -71,6 +73,58 @@ function settlesAtResolutionTickPlus25000() {
   assert.equal(result.settlement, "little/no major measured response within the observation window");
 }
 
+function liveProjectionDoesNotDependOnRetainedSnapshot() {
+  const projectLive=(aftermathProjection as any).projectLiveAftermath;
+  assert.equal(typeof projectLive,"function","live Aftermath has a bounded-read-model projection adapter");
+  const staleDetail={
+    aftermath:{...aftermath,phase:"impact"},
+    tick:aftermath.resolutionTick,
+    population:10,
+    resolvedDecisions:[],
+    analysis:{records:[]},
+  };
+  const atLastProtectedTick=projectLive({
+    interpretation:{aftermath},
+    live:{tick:aftermath.resolutionTick+24_999,population:10},
+    detail:staleDetail,
+    candidates:[],
+  });
+  assert.equal(atLastProtectedTick.stage,"observation","stale retained impact/tick cannot rewind live observation");
+  const atHorizon=projectLive({
+    interpretation:{aftermath},
+    live:{tick:aftermath.resolutionTick+25_000,population:10},
+    detail:null,
+    candidates:[],
+  });
+  assert.equal(atHorizon.stage,"settlement","null retained detail cannot hide live settlement at the horizon");
+  assert.equal(atHorizon.settlementReason,"horizon");
+  assert.equal(projectLive({interpretation:{aftermath:null},live:{tick:25_100,population:10},detail:staleDetail,candidates:[]}),null,
+    "a stale detail Aftermath cannot resurrect after the live read model clears it");
+}
+
+function liveProjectionUsesRetainedDetailOnlyForMatchingOriginHistory() {
+  const projectLive=(aftermathProjection as any).projectLiveAftermath;
+  const detail={
+    aftermath:{...aftermath,phase:"impact"},
+    tick:aftermath.resolutionTick,
+    population:10,
+    resolvedDecisions:[{commandId,sourceEventId:"event-origin-7"}],
+    analysis:{records:[{id:"event-origin-7"}]},
+  };
+  const enriched=projectLive({interpretation:{aftermath},live:{tick:101,population:10},detail,candidates:[]});
+  assert.equal(enriched.stage,"observation","retained detail does not rewind live phase");
+  assert.equal(enriched.originHistoryRecordId,"event-origin-7","matching detail may enrich the origin History link");
+
+  const missingOrigin=projectLive({
+    interpretation:{aftermath},
+    live:{tick:101,population:10},
+    detail:{...detail,analysis:{records:[]}},
+    candidates:[],
+  });
+  assert.equal(missingOrigin.stage,"observation","missing origin evidence cannot hide the live Aftermath");
+  assert.equal(missingOrigin.originHistoryRecordId,null,"missing origin History simply omits its link");
+}
+
 function settlesWhenSnapshotSkipsPastHorizon() {
   const result = projectAftermath({ aftermath, currentTick: 25_101, population: 10, candidates: [] });
   assert.equal(result.stage, "settlement");
@@ -119,6 +173,22 @@ function impactAcknowledgementMovesToObservation() {
   const next=transitionAftermath(initialState, { type: "acknowledge-impact" });
   assert.equal(next.stage, "observation");
   assert.equal(next.expanded, false, "impact release collapses to compact observation");
+}
+
+function liveLifecycleSynchronizesBeforeTheNextRender() {
+  const synchronize=(aftermathLifecycle as any).synchronizeAftermathPresentation;
+  assert.equal(typeof synchronize,"function","live lifecycle has a synchronous presentation projection");
+  const observation={...aftermath,phase:"observation" as const};
+  const rendered=synchronize(initialState,observation,false);
+  assert.equal(rendered.stage,"observation","live observation immediately supersedes stale impact presentation");
+  assert.equal(rendered.expanded,false,"impact sheet collapses on the first live advance");
+  const preempted=synchronize(rendered,observation,true);
+  assert.equal(preempted.suspended,true,"pending decision synchronously preempts Aftermath");
+  assert.equal(preempted.expanded,false,"preemption keeps the single large sheet slot");
+  const resumed=synchronize(preempted,observation,false);
+  assert.equal(resumed.suspended,false,"Aftermath resumes after the decision clears");
+  assert.equal(resumed.stage,"observation","resume does not rewind live lifecycle state");
+  assert.equal(synchronize(resumed,null,false),null,"cleared live aftermath cannot be restored by retained state");
 }
 
 function pendingDecisionSuspendsWithoutDroppingEvidenceIdentity() {
@@ -182,15 +252,18 @@ acceptsOnlyExplicitStableIdentityLink();
 originRecordIsProvenanceNotDevelopmentEvidence();
 staysQuietWhenNoDevelopmentLinkExists();
 settlesAtResolutionTickPlus25000();
+liveProjectionDoesNotDependOnRetainedSnapshot();
+liveProjectionUsesRetainedDetailOnlyForMatchingOriginHistory();
 settlesWhenSnapshotSkipsPastHorizon();
 doesNotSettleFromMetricStability();
 extinctionMaySettleEarly();
 developmentDoesNotResetHorizon();
 strongestSupportedEvidenceWins();
 impactAcknowledgementMovesToObservation();
+liveLifecycleSynchronizesBeforeTheNextRender();
 pendingDecisionSuspendsWithoutDroppingEvidenceIdentity();
 foregroundSupersessionDoesNotMutateTheOldState();
 manualLensOverrideStopsAutomaticLensSwitching();
 fixtureDevelopmentCardShowsOneSupportedRecordAndOptionalFollow();
 quietSettlementShowsEvidenceBoundedCopyWithoutHistoryLink();
-console.log("aftermath stage 2 projection/lifecycle/presentation fixture: PASS (16 cases)");
+console.log("aftermath stage 2 projection/lifecycle/presentation fixture: PASS (19 cases)");
