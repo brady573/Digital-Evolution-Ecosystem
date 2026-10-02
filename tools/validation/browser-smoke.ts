@@ -713,11 +713,10 @@ async function main(){
     await decisionPage.evaluate(()=>{
       const evidence:{phases:string[];impactSlotMode:string|null}={phases:[],impactSlotMode:null};
       (window as any).__DEE_AFTERMATH_PHASES__=evidence;
-      const has=(node:Node,selector:string)=>node instanceof Element&&(node.matches(selector)||node.querySelector(selector)!==null);
       new MutationObserver(records=>{
         for(const record of records){
           for(const node of [...record.addedNodes]){
-            if(has(node,'[data-testid="aftermath-impact"]')){
+            if(node instanceof Element&&(node.matches('[data-testid="aftermath-impact"]')||node.querySelector('[data-testid="aftermath-impact"]')!==null)){
               evidence.phases.push("impact");
               evidence.impactSlotMode=(node instanceof Element?node.closest('[data-testid="sheet-slot"]'):null)?.getAttribute("data-mode")??null;
             }
