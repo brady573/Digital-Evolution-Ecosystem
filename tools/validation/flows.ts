@@ -384,6 +384,14 @@ function testIntervalNetMembers() {
 function testIntervalCoversDead() {
   // Interval consumption must cover organisms that died mid-stride: it can
   // only exceed the living-lifetime delta, never fall short of it.
+  // Dimensional correction (Slice 1 investigation): the interval credit books
+  // mass per meal (engine.ts lineageCredit: consumedC += eat.amount) while
+  // o.mc counts meals (+1 per C meal), so mass-vs-counts compares different
+  // units — and fails 35 of 55 strides on the BASE engine too (probe:
+  // stride sweep 251..14000, seed 24681357), passing in CI only by
+  // settle-timing luck. The energy side shares units on both ledgers
+  // (o.gc += eat.gain; energyC += eat.gain), so the covers-the-dead claim is
+  // stated in energy: 0 violations in 55 strides on base AND Slice 1.
   const session = new UniverseSession();
   session.create(config(FIXTURE_SEED));
   settle(session, 10000);
@@ -392,11 +400,11 @@ function testIntervalCoversDead() {
   settleStride(session);
   const facts = intervalFlows(session);
   const after = livingSums(session);
-  const delta = after.mc - before.mc;
-  const eps = 1e-9 * Math.max(1, Math.abs(facts.totals.consumedC), Math.abs(delta));
+  const delta = after.gc - before.gc;
+  const eps = 1e-9 * Math.max(1, Math.abs(facts.totals.energyC), Math.abs(delta));
   assert.ok(
-    facts.totals.consumedC + eps >= delta,
-    `interval C (${facts.totals.consumedC}) covers living delta (${delta})`,
+    facts.totals.energyC + eps >= delta,
+    `interval C energy (${facts.totals.energyC}) covers living delta (${delta})`,
   );
   console.log("interval covers the dead: PASS");
 }
