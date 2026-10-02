@@ -205,6 +205,8 @@ export function createPresentationStore(): PresentationStore {
             dormancyResponse: entry.dormancyResponse,
             tolerance: entry.tolerance,
             cleanup: entry.cleanup,
+            secretion: entry.secretion,
+            resistance: entry.resistance,
           });
         }
       }

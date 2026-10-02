@@ -2944,6 +2944,12 @@ export interface WorldCatalogEntry {
   readonly dormancyResponse: number;
   readonly tolerance: number;
   readonly cleanup: number;
+  /** Slice 1 interference traits. Static inherited presentation inputs like
+   *  tolerance/cleanup above: birth-set through mut(), thereafter only read.
+   *  Frame-dynamic values (position, energy, activity) live in the live
+   *  frame, never here. */
+  readonly secretion: number;
+  readonly resistance: number;
 }
 
 /**

@@ -69,6 +69,8 @@ export function buildCatalog(snapshot: RenderSnapshot): WorldEntityCatalog {
     dormancyResponse: o.dormancyResponse,
     tolerance: o.tolerance,
     cleanup: o.cleanup,
+    secretion: o.secretion,
+    resistance: o.resistance,
   }));
   return {
     readModelVersion: READ_MODEL_VERSION,
@@ -189,9 +191,9 @@ export function buildInterpretation(snapshot: RenderSnapshot): WorldInterpretati
  * id / parent / generation are written once per organism — at founding
  * (constructor) or at birth (child()) — and never reassigned; lineageId is
  * the organism's `l`, likewise birth-set (child() inherits or mints via
- * newL) with no reassignment site anywhere in the step loop; the ten
+ * newL) with no reassignment site anywhere in the step loop; the twelve
  * inherited traits (speed/sensing/metabolism/reproduction/diet/habitat/
- * byproductUse/dormancyResponse/tolerance/cleanup) are birth-set through
+ * byproductUse/dormancyResponse/tolerance/cleanup/secretion/resistance) are birth-set through
  * mut() and thereafter only read (movement/physiology/digestion cost terms),
  * static by design. cladeId is the SOLE mutable field: it is derived per
  * snapshot as cladeRoot(o.l) — the deepest established lineage branch with
