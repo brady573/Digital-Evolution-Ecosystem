@@ -34,6 +34,7 @@
     "test:catalysts:fast": "tsx tools/validation/catalysts.ts -- --fast",
     "test:niche": "tsx tools/validation/niche.ts",
     "test:inducible-interference": "tsx tools/validation/inducible-interference.ts",
+    "test:local-retention": "tsx tools/validation/local-retention.ts",
     "test:niche-survey": "tsx tools/validation/niche-survey.ts",
     "test:washout-reliance": "tsx tools/validation/washout-reliance.ts",
     "test:phenotype": "tsx tools/validation/phenotype.ts && tsx tools/validation/phenotype-world.ts",
