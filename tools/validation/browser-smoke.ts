@@ -213,6 +213,15 @@ async function main(){
   // acknowledge, by which point the sheet had detached and the element was gone.
   const effectText=await deltaPage.getByTestId("aftermath-direct-effect").innerText().catch(()=>"");
   assert.ok(effectText.trim().length>0,"the direct effect is stated on the open sheet");
+  const compareButtons=deltaImpact.locator(".compare-option");
+  assert.equal(await compareButtons.count(),3,"all comparison modes remain available in the impact sheet");
+  assert.deepEqual(await compareButtons.allTextContents(),["Difference","Now","Before"],
+    "impact comparisons remain ordered Difference | Now | Before");
+  assert.equal(await deltaImpact.locator(".compare-option.active").getAttribute("data-compare"),"difference",
+    "Difference remains the default impact comparison");
+  await compareButtons.nth(2).click();
+  await deltaPage.getByText(/moment the intervention was applied/i).waitFor();
+  await compareButtons.nth(0).click();
   // Logged, not only asserted on failure: the margin is the evidence for this
   // slice, so a passing run must still produce it.
   console.log(`world consequence at zero ticks: ${lost}/${samples} samples lost material, ${gained} gained, luma ${lumaBefore.toFixed(1)}->${lumaAfter.toFixed(1)}`);
@@ -650,7 +659,7 @@ async function main(){
 
     // M3 event decision, end to end on the World surface: the world pauses for a
     // decision, Play cannot bypass it, resolving records the choice with no hidden
-    // tick, and time only resumes on an explicit Play.
+    // tick, and prior playback intent resumes afterward.
     const decisionPage=await context.newPage();
     // Test hook, not a product control (AC21).
     await decisionPage.goto(`${baseUrl}?deeTest=1`,{waitUntil:"networkidle"});
@@ -671,6 +680,16 @@ async function main(){
       "rebuilt world runs the requested seed",
     );
     await decisionPage.getByRole("button",{name:"Close"}).click();
+    // Start the production journey without any retained RenderSnapshot detail.
+    await decisionPage.evaluate(()=>(window as any).__DEE_TEST__.clearRetainedDetail());
+    await decisionPage.getByLabel("Simulation speed").selectOption("1");
+    const tickBeforeSearch=await tick(decisionPage);
+    await decisionPage.getByRole("button",{name:"Play"}).click();
+    await decisionPage.waitForFunction(
+      previous=>Number(document.querySelector('[data-testid="tick"]')?.textContent?.replace(/\D/g,""))>previous,
+      tickBeforeSearch,
+      {timeout:15_000},
+    );
     const sheet=decisionPage.getByTestId("decision-sheet");
     for(let i=0;i<20&&!(await sheet.isVisible().catch(()=>false));i++){
       await decisionPage.evaluate(()=>(window as any).__DEE_TEST__.runToNextEvent());
@@ -688,59 +707,51 @@ async function main(){
     await decisionPage.getByRole("button",{name:"Play"}).click();
     await decisionPage.waitForTimeout(600);
     assert.equal(await tick(decisionPage),decisionTick,"Play cannot advance while a decision is pending (A6/A13)");
+    // Capture both sides of the brief impact->observation morph. Prior play
+    // intent resumes immediately after resolution, so impact is transient by
+    // design; the observer preserves evidence without slowing product playback.
+    await decisionPage.evaluate(()=>{
+      const evidence:{phases:string[];impactSlotMode:string|null}={phases:[],impactSlotMode:null};
+      (window as any).__DEE_AFTERMATH_PHASES__=evidence;
+      new MutationObserver(records=>{
+        for(const record of records){
+          for(const node of [...record.addedNodes]){
+            if(node instanceof Element&&(node.matches('[data-testid="aftermath-impact"]')||node.querySelector('[data-testid="aftermath-impact"]')!==null)){
+              evidence.phases.push("impact");
+              evidence.impactSlotMode=(node instanceof Element?node.closest('[data-testid="sheet-slot"]'):null)?.getAttribute("data-mode")??null;
+            }
+          }
+        }
+        if(document.querySelector('[data-testid="aftermath-compact"]')&&!evidence.phases.includes("observation"))evidence.phases.push("observation");
+      }).observe(document.body,{childList:true,subtree:true});
+    });
     // A7: resolve with keep watching; no hidden tick, no control fork.
     await sheet.getByText("Keep watching").click();
     await sheet.waitFor({state:"detached",timeout:15_000});
     assert.equal(await tick(decisionPage),decisionTick,"resolution advances zero ticks (A7)");
-    // A14 + AC1/AC2: the aftermath impact state opens in the SAME sheet slot and
-    // is itself a hard pause at the resolution tick.
-    const impact=decisionPage.getByTestId("aftermath-impact");
-    await impact.waitFor({timeout:15_000});
-    assert.equal(await decisionPage.getByTestId("sheet-slot").getAttribute("data-mode"),"aftermath",
-      "the sheet slot persists across the morph and switches mode, rather than one sheet closing and another opening");
-    // AC3: Difference leads when a comparable baseline exists.
-    const compareButtons=impact.locator(".compare-option");
-    assert.equal(await compareButtons.count(),3,"all three comparison modes are offered when a baseline was retained");
-    assert.deepEqual(await compareButtons.allTextContents(),["Difference","Now","Before"],
-      "the comparison control is ordered Difference | Now | Before");
-    assert.equal(await impact.locator(".compare-option.active").getAttribute("data-compare"),"difference",
-      "Difference is the default, because the player's immediate question is 'what changed?'");
-    // This resolution applied nothing, so the honest report is that nothing
-    // measurable changed. Silence must not read as a broken or empty state.
-    await decisionPage.getByTestId("aftermath-quiet").waitFor({timeout:10_000});
-    await decisionPage.getByText(/not an outcome: no biological/i).waitFor(),
-      "the sheet states that no biological response exists yet, so the effect cannot be read as an outcome";
-    // Switching modes must change the evidence actually shown.
-    await compareButtons.nth(1).click();
-    await decisionPage.getByTestId("aftermath-single").waitFor({timeout:10_000});
-    await compareButtons.nth(2).click();
-    await decisionPage.getByText(/moment the intervention was applied/i).waitFor(),
-      "Before is labelled as the instant the intervention was applied, not an invented earlier moment";
-    await compareButtons.nth(0).click();
-    await decisionPage.getByTestId("aftermath-quiet").waitFor({timeout:10_000});
-    assert.equal(await tick(decisionPage),decisionTick,"world stays at the resolution tick (A14)");
-    // The affordance collapses the sheet. It is not what releases time.
-    await decisionPage.getByTestId("aftermath-acknowledge").click();
-    await impact.waitFor({state:"detached",timeout:15_000});
-    await decisionPage.getByRole("button",{name:"Play"}).click();
-    await decisionPage.waitForTimeout(900);
-    assert.ok(await tick(decisionPage)>decisionTick,"explicit play still resumes time (A14)");
-    // History retains the event and the player's action, without claiming cause.
+    // The live frame resumes remembered play automatically. Wait for the first
+    // live advance to expose compact observation, not for the transient impact.
+    const compactAfterFirstAdvance=decisionPage.getByTestId("aftermath-compact");
+    await compactAfterFirstAdvance.waitFor({timeout:15_000});
+    assert.ok(await tick(decisionPage)>decisionTick,"the pre-existing play intent resumes on the first live advance");
+    const observedMorph=await decisionPage.evaluate(()=>(window as any).__DEE_AFTERMATH_PHASES__);
+    assert.ok(observedMorph.phases.includes("impact"),"the browser observed the real decision impact phase");
+    assert.ok(observedMorph.phases.includes("observation"),"the browser observed compact observation after impact");
+    assert.equal(observedMorph.impactSlotMode,"aftermath","impact uses the same single large sheet slot");
+    assert.equal(await decisionPage.evaluate(()=>(window as any).__DEE_TEST__.retainedAftermathPhase()),"impact",
+      "retained detail is deliberately stale at impact while live interpretation has advanced");
+    assert.match(await compactAfterFirstAdvance.innerText(),/observing/,
+      "live observation remains visible despite stale retained detail at impact");
+    await decisionPage.evaluate(()=>(window as any).__DEE_TEST__.clearRetainedDetail());
+    await compactAfterFirstAdvance.waitFor({state:"visible",timeout:5_000});
+    assert.equal(await decisionPage.evaluate(()=>(window as any).__DEE_TEST__.retainedAftermathPhase()),null,
+      "the retained detail is now explicitly null");
+    assert.match(await compactAfterFirstAdvance.innerText(),/observing/,
+      "null retained detail also leaves live observation visible");
     await decisionPage.getByRole("button",{name:"Pause"}).click();
-    await decisionPage.getByRole("button",{name:"History"}).click();
-    await decisionPage.getByText("Your decisions").waitFor();
-    // History renders the recorded choice copy, never a UI-side label.
-    await decisionPage.getByText("Keep watching",{exact:true}).waitFor();
-    await decisionPage.getByText(/not a proven cause/).waitFor();
 
-    // Aftermath decision pacing: keep the real decision/history record
-    // inspectable while ordinary runtime advancement finishes the full
-    // observation horizon. Ecology records are allowed to be seed-dependent;
-    // this claim is about preserving recorded History, not requiring a new
-    // ecological transition in every observation window.
-    const recordedHistoryCount=await historyRecordCount(decisionPage);
-    assert.ok(recordedHistoryCount>0,"the real decision scenario has durable ecological History to inspect");
-    await decisionPage.getByRole("button",{name:"World",exact:true}).click();
+    // Reach real T+25,000 through ordinary bounded runtime advances, without
+    // opening History/Experiments or refreshing retained detail in observation.
     const aftermathHorizon=decisionTick+25_000;
     const currentTick=await tick(decisionPage);
     assert.ok(currentTick<aftermathHorizon,"the live decision Aftermath is still inside its observation horizon");
@@ -749,28 +760,36 @@ async function main(){
       "ordinary runtime advancement reaches T+24,999 without an automatic decision preemption");
     assert.equal(await decisionPage.getByTestId("decision-sheet").count(),0,
       "no automatic decision is pending at the last protected tick");
+    const compactBeforeBoundary=decisionPage.getByTestId("aftermath-compact");
+    await compactBeforeBoundary.waitFor({timeout:15_000});
+    await compactBeforeBoundary.click();
+    const observationPanel=decisionPage.getByTestId("aftermath-stage2");
+    await observationPanel.waitFor({timeout:15_000});
+    assert.match(await observationPanel.innerText(),/Observation continues for 1 more simulation ticks/,
+      "remaining ticks use the live tick exactly one tick before the horizon");
     await advanceRuntimeToTick(decisionPage,aftermathHorizon);
     assert.equal(await tick(decisionPage),aftermathHorizon,
       "ordinary runtime advancement reaches the exact Aftermath horizon");
     assert.equal(await decisionPage.getByTestId("decision-sheet").count(),0,
       "the horizon boundary itself does not replay a protected-period event");
-    // Retained history/detail is intentionally pulled on the History surface,
-    // not streamed in live frames. Refresh it here before inspecting the
-    // production settlement projection at this exact horizon.
+    assert.equal(await observationPanel.getAttribute("data-stage"),"settlement",
+      "live Stage 2 settles exactly at resolutionTick + 25,000 without detail refresh");
+    assert.match(await observationPanel.innerText(),/observation window/i,
+      "quiet settlement retains its approved observation-window meaning");
+
+    // A later retained-detail pull may enrich History, but cannot rewind or
+    // hide the live Aftermath lifecycle.
     await decisionPage.getByRole("button",{name:"History",exact:true}).click();
-    assert.equal(await historyRecordCount(decisionPage),recordedHistoryCount,
-      "durable ecological History records remain recorded through protected observation");
     await decisionPage.getByText("Your decisions").waitFor();
     await decisionPage.getByText("Keep watching",{exact:true}).waitFor();
     await decisionPage.getByRole("button",{name:"World",exact:true}).click();
-    const compactAftermath=decisionPage.getByTestId("aftermath-compact");
-    await compactAftermath.waitFor({timeout:15_000});
-    assert.match(await compactAftermath.innerText(),/settled/,
-      "the production Aftermath projection reaches settlement at the real horizon");
-    await compactAftermath.click();
-    await decisionPage.getByTestId("aftermath-settlement").waitFor({timeout:15_000});
-    assert.match(await decisionPage.getByTestId("aftermath-settlement").innerText(),/observation window/i,
-      "quiet settlement retains the approved observation-window meaning");
+    assert.equal(await observationPanel.getAttribute("data-stage"),"settlement",
+      "refreshing detail does not hide or rewind the settled live Aftermath");
+    await decisionPage.getByRole("button",{name:"Experiments",exact:true}).click();
+    await decisionPage.getByRole("heading",{name:"Experiments"}).waitFor();
+    await decisionPage.getByRole("button",{name:"World",exact:true}).click();
+    assert.equal(await observationPanel.getAttribute("data-stage"),"settlement",
+      "an Experiments detail refresh also leaves live settlement unchanged");
     // C17 plus Aftermath protection: after the observation horizon the existing
     // catalyst policy resumes at its first eligible stride.
     await decisionPage.getByRole("button",{name:"World",exact:true}).click();

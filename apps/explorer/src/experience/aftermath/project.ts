@@ -1,4 +1,14 @@
 import { AFTERMATH_OBSERVATION_TICKS, type AftermathProjection, type AftermathProjectionInput, type DevelopmentEvidence } from "./model";
+import type { RenderSnapshot, WorldInterpretationState, WorldLiveFrame } from "@digital-evolution/contracts";
+
+export interface LiveAftermathProjectionInput {
+  readonly interpretation: Pick<WorldInterpretationState,"aftermath">;
+  readonly live: Pick<WorldLiveFrame,"tick"|"population">;
+  /** Optional retained detail enriches origin navigation only; it is not lifecycle authority. */
+  readonly detail: Pick<RenderSnapshot,"resolvedDecisions"|"analysis"> | null;
+  readonly candidates: readonly DevelopmentEvidence[];
+  readonly fixtureOnly?: boolean;
+}
 
 const SOURCE_PRIORITY: Record<DevelopmentEvidence["source"], number> = {
   "matched-comparison": 0,
@@ -54,4 +64,25 @@ export function projectAftermath(input: AftermathProjectionInput): AftermathProj
     development: null, historyRecordId: null,
     originHistoryRecordId: input.originHistoryRecordId ?? null,
     settlement: null, settlementReason: null };
+}
+
+/** Project lifecycle exclusively from bounded live read models. Retained detail
+ * is consulted only for a matching origin History link, when one is available. */
+export function projectLiveAftermath(input: LiveAftermathProjectionInput): AftermathProjection | null {
+  const aftermath=input.interpretation.aftermath;
+  if(!aftermath)return null;
+
+  const resolution=input.detail?.resolvedDecisions.find(item=>item.commandId===aftermath.commandId);
+  const originRecord=resolution?.sourceEventId
+    ?input.detail?.analysis.records.find(record=>String(record.id)===String(resolution.sourceEventId))
+    :undefined;
+
+  return projectAftermath({
+    aftermath,
+    currentTick:input.live.tick,
+    population:input.live.population,
+    originHistoryRecordId:originRecord?.id??null,
+    candidates:input.candidates,
+    ...(input.fixtureOnly===undefined?{}:{fixtureOnly:input.fixtureOnly}),
+  });
 }

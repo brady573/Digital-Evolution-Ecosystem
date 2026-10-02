@@ -17,9 +17,9 @@ import { cladeColor, dormantChannel, organismColor, type OrganismLens } from "./
 import { AftermathPanel } from "./AftermathPanel";
 import { createPresentationStore, type PresentationView } from "./presentationStore";
 import { AftermathStage2Panel } from "./AftermathStage2Panel";
-import { projectAftermath } from "./experience/aftermath/project";
-import { transitionAftermath } from "./experience/aftermath/lifecycle";
-import type { AftermathLifecycleEvent, AftermathPresentationState, AftermathStage2Fixture, DevelopmentEvidence } from "./experience/aftermath/model";
+import { synchronizeAftermathPresentation, transitionAftermath } from "./experience/aftermath/lifecycle";
+import { AFTERMATH_OBSERVATION_TICKS, type AftermathLifecycleEvent, type AftermathPresentationState, type AftermathStage2Fixture, type DevelopmentEvidence } from "./experience/aftermath/model";
+import { projectLiveAftermath } from "./experience/aftermath/project";
 import { drawPhenotypeOrganism, phenotypeCache, tierForZoom } from "./phenotype";
 import { familyArtwork } from "./familyArt";
 
@@ -499,6 +499,8 @@ export function App(){
   },[]);
   const repository=useMemo(()=>new IndexedDbWorldRepository(),[]);
   const [snapshot,setSnapshot]=useState<RenderSnapshot|null>(null);
+  const snapshotRef=useRef<RenderSnapshot|null>(null);
+  snapshotRef.current=snapshot;
   // Lane 3 Task 6: read-model-only transport. The legacy snapshot subscription
   // is gone (RuntimeClient.subscribe removed): backpressure release, status
   // clearing, and the decision-gate control flow below live on the
@@ -566,21 +568,20 @@ export function App(){
   // "Checkpoint restored") before the restore's frames arrive; clearing status
   // on those frames would wipe it, repeating the PR #84 defect class.
   const knownWorldRef=useRef<WorldId|null>(null);
+  const liveAftermathState=presentation.interpretation?.aftermath??null;
+  const livePendingDecision=!!presentation.interpretation?.pendingDecision;
 
-  // Lane 2 aftermath-stage2 projection, adapted to the Lane 3 retained-detail
-  // snapshot: the DETAIL snapshot may be null during pure-advance play, so a
-  // null snapshot yields a null projection (no stage2 UI) rather than a crash.
-  // The top guard covers every snapshot read below; no bare dereference.
+  // Aftermath lifecycle and timing come from bounded live read models. Retained
+  // detail contributes only an optional origin-History link; it cannot hide or
+  // rewind the live Aftermath when absent or stale.
   const aftermathProjection=useMemo(()=>{
-    if(snapshot==null||snapshot.aftermath==null)return null;
+    const live=presentation.live;
+    const interpretation=presentation.interpretation;
+    if(!live||!interpretation?.aftermath)return null;
     const testMode=typeof window!=="undefined"&&new URLSearchParams(window.location.search).has("deeTest");
-    const resolution=snapshot.resolvedDecisions.find(item=>item.commandId===snapshot.aftermath!.commandId);
-    const originRecord=resolution?.sourceEventId
-      ?snapshot.analysis.records.find(record=>String(record.id)===resolution.sourceEventId)
-      :undefined;
     const fixtureEnabled=testMode&&aftermathFixture!==null;
     const fixtureEvidence:DevelopmentEvidence[] = fixtureEnabled&&aftermathFixture==="development"?[{
-      aftermathCommandId:snapshot.aftermath.commandId,
+      aftermathCommandId:interpretation.aftermath.commandId,
       source:"matched-comparison",
       sourceId:"deeTest-stage2-development",
       title:"Synthetic development fixture",
@@ -588,54 +589,29 @@ export function App(){
       followLens:"clades",
       fixtureOnly:true,
     }]:[];
-    return projectAftermath({
-      aftermath:snapshot.aftermath,
-      currentTick:fixtureEnabled&&aftermathFixture==="settlement"
-        ?snapshot.aftermath.resolutionTick+25_000
-        :snapshot.tick,
-      population:snapshot.population,
-      originHistoryRecordId:originRecord?.id??null,
+    const projectionLive=fixtureEnabled&&aftermathFixture==="settlement"
+      ?{...live,tick:interpretation.aftermath.resolutionTick+AFTERMATH_OBSERVATION_TICKS}
+      :live;
+    return projectLiveAftermath({
+      interpretation,
+      live:projectionLive,
+      detail:snapshot,
       fixtureOnly:fixtureEnabled,
       // Current contracts do not carry a stable relationship from later
       // developments to this command. Do not use chronology or originating
       // event provenance as a substitute.
       candidates:fixtureEvidence,
     });
-  },[snapshot,aftermathFixture]);
+  },[presentation.live?.tick,presentation.live?.population,presentation.interpretation,snapshot,aftermathFixture]);
 
-  useEffect(()=>{
-    const aftermath=snapshot?.aftermath;
-    setAftermathFixture(null);
-    if(!aftermath){setAftermathPresentation(null);return}
-    setAftermathPresentation(previous=>previous?.commandId===aftermath.commandId?previous:{
-      commandId:aftermath.commandId,
-      stage:aftermath.phase==="impact"?"impact":"observation",
-      expanded:aftermath.phase==="impact",
-      suspended:!!snapshot?.pendingDecision,
-      dismissed:false,
-      following:false,
-      automaticLens:null,
-      manualLensOverride:false,
-    });
-  },[snapshot?.aftermath?.commandId]);
+  useEffect(()=>setAftermathFixture(null),[liveAftermathState?.commandId]);
 
+  // Persist transitions sourced by the live read model. The same synchronization
+  // is also used below during render, so impact -> observation and decision
+  // preemption cannot produce a one-frame gap while this effect is pending.
   useEffect(()=>{
-    setAftermathPresentation(previous=>previous?transitionAftermath(previous,{
-      type:snapshot?.pendingDecision?"suspend":"resume-presentation",
-    }):previous);
-  },[!!snapshot?.pendingDecision]);
-
-  // Runtime releases its pinned impact phase on an explicit acknowledgment or
-  // when a resumed session executes its first tick. In either case the
-  // Explorer presentation moves to the compact observation affordance; it
-  // never leaves an expanded sheet behind as a playback gate.
-  useEffect(()=>{
-    const aftermath=snapshot?.aftermath;
-    if(aftermath?.phase!=="observation")return;
-    setAftermathPresentation(previous=>previous?.commandId===aftermath.commandId&&previous.stage==="impact"
-      ?transitionAftermath(previous,{type:"acknowledge-impact"})
-      :previous);
-  },[snapshot?.aftermath?.commandId,snapshot?.aftermath?.phase]);
+    setAftermathPresentation(previous=>synchronizeAftermathPresentation(previous,liveAftermathState,livePendingDecision));
+  },[liveAftermathState?.commandId,liveAftermathState?.phase,livePendingDecision]);
 
   const aftermathEvent=(event:AftermathLifecycleEvent)=>{
     setAftermathPresentation(previous=>previous?transitionAftermath(previous,event):previous);
@@ -728,6 +704,8 @@ export function App(){
       acknowledgeAftermath:()=>runtime.acknowledgeAftermath(),
       resolve:(opportunityId:string,choiceId:string)=>runtime.resolveEventDecision(opportunityId,choiceId),
       setAftermathFixture:(fixture:AftermathStage2Fixture|null)=>setAftermathFixture(fixture),
+      clearRetainedDetail:()=>setSnapshot(null),
+      retainedAftermathPhase:()=>snapshotRef.current?.aftermath?.phase??null,
       killWorker:()=>instrumentedRef.current?.fail("error"),
     };
     (window as any).__DEE_TEST__=hook;
@@ -885,14 +863,15 @@ export function App(){
   if(!live||!env||!interp||!ident||!catalog)return <main className="loading">{status}</main>;
   const m=interp.metrics;
   const pending=interp.pendingDecision;
+  const aftermathPresentationForRender=synchronizeAftermathPresentation(aftermathPresentation,interp.aftermath,!!pending);
   // A pending decision outranks an aftermath (AC15); the aftermath yields the
   // slot without being discarded, so it returns after the decision resolves.
   const showDecision=!!pending;
   const showAftermath=!pending&&!!interp.aftermath&&interp.aftermath.phase==="impact";
-  const showAftermathStage2=!pending&&surface==="world"&&!!aftermathProjection&&!!aftermathPresentation
-    &&aftermathProjection.stage!=="impact"&&aftermathPresentation.stage!=="impact"&&aftermathPresentation.expanded&&!aftermathPresentation.dismissed;
-  const showCompactAftermath=!pending&&surface==="world"&&!!aftermathProjection&&!!aftermathPresentation
-    &&aftermathProjection.stage!=="impact"&&aftermathPresentation.stage!=="impact"&&!aftermathPresentation.expanded&&!aftermathPresentation.dismissed;
+  const showAftermathStage2=!pending&&surface==="world"&&!!aftermathProjection&&!!aftermathPresentationForRender
+    &&aftermathProjection.stage!=="impact"&&aftermathPresentationForRender.stage!=="impact"&&aftermathPresentationForRender.expanded&&!aftermathPresentationForRender.dismissed;
+  const showCompactAftermath=!pending&&surface==="world"&&!!aftermathProjection&&!!aftermathPresentationForRender
+    &&aftermathProjection.stage!=="impact"&&aftermathPresentationForRender.stage!=="impact"&&!aftermathPresentationForRender.expanded&&!aftermathPresentationForRender.dismissed;
   // Retained detail path: analysis records and the full decision history are
   // deliberately excluded from live read-model traffic (handoff §6 history
   // rule — never push retained history into live frames). History reads them
@@ -945,10 +924,10 @@ export function App(){
         <div className="world-wrap">
           <div className="world-scene" aria-hidden="true"><div className="glow g-a"/><div className="glow g-b"/><div className="glow g-c"/><div className="ambient"/></div>
           <WorldCanvas worldId={ident.worldId} tick={live.tick} env={env} organisms={presentation.organisms} lens={lens} resourceView={resourceView} traitView={traitView} selectedId={selectedId} onSelect={setSelectedId} cam={cam} zoom={zoom} onCamera={setCam} onView={reportView}/>
-          {showCompactAftermath&&aftermathProjection&&aftermathPresentation&&snapshot!=null&&<AftermathStage2Panel
+          {showCompactAftermath&&aftermathProjection&&aftermathPresentationForRender&&<AftermathStage2Panel
             projection={aftermathProjection}
-            presentation={aftermathPresentation}
-            remainingTicks={Math.max(0,(snapshot.aftermath?.resolutionTick??live.tick)+25_000-live.tick)}
+            presentation={aftermathPresentationForRender}
+            remainingTicks={Math.max(0,(interp.aftermath?.resolutionTick??live.tick)+AFTERMATH_OBSERVATION_TICKS-live.tick)}
             onEvent={aftermathEvent}
             onReviewHistory={recordId=>reviewAftermathHistory(recordId)}
           />}
@@ -994,10 +973,10 @@ export function App(){
                 </div>
               : showAftermath
                 ? <AftermathPanel aftermath={interp.aftermath} capacity={env.resources.capacity} onAcknowledge={acknowledgeAftermath} busy={acknowledging}/>
-                : aftermathProjection&&aftermathPresentation&&snapshot!=null&&<AftermathStage2Panel
+                : aftermathProjection&&aftermathPresentationForRender&&<AftermathStage2Panel
                   projection={aftermathProjection}
-                  presentation={aftermathPresentation}
-                  remainingTicks={Math.max(0,(snapshot.aftermath?.resolutionTick??live.tick)+25_000-live.tick)}
+                  presentation={aftermathPresentationForRender}
+                  remainingTicks={Math.max(0,(interp.aftermath?.resolutionTick??live.tick)+AFTERMATH_OBSERVATION_TICKS-live.tick)}
                   onEvent={aftermathEvent}
                   onReviewHistory={recordId=>reviewAftermathHistory(recordId)}
                 />}
