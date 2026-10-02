@@ -501,26 +501,46 @@ async function main(){
     // reload. The Node suite proves the same survival through the transaction
     // semantics directly (`testFailedOverwritePreservesPriorSave`).
     let confirmedTick=0;
+    // Page-side scripts as STRINGS: esbuild's `__name` helper does not exist in the
+    // browser, so any page.evaluate given a compiled function that declares a named
+    // function fails with `ReferenceError: __name is not defined` before it runs.
+    const poisonIndexedDbPut=`(()=>{
+      const proto=IDBObjectStore.prototype;
+      window.__deeOriginalPut=proto.put;
+      proto.put=function(){throw new DOMException("The quota has been exceeded.","QuotaExceededError")};
+      window.__deeRestorePut=function(){proto.put=window.__deeOriginalPut;window.__deeRestorePut=null};
+      return true;
+    })()`;
+    const restoreIndexedDbPut=`(()=>{if(window.__deeRestorePut)window.__deeRestorePut();return true})()`;
+    const corruptCurrentSave=`(()=>new Promise((resolve,reject)=>{
+      const open=indexedDB.open("digital-evolution-ecosystem");
+      open.onerror=()=>reject(open.error);
+      open.onsuccess=()=>{
+        const db=open.result;
+        const tx=db.transaction("universes","readwrite");
+        tx.objectStore("universes").put({id:"current",savedAt:new Date().toISOString(),tick:1,engineVersion:"0.0.0",checkpoint:{not:"a checkpoint"}});
+        tx.oncomplete=()=>{db.close();resolve(true)};
+        tx.onerror=()=>{db.close();reject(tx.error)};
+        tx.onabort=()=>{db.close();reject(tx.error)};
+      };
+    }))()`;
     const failedOverwriteIsReportedTruthfully=async()=>{
       await page.getByRole("button",{name:"Save"}).click();
       await page.getByText(/Saved tick/).waitFor();
       confirmedTick=await tick(page);
-      await page.getByText(/Saved tick/).waitFor();
       // Force a real write failure at the storage engine's own boundary.
       //
-      // Not by storing an unstoreable record: `put` throws DataCloneError
-      // SYNCHRONOUSLY on a function, so such a record is never written and cannot
-      // make anything fail. Instead, make the engine itself refuse the write —
+      // Passed as a STRING, not a function: esbuild injects a `__name` helper into
+      // named function expressions it compiles, and that helper does not exist
+      // inside the page, so a function form throws `ReferenceError: __name is not
+      // defined` before reaching the browser. A string is evaluated as-is.
+      //
+      // A value containing a function is NOT the trigger: `put` throws
+      // DataCloneError SYNCHRONOUSLY on one, so such a record is never stored and
+      // cannot make anything fail. Instead the engine itself refuses the write —
       // the shape a quota-exhausted device produces — so the app's own code path
       // meets a genuine DOMException without the repository being stubbed.
-      await page.evaluate(()=>{
-        const proto=IDBObjectStore.prototype as unknown as {put:unknown};
-        const original=proto.put;
-        proto.put=function(this:IDBObjectStore,value:unknown,key?:IDBValidKey){
-          throw new DOMException("The quota has been exceeded.","QuotaExceededError");
-        };
-        (window as unknown as {__restorePut:unknown}).__restorePut=()=>{proto.put=original};
-      });
+      await page.evaluate(poisonIndexedDbPut);
       try{
         await page.getByRole("button",{name:"Save"}).click();
         await page.getByText(/Could not save/).waitFor({timeout:15_000});
@@ -530,7 +550,7 @@ async function main(){
           "a failed write is reported in player prose, not as the raw DOM exception",
         );
       }finally{
-        await page.evaluate(()=>{((window as unknown as {__restorePut?:()=>void}).__restorePut)?.()});
+        await page.evaluate(restoreIndexedDbPut);
       }
       // And the previously confirmed save is still loadable — the failed write
       // destroyed nothing.
@@ -557,22 +577,7 @@ async function main(){
     // Corrupt the stored record through the page's own database, then attempt a
     // load while playing. The player must get a truthful sentence, the world
     // must stay usable, and playback must resume by itself.
-    await page.evaluate(async ()=>{
-      const open=(name:string)=>new Promise<IDBDatabase>((resolve,reject)=>{
-        const request=indexedDB.open(name);
-        request.onsuccess=()=>resolve(request.result);
-        request.onerror=()=>reject(request.error);
-      });
-      const db=await open("digital-evolution-ecosystem");
-      await new Promise<void>((resolve,reject)=>{
-        const tx=db.transaction("universes","readwrite");
-        tx.objectStore("universes").put({id:"current",savedAt:new Date().toISOString(),tick:1,engineVersion:"0.0.0",checkpoint:{not:"a checkpoint"}});
-        tx.oncomplete=()=>resolve();
-        tx.onerror=()=>reject(tx.error);
-        tx.onabort=()=>reject(tx.error);
-      });
-      db.close();
-    });
+    await page.evaluate(corruptCurrentSave);
     // Start playback FIRST: AC9 is about restoring a prior intent to RUN, which is
     // only observable from a running world.
     await page.getByRole("button",{name:"Play"}).click();

@@ -784,7 +784,11 @@ export const GROUPS: readonly ValidationGroup[] = [
     // gate while including it in `verify:fast` (or the reverse) is precisely the
     // local-versus-CI drift this manifest exists to prevent. `ci-fast` is
     // asserted to hold exactly this set.
-    unitIds: ["typecheck", "migration", "validation-arch", "decisions"],
+    // `persistence-integrity` is here for the same reason `decisions` is: it is
+    // Class B, but it is a sub-11s contract check whose failures are otherwise
+    // only visible hours later in the simulation shards. CI's fast gate is
+    // asserted to hold exactly this set, so both lists move together.
+    unitIds: ["typecheck", "migration", "validation-arch", "decisions", "persistence-integrity"],
     ci: false,
   },
   {
@@ -796,7 +800,6 @@ export const GROUPS: readonly ValidationGroup[] = [
       "catalysts",
       "flows",
       "runtime-boundary",
-      "persistence-integrity",
       "time-controls",
       "landscape",
       "ecology",
@@ -862,7 +865,7 @@ export const GROUPS: readonly ValidationGroup[] = [
   {
     id: "ci-fast",
     title: "Fast gate",
-    unitIds: ["typecheck", "validation-arch", "migration", "decisions"],
+    unitIds: ["typecheck", "validation-arch", "migration", "decisions", "persistence-integrity"],
     ci: true,
   },
   // Balanced from measured per-unit costs, not from intuition. The previous
@@ -885,8 +888,8 @@ export const GROUPS: readonly ValidationGroup[] = [
   },
   {
     id: "ci-sim-c",
-    title: "Deterministic suites C (niche, ecology, runtime boundary, persistence)",
-    unitIds: ["niche", "ecology", "runtime-boundary", "persistence-integrity"],
+    title: "Deterministic suites C (niche, ecology, runtime boundary)",
+    unitIds: ["niche", "ecology", "runtime-boundary"],
     ci: true,
   },
   {
