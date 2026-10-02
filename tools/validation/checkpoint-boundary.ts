@@ -185,7 +185,9 @@ const REFUSED: Readonly<Record<string, { what: string; examples: readonly string
   "unsupported-version": {
     what: "a save declares a schema version this build does not know",
     examples: [
-      '`checkpointSchemaVersion: "0.5"`',
+      // 0.5 became the supported current schema in Task 4; keep this example
+      // one version ahead so the generated rejection case remains unsupported.
+      '`checkpointSchemaVersion: "0.6"`',
       '`checkpointSchemaVersion: "1.0"`',
       '`checkpointSchemaVersion: ""`',
       "`checkpointSchemaVersion: null`",

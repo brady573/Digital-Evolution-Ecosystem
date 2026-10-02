@@ -344,11 +344,15 @@ if (!SKIP_POLICY) {
 
 // --- Integration: full arc on one deterministic run --------------------------
 // Balanced seed 24681357 on current biology: drought_b @~60k delays the
-// guild (suppression during the shock), which then establishes @91615 with a
-// diffuse consumer base. Disruption/recovery do NOT occur here: established
-// guilds ride out shocks on 0.22 as under drought_a on 0.21. The full arc
+// guild (suppression during the shock), which then establishes @160640 with
+// a diffuse consumer base. Disruption/recovery do NOT occur here: established
+// guilds ride out shocks on 0.23 as under drought_a on 0.21. The full arc
 // machinery stays unit-covered (and 0.21-pinned historically); integration
 // proves what the current biology actually does.
+// 0.23.0 interference-biology re-pin (af9ad23 precedent): costly
+// secretion/resistance plus acquisition suppression (Task 3) slow guild
+// buildup after the shock, so establishment moves 91615 -> 160640. Still one
+// establishment, still diffuse, still no disruption on this run.
 
 const FIXTURE_SEED = 24681357;
 function fixtureConfig(seed: number): EngineConfig {
@@ -402,11 +406,16 @@ function testFixtureArc() {
     { schemaVersion: 1, kind: "nutrient_disturbance", mode: "drought_b" },
     "dependency validation",
   );
-  settle(session, 120000);
+  // 0.23.0 interference-biology re-pin: establishment moved past the old
+  // 120k horizon (now @160640 and still disruption-free at 250k, probed), so
+  // the observation window extends to 170k. Horizon follows the trajectory;
+  // the asserted structure (exactly one establishment, diffuse, no
+  // disruption) is unchanged.
+  settle(session, 170000);
   const records = (session.analysis as any).records.filter((r: any) => r.kind === "cuse");
   assert.equal(records.length, 1, "one establishment record (no disruption on this run)");
   assert.equal(records[0].phase, "established", "record establishes");
-  assert.equal(records[0].tick, 91615, "establishment is deterministic under the current catalyst policy");
+  assert.equal(records[0].tick, 160640, "establishment is deterministic under the current catalyst policy");
   assert.deepEqual(records[0].entity_refs, [], "diffuse founding names nobody");
   console.log("dependency fixture arc: PASS");
 }
@@ -452,8 +461,11 @@ function testMultiSeedPossibility() {
     if (records.length > 0) established.push(`${seed}@${records[0].tick}`);
   }
   assert.ok(established.length >= 1, "dependency establishment must be realizable");
+  // 0.23.0 interference-biology re-pin (same cause as the fixture arc):
+  // the pinned multi-seed establishment moves 55973 -> 15311. Possibility
+  // structure unchanged (realizable somewhere, required nowhere).
   assert.ok(
-    established.some((s) => s === "3543950664@55973"),
+    established.some((s) => s === "3543950664@15311"),
     "pinned establishment reproduces exactly",
   );
   console.log(`dependency multi-seed possibility [${established.join(", ")}]: PASS`);
@@ -508,7 +520,11 @@ function testWashoutReliance() {
   const liveShare = (live.metabolic_roles?.counts?.byproduct_scavenger || 0) / live.population;
   const controlShare = (control.metabolic_roles?.counts?.byproduct_scavenger || 0) / control.population;
   assert.ok(liveShare < 0.02, `washed guild collapses (live ${liveShare.toFixed(3)})`);
-  assert.ok(controlShare > 0.03, `control guild exists (control ${controlShare.toFixed(3)})`);
+  // 0.23.0 interference-biology re-pin: the matched untouched twin retains a
+  // guild at 2.9%, below the old 3% existence floor after the Task 3 cost and
+  // suppression shift. Keep a positive lower bound; the relative matched
+  // comparisons below still require a material washout effect.
+  assert.ok(controlShare > 0.02, `control guild exists (control ${controlShare.toFixed(3)})`);
   assert.ok(liveShare < controlShare, "washed guild underperforms its own twin");
   assert.ok(liveShare < controlShare / 2, "guild effect is large, not marginal");
   assert.ok(
