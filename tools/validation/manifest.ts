@@ -349,7 +349,7 @@ export const UNITS: readonly ValidationUnit[] = [
     domains: withApparatus("contracts", "sim-core", "sim-runtime"),
     needs: [],
     parallelSafe: true,
-    baselineSeconds: 150,
+    baselineSeconds: 32,
     claim:
       "Inducible secretion is gated by crowding and scarcity through an order-free pre-step context, stays local, pays proportional costs, suppresses only acquisition, and shows a conditional advantage that mixing destroys — all deterministically.",
   },
