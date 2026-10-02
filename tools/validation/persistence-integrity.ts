@@ -247,6 +247,12 @@ async function testSaveThenReadRoundTrips() {
   assert.equal(summary.id, "current");
   assert.equal(summary.tick, 1200, "summary reports the checkpoint's own tick");
 
+  // The in-band version is the point of the envelope (spec §1). Asserted
+  // POSITIVELY: if save() stopped writing it, every read would still succeed
+  // through the legacy-normalization path and nothing else here would notice.
+  const stored = committed.get("current") as Record<string, unknown>;
+  assert.equal(stored["envelopeVersion"], SAVE_ENVELOPE_VERSION, "save writes the current envelope version");
+
   const read = (await repository.readSlot("current")) as SlotRead;
   assert.deepEqual(read.checkpoint, checkpoint, "checkpoint round-trips unchanged");
   assert.ok(read.phenotypeAnchors && 7 in read.phenotypeAnchors, "adjuncts travel with the same read");
@@ -285,15 +291,14 @@ async function testOpenFailureIsTyped() {
 }
 
 async function testUnreadableRecordIsTypedNotSilent() {
-  for (const [label, record] of [
-    ["no checkpoint field", { id: "bad", savedAt: "x" }],
-    ["checkpoint is not an object", { id: "bad", savedAt: "x", checkpoint: 42 }],
-    ["envelope from a newer build", { id: "bad", savedAt: "x", envelopeVersion: SAVE_ENVELOPE_VERSION + 1, checkpoint: fakeCheckpoint(1) }],
-  ] as const) {
+  for (const record of [
+    { id: "bad", savedAt: "x" },
+    { id: "bad", savedAt: "x", checkpoint: 42 },
+    { id: "bad", savedAt: "x", envelopeVersion: SAVE_ENVELOPE_VERSION + 1, checkpoint: fakeCheckpoint(1) },
+  ]) {
     reset();
     seedRaw(record);
     await expectFailure(() => repository.readSlot("bad"), "storage-read-failed");
-    void label;
   }
 }
 
@@ -348,7 +353,19 @@ const mkOrganism = (id: number) => ({
  * component is not importable in Node — the browser lane proves the end-to-end
  * behaviour with a real rejected load (Task 4 Step 6).
  */
-function testFailedCandidateAnchorsAreNeverStaged() {
+/**
+ * Renamed from a claim it could not support.
+ *
+ * This pins the MECHANISM AC8 depends on: a cache with nothing staged adopts
+ * nothing. It does NOT pin F3a's change, because App's ordering is not importable
+ * in Node — an earlier version of this test created two caches, never called
+ * `stageAnchors`, and asserted natural resolution, which passes for every
+ * implementation including the pre-F3a one that staged before restoring.
+ *
+ * AC8's real evidence is the browser lane's rejected-load interaction. This test
+ * stays because the mechanism it pins is what makes that interaction meaningful.
+ */
+function testAnUnstagedCacheAdoptsNothing() {
   // The family these traits resolve to unaided. Asserting "not blob" would be
   // vacuous if blob IS the natural resolution, so pin the natural value first.
   const natural = new PhenotypeCache()
@@ -378,6 +395,30 @@ function testSuccessfulRestoreAdoptsMatchingAnchors() {
   assert.notEqual(second.get(1)?.family, "branching", "the anchor is consumed by one world, not inherited by the next");
 }
 
+/**
+ * Listing tolerates an unreadable record; reading one slot does not.
+ *
+ * Before F3a, `list()` destructured each record's metadata and never touched its
+ * checkpoint, so a truncated save could not hide the others. Routing list()
+ * through the strict normalizer made one bad record take the whole list down —
+ * a silent behaviour change with no consumer to notice and no test either way.
+ */
+async function testListingToleratesOneUnreadableRecord() {
+  reset();
+  await repository.save("good", fakeCheckpoint(11));
+  await repository.save("also-good", fakeCheckpoint(22));
+  seedRaw({ id: "truncated", savedAt: "2026-02-02T00:00:00.000Z", tick: 33, engineVersion: "0.23.0" });
+
+  const listed = await repository.list();
+  const ids = listed.map((entry) => entry.id);
+  assert.deepEqual(ids.sort(), ["also-good", "good", "truncated"], "one unreadable record does not hide the rest");
+  const truncated = listed.find((entry) => entry.id === "truncated");
+  assert.equal(truncated?.tick, 33, "the unreadable record is still listed with its own metadata");
+
+  // Reading that slot is strict: it is a typed failure, never a silent null.
+  await expectFailure(() => repository.readSlot("truncated"), "storage-read-failed");
+}
+
 // --- F3a: player-facing wording ---------------------------------------------
 
 /**
@@ -386,8 +427,6 @@ function testSuccessfulRestoreAdoptsMatchingAnchors() {
  * implementer freedom; the distinctions are not.
  */
 async function testStorageFailuresAreDistinguishable() {
-  const copy = new PhenotypeCache(); // unused; keeps the import honest
-  void copy;
   const read = new PersistenceFailure("storage-read-failed", new Error("QuotaExceededError: raw browser text"));
   const write = new PersistenceFailure("storage-write-failed", new Error("QuotaExceededError: raw browser text"));
   const none = new PersistenceFailure("no-save");
@@ -449,9 +488,10 @@ const tests: readonly (readonly [string, () => Promise<void>])[] = [
   ["failed overwrite preserves prior save", testFailedOverwritePreservesPriorSave],
   ["write success is not reported before commit", testWriteSuccessIsNotReportedBeforeCommit],
   ["prior save survives repeated failed overwrites", testPriorSaveSurvivesRepeatedFailedOverwrites],
+  ["listing tolerates one unreadable record", testListingToleratesOneUnreadableRecord],
   ["storage failures are distinguishable", testStorageFailuresAreDistinguishable],
   ["restore rejections are distinguishable", testRestoreRejectionsAreDistinguishable],
-  ["failed candidate anchors are never staged", testFailedCandidateAnchorsAreNeverStaged],
+  ["an unstaged cache adopts nothing", testAnUnstagedCacheAdoptsNothing],
   ["successful restore adopts matching anchors", testSuccessfulRestoreAdoptsMatchingAnchors],
 ];
 

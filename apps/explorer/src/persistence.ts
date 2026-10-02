@@ -118,8 +118,15 @@ function normalizeStoredRecord(raw:unknown):SlotRead&{readonly id:string}{
     checkpoint:checkpoint as unknown as UniverseCheckpoint,
     phenotypeAnchors:anchors&&Object.keys(anchors).length>0?anchors:null,
     savedAt:typeof raw["savedAt"]==="string"?raw["savedAt"]:"",
-    tick:typeof raw["tick"]==="number"?raw["tick"]:(checkpoint as {createdTick?:unknown}).createdTick as number,
-    engineVersion:typeof raw["engineVersion"]==="string"?raw["engineVersion"]:(checkpoint as {engineVersion?:unknown}).engineVersion as string,
+    // The CHECKPOINT is the authority for tick and engine version. The envelope's
+    // copies exist for indexing records that predate them, and are used only when
+    // the checkpoint does not carry the field — never to override it.
+    tick:typeof (checkpoint as {createdTick?:unknown}).createdTick==="number"
+      ?(checkpoint as {createdTick:number}).createdTick
+      :typeof raw["tick"]==="number"?raw["tick"]:0,
+    engineVersion:typeof (checkpoint as {engineVersion?:unknown}).engineVersion==="string"
+      ?(checkpoint as {engineVersion:string}).engineVersion
+      :typeof raw["engineVersion"]==="string"?raw["engineVersion"]:"",
   };
 }
 
@@ -202,9 +209,28 @@ export function createRepository(options?:{readonly indexedDB?:IDBFactory}):Worl
       try{
         const records=await requestResult(db.transaction(STORE,"readonly").objectStore(STORE).getAll())
           .catch((error)=>{throw asFailure("storage-read-failed",error)});
+        // Listing is tolerant on purpose, as it was before F3a: one truncated or
+        // unreadable record must not hide every other save from the list. Only
+        // `readSlot`, which has to return a coherent checkpoint, is strict.
         return records
-          .map((raw)=>normalizeStoredRecord(raw))
-          .map(({id:savedId,savedAt,tick,engineVersion})=>({id:savedId,savedAt,tick,engineVersion}))
+          .map((raw,index)=>{
+            const id=isRecord(raw)&&typeof raw["id"]==="string"?raw["id"]:"";
+            try{
+              const read=normalizeStoredRecord(raw);
+              return {id:read.id||id,savedAt:read.savedAt,tick:read.tick,engineVersion:read.engineVersion};
+            }catch{
+              // Unreadable record: still listed, with whatever descriptive
+              // metadata it carries, so the player can see it exists and act on
+              // it rather than meeting a vanished slot.
+              const meta=isRecord(raw)?raw:{};
+              return{
+                id:id||`unreadable-${index}`,
+                savedAt:typeof meta["savedAt"]==="string"?meta["savedAt"]:"",
+                tick:typeof meta["tick"]==="number"?meta["tick"]:0,
+                engineVersion:typeof meta["engineVersion"]==="string"?meta["engineVersion"]:"",
+              };
+            }
+          })
           .sort((a,b)=>b.savedAt.localeCompare(a.savedAt));
       }finally{db.close()}
     },

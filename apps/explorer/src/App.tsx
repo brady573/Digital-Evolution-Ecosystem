@@ -830,8 +830,10 @@ export function App(){
     // F3a: an ordinary rejected load is not a request to pause. The runtime stops
     // playback itself on a successful restore, so this path only pauses for the
     // attempt and MUST put the player's prior intent back if it is refused. A
-    // terminal runtime failure is a different thing entirely and stays stopped.
-    const wasRunning=running;
+    // terminal runtime failure is a different thing entirely: the world is stopped
+    // for good, so restoring "prior intent" must not re-arm playback on a dead
+    // worker or overwrite the truthful stopped status.
+    const wasRunning=running&&!deadRef.current;
     let read;
     try{
       // One coherent read: the checkpoint and its adjuncts cannot come from
@@ -863,7 +865,11 @@ export function App(){
       // Typed classification, never message text. A3.3 makes an ordinary save
       // fail to load for the first time, and F3a makes the worker boundary carry
       // the reason, so this branch is now reachable with a real player message.
-      setStatus(restoreFailureMessage(error));
+      //
+      // A dead runtime keeps its own truthful stopped status: overwriting it with
+      // "restore failed" would tell the player the save is the problem when the
+      // worker is.
+      if(!deadRef.current)setStatus(restoreFailureMessage(error));
       if(wasRunning)setRunning(true);
     }
   };

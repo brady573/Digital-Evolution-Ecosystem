@@ -1593,18 +1593,19 @@ function testRejectedRestoreLeavesSessionUntouched() {
   assert.equal(session.worldId, beforeId, "a refused restore never mints a new displayed-world identity");
   assert.deepEqual(session.checkpoint(), beforeCheckpoint, "the live checkpoint is byte-identical after a refusal");
 
-  // Deterministic continuation: the refused attempt consumed no RNG and left no
-  // partial state, so advancing from here reproduces the un-refused timeline.
+  // Deterministic continuation: a refused restore leaves the session able to
+  // continue exactly as an un-refused one would. This proves determinism, not
+  // "consumed no RNG" — a refusal that consumed RNG symmetrically in both
+  // sessions would also agree. The per-step hook tests below are what prove no
+  // state was touched.
   const twin = liveSession();
   twin.advance(20);
-  const twinId = twin.worldId;
   assert.throws(() => twin.restore(lateRejectedCheckpoint(twin.checkpoint())), "the twin refuses identically");
   session.advance(15);
   twin.advance(15);
   const a = session.checkpoint() as { experiment: unknown };
   const b = twin.checkpoint() as { experiment: unknown };
   assert.deepEqual(a.experiment, b.experiment, "a refused restore leaves deterministic continuation intact");
-  void twinId;
 }
 
 /**
@@ -1676,6 +1677,7 @@ function testNoFramesAreEmittedForAPrepareStepFailure() {
     } finally {
       __setRestorePrepareHookForTests(undefined);
     }
+    assert.ok(responses.length > 0, `a ${step} failure is reported as a response, not thrown`);
     assert.ok(
       responses.every((r) => (r as { type?: string }).type !== "PRESENTATION"),
       `a ${step} failure announces no world to presentation`,

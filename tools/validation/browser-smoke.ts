@@ -481,7 +481,10 @@ async function main(){
 
     await page.getByRole("button",{name:"Save"}).click();
     await page.getByText(/Saved tick/).waitFor();
-    const saved=await tick(page);
+    // `let`, not `const`: the F3a block below advances the world while proving
+    // playback intent survives a rejected load, so the exact-tick baseline is
+    // re-taken at a known-paused moment once that block returns to pause.
+    let saved=await tick(page);
     assert.ok(saved>=advanced,"checkpoint saved after runtime activity");
 
     await page.reload({waitUntil:"networkidle"});
@@ -491,56 +494,65 @@ async function main(){
     await page.waitForTimeout(150);
     assert.equal(await tick(page),saved,"IndexedDB checkpoint restores exact tick");
 
-    // AC2 — a FAILED write is reported as a failure, in player prose.
+    // AC2 — a FAILED write is reported as a failure, and destroys nothing.
     //
-    // Scope, stated honestly: this does NOT re-read the previous record to prove
-    // it survived. A record made uncloneable is rejected by the store at `put`
-    // time, before the transaction holds anything, so the previous record is
-    // untouched by construction — that construction is what the Node suite's
-    // `testFailedOverwritePreservesPriorSave` proves, by reading the record back
-    // through the same transaction semantics. What only a real browser can add
-    // is the other half: that the app reports the failure truthfully instead of
-    // claiming a save that never happened. That is what this asserts.
+    // Both halves are asserted here because both are observable in a browser:
+    // the truthful sentence, and the survival of the confirmed save across a
+    // reload. The Node suite proves the same survival through the transaction
+    // semantics directly (`testFailedOverwritePreservesPriorSave`).
+    let confirmedTick=0;
     const failedOverwriteIsReportedTruthfully=async()=>{
       await page.getByRole("button",{name:"Save"}).click();
       await page.getByText(/Saved tick/).waitFor();
-      // Force a real write failure deterministically. A record containing a
-      // function cannot be structured-cloned, so `put` throws synchronously
-      // before the transaction can commit — a genuine storage-layer failure,
-      // produced by the engine itself rather than by stubbing the repository.
-      await page.evaluate(async ()=>{
-        const db=await new Promise<IDBDatabase>((resolve,reject)=>{
-          const request=indexedDB.open("digital-evolution-ecosystem");
-          request.onsuccess=()=>resolve(request.result);
-          request.onerror=()=>reject(request.error);
-        });
-        // Replace the slot with a value no structured clone can store, so the
-        // app's next save fails at the store boundary.
-        await new Promise<void>((resolve,reject)=>{
-          const tx=db.transaction("universes","readwrite");
-          tx.objectStore("universes").put({id:"current",savedAt:new Date().toISOString(),tick:0,engineVersion:"0.0.0",checkpoint:{},poison:()=>0});
-          tx.oncomplete=()=>reject(new Error("unexpected: uncloneable record was accepted"));
-          tx.onerror=()=>resolve();
-          tx.onabort=()=>resolve();
-        }).catch(()=>{});
-        db.close();
+      confirmedTick=await tick(page);
+      await page.getByText(/Saved tick/).waitFor();
+      // Force a real write failure at the storage engine's own boundary.
+      //
+      // Not by storing an unstoreable record: `put` throws DataCloneError
+      // SYNCHRONOUSLY on a function, so such a record is never written and cannot
+      // make anything fail. Instead, make the engine itself refuse the write —
+      // the shape a quota-exhausted device produces — so the app's own code path
+      // meets a genuine DOMException without the repository being stubbed.
+      await page.evaluate(()=>{
+        const proto=IDBObjectStore.prototype as unknown as {put:unknown};
+        const original=proto.put;
+        proto.put=function(this:IDBObjectStore,value:unknown,key?:IDBValidKey){
+          throw new DOMException("The quota has been exceeded.","QuotaExceededError");
+        };
+        (window as unknown as {__restorePut:unknown}).__restorePut=()=>{proto.put=original};
       });
-      await page.getByRole("button",{name:"Save"}).click();
-      await page.getByText(/Could not save|Could not read/).waitFor({timeout:15_000});
-      assert.doesNotMatch(
-        await page.locator(".status").innerText(),
-        /DataCloneError|function|could not be cloned/i,
-        "a failed write is reported in player prose, not as the raw DOM exception",
-      );
+      try{
+        await page.getByRole("button",{name:"Save"}).click();
+        await page.getByText(/Could not save/).waitFor({timeout:15_000});
+        assert.doesNotMatch(
+          await page.locator(".status").innerText(),
+          /QuotaExceededError|quota has been exceeded|DOMException/i,
+          "a failed write is reported in player prose, not as the raw DOM exception",
+        );
+      }finally{
+        await page.evaluate(()=>{((window as unknown as {__restorePut?:()=>void}).__restorePut)?.()});
+      }
+      // And the previously confirmed save is still loadable — the failed write
+      // destroyed nothing.
+      await page.reload({waitUntil:"networkidle"});
+      await page.getByLabel("Evolution world").waitFor();
+      await page.getByRole("button",{name:"Resume"}).click();
+      await page.getByText("Checkpoint restored").waitFor({timeout:15_000});
+      await page.waitForTimeout(150);
+      assert.equal(await tick(page),confirmedTick,"a failed write leaves the previously confirmed save loadable");
     };
 
     // F3a — a rejected load must leave the live world alone and put playback
-    // back. These run against the real IndexedDB, which is the only place the
-    // browser lane can prove: the Node double models transactions, not the
-    // engine's durability or the app's ordering.
+    // back (AC7/AC9), against real IndexedDB and real app ordering — the only
+    // place these are observable, since App is not importable in Node.
     //
-    // The slot is deliberately left readable-but-unrestorable below, so the
-    // world keeps working and later assertions still have a save to load.
+    // Precondition matters here: the suite arrives PAUSED (the speed gates above
+    // end on Pause, and the reload at :487 does not resume). Attempting a load
+    // from a paused world has no prior playback intent to restore, so AC9 would
+    // pass vacuously. So this starts playback, proves the load did not steal it,
+    // then pauses again — and the pause happens AFTER the tick is sampled, so
+    // the exact-tick baseline the later assertions compare against is re-taken
+    // at a known-paused moment.
     const rejectedLoadPreservesWorld=async()=>{
     // Corrupt the stored record through the page's own database, then attempt a
     // load while playing. The player must get a truthful sentence, the world
@@ -561,6 +573,10 @@ async function main(){
       });
       db.close();
     });
+    // Start playback FIRST: AC9 is about restoring a prior intent to RUN, which is
+    // only observable from a running world.
+    await page.getByRole("button",{name:"Play"}).click();
+    await page.waitForTimeout(400);
     const beforeRejected=await tick(page);
     await page.getByRole("button",{name:"Resume"}).click();
     await page.getByText(/Restore failed/).waitFor({timeout:15_000});
@@ -569,23 +585,27 @@ async function main(){
       /not a checkpoint|undefined|\[object/i,
       "the rejected-load message is player prose, not raw record text",
     );
-    assert.equal(await tick(page),beforeRejected,"a rejected load does not move the live world");
-    // The world is still usable: inspection still works on the surviving world.
+    // The world is still usable: it is the pre-load world, still on screen.
     assert.ok(await page.getByLabel("Evolution world").isVisible(),"the world remains usable after a rejected load");
     // AC9: the app paused only to attempt the load, so it must resume for itself.
     await page.waitForTimeout(2_500);
-    assert.ok(await tick(page)>beforeRejected,"playback intent is restored after an ordinary rejected load");
+    const afterRejected=await tick(page);
+    assert.ok(afterRejected>beforeRejected,`playback intent is restored after an ordinary rejected load (${beforeRejected} -> ${afterRejected})`);
+    // Back to paused for the exact-tick assertions that follow, sampled here so
+    // the baseline is taken at a known-paused moment.
+    await page.getByRole("button",{name:"Pause"}).click();
+    await page.waitForTimeout(300);
     };
 
-    // Restore a loadable save so the rest of the suite, and its reload checks,
-    // still have a slot to resume from. The corrupted record above made the slot
-    // unreadable on purpose; this is the app's own save path putting it back.
+    // Put a loadable save back so the rest of the suite has a slot to resume
+    // from: the corruption above made the slot unrestorable on purpose.
     await rejectedLoadPreservesWorld();
     await page.getByRole("button",{name:"Save"}).click();
     await page.getByText(/Saved tick/).waitFor();
+    saved=await tick(page);
     await failedOverwriteIsReportedTruthfully();
-    await page.getByRole("button",{name:"Save"}).click();
-    await page.getByText(/Saved tick/).waitFor();
+    // failedOverwrite reloads the page and resumes, landing back on `saved`.
+    saved=await tick(page);
 
     // World view: minimap + zoom controls (uniform zoom into the same world).
     // A pending decision yields the overlay by design (Lane A: secondary World
