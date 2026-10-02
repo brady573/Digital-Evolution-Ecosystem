@@ -491,11 +491,57 @@ async function main(){
     await page.waitForTimeout(150);
     assert.equal(await tick(page),saved,"IndexedDB checkpoint restores exact tick");
 
+    // AC2 — a FAILED write is reported as a failure, in player prose.
+    //
+    // Scope, stated honestly: this does NOT re-read the previous record to prove
+    // it survived. A record made uncloneable is rejected by the store at `put`
+    // time, before the transaction holds anything, so the previous record is
+    // untouched by construction — that construction is what the Node suite's
+    // `testFailedOverwritePreservesPriorSave` proves, by reading the record back
+    // through the same transaction semantics. What only a real browser can add
+    // is the other half: that the app reports the failure truthfully instead of
+    // claiming a save that never happened. That is what this asserts.
+    const failedOverwriteIsReportedTruthfully=async()=>{
+      await page.getByRole("button",{name:"Save"}).click();
+      await page.getByText(/Saved tick/).waitFor();
+      // Force a real write failure deterministically. A record containing a
+      // function cannot be structured-cloned, so `put` throws synchronously
+      // before the transaction can commit — a genuine storage-layer failure,
+      // produced by the engine itself rather than by stubbing the repository.
+      await page.evaluate(async ()=>{
+        const db=await new Promise<IDBDatabase>((resolve,reject)=>{
+          const request=indexedDB.open("digital-evolution-ecosystem");
+          request.onsuccess=()=>resolve(request.result);
+          request.onerror=()=>reject(request.error);
+        });
+        // Replace the slot with a value no structured clone can store, so the
+        // app's next save fails at the store boundary.
+        await new Promise<void>((resolve,reject)=>{
+          const tx=db.transaction("universes","readwrite");
+          tx.objectStore("universes").put({id:"current",savedAt:new Date().toISOString(),tick:0,engineVersion:"0.0.0",checkpoint:{},poison:()=>0});
+          tx.oncomplete=()=>reject(new Error("unexpected: uncloneable record was accepted"));
+          tx.onerror=()=>resolve();
+          tx.onabort=()=>resolve();
+        }).catch(()=>{});
+        db.close();
+      });
+      await page.getByRole("button",{name:"Save"}).click();
+      await page.getByText(/Could not save|Could not read/).waitFor({timeout:15_000});
+      assert.doesNotMatch(
+        await page.locator(".status").innerText(),
+        /DataCloneError|function|could not be cloned/i,
+        "a failed write is reported in player prose, not as the raw DOM exception",
+      );
+    };
+
     // F3a — a rejected load must leave the live world alone and put playback
     // back. These run against the real IndexedDB, which is the only place the
     // browser lane can prove: the Node double models transactions, not the
     // engine's durability or the app's ordering.
     //
+    // The slot is deliberately left readable-but-unrestorable below, so the
+    // world keeps working and later assertions still have a save to load.
+    const rejectedLoadPreservesWorld=async()=>{
     // Corrupt the stored record through the page's own database, then attempt a
     // load while playing. The player must get a truthful sentence, the world
     // must stay usable, and playback must resume by itself.
@@ -529,6 +575,17 @@ async function main(){
     // AC9: the app paused only to attempt the load, so it must resume for itself.
     await page.waitForTimeout(2_500);
     assert.ok(await tick(page)>beforeRejected,"playback intent is restored after an ordinary rejected load");
+    };
+
+    // Restore a loadable save so the rest of the suite, and its reload checks,
+    // still have a slot to resume from. The corrupted record above made the slot
+    // unreadable on purpose; this is the app's own save path putting it back.
+    await rejectedLoadPreservesWorld();
+    await page.getByRole("button",{name:"Save"}).click();
+    await page.getByText(/Saved tick/).waitFor();
+    await failedOverwriteIsReportedTruthfully();
+    await page.getByRole("button",{name:"Save"}).click();
+    await page.getByText(/Saved tick/).waitFor();
 
     // World view: minimap + zoom controls (uniform zoom into the same world).
     // A pending decision yields the overlay by design (Lane A: secondary World
