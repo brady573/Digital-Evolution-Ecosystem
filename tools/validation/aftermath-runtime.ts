@@ -23,6 +23,7 @@ import type {
 } from "../../packages/contracts/src/index.ts";
 import { AFTERMATH_COMPARABLES } from "../../packages/contracts/src/index.ts";
 import { UniverseSession } from "../../packages/sim-runtime/src/session.ts";
+import { isDecisionEligible } from "../../packages/sim-decisions/src/index.ts";
 import { fieldDelta } from "../../apps/explorer/src/aftermath.ts";
 
 const FIXTURE_SEED = 24681357;
@@ -324,6 +325,119 @@ function testAftermathIsDeterministicAcrossReplay() {
     "the same engine version, config, seed and command sequence retain the same aftermath");
 }
 
+function sessionAfterEventResolution(): { session: UniverseSession; aftermath: AftermathState } {
+  const session = new UniverseSession();
+  const first = session.restore(fixture());
+  const eventOpportunity = first.pendingDecision!;
+  const keepWatching = eventOpportunity.choices.find(choice => !choice.intervention)!;
+  const resolved = session.resolveEventDecision(eventOpportunity.opportunityId, keepWatching.choiceId);
+  session.acknowledgeAftermath();
+  return { session, aftermath: resolved.aftermath! };
+}
+
+function sessionAfterCatalystResolution(): { session: UniverseSession; aftermath: AftermathState } {
+  const { session, aftermath: firstAftermath } = sessionAfterEventResolution();
+  const firstHorizon = firstAftermath.resolutionTick + 25_000;
+  const protectedRun = session.advance(24_999);
+  assert.equal(protectedRun.tick, firstHorizon - 1,
+    "the first Aftermath completes its protected interval before another catalyst is created");
+  assert.equal(protectedRun.pendingDecision, null,
+    "no catalyst can interrupt the first Aftermath");
+  session.advance(1);
+  const catalystSnapshot = session.advance(251);
+  assert.equal(catalystSnapshot.pendingDecision?.source, "world_catalyst",
+    "the deterministic fixture reaches its existing eligible catalyst window");
+  const catalyst = catalystSnapshot.pendingDecision!;
+  const applyCatalyst = catalyst.choices.find(choice => !!choice.intervention)!;
+  const resolved = session.resolveEventDecision(catalyst.opportunityId, applyCatalyst.choiceId);
+  assert.equal(resolved.aftermath?.source, "world_catalyst",
+    "resolving the real catalyst starts the aftermath used by this regression");
+  session.acknowledgeAftermath();
+  return { session, aftermath: resolved.aftermath! };
+}
+
+function testAutomaticCatalystSuppressedUntilHorizon() {
+  const { session, aftermath } = sessionAfterEventResolution();
+  const horizon = aftermath.resolutionTick + 25_000;
+  const initialRecords = session.analysis.records.length;
+
+  const protectedSnapshot = session.advance(24_999);
+  assert.equal(protectedSnapshot.tick, horizon - 1,
+    "the normally eligible 10,000-tick catalyst window cannot interrupt Aftermath");
+  assert.equal(protectedSnapshot.pendingDecision, null,
+    "no automatic catalyst opportunity is pending before the observation horizon");
+  assert.ok(session.analysis.records.length > initialRecords,
+    "the catalyst gate does not pause ongoing analysis/history records");
+
+  const atBoundary = session.advance(1);
+  assert.equal(atBoundary.tick, horizon, "Aftermath reaches its exact 25,000-tick boundary");
+  const resumed = session.advance(251);
+  assert.equal(resumed.pendingDecision?.source, "world_catalyst",
+    "the existing eligible catalyst window resumes at the first stride after protection");
+  assert.ok(resumed.pendingDecision!.createdTick >= horizon,
+    "the catalyst is created only after the protected interval ends");
+}
+
+function testExplicitExperimentRemainsAvailableDuringProtection() {
+  const { session, aftermath } = sessionAfterEventResolution();
+  assert.ok(aftermath.commandId, "the session begins with a foreground decision Aftermath");
+  const beforeTick = session.snapshot().tick;
+  const afterExperiment = session.intervene("droughtA");
+  assert.equal(afterExperiment.tick, beforeTick,
+    "a deliberate experiment remains a zero-tick action during Aftermath protection");
+  assert.equal(afterExperiment.pendingDecision, null,
+    "an explicit experiment is not mistaken for an automatic decision opportunity");
+  assert.equal(afterExperiment.aftermath, null,
+    "a deliberate manual experiment supersedes the foreground Aftermath");
+}
+
+function testProtectedDecisionEventsAreConsumedWithoutReplay() {
+  const { session, aftermath } = sessionAfterCatalystResolution();
+  const horizon = aftermath.resolutionTick + 25_000;
+  const initialRecords = session.analysis.records.length;
+
+  const protectedSnapshot = session.advance(24_999);
+  assert.equal(protectedSnapshot.tick, horizon - 1,
+    "ordinary advancement reaches the last protected tick without an automatic interruption");
+  assert.equal(protectedSnapshot.pendingDecision, null,
+    "event-derived and catalyst-derived opportunities stay suppressed inside protection");
+  assert.ok(session.analysis.records.length > initialRecords,
+    "analysis records continue to accumulate while automatic opportunities are suppressed");
+
+  const protectedEligibleEvents = session.analysis.observedEvents().filter(event =>
+    event.tick > aftermath.resolutionTick && event.tick < horizon && isDecisionEligible(event));
+  assert.ok(protectedEligibleEvents.length > 0,
+    "the deterministic world records decision-eligible events during the protected interval");
+
+  let afterBoundary = session.advance(1);
+  assert.equal(afterBoundary.tick, horizon,
+    "the boundary tick is reached exactly after the last protected tick");
+  let attempts = 0;
+  while (!afterBoundary.pendingDecision && attempts++ < 20) {
+    afterBoundary = session.runToNextEvent();
+    if (session.simulation.extinctTick !== null) break;
+  }
+  assert.ok(afterBoundary.pendingDecision,
+    "automatic opportunity creation resumes for a newly generated post-boundary opportunity");
+  const resumed = afterBoundary.pendingDecision!;
+  assert.ok(resumed.createdTick >= horizon,
+    "the resumed opportunity is created at or after the observation horizon");
+  if (resumed.source === "observed_event") {
+    const source = session.analysis.observedEvents().find(event => event.eventId === resumed.sourceEventId);
+    assert.ok(source && source.tick >= horizon,
+      "a protected-period event is consumed rather than replayed as a stale prompt");
+  }
+  const pendingTick = session.snapshot().tick;
+  assert.equal(session.advance(1).tick, pendingTick,
+    "once the post-boundary opportunity is legitimately pending, the hard tick gate is unchanged");
+  const nextChoice = resumed.choices.find(choice => !!choice.intervention) ?? resumed.choices[0]!;
+  const superseding = session.resolveEventDecision(resumed.opportunityId, nextChoice.choiceId);
+  assert.notEqual(superseding.aftermath?.commandId, aftermath.commandId,
+    "a deliberate post-boundary decision resolution replaces the foreground Aftermath");
+  assert.equal(superseding.aftermath?.resolutionTick, pendingTick,
+    "the new Aftermath starts at the later decision's own resolution tick");
+}
+
 // --- The awaiting caller must actually settle -----------------------------------
 
 function testResumeReplySettlesTheAwaitingCaller() {
@@ -381,6 +495,9 @@ function main() {
   testNoBaselineMeansNoComparisonIsOffered();
   testAftermathSupersedesWithoutLosingHistory();
   testAftermathIsDeterministicAcrossReplay();
+  testAutomaticCatalystSuppressedUntilHorizon();
+  testProtectedDecisionEventsAreConsumedWithoutReplay();
+  testExplicitExperimentRemainsAvailableDuringProtection();
   testResumeReplySettlesTheAwaitingCaller();
   console.log("aftermath runtime validation: PASS");
 }

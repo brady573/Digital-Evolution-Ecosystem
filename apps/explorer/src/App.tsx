@@ -724,6 +724,7 @@ export function App(){
     if(!new URLSearchParams(window.location.search).has("deeTest"))return;
     const hook={
       runToNextEvent:()=>runtime.runToNextEvent(),
+      advanceTicks:(ticks:number)=>runtime.advance(ticks),
       acknowledgeAftermath:()=>runtime.acknowledgeAftermath(),
       resolve:(opportunityId:string,choiceId:string)=>runtime.resolveEventDecision(opportunityId,choiceId),
       setAftermathFixture:(fixture:AftermathStage2Fixture|null)=>setAftermathFixture(fixture),
@@ -789,6 +790,18 @@ export function App(){
       setStatus(`Could not continue: ${error instanceof Error?error.message:String(error)}`);
     }finally{
       setAcknowledging(false);
+    }
+  };
+  const applyManualIntervention=async(intervention:"global"|"droughtA"|"droughtB")=>{
+    if(blockWhilePending())return;
+    runtime.intervene(intervention);
+    try{
+      // APPLY_INTERVENTION updates the live frame, while retained detail (and
+      // its Aftermath projection) is refreshed explicitly after the command.
+      // Worker message ordering makes this detail read observe the intervention.
+      setSnapshot(await runtime.requestDetail());
+    }catch(error){
+      setStatus(`Intervention applied, but details could not refresh: ${error instanceof Error?error.message:String(error)}`);
     }
   };
   const newUniverse=()=>{
@@ -1053,7 +1066,7 @@ export function App(){
         {/* impl: REQ-UX-001 (World/History/Tree/Experiments investigation surfaces) */}
         <span className="eyebrow">What if this world changed?</span><h2>Experiments</h2>
         {interp.control?<div className="compare"><div><strong>Experiment</strong><span>{live.population} living</span><span>{m.ecological_outcome}</span><span>{formatYear(live.tick)}</span></div><div><strong>Untouched twin</strong><span>{interp.control.population} living</span><span>{interp.control.metrics.ecological_outcome}</span><span>{formatYear(interp.control.tick)}</span></div></div>:<p>No matched control exists yet. Applying an intervention creates an exact twin first.</p>}
-        <div className="actions"><button onClick={()=>{if(blockWhilePending())return;runtime.intervene("global")}}>Global nutrient crash</button><button onClick={()=>{if(blockWhilePending())return;runtime.intervene("droughtA")}}>Nutrient A drought</button><button onClick={()=>{if(blockWhilePending())return;runtime.intervene("droughtB")}}>Nutrient B drought</button></div>
+        <div className="actions"><button onClick={()=>void applyManualIntervention("global")}>Global nutrient crash</button><button onClick={()=>void applyManualIntervention("droughtA")}>Nutrient A drought</button><button onClick={()=>void applyManualIntervention("droughtB")}>Nutrient B drought</button></div>
         {records.length>0&&<><h3>Histories so far</h3><p>What the experiment branch has lived through — the untouched twin keeps its own time.</p>{records.slice(-4).reverse().map((r)=><article key={r.id}><span>{formatTickAge(r.tick)} · {r.phase}</span><h3>{r.title}</h3></article>)}</>}
       </section>}
       </aside>

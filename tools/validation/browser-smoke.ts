@@ -28,6 +28,38 @@ async function tick(page:Page){
   return Number(text.replace(/[^0-9]/g,""));
 }
 
+async function waitForTickOrDecision(page:Page,target:number,timeoutMs=120_000){
+  const deadline=Date.now()+timeoutMs;
+  while(Date.now()<deadline){
+    const current=await tick(page);
+    if(current>=target||await page.getByTestId("decision-sheet").count())return current;
+    await page.waitForTimeout(100);
+  }
+  throw new Error(`timed out waiting for tick ${target} or a pending decision; current tick ${await tick(page)}`);
+}
+
+async function advanceRuntimeToTick(page:Page,target:number){
+  let current=await tick(page);
+  while(current<target){
+    // ADVANCE_TICKS has a 2,000-tick command limit. Send ordinary production
+    // commands in bounded slices and wait for each reply to reach the HUD.
+    const next=Math.min(target,current+2_000);
+    await page.evaluate((ticks)=>(window as any).__DEE_TEST__.advanceTicks(ticks),next-current);
+    const reached=await waitForTickOrDecision(page,next);
+    assert.equal(reached,next,`the runtime accepts and reaches its bounded advance to tick ${next}`);
+    assert.equal(await page.getByTestId("decision-sheet").count(),0,
+      `no automatic decision interrupts protected advancement before tick ${target}`);
+    current=reached;
+  }
+}
+
+async function historyRecordCount(page:Page){
+  const text=await page.getByText(/\d+ durable ecological records/).innerText();
+  const match=text.match(/(\d+) durable ecological records/);
+  assert.ok(match,"History displays its durable ecological record count");
+  return Number(match[1]);
+}
+
 // Renderer geometry is published after the canvas paints, so poll for the
 // expectation instead of sampling once (a single read can catch a stale value).
 async function expectAttr(locator:Locator,name:string,match:(v:number)=>boolean,label:string){
@@ -390,7 +422,16 @@ async function main(){
           // is still exercised by click in the dedicated aftermath block, where
           // the world is paused and preemption cannot occur.
           if(await page.getByTestId("aftermath-impact").isVisible().catch(()=>false)){
-            await page.evaluate(()=>(window as any).__DEE_TEST__.acknowledgeAftermath());
+            await page.evaluate(async()=>{
+              try {
+                await (window as any).__DEE_TEST__.acknowledgeAftermath();
+              } catch(error) {
+                // The sheet can be one render behind playback: the runtime may
+                // already have released impact into observation. Ignore only
+                // that expected race; surface every other command failure.
+                if(!String(error).includes("Aftermath is not awaiting acknowledgement"))throw error;
+              }
+            });
             await page.waitForTimeout(150);
           }
           // Whichever sheet now owns the slot, the window is void either way.
@@ -692,20 +733,55 @@ async function main(){
     await decisionPage.getByText("Keep watching",{exact:true}).waitFor();
     await decisionPage.getByText(/not a proven cause/).waitFor();
 
-    // C17: catalyst window on the same World surface. Quiet restarts at the
-    // event creation tick, so the first window follows at the next quiet stride.
+    // Aftermath decision pacing: keep the real decision/history record
+    // inspectable while ordinary runtime advancement finishes the full
+    // observation horizon. Ecology records are allowed to be seed-dependent;
+    // this claim is about preserving recorded History, not requiring a new
+    // ecological transition in every observation window.
+    const recordedHistoryCount=await historyRecordCount(decisionPage);
+    assert.ok(recordedHistoryCount>0,"the real decision scenario has durable ecological History to inspect");
+    await decisionPage.getByRole("button",{name:"World",exact:true}).click();
+    const aftermathHorizon=decisionTick+25_000;
+    const currentTick=await tick(decisionPage);
+    assert.ok(currentTick<aftermathHorizon,"the live decision Aftermath is still inside its observation horizon");
+    await advanceRuntimeToTick(decisionPage,aftermathHorizon-1);
+    assert.equal(await tick(decisionPage),aftermathHorizon-1,
+      "ordinary runtime advancement reaches T+24,999 without an automatic decision preemption");
+    assert.equal(await decisionPage.getByTestId("decision-sheet").count(),0,
+      "no automatic decision is pending at the last protected tick");
+    await advanceRuntimeToTick(decisionPage,aftermathHorizon);
+    assert.equal(await tick(decisionPage),aftermathHorizon,
+      "ordinary runtime advancement reaches the exact Aftermath horizon");
+    assert.equal(await decisionPage.getByTestId("decision-sheet").count(),0,
+      "the horizon boundary itself does not replay a protected-period event");
+    // Retained history/detail is intentionally pulled on the History surface,
+    // not streamed in live frames. Refresh it here before inspecting the
+    // production settlement projection at this exact horizon.
+    await decisionPage.getByRole("button",{name:"History",exact:true}).click();
+    assert.equal(await historyRecordCount(decisionPage),recordedHistoryCount,
+      "durable ecological History records remain recorded through protected observation");
+    await decisionPage.getByText("Your decisions").waitFor();
+    await decisionPage.getByText("Keep watching",{exact:true}).waitFor();
+    await decisionPage.getByRole("button",{name:"World",exact:true}).click();
+    const compactAftermath=decisionPage.getByTestId("aftermath-compact");
+    await compactAftermath.waitFor({timeout:15_000});
+    assert.match(await compactAftermath.innerText(),/settled/,
+      "the production Aftermath projection reaches settlement at the real horizon");
+    await compactAftermath.click();
+    await decisionPage.getByTestId("aftermath-settlement").waitFor({timeout:15_000});
+    assert.match(await decisionPage.getByTestId("aftermath-settlement").innerText(),/observation window/i,
+      "quiet settlement retains the approved observation-window meaning");
+    // C17 plus Aftermath protection: after the observation horizon the existing
+    // catalyst policy resumes at its first eligible stride.
     await decisionPage.getByRole("button",{name:"World",exact:true}).click();
     const catalystSheet=decisionPage.getByTestId("decision-sheet");
-    for(let i=0;i<10&&!(await catalystSheet.isVisible().catch(()=>false));i++){
-      await decisionPage.evaluate(()=>(window as any).__DEE_TEST__.runToNextEvent());
-      await decisionPage.waitForTimeout(1000);
-    }
+    await decisionPage.evaluate(()=>(window as any).__DEE_TEST__.advanceTicks(251));
     await catalystSheet.waitFor({timeout:180_000});
     assert.equal(await catalystSheet.getAttribute("data-source"),"world_catalyst","window carries catalyst provenance, never a fake event");
     await catalystSheet.getByText("World catalyst — your move").waitFor();
     await catalystSheet.getByText("Change the environment?").waitFor();
     const catalystTick=await tick(decisionPage);
-    assert.ok(catalystTick>decisionTick,"catalyst window arrives after the event decision");
+    assert.ok(catalystTick>=aftermathHorizon,"catalyst window resumes only after the Aftermath horizon");
     const catalystChoices=await catalystSheet.locator(".decision-choices button").count();
     assert.ok(catalystChoices>=2,"window offers keep watching plus eligible catalysts");
     // Bypass prevention, zero-tick resolution, explicit resume — same gate.
@@ -727,6 +803,23 @@ async function main(){
     await decisionPage.getByRole("button",{name:"Pause"}).click();
     await decisionPage.getByRole("button",{name:"History"}).click();
     await decisionPage.getByText(/World catalyst offered at tick/).waitFor();
+    // A deliberate manual intervention remains available and clears the old
+    // foreground observation rather than leaving it attached to a new world.
+    await decisionPage.getByRole("button",{name:"Experiments",exact:true}).click();
+    await decisionPage.getByRole("button",{name:"Global nutrient crash",exact:true}).click();
+    const afterManualExperiment=await tick(decisionPage);
+    await decisionPage.getByRole("button",{name:"World",exact:true}).click();
+    await decisionPage.waitForFunction(
+      ()=>document.querySelector('[data-testid="aftermath-compact"]')===null,
+      undefined,
+      {timeout:15_000},
+    );
+    assert.equal(await decisionPage.getByTestId("aftermath-compact").count(),0,
+      "a deliberate experiment supersedes the previous foreground Aftermath");
+    assert.equal(await decisionPage.getByTestId("aftermath-impact").count(),0,
+      "manual intervention does not fabricate a new decision-impact aftermath");
+    assert.equal(await tick(decisionPage),afterManualExperiment,
+      "the superseding manual experiment advances zero ticks");
     await decisionPage.close();
 
     const mobile=await context.newPage();

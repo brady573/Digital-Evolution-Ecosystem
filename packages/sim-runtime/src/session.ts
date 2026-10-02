@@ -57,6 +57,10 @@ import { ENVIRONMENT_PERIOD_TICKS } from "@digital-evolution/contracts";
 import { buildLive, buildPresentation, catalogMembershipSignature, interpretationPayloadKey } from "./presentation";
 import { validateRuntimeCommand } from "./command-validation";
 
+// Keep automatic prompts out of a foreground Aftermath's fixed observation
+// interval. This is runtime pacing, not a change to either eligibility policy.
+const AFTERMATH_DECISION_PROTECTION_TICKS = 25_000;
+
 /**
  * The schema this build writes. DERIVED from contracts' single declaration, not
  * written inline: `restore` passes this value into canonical validation, so a
@@ -377,6 +381,18 @@ export class UniverseSession {
   }
 
   /**
+   * Automatic opportunities must not replace the foreground Aftermath before
+   * its fixed observation horizon. The interval is presentation-derived and
+   * intentionally not persisted: restoring a checkpoint does not restore an
+   * Aftermath that the existing checkpoint contract does not retain.
+   */
+  #automaticDecisionProtected():boolean{
+    const aftermath=this.#aftermath;
+    if(!aftermath||this.#experiment.extinctTick!==null)return false;
+    return this.#experiment.t<aftermath.resolutionTick+AFTERMATH_DECISION_PROTECTION_TICKS;
+  }
+
+  /**
    * Evaluate only newly emitted observed events. Returns true when an
    * opportunity became pending, which is the signal to stop executing ticks.
    * Eligibility is pure policy; it cannot change whether the event occurred.
@@ -391,6 +407,10 @@ export class UniverseSession {
       const event=events[i];
       this.#observedThrough=i+1;
       if(!event||!isDecisionEligible(event))continue;
+      // Consume protected observations instead of deferring them. Eligibility
+      // describes the event itself; it does not require a prompt during this
+      // foreground observation interval.
+      if(this.#automaticDecisionProtected())continue;
       const opportunity=buildDecisionOpportunity(event,this.#decisionContext(),this.#policyVersion);
       if(!opportunity)continue;
       this.#pendingDecision=opportunity;
@@ -435,7 +455,7 @@ export class UniverseSession {
    * too costly to rebuild per step at phone populations.
    */
   #evaluateCatalystWindow():boolean{
-    if(this.#pendingDecision)return false;
+    if(this.#pendingDecision||this.#automaticDecisionProtected())return false;
     const context=this.#catalystContext();
     const opportunity=selectCatalystWindow({
       includeTestCatalysts:this.#testCatalysts,
@@ -561,6 +581,10 @@ export class UniverseSession {
   applyIntervention(spec:InterventionSpec,provenance:string){
     if(!this.#experiment)throw new Error("Universe has not been created");
     if(!isSupportedIntervention(spec))throw new Error(`Unsupported intervention spec: ${JSON.stringify(spec)}`);
+    // A deliberate world-changing action supersedes the foreground observation.
+    // Decision resolution immediately installs its own Aftermath after applying
+    // the selected effect; a manual experiment leaves no invented outcome view.
+    this.#aftermath=null;
     this.#experiment.catalyst(engineCatalystModeFor(spec),provenance);
     return this.snapshot();
   }
