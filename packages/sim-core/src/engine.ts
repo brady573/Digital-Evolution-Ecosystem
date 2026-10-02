@@ -532,19 +532,19 @@ class SpatialIndex{
  * No RNG: draw streams are untouched by settlement. Exported for direct
  * contention assays; S.step is its only production caller.
  */
-function settleMovementClaims(live:Organism[],moveIntents:{o:Organism;tx:number;ty:number}[],rs:{n:number;cell:number},cur:any):void{
+function settleMovementClaims(occ:SpatialIndex,claims:{o:Organism;ox:number;oy:number;tx:number;ty:number}[],cur:any):void{
  // Fast path: empty claim sets resolve trivially (all counts stay zero).
- if(moveIntents.length===0)return;
- let liveIds=new Set(live.map(o=>o.id));
- let claims=moveIntents.filter(c=>liveIds.has(c.o.id)).sort((a,b)=>a.o.id-b.o.id);
- let occ=SpatialIndex.build(rs,live as Array<{x:number;y:number}>);
- for(const c of claims)occ.vacate(occ.cellOf(c.o.x,c.o.y));
+ if(claims.length===0)return;
+ // Caller (S.step) invokes per organism in id-sorted loop order, so the
+ // commit sequence IS seniority order; sorting here is a no-op safety net.
+ claims=claims.slice().sort((a,b)=>a.o.id-b.o.id);
+ for(const c of claims)occ.vacate(occ.cellOf(c.ox,c.oy));
  for(const c of claims){
   let ti=occ.cellOf(c.tx,c.ty);
   if(occ.countCell(ti)<LOCAL_OCCUPANCY_CAP){c.o.x=c.tx;c.o.y=c.ty;occ.occupy(ti);cur.movement_settled=(cur.movement_settled as number||0)+1;continue}
   let fb=occ.fallbackCells(c.tx,c.ty).find(i=>occ.countCell(i)<LOCAL_OCCUPANCY_CAP);
   if(fb!==undefined){let ncxNcy=occ.cellXY(fb);c.o.x=ncxNcy[0]*occ.cell+occ.cell/2;c.o.y=ncxNcy[1]*occ.cell+occ.cell/2;occ.occupy(fb);cur.movement_redirected=(cur.movement_redirected as number||0)+1;continue}
-  occ.occupy(occ.cellOf(c.o.x,c.o.y));cur.movement_blocked=(cur.movement_blocked as number||0)+1;
+  c.o.x=c.ox;c.o.y=c.oy;occ.occupy(occ.cellOf(c.ox,c.oy));cur.movement_blocked=(cur.movement_blocked as number||0)+1;
  }
 }
 
@@ -614,7 +614,17 @@ class S{
  observerSnapshot(m:any,interval:Interval):any{let roles:Record<string,number>={},cross=0,dormClades:Record<string,number>={},cladeTotals:Record<string,number>={};for(const o of this.o){let role=metabolicRole(o);roles[role]=(roles[role]||0)+1;if(role==='byproduct_scavenger')cross++;let c=this.cladeRoot(o.l);cladeTotals[c]=(cladeTotals[c]||0)+1;if(o.activity==='dormant')dormClades[c]=(dormClades[c]||0)+1}let totalE=(m.resource_energy.a||0)+(m.resource_energy.b||0)+(m.resource_energy.c||0),fra:Record<string,number>={};for(const [c,n] of Object.entries(cladeTotals))fra[c]=(dormClades[c]||0)/n;let dominant=Object.entries(roles).sort((a,b)=>b[1]-a[1])[0]?.[0]||'unresolved';return{tick:this.t,population:m.population,starting_population:this.c.pop,active_population:m.active_population,dormant_population:m.dormant_population,dormant_fraction:m.dormant_fraction,c_energy_share:totalE?m.resource_energy.c/totalE:0,crossfeeder_fraction:m.population?cross/m.population:0,partitioned:m.niche_structure.persistent_partitioning,dominant_role:dominant,roles,wake_events:interval.wakes||0,wake_clades:{...(interval.wake_clades||{})},dormant_clade_fraction:fra,clade_totals:cladeTotals,waste_fraction:(m.waste?m.waste.fraction||0:0),waste_exposed_share:(()=>{let n=0;for(const o of this.o){if(this.resources.waste.fractionAt(o.x,o.y)>=WASTE_HALF_SAT)n++}return this.o.length?n/this.o.length:0})(),tolerance_mean:(m.traits&&m.traits.tolerance?m.traits.tolerance.mean||0:0),cleanup_mean:(m.traits&&m.traits.cleanup?m.traits.cleanup.mean||0:0),interval:{producedC:interval.produced_c||0,consumedA:interval.consumed_a||0,consumedB:interval.consumed_b||0,consumedC:interval.consumed_c||0,energyA:interval.energy_a||0,energyB:interval.energy_b||0,energyC:interval.energy_c||0,births:interval.births||0,deaths:interval.deaths||0,wasteProduced:interval.produced_w||0,wasteRemoved:interval.removed_w||0,wasteDecayed:interval.decayed_w||0,burdenEnergy:interval.burden_energy||0,cleanupEnergy:interval.cleanup_energy||0,cleanupExec:interval.cleanup_exec||0},flows:this.flowFacts(),intervalFlows:this.lastLineageFlows||EMPTY_INTERVAL_FLOWS}}
  step(){
   this.t++;if(this.c.st===this.t)this.catalyst(this.c.cat,'scheduled');if(this.drought&&this.t>=this.drought.end){this.log(`Nutrient ${this.drought.kind?'B':'A'} drought ended`);this.drought=null}if(this.resources.cSink&&this.t>=this.resources.cSink.end){this.log('Metabolite C sink dissipated');this.resources.cSink=null}
-  this.resources.step(this.t,this.drought,this.cur);let born:(Organism)[]=[],live:(Organism)[]=[],moveIntents:{o:Organism;tx:number;ty:number}[]=[],pendingBirths:{parent:Organism;baby:Organism}[]=[];
+  this.resources.step(this.t,this.drought,this.cur);let born:(Organism)[]=[],live:(Organism)[]=[],pendingBirths:{parent:Organism;baby:Organism}[]=[];
+  // Seniority order: the array is id-sorted by construction (live preserves
+  // order, newborns carry fresh larger ids), so this sort is a near-free
+  // safety net. All same-tick contention below therefore resolves oldest-
+  // first — deterministic, explicit, lineage-blind. Draw streams follow the
+  // same order as pre-slice biology.
+  this.o.sort((a,b)=>a.id-b.id);
+  // Running occupancy from authoritative pre-tick positions (dormant
+  // included as physical occupants). Mutated in place by settlement,
+  // deaths, and birth commits below — always exact within the tick.
+  let occ=SpatialIndex.build(this.resources,this.o);
   for(const o of this.o){
    if(o.activity==='dormant'){
     if(((this.t+o.id)%DORMANCY_CHECK)===0&&this.dormancyWake(o)){o.activity='active';o.lastWakeTick=this.t;o.wakeCount=(o.wakeCount||0)+1;o.dormantSince=null;this.cur.wakes++;let cid=this.cladeRoot(o.l);this.cur.wake_clades[cid]=(this.cur.wake_clades[cid]||0)+1}
@@ -631,7 +641,12 @@ class S{
    // destination only on cell-boundary crossings (legitimate downstream
    // spatial consequence, AC12).
    let mv=MV(o.sp),ITX=(o.x+Math.cos(o.h)*mv+600)%600,ITY=(o.y+Math.sin(o.h)*mv+600)%600;o.en-=(PC(o.me)+MC(o.sp)+DC(o.di)+SC(o.en)+(this.c.enable_byproduct?BUC(o.bu||0):0))*this.c.press;
-   if(this.resources.idx(ITX,ITY)!==this.resources.idx(o.x,o.y)){moveIntents.push({o,tx:ITX,ty:ITY});this.cur.movement_intents=(this.cur.movement_intents as number||0)+1;}
+   // Slice 1 settlement (§8): same-tick immediate commit against running
+   // occupancy. Same-cell moves settle trivially; cross-cell intents go
+   // through the seniority rule (loop is id-sorted). Waste/consumption below
+   // therefore read post-move positions exactly like pre-slice biology.
+   let OX=o.x,OY=o.y;o.x=ITX;o.y=ITY;
+   if(this.resources.idx(ITX,ITY)!==this.resources.idx(OX,OY)){this.cur.movement_intents=(this.cur.movement_intents as number||0)+1;settleMovementClaims(occ,[{o,ox:OX,oy:OY,tx:ITX,ty:ITY}],this.cur);}
    // Waste economy (Slice 2): gated by the resource system's internal switch
    // (validation assays may disable it on a fork; production always runs
    // the full economy). Cleanup is the waste_cleanup process: inherited
@@ -659,18 +674,9 @@ class S{
    counts. Interval deltas carry true mass. Do not 'fix' without an
    engine-version change. */
    if(eat.substance===0){o.ma++;o.ga+=eat.gain;o.ra+=eat.gain;this.cur.energy_a+=eat.gain;this.lineageCredit(o.l,{consumedA:eat.amount,energyA:eat.gain,producedC:eat.produced,wasteProduced:eat.wasteProduced})}else if(eat.substance===1){o.mb++;o.gb+=eat.gain;o.rb+=eat.gain;this.cur.energy_b+=eat.gain;this.lineageCredit(o.l,{consumedB:eat.amount,energyB:eat.gain,producedC:eat.produced,wasteProduced:eat.wasteProduced})}else{o.mc=(o.mc||0)+1;o.gc=(o.gc||0)+eat.gain;o.rc=(o.rc||0)+eat.gain;this.cur.energy_c+=eat.gain;this.lineageCredit(o.l,{consumedC:eat.amount,energyC:eat.gain})}this.totalUse[eat.substance]!+=eat.amount;this.totalEnergy[eat.substance]!+=eat.gain}
-   if(this.t>=(o.matureAt||0)&&this.t>=(o.readyAt||0)&&o.en>=o.rp){let support=this.reproSupport(o);this.totalReproSupport[support]!++;if(support===0)this.cur.repro_supported_a++;else if(support===1)this.cur.repro_supported_b++;else if(support===3)this.cur.repro_supported_c++;else this.cur.repro_supported_mixed++;this.cur.repro_eligible=(this.cur.repro_eligible as number||0)+1;let baby=this.child(o);pendingBirths.push({parent:o,baby});}if(o.en>0)live.push(o);else{this.cur.deaths++;this.lineageCredit(o.l,{deaths:1})}
+   if(this.t>=(o.matureAt||0)&&this.t>=(o.readyAt||0)&&o.en>=o.rp){let support=this.reproSupport(o);this.totalReproSupport[support]!++;if(support===0)this.cur.repro_supported_a++;else if(support===1)this.cur.repro_supported_b++;else if(support===3)this.cur.repro_supported_c++;else this.cur.repro_supported_mixed++;this.cur.repro_eligible=(this.cur.repro_eligible as number||0)+1;let baby=this.child(o);pendingBirths.push({parent:o,baby});}if(o.en>0)live.push(o);else{this.cur.deaths++;this.lineageCredit(o.l,{deaths:1});occ.vacate(occ.cellOf(o.x,o.y))}
   }
-  // Slice 1 movement settlement (§8, phase 2): simultaneous allocation
-  // against pre-move occupancy. Deaths are already known (live[] excludes
-  // them), so movers also see same-tick death vacancy. All movers vacate
-  // first (order-free — each vacates exactly its own origin), then intents
-  // commit in organism-id order (deterministic stable allocation =
-  // seniority; lineage-blind). Target room → settle; else fixed clockwise
-  // 8-neighbor fallback around the TARGET (movement continuity); else stay.
-  // No RNG here: draw streams are untouched by settlement.
-  settleMovementClaims(live,moveIntents,this.resources,this.cur);
-  // Slice 1 birth placement (§9, phase 3): atomic commit in parent-id order
+    // Slice 1 birth placement (§9, phase 3): atomic commit in parent-id order
   // against settled post-mortality occupancy (movement + deaths committed
   // above, so newborns see death vacancy same-tick). Spiral ring 0-1 around
   // the parent's settled cell, first room wins; baby energy fixed to
@@ -680,7 +686,10 @@ class S{
   // Empty pending sets skip the phase entirely (identical no-op).
   if(pendingBirths.length){
   {
-   let occ=SpatialIndex.build(this.resources,live);
+   // Birth placement reuses the running index: movement settlement and
+   // deaths above are already committed, so newborns see same-tick death
+   // vacancy (§10). Dead parents' pending builds still commit on placement
+   // (pre-slice order also built the child before the survival check).
    let pend=pendingBirths.sort((a,b)=>a.parent.id-b.parent.id);
    for(const p of pend){
     let at=occ.findPlacement(p.parent.x,p.parent.y,LOCAL_OCCUPANCY_CAP);
