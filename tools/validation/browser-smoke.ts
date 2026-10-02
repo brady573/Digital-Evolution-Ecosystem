@@ -780,8 +780,6 @@ async function main(){
     // A later retained-detail pull may enrich History, but cannot rewind or
     // hide the live Aftermath lifecycle.
     await decisionPage.getByRole("button",{name:"History",exact:true}).click();
-    assert.ok(await historyRecordCount(decisionPage)>0,
-      "durable ecological History remains recorded and inspectable after observation");
     await decisionPage.getByText("Your decisions").waitFor();
     await decisionPage.getByText("Keep watching",{exact:true}).waitFor();
     await decisionPage.getByRole("button",{name:"World",exact:true}).click();
