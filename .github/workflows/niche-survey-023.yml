@@ -1,14 +1,23 @@
 name: niche-survey-023
 
-# Manual scientific survey: niche-construction characterization under engine
-# 0.23.0 interference biology. Mirrors broad-ecology-022.yml precedent
-# (dispatch-only, artifact upload, never merge-gating). The runner is
-# resume-safe: each invocation completes only missing rows and rewrites the
-# retained file, so re-dispatch continues rather than restarts. Device
-# execution is off limits for long suites; CI is the execution environment.
+# Manual scientific survey: niche-construction characterization. Mirrors
+# broad-ecology-022.yml precedent (dispatch-only, artifact upload, never
+# merge-gating). The runner is resume-safe: each invocation completes only
+# missing rows and rewrites the retained file, so re-dispatch continues
+# rather than restarts. Device execution is off limits for long suites; CI
+# is the execution environment.
 
 on:
   workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch to survey (must carry the survey script + engine under test)"
+        required: false
+        default: "feat/interference-s1-biology"
+      out:
+        description: "Retained artifact path"
+        required: false
+        default: "testdata/niche-survey-0.23.json"
 
 permissions:
   contents: read
@@ -20,12 +29,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: feat/interference-s1-biology
+          ref: ${{ inputs.ref }}
       - uses: ./.github/actions/setup-project
       - run: pnpm test:niche-survey
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: niche-survey-023-results
-          path: testdata/niche-survey-0.23.json
+          path: ${{ inputs.out }}
           if-no-files-found: error
           retention-days: 30
