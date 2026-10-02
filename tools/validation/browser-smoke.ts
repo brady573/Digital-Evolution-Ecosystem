@@ -38,6 +38,21 @@ async function waitForTickOrDecision(page:Page,target:number,timeoutMs=120_000){
   throw new Error(`timed out waiting for tick ${target} or a pending decision; current tick ${await tick(page)}`);
 }
 
+async function advanceRuntimeToTick(page:Page,target:number){
+  let current=await tick(page);
+  while(current<target){
+    // ADVANCE_TICKS has a 2,000-tick command limit. Send ordinary production
+    // commands in bounded slices and wait for each reply to reach the HUD.
+    const next=Math.min(target,current+2_000);
+    await page.evaluate((ticks)=>(window as any).__DEE_TEST__.advanceTicks(ticks),next-current);
+    const reached=await waitForTickOrDecision(page,next);
+    assert.equal(reached,next,`the runtime accepts and reaches its bounded advance to tick ${next}`);
+    assert.equal(await page.getByTestId("decision-sheet").count(),0,
+      `no automatic decision interrupts protected advancement before tick ${target}`);
+    current=reached;
+  }
+}
+
 async function historyRecordCount(page:Page){
   const text=await page.getByText(/\d+ durable ecological records/).innerText();
   const match=text.match(/(\d+) durable ecological records/);
@@ -716,14 +731,13 @@ async function main(){
     const aftermathHorizon=decisionTick+25_000;
     const currentTick=await tick(decisionPage);
     assert.ok(currentTick<aftermathHorizon,"the live decision Aftermath is still inside its observation horizon");
-    await decisionPage.evaluate((ticks)=>(window as any).__DEE_TEST__.advanceTicks(ticks),aftermathHorizon-1-currentTick);
-    const lastProtectedTick=await waitForTickOrDecision(decisionPage,aftermathHorizon-1);
-    assert.equal(lastProtectedTick,aftermathHorizon-1,
+    await advanceRuntimeToTick(decisionPage,aftermathHorizon-1);
+    assert.equal(await tick(decisionPage),aftermathHorizon-1,
       "ordinary runtime advancement reaches T+24,999 without an automatic decision preemption");
     assert.equal(await decisionPage.getByTestId("decision-sheet").count(),0,
       "no automatic decision is pending at the last protected tick");
-    await decisionPage.evaluate(()=>(window as any).__DEE_TEST__.advanceTicks(1));
-    assert.equal(await waitForTickOrDecision(decisionPage,aftermathHorizon),aftermathHorizon,
+    await advanceRuntimeToTick(decisionPage,aftermathHorizon);
+    assert.equal(await tick(decisionPage),aftermathHorizon,
       "ordinary runtime advancement reaches the exact Aftermath horizon");
     assert.equal(await decisionPage.getByTestId("decision-sheet").count(),0,
       "the horizon boundary itself does not replay a protected-period event");
@@ -772,6 +786,23 @@ async function main(){
     await decisionPage.getByRole("button",{name:"Pause"}).click();
     await decisionPage.getByRole("button",{name:"History"}).click();
     await decisionPage.getByText(/World catalyst offered at tick/).waitFor();
+    // A deliberate manual intervention remains available and clears the old
+    // foreground observation rather than leaving it attached to a new world.
+    await decisionPage.getByRole("button",{name:"Experiments",exact:true}).click();
+    await decisionPage.getByRole("button",{name:"Global nutrient crash",exact:true}).click();
+    const afterManualExperiment=await tick(decisionPage);
+    await decisionPage.getByRole("button",{name:"World",exact:true}).click();
+    await decisionPage.waitForFunction(
+      ()=>document.querySelector('[data-testid="aftermath-compact"]')===null,
+      undefined,
+      {timeout:15_000},
+    );
+    assert.equal(await decisionPage.getByTestId("aftermath-compact").count(),0,
+      "a deliberate experiment supersedes the previous foreground Aftermath");
+    assert.equal(await decisionPage.getByTestId("aftermath-impact").count(),0,
+      "manual intervention does not fabricate a new decision-impact aftermath");
+    assert.equal(await tick(decisionPage),afterManualExperiment,
+      "the superseding manual experiment advances zero ticks");
     await decisionPage.close();
 
     const mobile=await context.newPage();

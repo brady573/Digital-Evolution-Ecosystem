@@ -380,14 +380,15 @@ function testAutomaticCatalystSuppressedUntilHorizon() {
 
 function testExplicitExperimentRemainsAvailableDuringProtection() {
   const { session, aftermath } = sessionAfterEventResolution();
+  assert.ok(aftermath.commandId, "the session begins with a foreground decision Aftermath");
   const beforeTick = session.snapshot().tick;
   const afterExperiment = session.intervene("droughtA");
   assert.equal(afterExperiment.tick, beforeTick,
     "a deliberate experiment remains a zero-tick action during Aftermath protection");
   assert.equal(afterExperiment.pendingDecision, null,
     "an explicit experiment is not mistaken for an automatic decision opportunity");
-  assert.equal(afterExperiment.aftermath?.commandId, aftermath.commandId,
-    "the runtime gate does not invent or rewrite Aftermath identity for a manual experiment");
+  assert.equal(afterExperiment.aftermath, null,
+    "a deliberate manual experiment supersedes the foreground Aftermath");
 }
 
 function testProtectedDecisionEventsAreConsumedWithoutReplay() {

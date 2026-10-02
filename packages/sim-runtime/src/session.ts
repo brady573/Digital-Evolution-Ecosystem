@@ -581,6 +581,10 @@ export class UniverseSession {
   applyIntervention(spec:InterventionSpec,provenance:string){
     if(!this.#experiment)throw new Error("Universe has not been created");
     if(!isSupportedIntervention(spec))throw new Error(`Unsupported intervention spec: ${JSON.stringify(spec)}`);
+    // A deliberate world-changing action supersedes the foreground observation.
+    // Decision resolution immediately installs its own Aftermath after applying
+    // the selected effect; a manual experiment leaves no invented outcome view.
+    this.#aftermath=null;
     this.#experiment.catalyst(engineCatalystModeFor(spec),provenance);
     return this.snapshot();
   }
