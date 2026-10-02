@@ -422,7 +422,16 @@ async function main(){
           // is still exercised by click in the dedicated aftermath block, where
           // the world is paused and preemption cannot occur.
           if(await page.getByTestId("aftermath-impact").isVisible().catch(()=>false)){
-            await page.evaluate(()=>(window as any).__DEE_TEST__.acknowledgeAftermath());
+            await page.evaluate(async()=>{
+              try {
+                await (window as any).__DEE_TEST__.acknowledgeAftermath();
+              } catch(error) {
+                // The sheet can be one render behind playback: the runtime may
+                // already have released impact into observation. Ignore only
+                // that expected race; surface every other command failure.
+                if(!String(error).includes("Aftermath is not awaiting acknowledgement"))throw error;
+              }
+            });
             await page.waitForTimeout(150);
           }
           // Whichever sheet now owns the slot, the window is void either way.
