@@ -351,7 +351,7 @@ export const UNITS: readonly ValidationUnit[] = [
     parallelSafe: true,
     baselineSeconds: 32,
     claim:
-      "Inducible secretion is gated by crowding and scarcity through an order-free pre-step context, stays local, pays proportional costs, suppresses only acquisition, and shows a conditional advantage that mixing destroys — all deterministically.",
+      "Inducible secretion is gated by crowding and scarcity through an order-free pre-step context, stays local, pays proportional costs, and suppresses only acquisition — all deterministically, with default-off parity. Competitive outcome is REPORTED, not asserted: R0 found no conditional advantage (DESIGN TENSION), so this gate must never be read as claiming one.",
   },
   {
     id: "aftermath",

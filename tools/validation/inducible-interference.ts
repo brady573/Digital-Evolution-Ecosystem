@@ -15,6 +15,7 @@
  * Run: npx tsx tools/validation/inducible-interference.ts
  */
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import type { EngineConfig } from "../../packages/contracts/src/index.ts";
 import {
   Simulation,
@@ -443,6 +444,37 @@ function testCheckpointRoundTrip() {
   console.log("testCheckpointRoundTrip: PASS");
 }
 
+function testDefaultOffParity() {
+  // PR #94 instruction 3: test the R0 default-off claim DIRECTLY. Same
+  // seed/config/horizon as the main-baseline probe (main@9c3e9c0, values
+  // generated read-only via /tmp/opencode/gen-parity.mts, never edited
+  // there): with enable_interference absent, the world must replay
+  // bit-identically — tick, population, waste, trait means, and the full
+  // organism-array hash. Any divergence is a real default-biology change,
+  // not a stale pin.
+  const sim = new Simulation({
+    seed: 24681357, start: 0.62, prod: 0.86, cap: 360, pop: 34, div: 0.45, mr: 0.03,
+    ms: 0.12, press: 1.0875, patch: 0.9, resource_b_fraction: 0.5, cat: "global", st: null,
+    resource_model: "definition_driven_substances", resource_grid: 60,
+    enable_byproduct: true, enable_dormancy: true, study: true,
+  } as unknown as EngineConfig) as any;
+  for (let t = 0; t < 20000; t++) sim.step();
+  const m = sim.metrics();
+  const orgs = sim.o as any[];
+  const mean = (f: (o: any) => number) => orgs.reduce((x, o) => x + f(o), 0) / orgs.length;
+  assert.equal(sim.t, 20000, "tick");
+  assert.equal(m.population, 391, "population replays main exactly");
+  assert.equal(+(m.waste.fraction as number).toFixed(6), 0.06741, "waste replays main exactly");
+  assert.equal(+mean((o) => o.sp).toFixed(6), 1.487696, "trait means replay main exactly");
+  assert.equal(
+    createHash("sha256").update(JSON.stringify(sim.o)).digest("hex").slice(0, 32),
+    "a6d99bb95c60a81bbc3a4da217e83950",
+    "organism array replays main bit-identically",
+  );
+  assert.equal(sim.resources.inhibitor.produced, 0, "disabled field produces nothing");
+  console.log("testDefaultOffParity: PASS");
+}
+
 function testTraitDefinitions() {
   assert.ok(TRAIT_DEFINITIONS.secretion, "secretion trait defined");
   assert.ok(TRAIT_DEFINITIONS.resistance, "resistance trait defined");
@@ -452,6 +484,7 @@ function testTraitDefinitions() {
 }
 
 testTraitDefinitions();
+testDefaultOffParity();
 testCheckpointRoundTrip();
 testInductionGate();
 testOrderIndependence();
