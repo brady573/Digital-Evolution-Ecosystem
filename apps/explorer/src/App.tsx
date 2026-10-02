@@ -642,6 +642,16 @@ export function App(){
     setAftermathPresentation(previous=>previous?transitionAftermath(previous,event):previous);
     if(event.type==="follow"&&event.lens)setLens(event.lens);
   };
+  // F3a: a status that reports a FAILURE must survive the next metrics frame.
+  //
+  // Live frames clear the status so ordinary progress chatter does not pile up,
+  // but during playback an interpretation frame arrives every tick or two — so a
+  // "your save could not be written" message set while the world is running was
+  // erased before anyone could read it. That is precisely the untruthful failure
+  // reporting F3a exists to close, so a failure status is pinned until the player
+  // does something next (toggles playback, saves, loads, or creates a universe).
+  const stickyStatusRef=useRef(false);
+  const say=(text:string,sticky=false)=>{stickyStatusRef.current=sticky;setStatus(text)};
   useEffect(()=>{
     // Read-model delivery only. The live frame is the per-advance heartbeat —
     // it emits on every advance — so one advance releases backpressure exactly
@@ -658,7 +668,7 @@ export function App(){
       if(!("metrics" in frame))return;
       const transition=knownWorldRef.current!==null&&view.worldId!==knownWorldRef.current;
       knownWorldRef.current=view.worldId;
-      if(!transition)setStatus("");
+      if(!transition&&!stickyStatusRef.current)setStatus("");
       const interp=view.interpretation;
       // A pending decision is a visible pause: the player must choose before
       // time moves again (A13). Runtime enforces the same gate independently.
@@ -810,10 +820,10 @@ export function App(){
     phenotypeCache.clearStaged();
     runtime.create(configFromSettings(settings));
     setActiveSettings(settings);setPreset(presetForSettings(settings));
-    setSettingsOpen(false);setStatus("New universe created — settings now active");
+    setSettingsOpen(false);say("New universe created — settings now active");
   };
   const save=async()=>{
-    setStatus("Saving exact checkpoint…");
+    say("Saving exact checkpoint…");
     try{
       const checkpoint=await runtime.requestCheckpoint();
       // Presentation-side family anchors travel with the save record (never in
@@ -821,9 +831,9 @@ export function App(){
       const summary=await repository.save("current",checkpoint,phenotypeCache.snapshotAnchors());
       // F3a: reached only after the storage transaction committed. A failed
       // write leaves the previously confirmed save intact and says so.
-      setStatus(`Saved tick ${summary.tick.toLocaleString()}`);
+      say(`Saved tick ${summary.tick.toLocaleString()}`);
     }catch(error){
-      setStatus(storageFailureMessage(error));
+      say(storageFailureMessage(error),true);
     }
   };
   const load=async()=>{
@@ -840,13 +850,13 @@ export function App(){
       // different record generations.
       read=await repository.readSlot("current");
     }catch(error){
-      setStatus(storageFailureMessage(error));
+      say(storageFailureMessage(error),true);
       if(wasRunning)setRunning(true);
       return;
     }
-    if(!read){setStatus("No saved universe found");if(wasRunning)setRunning(true);return}
+    if(!read){say("No saved universe found",true);if(wasRunning)setRunning(true);return}
     setRunning(false);
-    setStatus("Restoring checkpoint…");
+    say("Restoring checkpoint…");
     try{
       const restored=await runtime.loadCheckpoint(read.checkpoint);
       // Staged ONLY now, after the runtime accepted the restore. A rejected
@@ -860,7 +870,7 @@ export function App(){
       // match it so staged settings can never be mistaken for the live world.
       const mapped=settingsFromConfig(restored.config);
       setSettings(mapped);setActiveSettings(mapped);setPreset(presetForSettings(mapped));
-      setStatus("Checkpoint restored — active settings match the resumed universe");
+      say("Checkpoint restored — active settings match the resumed universe");
     }catch(error){
       // Typed classification, never message text. A3.3 makes an ordinary save
       // fail to load for the first time, and F3a makes the worker boundary carry
@@ -869,7 +879,7 @@ export function App(){
       // A dead runtime keeps its own truthful stopped status: overwriting it with
       // "restore failed" would tell the player the save is the problem when the
       // worker is.
-      if(!deadRef.current)setStatus(restoreFailureMessage(error));
+      if(!deadRef.current)say(restoreFailureMessage(error),true);
       if(wasRunning)setRunning(true);
     }
   };
@@ -1109,7 +1119,7 @@ export function App(){
           The wrappers are `display:contents` on desktop, so the desktop
           control bar is unchanged. */}
       <span className="control-row control-row-primary">
-        <button onClick={()=>{if(deadRef.current){setStatus("Simulation stopped — reload to continue");return}if(blockWhilePending())return;setRunning(v=>!v)}}>{running?"Pause":"Play"}</button>
+        <button onClick={()=>{if(deadRef.current){setStatus("Simulation stopped — reload to continue");return}if(blockWhilePending())return;stickyStatusRef.current=false;setRunning(v=>!v)}}>{running?"Pause":"Play"}</button>
         {/* AC21: bounded speeds only. Max is gone from the product - it was a
             throughput ceiling the player could not read, not a speed, and its
             ratio assertion was the flaky part of #46. The internal
