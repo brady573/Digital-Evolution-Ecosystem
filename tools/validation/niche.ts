@@ -326,7 +326,8 @@ function patchworkConfig(seed: number): EngineConfig {
 }
 
 /** Advance to target, resolving everything keep-watching (no-op). */
-function settle(session: UniverseSession, target: number): void {  for (let i = 0; i < 2000 && session.snapshot().tick < target; i++) {
+function settle(session: UniverseSession, target: number): void {
+  for (let i = 0; i < 2000 && session.snapshot().tick < target; i++) {
     const snapshot = session.advance(1000);
     const pending = snapshot.pendingDecision;
     if (pending) session.resolveEventDecision(pending.opportunityId, "keep-watching");
@@ -338,26 +339,20 @@ function settle(session: UniverseSession, target: number): void {  for (let i = 
 
 function testNicheIntegration() {
   // Patchwork seed 24681357: waste accumulates; the cleanup composition
-  // shift is first crossed later than under 0.22 (suppression trims takes
-  // even at retuned strength), so establishment lands @99145 with no
-  // lineage above the meaningful-share bar (refs empty — attribution is
-  // measured, not assumed). By 150k the same world disrupts at @118472
-  // with producer and remover both named (probe-verified); the survey
-  // artifact retains that row. Balanced shows no arc by 150k (pinned below
-  // at 70k as a retune guard): possibility, never frequency.
-  // 0.23.1 interference retune re-pin (Correction 2 option b): founder
-  // secretion near-zero plus faster inhibitor decay restore the
-  // waste-accumulation pathway the 0.23.0 background pressure erased
-  // (0 records @70k AND @150k on this same seed); the arc fires again,
-  // later (@99145 vs 0.22's @63754), same structure. Re-pins the fixture,
-  // not the biology.
+  // shift (0.09 -> 0.14) is first crossed before 48k but only holds its own
+  // 5000-tick window, so establishment lands @63754 with no lineage above
+  // the meaningful-share bar (refs empty — attribution is measured, not
+  // assumed). By 150k the same world disrupts at @134285 with producer and
+  // remover both named; the survey artifact retains that row. Balanced
+  // shows no arc by 150k (pinned below at 70k as a retune guard):
+  // possibility, never frequency.
   const session = new UniverseSession();
   session.create(patchworkConfig(PATCHWORK_SEED));
-  settle(session, 110000);
+  settle(session, 70000);
   const records = (session.analysis as any).records.filter((r: any) => r.kind === "niche");
-  assert.equal(records.length, 1, "one establishment record by 110k");
+  assert.equal(records.length, 1, "one establishment record by 70k");
   assert.equal(records[0].phase, "established", "record establishes");
-  assert.equal(records[0].tick, 99145, "establishment is deterministic after the durability window");
+  assert.equal(records[0].tick, 63754, "establishment is deterministic after the durability window");
   assert.deepEqual(records[0].entity_refs, [], "no lineage clears the meaningful-share bar here");
   assert.ok(records[0].summary.includes("sustained for"), "record states the durability evidence");
   console.log("niche fixture arc: PASS");
