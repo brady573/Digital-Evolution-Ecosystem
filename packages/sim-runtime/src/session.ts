@@ -78,6 +78,51 @@ export const CHECKPOINT_SCHEMA_VERSION = CURRENT_SCHEMA as UniverseCheckpoint["c
  */
 let worldIdCounter=0;
 
+/**
+ * TEST-ONLY. A hook that throws while `restore()` prepares one named step.
+ *
+ * Why this exists rather than a pile of corrupted checkpoints: a probe of every
+ * reachable corruption (engine version, null/garbage simulation state, bad
+ * control, bad detector) showed the A3.3 preflight refuses all of them BEFORE
+ * restore touches the session. That is reassuring today and untested tomorrow —
+ * the first fallible decode step added without a matching preflight rule would
+ * reintroduce partial mutation with no test failing.
+ *
+ * So the property under test is structural: no live assignment precedes a
+ * fallible prepare step. The only way to observe it is to make a step throw.
+ *
+ * Module-scoped and factory-shaped on purpose: a public method on the exported
+ * class would be reachable from production regardless of the interface it is
+ * omitted from (the Tranche B lesson). Nothing in production calls this.
+ */
+type RestorePrepareStep = "experiment" | "analysis" | "control" | "controlAnalysis" | "decisions";
+let restorePrepareHookForTests: ((step: RestorePrepareStep) => void) | undefined;
+
+/**
+ * A fully constructed restore candidate. Holding this as one value is what makes
+ * the prepare/commit split checkable: there is no way to hold half of one.
+ */
+interface PreparedRestore {
+  readonly worldId:WorldId;
+  readonly experiment:unknown;
+  readonly analysis:EcologyObserver;
+  readonly control:unknown;
+  readonly controlAnalysis:EcologyObserver|null;
+  readonly observedThrough:number;
+  readonly decisions:{
+    readonly pending:PendingDecision|null;
+    readonly resolutions:DecisionResolution[];
+    readonly policyVersion:string;
+    readonly catalystPolicyVersion:string;
+    readonly lastDecisionTick:number;
+    readonly lastMajorCatalystTick:number|null;
+  };
+}
+
+export function __setRestorePrepareHookForTests(hook?: (step: RestorePrepareStep) => void): void {
+  restorePrepareHookForTests = hook;
+}
+
 function analysisFrame(sim:any){
   return sim.observerSnapshot(sim.metrics(),sim.last);
 }
@@ -773,15 +818,74 @@ export class UniverseSession {
     // contract. A rule whose canonical default the current contract rejects
     // therefore fails here instead of loading.
     const canonical=validateCanonicalRestoreState(canonicalizeRestoreState(checkpoint,context),context);
-    this.#worldId=toWorldId(++worldIdCounter);
-    this.#experiment=restoreSimulationCheckpoint(checkpoint.experiment as any);
+    // ---- PREPARE -----------------------------------------------------------
+    // Everything fallible happens here, against locals only. No assignment to a
+    // live field may appear above this line: `worldId` in particular is what
+    // presentation identity, the store's world gate, and phenotype anchor
+    // scoping all key on, so minting it before the candidate is fully
+    // constructed would let a rejection hand presentation a world the session
+    // never restored. The next identity is COMPUTED here and CONSUMED in commit,
+    // so a refused restore does not burn one either.
+    const prepared=this.#prepareRestore(checkpoint,canonical);
+    // ---- COMMIT ------------------------------------------------------------
+    return this.#commitRestore(prepared);
+  }
+
+  /**
+   * F3a: build the whole restored session in locals, or throw having touched
+   * nothing. Order is unchanged from the pre-split body, because a restore that
+   * reaches commit has always run these in this order.
+   */
+  #prepareRestore(checkpoint:SupportedUniverseCheckpoint,canonical:ReturnType<typeof validateCanonicalRestoreState>):PreparedRestore{
+    const nextWorldId=toWorldId(worldIdCounter+1);
+    restorePrepareHookForTests?.("experiment");
+    const experiment=restoreSimulationCheckpoint(checkpoint.experiment as any);
     // The observer sees the canonical layer: references migrated, and detector
     // sub-states materialised where the writer could not have emitted them. A
     // save written before A2 holds bare numbers where a ref now carries its
     // kind, and each becomes `kind: null` — a real entity of unrecorded kind.
     // Presentation then omits the label rather than guessing a namespace,
     // which is A2's specified behaviour for a kind never recorded.
-    this.#analysis=EcologyObserver.restore(canonical.analysis.state);
+    restorePrepareHookForTests?.("analysis");
+    const analysis=EcologyObserver.restore(canonical.analysis.state);
+    restorePrepareHookForTests?.("control");
+    const control=checkpoint.control?restoreSimulationCheckpoint(checkpoint.control as any):null;
+    restorePrepareHookForTests?.("controlAnalysis");
+    const controlAnalysis=canonical.controlAnalysis
+      ?EcologyObserver.restore(canonical.controlAnalysis.state)
+      :null;
+    restorePrepareHookForTests?.("decisions");
+    const decisions=canonical.decisions as DecisionCheckpoint;
+    return{
+      worldId:nextWorldId,
+      experiment,
+      analysis,
+      control,
+      controlAnalysis,
+      // A restored pending opportunity is replayed as-is: never re-evaluated
+      // against the current catalog, which could silently substitute choices.
+      observedThrough:analysis.observedEvents().length,
+      decisions:{
+        pending:decisions.pending,
+        resolutions:[...decisions.resolutions] as DecisionResolution[],
+        policyVersion:decisions.policyVersion,
+        catalystPolicyVersion:decisions.catalystPolicyVersion,
+        lastDecisionTick:decisions.lastDecisionTick,
+        lastMajorCatalystTick:decisions.lastMajorCatalystTick,
+      },
+    };
+  }
+
+  /**
+   * F3a: adopt a fully prepared restore. Every assignment a restore can make is
+   * here, and nothing above it can throw.
+   */
+  #commitRestore(prepared:PreparedRestore){
+    this.#worldId=prepared.worldId;
+    // Only now is the identity consumed, so a refused restore never burns one.
+    worldIdCounter+=1;
+    this.#experiment=prepared.experiment;
+    this.#analysis=prepared.analysis;
     // Aftermath is deliberately NOT restored. It is evidence held outside the
     // checkpoint, so a restore that carried it would be reconstructing an
     // observation from simulation state alone - exactly what must not happen.
@@ -789,20 +893,15 @@ export class UniverseSession {
     // record still reads from `decisions.resolutions`. Presenting the retained
     // baseline across a save is a later, separate contract.
     this.#aftermath=null;
-    this.#control=checkpoint.control?restoreSimulationCheckpoint(checkpoint.control as any):null;
-    this.#controlAnalysis=canonical.controlAnalysis
-      ?EcologyObserver.restore(canonical.controlAnalysis.state)
-      :null;
-    const decisions=canonical.decisions as DecisionCheckpoint;
-    this.#pendingDecision=decisions.pending;
-    this.#decisionResolutions=[...decisions.resolutions] as DecisionResolution[];
-    this.#policyVersion=decisions.policyVersion;
-    this.#catalystPolicyVersion=decisions.catalystPolicyVersion;
-    this.#lastDecisionTick=decisions.lastDecisionTick;
-    this.#lastMajorCatalystTick=decisions.lastMajorCatalystTick;
-    // A restored pending opportunity is replayed as-is: never re-evaluated
-    // against the current catalog, which could silently substitute choices.
-    this.#observedThrough=this.#analysis.observedEvents().length;
+    this.#control=prepared.control;
+    this.#controlAnalysis=prepared.controlAnalysis;
+    this.#pendingDecision=prepared.decisions.pending;
+    this.#decisionResolutions=prepared.decisions.resolutions;
+    this.#policyVersion=prepared.decisions.policyVersion;
+    this.#catalystPolicyVersion=prepared.decisions.catalystPolicyVersion;
+    this.#lastDecisionTick=prepared.decisions.lastDecisionTick;
+    this.#lastMajorCatalystTick=prepared.decisions.lastMajorCatalystTick;
+    this.#observedThrough=prepared.observedThrough;
     return this.snapshot();
   }
 
