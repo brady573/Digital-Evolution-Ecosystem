@@ -191,7 +191,7 @@ export const formatCladeId = (id: CladeId): string => `C-${String(id).padStart(4
  * ------------------------------------------------------------------ */
 
 /** Schema versions a universe checkpoint may declare. */
-export type CheckpointSchemaVersion = "0.1" | "0.2" | "0.3" | "0.4";
+export type CheckpointSchemaVersion = "0.1" | "0.2" | "0.3" | "0.4" | "0.5";
 
 /**
  * What actually absorbs a tolerated omission today.
@@ -288,7 +288,7 @@ export interface CheckpointMigrationRule {
  * written, which is a claim about history and has to be evidenced, not a claim
  * about what the current build tolerates.
  */
-const PRE_CURRENT_SCHEMAS: readonly CheckpointSchemaVersion[] = ["0.1", "0.2", "0.3"];
+const PRE_CURRENT_SCHEMAS: readonly CheckpointSchemaVersion[] = ["0.1", "0.2", "0.3", "0.4"];
 
 export const CHECKPOINT_MIGRATION_RULES: readonly CheckpointMigrationRule[] = [
   // --- The three omissions Decision 2 names explicitly ---------------------
@@ -736,10 +736,11 @@ const canonicalDecisions = (
     : Array.isArray(source.resolutions)
       ? (source.resolutions as unknown[]).map(historical ? historicalResolution : normalizeResolution)
       : [];
-  // A 0.3 save carries its own pacing state and keeps it; a 0.2 save predates the
-  // pacing fields and reconstructs the tick from its own records, with no
-  // cooldown to reconstruct because the mechanic did not exist; 0.1 predates
-  // the decision system and therefore has no history to read at all.
+  // A 0.4 save carries its own pacing state and keeps it, exactly as 0.3
+  // does; a 0.2 save predates the pacing fields and reconstructs the tick
+  // from its own records, with no cooldown to reconstruct because the
+  // mechanic did not exist; 0.1 predates the decision system and therefore
+  // has no history to read at all.
   //
   // `context.currentSchema` is deliberately NOT consulted for VALIDATION here.
   // It identifies the running contract for metadata and diagnostics; the
@@ -747,12 +748,12 @@ const canonicalDecisions = (
   // branching on it to choose what to accept would be the validation-mode
   // switch the design forbids. The running schema is read from the single
   // derived declaration instead, so a version bump moves one place.
-  const lastDecisionTick = isCurrentSchema(schema) || schema === "0.3"
+  const lastDecisionTick = isCurrentSchema(schema) || schema === "0.3" || schema === "0.4"
     ? finiteOrZero(source.lastDecisionTick)
     : schema === "0.2"
       ? newestKnownDecisionTick(pending, resolutions)
       : 0;
-  const lastMajorCatalystTick = isCurrentSchema(schema) || schema === "0.3"
+  const lastMajorCatalystTick = isCurrentSchema(schema) || schema === "0.3" || schema === "0.4"
     ? nullableTick(source.lastMajorCatalystTick)
     : null;
   return {
@@ -1016,12 +1017,12 @@ const describe = (v: unknown): string => (v === null ? "null" : Array.isArray(v)
  * a second thing to forget to update on a version bump, and it is the exact
  * shape of rot this generator exists to prevent.
  */
-export const SUPPORTED_SCHEMAS: readonly CheckpointSchemaVersion[] = ["0.1", "0.2", "0.3", "0.4"];
+export const SUPPORTED_SCHEMAS: readonly CheckpointSchemaVersion[] = ["0.1", "0.2", "0.3", "0.4", "0.5"];
 
 /**
  * The newest supported schema, which is the one the running build writes.
  *
- * Derived rather than written as a literal. `0.4` written inline is correct
+ * Derived rather than written as a literal. `0.5` written inline is correct
  * today and silently wrong at the next version bump — the rot the standing
  * decisions forbid — and a schema bump should move exactly one place. The list
  * is ordered oldest to newest, so its last entry is the current one.
@@ -1037,6 +1038,7 @@ const CHECKPOINT_TAGS: readonly string[] = [
   "simulation",
   "resource-system",
   "waste-field",
+  "inhibitor-field",
   "legacy-observer",
   "map",
   "undefined",
@@ -1082,7 +1084,7 @@ function validateEncodedSimulation(value: unknown, path: string, source: Checkpo
       if (typeof tag !== "string" || !CHECKPOINT_TAGS.includes(tag)) {
         reject(at, "unsupported-tag", `unrecognised checkpoint tag ${JSON.stringify(tag)}`);
       }
-      if (["simulation", "resource-system", "waste-field", "legacy-observer"].includes(tag)) {
+      if (["simulation", "resource-system", "waste-field", "inhibitor-field", "legacy-observer"].includes(tag)) {
         if (!isPlainObject(node.props)) reject(`${at}.props`, "malformed-container", "tagged state needs object props");
         for (const [key, item] of Object.entries(node.props)) walk(item, `${at}.props.${key}`);
       } else if (tag === "map") {
@@ -1147,15 +1149,15 @@ function validateEncodedSimulation(value: unknown, path: string, source: Checkpo
     const at = `${path}.state.props.o[${index}]`;
     if (!isPlainObject(organism)) reject(at, "malformed-container", "expected an organism");
     const pc = organism.pc;
-    if (pc === undefined && source === "0.4") reject(`${at}.pc`, "wrong-type", "current organisms write pc");
+    if (pc === undefined && (source === "0.4" || source === "0.5")) reject(`${at}.pc`, "wrong-type", "current organisms write pc");
     if (pc !== undefined && !isFiniteNumber(pc)) reject(`${at}.pc`, "wrong-type", "production count must be finite");
   });
   const interval = props.lineageInterval;
-  if (interval === undefined && source === "0.4") reject(`${path}.state.props.lineageInterval`, "malformed-container", "current simulation writes lineageInterval");
+  if (interval === undefined && (source === "0.4" || source === "0.5")) reject(`${path}.state.props.lineageInterval`, "malformed-container", "current simulation writes lineageInterval");
   if (interval !== undefined && (!isPlainObject(interval) || interval[CHECKPOINT_TAG_KEY] !== "map")) reject(`${path}.state.props.lineageInterval`, "malformed-container", "expected encoded map");
-  if (props.lastLineageFlows === undefined && source === "0.4") reject(`${path}.state.props.lastLineageFlows`, "malformed-container", "current simulation writes lastLineageFlows");
+  if (props.lastLineageFlows === undefined && (source === "0.4" || source === "0.5")) reject(`${path}.state.props.lastLineageFlows`, "malformed-container", "current simulation writes lastLineageFlows");
   if (props.lastLineageFlows !== undefined && props.lastLineageFlows !== null && !isPlainObject(props.lastLineageFlows)) reject(`${path}.state.props.lastLineageFlows`, "wrong-type", "expected null or flow facts");
-  validateResourceSystem(props.resources, `${path}.state.props.resources`);
+  validateResourceSystem(props.resources, `${path}.state.props.resources`, source);
   if (props.drought !== null && !isPlainObject(props.drought)) reject(`${path}.state.props.drought`, "wrong-type", "expected null or an active drought");
   if (props.drought !== null && props.drought !== undefined) {
     for (const field of ["kind", "end", "suppression"] as const) {
@@ -1259,7 +1261,7 @@ function validateEncodedSimulation(value: unknown, path: string, source: Checkpo
  * fail later — it produces NaN stock totals that quietly change the world's
  * resource economy, so the check is here rather than left to the consumer.
  */
-function validateResourceSystem(value: unknown, at: string): void {
+function validateResourceSystem(value: unknown, at: string, source: CheckpointSchemaVersion): void {
   if (!isPlainObject(value) || value[CHECKPOINT_TAG_KEY] !== "resource-system") {
     reject(at, "malformed-container", "expected tagged resource-system state");
   }
@@ -1306,6 +1308,14 @@ function validateResourceSystem(value: unknown, at: string): void {
     }
   }
   validateWasteField(props.waste, `${at}.props.waste`);
+  // Slice 1 interference: the inhibitor field is required at 0.5, where every
+  // writer emits it. Pre-0.5 payloads keep their exact historical shape: an
+  // absent inhibitor is the true pre-interference form — refused later by the
+  // engine-version gate, never defaulted — while a present-but-malformed one
+  // is corrupt at every schema. Presence is version-scoped; validity is not.
+  if (source === "0.5" || props.inhibitor !== undefined) {
+    validateInhibitorField(props.inhibitor, `${at}.props.inhibitor`);
+  }
 }
 
 /** The waste field is read cell-by-cell in the biological step. */
@@ -1323,12 +1333,32 @@ function validateWasteField(value: unknown, at: string): void {
 }
 
 /**
+ * Slice 1 interference: the inhibitor signal field persists alongside waste.
+ * Same shape as the waste field minus biological removal (no removal path
+ * exists yet), so the required numerics omit bioRemoved.
+ */
+function validateInhibitorField(value: unknown, at: string): void {
+  if (!isPlainObject(value) || value[CHECKPOINT_TAG_KEY] !== "inhibitor-field") {
+    reject(at, "malformed-container", "expected tagged inhibitor-field state");
+  }
+  const props = (value as Record<string, unknown>).props as Record<string, unknown>;
+  if (!isPlainObject(props)) reject(`${at}.props`, "malformed-container", "inhibitor field needs object props");
+  for (const field of ["n", "cell", "size", "produced", "decayed", "clampAdj", "discarded", "diffusionRate", "decayRate", "updateStride"] as const) {
+    if (!isFiniteNumber(props[field])) reject(`${at}.props.${field}`, "wrong-type", "expected a finite number");
+  }
+  for (const field of ["stock", "cap", "right", "down", "delta", "decayLast"] as const) validateTypedArray(props[field], `${at}.props.${field}`);
+  if (props.decayBuckets !== undefined && !Array.isArray(props.decayBuckets)) reject(`${at}.props.decayBuckets`, "malformed-container", "expected decay buckets");
+}
+
+/**
  * One organism's persisted state.
  *
  * Every trait here is read by the biological step, so a wrong type or a
  * non-finite value changes physiology rather than presentation. `to` and `cu`
- * arrived under 0.3 and carry named omission rules; the remainder existed in
- * every supported writer.
+ * arrived under 0.3 and carry named omission rules; `in` and `re` arrive at
+ * 0.5 and are required there, with no rule tolerating their absence — a
+ * pre-0.5 world without them is refused by the engine-version gate, not
+ * reinterpreted. The remainder existed in every supported writer.
  */
 function validateOrganism(value: unknown, at: string, source: CheckpointSchemaVersion): void {
   if (!isPlainObject(value)) reject(at, "malformed-container", "expected an organism");
@@ -1354,8 +1384,22 @@ function validateOrganism(value: unknown, at: string, source: CheckpointSchemaVe
     const value = organism[field];
     if (value === undefined) {
       // Older schemas may genuinely lack it; the current schema may not, and
-      // the omission rules cover the historical case explicitly.
-      if (introduced === "0.4" && source === "0.4") reject(`${at}.${field}`, "malformed-container", "current organisms write this field");
+      // the omission rules cover the historical case explicitly. `pc` arrived
+      // with 0.4 and is required at 0.4 and 0.5; `to`/`cu` arrived mid-0.3 so
+      // even 0.3+ saves may omit them under their named rules.
+      if (introduced === "0.4" && (source === "0.4" || source === "0.5")) reject(`${at}.${field}`, "malformed-container", "current organisms write this field");
+      continue;
+    }
+    if (!isFiniteNumber(value)) reject(`${at}.${field}`, "wrong-type", "expected a finite trait value");
+  }
+  // Slice 1 interference traits: every 0.5 writer emits finite `in`/`re`.
+  // Pre-0.5 payloads genuinely lack them — refused later by the engine-version
+  // gate, never defaulted — so absence is tolerated everywhere but 0.5,
+  // while a present non-finite value is corrupt at every schema.
+  for (const field of ["in", "re"] as const) {
+    const value = organism[field];
+    if (value === undefined) {
+      if (source === "0.5") reject(`${at}.${field}`, "malformed-container", "current organisms write this field");
       continue;
     }
     if (!isFiniteNumber(value)) reject(`${at}.${field}`, "wrong-type", "expected a finite trait value");
@@ -1568,10 +1612,10 @@ export const validateCheckpoint = (checkpoint: unknown): void => {
       }
     }
   }
-  // 0.3 introduced both pacing fields, and the current schema still writes
+  // 0.3 introduced both pacing fields, and every schema since still writes
   // them even when the cooldown value is null. Only 0.2 can reconstruct the
   // decision tick or read the pre-cooldown absence as null.
-  if (schema === "0.3" || isCurrentSchema(schema as string)) {
+  if (schema === "0.3" || schema === "0.4" || isCurrentSchema(schema as string)) {
     const pacing = decisions as Record<string, unknown>;
     for (const field of ["lastDecisionTick", "lastMajorCatalystTick"] as const) {
       if (pacing[field] === undefined) {
@@ -1600,7 +1644,10 @@ export const validateCheckpoint = (checkpoint: unknown): void => {
       }
     }
   }
-  if (isPlainObject(analysis)) validateEntityRefs(analysis, "analysis", !isCurrentSchema(schema as string));
+  // Bare numbers are the pre-A2 shape, tolerated only where a writer could
+  // have produced them (pre-0.4). 0.4 exists precisely because tagged refs
+  // became required, so a bare ref at 0.4 or later is refused, not migrated.
+  if (isPlainObject(analysis)) validateEntityRefs(analysis, "analysis", schema !== "0.4" && !isCurrentSchema(schema as string));
   if (checkpoint.control === undefined || (checkpoint.control !== null && !isPlainObject(checkpoint.control))) {
     reject("control", "wrong-type", `expected null or a control checkpoint object, got ${describe(checkpoint.control)}`);
   }
@@ -1616,7 +1663,7 @@ export const validateCheckpoint = (checkpoint: unknown): void => {
     reject("control.engine_version", "structural-contradiction", "control and runtime engine versions disagree");
   }
   if (checkpoint.controlAnalysis !== null) validateObserverCheckpoint(checkpoint.controlAnalysis, "controlAnalysis", { requireDetectors: isCurrentSchema(schema as string) });
-  if (isPlainObject(checkpoint.controlAnalysis)) validateEntityRefs(checkpoint.controlAnalysis, "controlAnalysis", !isCurrentSchema(schema as string));
+  if (isPlainObject(checkpoint.controlAnalysis)) validateEntityRefs(checkpoint.controlAnalysis, "controlAnalysis", schema !== "0.4" && !isCurrentSchema(schema as string));
   /**
    * Presence, decided per field by when that field was introduced.
    *
@@ -1645,7 +1692,7 @@ export const validateCheckpoint = (checkpoint: unknown): void => {
       }
     }
   }
-  if (schema !== "0.4") return;
+  if (schema !== "0.4" && schema !== "0.5") return;
 
   // Presence, current schema only. `dep` and `niche` are the analysis
   // sub-states older saves may genuinely lack; the five checked above are not.
@@ -1725,7 +1772,11 @@ export function validateDecisionRecords(decisions: Record<string, unknown>, sour
     if (pending.contextSnapshot === undefined && sourceSchema !== "0.2") {
       reject("decisions.pending.contextSnapshot", "malformed-container", "this schema wrote the observation context");
     }
-    if (pending.contextSnapshot === null && !isCurrentSchema(sourceSchema)) {
+    // A null context marks a re-saved pre-0.3 pending, whose context was not
+    // persisted. Only a re-save at 0.4 or later may carry it: 0.4 already
+    // accepted it as current, and narrowing that now would refuse genuine
+    // 0.4 re-saves.
+    if (pending.contextSnapshot === null && sourceSchema !== "0.4" && !isCurrentSchema(sourceSchema)) {
       reject("decisions.pending.contextSnapshot", "wrong-type", "only a current re-save may mark legacy context unrecorded");
     }
     if (pending.contextSnapshot !== undefined && pending.contextSnapshot !== null && !isPlainObject(pending.contextSnapshot)) {
@@ -2312,6 +2363,26 @@ export interface IntervalLineageFlow {
   readonly burdenEnergy: number;
   readonly cleanupEnergy: number;
   readonly cleanupExec: number;
+  /**
+   * Slice 1 interference, in the engine's fixed names. Accepted secreted mass
+   * (entered the field), the two standing costs, effective exposure, and the
+   * suppressed mass / forgone energy per substrate. Per-lineage decay is NOT
+   * attributed — decay acts on mixed field mass, so it lives in totals and
+   * field accounting only.
+   *
+   * Optional because the pre-first-stride placeholder carries none of them;
+   * every stride banked by the current engine populates all ten.
+   */
+  readonly secreted_i?: number;
+  readonly secretion_energy?: number;
+  readonly resistance_energy?: number;
+  readonly exposure_i?: number;
+  readonly suppressed_a?: number;
+  readonly suppressed_b?: number;
+  readonly suppressed_c?: number;
+  readonly suppressed_ea?: number;
+  readonly suppressed_eb?: number;
+  readonly suppressed_ec?: number;
 }
 
 /** Deterministic per-lineage interval activity with window totals. */
@@ -2335,6 +2406,23 @@ export interface IntervalFlowFacts {
     readonly burdenEnergy: number;
     readonly cleanupEnergy: number;
     readonly cleanupExec: number;
+    /** Slice 1 interference: the per-lineage fields summed, plus the two
+     * field-level losses, which are never attributed per lineage. All
+     * optional for the same placeholder reason as above; nothing populates
+     * the decay/saturation totals yet — they live in the interval counters
+     * and field accounting until a later slice wires them through. */
+    readonly secreted_i?: number;
+    readonly secretion_energy?: number;
+    readonly resistance_energy?: number;
+    readonly exposure_i?: number;
+    readonly suppressed_a?: number;
+    readonly suppressed_b?: number;
+    readonly suppressed_c?: number;
+    readonly suppressed_ea?: number;
+    readonly suppressed_eb?: number;
+    readonly suppressed_ec?: number;
+    readonly inhibitorDecayed?: number;
+    readonly inhibitorSaturatedLoss?: number;
   };
 }
 
@@ -2403,6 +2491,10 @@ export interface RenderOrganism {
    *  landscape and history evidence read them, biology never does. */
   readonly tolerance: number;
   readonly cleanup: number;
+  /** Slice 1 interference traits, mapped from `o.in`/`o.re`. Presentation
+   *  only, like tolerance/cleanup above: the explorer reads nothing new. */
+  readonly secretion: number;
+  readonly resistance: number;
 }
 
 export interface RenderResourceField {
@@ -2535,15 +2627,34 @@ export interface DecisionCheckpoint {
 
 // impl: REQ-EXPORT-001 (resumable checkpoints are a separate contract from evidence exports)
 /**
- * The current resumable checkpoint. Schema 0.4.
+ * The current resumable checkpoint. Schema 0.5.
  *
- * Carries catalyst windows and pacing state as 0.3 did, and additionally
- * guarantees the fields that arrived *during* 0.3 — `Organism.pc`,
- * `Simulation.lastLineageFlows` and `Simulation.lineageInterval`, the C-use and
- * niche sub-states, and tagged entity references. Those are the fields 0.3
- * could not promise, which is the whole reason for this version.
+ * Carries everything 0.4 did, and additionally guarantees the Slice 1
+ * interference state: finite `in`/`re` on every organism and the tagged
+ * inhibitor field in the resource system. A 0.4 save is a 0.22.0 world and
+ * is refused by the engine-version gate before any of this is read — no
+ * migration rule defaults interference state, because inventing traits or
+ * field mass would change that world's biology.
  */
 export interface UniverseCheckpoint {
+  readonly checkpointSchemaVersion: "0.5";
+  readonly engineVersion: string;
+  readonly createdTick: number;
+  readonly experiment: unknown;
+  readonly analysis: unknown;
+  readonly control: unknown | null;
+  readonly controlAnalysis: unknown | null;
+  readonly decisions: DecisionCheckpoint;
+}
+
+/**
+ * Schema 0.4 as last written (engine 0.22.0). Shape-loadable, but a genuine
+ * 0.4 save carries engine 0.22.0 and is refused by the engine-version gate
+ * before restore: 0.4 predates interference, so its organisms carry no
+ * `in`/`re` and its resource system carries no inhibitor field, and neither
+ * absence is defaulted. Never written by this version.
+ */
+export interface UniverseCheckpointV04 {
   readonly checkpointSchemaVersion: "0.4";
   readonly engineVersion: string;
   readonly createdTick: number;
@@ -2615,6 +2726,7 @@ export interface UniverseCheckpointV03 {
 
 export type SupportedUniverseCheckpoint =
   | UniverseCheckpoint
+  | UniverseCheckpointV04
   | UniverseCheckpointV03
   | UniverseCheckpointV02
   | LegacyUniverseCheckpoint;
@@ -2832,6 +2944,12 @@ export interface WorldCatalogEntry {
   readonly dormancyResponse: number;
   readonly tolerance: number;
   readonly cleanup: number;
+  /** Slice 1 interference traits. Static inherited presentation inputs like
+   *  tolerance/cleanup above: birth-set through mut(), thereafter only read.
+   *  Frame-dynamic values (position, energy, activity) live in the live
+   *  frame, never here. */
+  readonly secretion: number;
+  readonly resistance: number;
 }
 
 /**

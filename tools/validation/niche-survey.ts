@@ -14,11 +14,15 @@ import { ENGINE_VERSION } from "../../packages/sim-core/src/index.ts";
  *
  * Manual run (NOT part of `pnpm verify` — too long for the gate):
  *   pnpm exec tsx tools/validation/niche-survey.ts
- * Retains to testdata/niche-survey-0.22.json (resume-safe). The fast gate
+ * Retains to testdata/niche-survey-0.23.json (resume-safe). The fast gate
  * in tools/validation/niche.ts checks the retained artifact in.
+ *
+ * The 0.22 artifact (testdata/niche-survey-0.22.json) is superseded under
+ * engine 0.23.0: trajectories moved, so a new versioned file is retained
+ * per the washout precedent rather than overwriting versioned evidence.
  */
 
-const OUT = "testdata/niche-survey-0.22.json";
+const OUT = "testdata/niche-survey-0.23.json";
 const SEEDS = [24681357, 821947219, 3543950664, 111111111, 222222222, 333333333, 444444444, 555555555];
 const HORIZON = 150000;
 const ASSAY_TICKS = 15000;

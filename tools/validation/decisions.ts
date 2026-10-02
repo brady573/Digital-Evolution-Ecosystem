@@ -186,9 +186,13 @@ function testVerticalSliceAndGate() {
   const { session, pending } = atDecision();
   const triggerTick = session.snapshot().tick;
   assert.equal(pending.createdTick, triggerTick, "opportunity created at the current tick");
+  // 0.23.1 interference retune re-pin (af9ad23 precedent): naive founders
+  // plus faster inhibitor decay shift energy trajectories again, so the
+  // first durable formation lands @6526 rather than @6024. Counts/structure
+  // unchanged: still the earliest formation.
   assert.equal(
     pending.sourceEventId,
-    "eco-seedbank-1-established-7279",
+    "eco-seedbank-1-established-6526",
     "first decision comes from the earliest durable formation (deterministic)",
   );
   // The policy saw the same context the evidence supports: contextSnapshot must
@@ -291,7 +295,10 @@ function testForwardCompatPolicyVersion() {
   const window = session.advance(120_000).pendingDecision as CatalystOpportunity;
   assert.ok(window, "a catalyst window follows");
   assert.equal(window.source, "world_catalyst", "interceding decision is a catalyst window");
-  assert.equal(window.createdTick, 17_319, "first window opens at the first quiet stride");
+  // 0.23.1 interference retune re-pin (same cause as above): dormancy
+  // @6526 restarts quiet earlier, so the first quiet stride opens @16566
+  // rather than @16064. The 10040-tick quiet cadence is unchanged.
+  assert.equal(window.createdTick, 16_566, "first window opens at the first quiet stride");
   assert.equal(window.policyVersion, CATALYST_POLICY_VERSION, "new window stamped current");
   session.resolveEventDecision(window.opportunityId, "keep-watching");
   assert.equal(
@@ -313,7 +320,13 @@ function testForwardCompatPolicyVersion() {
   // is its resolution: no stale labels leak into new decisions or evidence.
   assert.ok(second && second.source === "observed_event", "a second natural decision follows");
   const natural = second as DecisionOpportunity;
-  assert.equal(natural.sourceEventId, "eco-era-2-established-113954", "second decision is deterministic");
+  // 0.23.1 interference retune re-pin (same cause as above): the second
+  // natural decision is still the deterministic next observed event, now the
+  // crossfeeding establishment @48945 rather than the era formation @87348 —
+  // the retuned trajectory reaches crossfeeding first. Count and context
+  // structure unchanged: exactly one natural decision with a stamped,
+  // evidence-backed context.
+  assert.equal(natural.sourceEventId, "eco-crossfeeding-1-established-48945", "second decision is deterministic");
   assert.equal(natural.policyVersion, DECISION_POLICY_VERSION, "new opportunity stamped current");
   assert.equal(
     natural.contextSnapshot.cEnergyShare,
