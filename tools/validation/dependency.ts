@@ -507,9 +507,13 @@ function testWashoutReliance() {
   // to 4-6% against 20-27% control while population holds: material reliance
   // on continued C availability, demonstrated by controlled comparison
   // rather than temporal order. Deterministic on the fixture seed.
+  // Slice 2B re-pin (delay pattern): guild establishment on the fixture
+  // seed moved to @133030 under detritus wealth (probe-mapped), so the
+  // fork moves 60k -> 135k to perturb an ESTABLISHED guild, not an
+  // unformed one. Same seed, same shock, same 15k assay age, same claim.
   const session = new UniverseSession();
   session.create(fixtureConfig(FIXTURE_SEED));
-  settle(session, 60000);
+  settle(session, 135000);
   session.createControlFork();
   session.applyIntervention(
     { schemaVersion: 1, kind: "nutrient_disturbance", mode: "c_washout" },
