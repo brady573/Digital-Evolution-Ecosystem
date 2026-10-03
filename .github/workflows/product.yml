@@ -205,7 +205,7 @@ jobs:
           # silently disable the whole feature.
           fetch-depth: 0
       - uses: ./.github/actions/setup-project
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
@@ -272,7 +272,7 @@ jobs:
         with:
           fetch-depth: 0
       - uses: ./.github/actions/setup-project
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
@@ -368,7 +368,7 @@ jobs:
         id: plan
         env:
           DEE_IMPACT_BASE: ${{ env.impact_base }}
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: steps.plan.outputs.ci_pixi_has_work == 'true'
         with:
           path: ~/.cache/ms-playwright
