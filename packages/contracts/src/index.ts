@@ -2301,6 +2301,20 @@ export interface IntervalRates {
   readonly burdenEnergy: number;
   readonly cleanupEnergy: number;
   readonly cleanupExec: number;
+  /** Death-deposited detritus mass (entered the field; pending buffer excluded). */
+  readonly detritusDeposited: number;
+  /** Detritus mass consumed by organisms. */
+  readonly detritusConsumed: number;
+  /** Realized energy from detritus consumption. */
+  readonly energyDetritus: number;
+  /** Detritus mass mineralized into A/B. */
+  readonly detritusMineralized: number;
+  /** Mineralized mass received by Nutrient A. */
+  readonly mineralizedA: number;
+  /** Mineralized mass received by Nutrient B. */
+  readonly mineralizedB: number;
+  /** Detritus-use process executions. */
+  readonly detritusExec: number;
 }
 
 /**
@@ -2328,6 +2342,20 @@ export interface IntervalLineageFlow {
   readonly burdenEnergy: number;
   readonly cleanupEnergy: number;
   readonly cleanupExec: number;
+  /** Death-deposited detritus mass (entered the field; pending buffer excluded). */
+  readonly detritusDeposited: number;
+  /** Detritus mass consumed by organisms. */
+  readonly detritusConsumed: number;
+  /** Realized energy from detritus consumption. */
+  readonly energyDetritus: number;
+  /** Detritus mass mineralized into A/B. */
+  readonly detritusMineralized: number;
+  /** Mineralized mass received by Nutrient A. */
+  readonly mineralizedA: number;
+  /** Mineralized mass received by Nutrient B. */
+  readonly mineralizedB: number;
+  /** Detritus-use process executions. */
+  readonly detritusExec: number;
 }
 
 /** Deterministic per-lineage interval activity with window totals. */
@@ -2351,6 +2379,20 @@ export interface IntervalFlowFacts {
     readonly burdenEnergy: number;
     readonly cleanupEnergy: number;
     readonly cleanupExec: number;
+    /** Death-deposited detritus mass (entered the field; pending buffer excluded). */
+    readonly detritusDeposited: number;
+    /** Detritus mass consumed by organisms. */
+    readonly detritusConsumed: number;
+    /** Realized energy from detritus consumption. */
+    readonly energyDetritus: number;
+    /** Detritus mass mineralized into A/B. */
+    readonly detritusMineralized: number;
+    /** Mineralized mass received by Nutrient A. */
+    readonly mineralizedA: number;
+    /** Mineralized mass received by Nutrient B. */
+    readonly mineralizedB: number;
+    /** Detritus-use process executions. */
+    readonly detritusExec: number;
   };
 }
 
@@ -2371,10 +2413,17 @@ export interface LineageFlow {
   readonly consumedA: number;
   readonly consumedB: number;
   readonly consumedC: number;
+  /**
+   * Lifetime detritus consumption-EVENT counts summed over living members
+   * (md increments per detritus meal, mirroring ma/mb/mc).
+   */
+  readonly consumedDetritus: number;
   /** Lifetime realized energy summed over living members, by source. */
   readonly energyA: number;
   readonly energyB: number;
   readonly energyC: number;
+  /** Lifetime realized detritus energy summed over living members (gd). */
+  readonly energyDetritus: number;
   /** Lifetime biologically produced Metabolite C summed over living members. */
   readonly producedC: number;
 }
@@ -2389,9 +2438,13 @@ export interface FlowFacts {
     readonly consumedA: number;
     readonly consumedB: number;
     readonly consumedC: number;
+    /** Lifetime detritus consumption events over living members (md). */
+    readonly consumedDetritus: number;
     readonly energyA: number;
     readonly energyB: number;
     readonly energyC: number;
+    /** Lifetime realized detritus energy over living members (gd). */
+    readonly energyDetritus: number;
     readonly producedC: number;
   };
 }
