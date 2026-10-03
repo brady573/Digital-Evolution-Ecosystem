@@ -42,9 +42,16 @@ const WASTE_YIELD=.15,WASTE_CAP_FRACTION=.25,WASTE_DIFFUSION=.20,WASTE_DECAY=.00
  * diffusion: death clusters stay local (AC13). Retune only on assay
  * evidence, never to hit a frequency.
  */
-const DETRITUS_CAP_FRACTION=.05,DETRITUS_MINERAL_RATE=.001,DETRITUS_BODY_BASE=2,DETRITUS_BODY_GAIN=.05,DETRITUS_BODY_CAP=30,DETRITUS_YIELD=7,DETRITUS_UPTAKE=.16,DU_STANDING=.0015,DU_ACTIVE=.6;
+const DETRITUS_CELL_CAP=400,DETRITUS_MINERAL_RATE=.001,DETRITUS_BODY_BASE=2,DETRITUS_BODY_GAIN=.05,DETRITUS_BODY_CAP=30,DETRITUS_YIELD=7,DETRITUS_UPTAKE=.16,DU_STANDING=.0015,DU_ACTIVE=.6;
 const H01=(seed:number,id:number,salt=0):number=>{let x=(seed^(Math.imul(id+salt,0x9E3779B1)))>>>0;x^=x>>>16;x=Math.imul(x,0x7FEB352D);x^=x>>>15;x=Math.imul(x,0x846CA68B);x^=x>>>16;return(x>>>0)/4294967296};
 const C_ACCESS=(bu:number):number=>{let v=Q(bu,0,1.5);return v<=0?0:(v*v)/(v*v+.1024)};
+/**
+ * Foundation Slice 2 body-return rule (AC1): deterministic body-mass proxy
+ * from lifetime realized energy. Same state → same detritus; bounded above
+ * by DETRITUS_BODY_CAP; newborn floor DETRITUS_BODY_BASE. Pure function so
+ * assays can verify the rule independent of any run.
+ */
+function detritusBodyProxy(o:Organism):number{return Math.min(DETRITUS_BODY_CAP,DETRITUS_BODY_BASE+DETRITUS_BODY_GAIN*((o.ga||0)+(o.gb||0)+(o.gc||0)))}
 const BUC=(bu:number):number=>BU_MAINT_COST*bu*bu;
 const T:Record<string,[string,number,number,string]>={speed:['sp',.25,4,'Movement speed'],sensing:['se',10,180,'Nutrient-sensing range'],metabolism:['me',.04,.5,'Baseline energy use'],reproduction:['rp',55,220,'Energy needed to reproduce'],diet:['di',-1.5,1.5,'Nutrient tendency'],habitat:['ha',-1.5,1.5,'Home-zone preference'],byproduct_use:['bu',0,1.5,'Byproduct use'],dormancy_response:['dr',0,1.5,'Dormancy response'],tolerance:['to',0,1.5,'Waste tolerance'],cleanup:['cu',0,1.5,'Waste cleanup'],detritus_use:['du',0,1.5,'Detritus use']};
 // impl: REQ-SIM-002 (evolvable trait set incl. cross-feeding and dormancy)
@@ -497,8 +504,10 @@ class DetritusField{
  constructor(totalCap:number){
   this.n=FIELD_N;this.cell=FIELD_CELL;this.size=FIELD_CELLS;
   this.mineralRate=DETRITUS_MINERAL_RATE;
-  let per=totalCap*DETRITUS_CAP_FRACTION/this.size;
-  this.stock=new Float32Array(this.size);this.cap=new Float32Array(this.size).fill(per);this.pending=new Float32Array(this.size);
+  // Absolute per-cell cap (not a share of nutrient capacity): a hotspot
+  // cell must hold a mass-mortality cluster (tens of 2–30-mass carcasses).
+  // Overflow stays pending and retries — counted, never lost.
+  this.stock=new Float32Array(this.size);this.cap=new Float32Array(this.size).fill(DETRITUS_CELL_CAP);this.pending=new Float32Array(this.size);
   this.deposited=0;this.consumed=0;this.mineralized=0;this.mineralizedA=0;this.mineralizedB=0;this.discarded=0;
   this.right=new Int32Array(this.size);this.down=new Int32Array(this.size);
   for(let iy=0;iy<this.n;iy++)for(let ix=0;ix<this.n;ix++){let i=iy*this.n+ix;this.right[i]=iy*this.n+((ix+1)%this.n);this.down[i]=((iy+1)%this.n)*this.n+ix}
@@ -675,6 +684,12 @@ class S{
   if((f as any).wasteProduced===undefined){f.wasteProduced=0;f.wasteRemoved=0;f.burdenEnergy=0;f.cleanupEnergy=0;f.cleanupExec=0}
   f.consumedA+=d.consumedA||0;f.consumedB+=d.consumedB||0;f.consumedC+=d.consumedC||0;f.energyA+=d.energyA||0;f.energyB+=d.energyB||0;f.energyC+=d.energyC||0;f.producedC+=d.producedC||0;f.births+=d.births||0;f.deaths+=d.deaths||0;f.wasteProduced+=d.wasteProduced||0;f.wasteRemoved+=d.wasteRemoved||0;f.burdenEnergy+=d.burdenEnergy||0;f.cleanupEnergy+=d.cleanupEnergy||0;f.cleanupExec+=d.cleanupExec||0;
  }
+ /** Single body-return rule (AC1): every supported biological death credits
+  * the lineage AND deposits deterministic detritus at the resolved death
+  * location. All mortality funnels through energy depletion, so no
+  * cause-specific semantics exist; physical-removal exceptions: none
+  * (no killer pathway removes bodies — catalysts only scale resources). */
+ recordDeath(o:Organism):void{this.cur.deaths++;this.lineageCredit(o.l,{deaths:1});if(this.resources.detritusDepositionEnabled)this.resources.detritus.depositPending(o.x,o.y,detritusBodyProxy(o),this.cur)}
  readIntervalFlows(stride:Interval):IntervalFlowFacts{
   let lineages:{lineageId:number;netMembers:number;consumedA:number;consumedB:number;consumedC:number;energyA:number;energyB:number;energyC:number;producedC:number;births:number;deaths:number;wasteProduced:number;wasteRemoved:number;burdenEnergy:number;cleanupEnergy:number;cleanupExec:number;detritusDeposited:number;detritusConsumed:number;energyDetritus:number;detritusExec:number}[]=[];
   let t={netMembers:0,consumedA:0,consumedB:0,consumedC:0,energyA:0,energyB:0,energyC:0,producedC:0,births:0,deaths:0,wasteProduced:0,wasteRemoved:0,burdenEnergy:0,cleanupEnergy:0,cleanupExec:0,detritusDeposited:0,detritusConsumed:0,energyDetritus:0,detritusMineralized:0,mineralizedA:0,mineralizedB:0,detritusExec:0};
@@ -716,9 +731,9 @@ class S{
   for(const o of this.o){
    if(o.activity==='dormant'){
     if(((this.t+o.id)%DORMANCY_CHECK)===0&&this.dormancyWake(o)){o.activity='active';o.lastWakeTick=this.t;o.wakeCount=(o.wakeCount||0)+1;o.dormantSince=null;this.cur.wakes++;let cid=this.cladeRoot(o.l);this.cur.wake_clades[cid]=(this.cur.wake_clades[cid]||0)+1}
-    if(o.activity==='dormant'){o.en-=(PC(o.me)*DORMANT_MAINTENANCE+SC(o.en)*.08)*this.c.press;if(o.en>0)live.push(o);else{this.cur.deaths++;this.lineageCredit(o.l,{deaths:1})}continue}
+    if(o.activity==='dormant'){o.en-=(PC(o.me)*DORMANT_MAINTENANCE+SC(o.en)*.08)*this.c.press;if(o.en>0)live.push(o);else{this.recordDeath(o)}continue}
    }
-   if(((this.t+o.id)%DORMANCY_CHECK)===0&&this.dormancyEntry(o)){o.activity='dormant';o.dormantSince=this.t;this.cur.dormancy_entries++;o.en-=(PC(o.me)*DORMANT_MAINTENANCE)*this.c.press;if(o.en>0)live.push(o);else{this.cur.deaths++;this.lineageCredit(o.l,{deaths:1})}continue}
+   if(((this.t+o.id)%DORMANCY_CHECK)===0&&this.dormancyEntry(o)){o.activity='dormant';o.dormantSince=this.t;this.cur.dormancy_entries++;o.en-=(PC(o.me)*DORMANT_MAINTENANCE)*this.c.press;if(o.en>0)live.push(o);else{this.recordDeath(o)}continue}
    if(((this.t+o.id)&3)===0){let sensed=this.resources.sense(o);if(sensed.score>.003)o.h=sensed.angle;else{let pull=.04+.12*Math.abs(o.ha);if(Math.abs(o.ha)>.08&&this.rMove()<pull){let kind=o.ha>0?1:0,cx=kind?445:155,cy=kind?390:210;o.h=Math.atan2(WD(o.y,cy),WD(o.x,cx))+(this.rMove()-.5)*.75}else if(this.rMove()<.10)o.h+=this.rMove()*1.6-.8}}
    // Slice 1: movement INTENT (§8). Same sensing/heading/math/draws as
    // before, in loop order — but positions do not commit here. Settlement
@@ -762,7 +777,7 @@ class S{
    counts. Interval deltas carry true mass. Do not 'fix' without an
    engine-version change. */
    if(eat.substance===0){o.ma++;o.ga+=eat.gain;o.ra+=eat.gain;this.cur.energy_a+=eat.gain;this.lineageCredit(o.l,{consumedA:eat.amount,energyA:eat.gain,producedC:eat.produced,wasteProduced:eat.wasteProduced})}else if(eat.substance===1){o.mb++;o.gb+=eat.gain;o.rb+=eat.gain;this.cur.energy_b+=eat.gain;this.lineageCredit(o.l,{consumedB:eat.amount,energyB:eat.gain,producedC:eat.produced,wasteProduced:eat.wasteProduced})}else{o.mc=(o.mc||0)+1;o.gc=(o.gc||0)+eat.gain;o.rc=(o.rc||0)+eat.gain;this.cur.energy_c+=eat.gain;this.lineageCredit(o.l,{consumedC:eat.amount,energyC:eat.gain})}this.totalUse[eat.substance]!+=eat.amount;this.totalEnergy[eat.substance]!+=eat.gain}
-   if(this.t>=(o.matureAt||0)&&this.t>=(o.readyAt||0)&&o.en>=o.rp){let support=this.reproSupport(o);this.totalReproSupport[support]!++;if(support===0)this.cur.repro_supported_a++;else if(support===1)this.cur.repro_supported_b++;else if(support===3)this.cur.repro_supported_c++;else this.cur.repro_supported_mixed++;this.cur.repro_eligible=(this.cur.repro_eligible as number||0)+1;let baby=this.child(o);pendingBirths.push({parent:o,baby});}if(o.en>0)live.push(o);else{this.cur.deaths++;this.lineageCredit(o.l,{deaths:1});occ.vacate(occ.cellOf(o.x,o.y))}
+   if(this.t>=(o.matureAt||0)&&this.t>=(o.readyAt||0)&&o.en>=o.rp){let support=this.reproSupport(o);this.totalReproSupport[support]!++;if(support===0)this.cur.repro_supported_a++;else if(support===1)this.cur.repro_supported_b++;else if(support===3)this.cur.repro_supported_c++;else this.cur.repro_supported_mixed++;this.cur.repro_eligible=(this.cur.repro_eligible as number||0)+1;let baby=this.child(o);pendingBirths.push({parent:o,baby});}if(o.en>0)live.push(o);else{this.recordDeath(o);occ.vacate(occ.cellOf(o.x,o.y))}
   }
     // Slice 1 birth placement (§9, phase 3): atomic commit in parent-id order
   // against settled post-mortality occupancy (movement + deaths committed
@@ -890,4 +905,5 @@ export {
   restoreSimulationCheckpoint,
   SpatialIndex,
   settleMovementClaims,
+  detritusBodyProxy,
 };

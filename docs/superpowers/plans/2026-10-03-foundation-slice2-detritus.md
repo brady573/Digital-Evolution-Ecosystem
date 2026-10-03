@@ -51,7 +51,7 @@
 - Access `duAccess = Q(du,0,1.5)/1.5` (linear, mirrors cleanup); role `detritivore` iff `gd_share >= .15 && duAccess >= .35` where `gd_share = gd/(ga+gb+gc+gd)` (mirrors byproduct_scavenger).
 - `DETRITUS_YIELD = 7` (below C's 9, well below primary 15); `DETRITUS_UPTAKE = .16` with `(.55+.45*conc)` scaling (mirrors nutrient uptake); `DU_STANDING = .0015`, `DU_ACTIVE = .6` (mirror cleanup costs); standing charged whenever `du > 0` (the tradeoff's teeth in poor conditions, AC10).
 - Body proxy `min(30, 2 + .05*(ga+gb+gc))` (floor for newborns, age-weighted carcasses, hard bound).
-- Field cap `totalCap*.05/size` uniform per cell (waste uses .25; detritus inflow is smaller; assay G must show unsaturated hotspots with small discard).
+- Field cap absolute per cell `DETRITUS_CELL_CAP=400` (holds a mass-mortality cluster; overflow stays pending and retries — a fractional share of nutrient capacity saturated on the first carcass and was rejected by assay B).
 - Mineralization `.001`/tick exponential per cell, allocation proportional to A/B room, remainder stays detritus.
 - No detritus diffusion (death clusters stay local for AC13; cheaper). Revisit only on assay evidence.
 
