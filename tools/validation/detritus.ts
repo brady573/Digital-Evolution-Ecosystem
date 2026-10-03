@@ -145,9 +145,54 @@ function testOpportunityDependence() {
   console.log("opportunity dependence: PASS");
 }
 
+function testMineralizationIsolation() {
+  // AC11: with deposition and consumption disabled, pre-existing stock
+  // falls ONLY by mineralization, and every mineralized unit appears as
+  // A/B biological production (no creation, no loss).
+  const base = new Simulation(config(7)) as any;
+  for (let t = 0; t < 20000; t++) base.step();
+  const f = base.clone();
+  f.resources.detritusDepositionEnabled = false;
+  f.resources.detritusConsumptionEnabled = false;
+  const d0 = f.resources.detritus;
+  const s0 = d0.totals().stock + d0.totals().pending;
+  assert.ok(s0 > 0, "isolation fork starts with detritus stock");
+  const dep0 = d0.deposited, con0 = d0.consumed, min0 = d0.mineralized, minA0 = d0.mineralizedA, minB0 = d0.mineralizedB;
+  const bioA0 = f.resources.biologicalProduction[0], bioB0 = f.resources.biologicalProduction[1];
+  for (let i = 0; i < 5000; i++) f.step();
+  const d1 = f.resources.detritus;
+  const s1 = d1.totals().stock + d1.totals().pending;
+  const wMin = d1.mineralized - min0, wMinA = d1.mineralizedA - minA0, wMinB = d1.mineralizedB - minB0;
+  assert.equal(d1.deposited, dep0, "no new deposits while disabled");
+  assert.equal(d1.consumed, con0, "no consumption while disabled");
+  assert.ok(wMin > 0, "passive mineralization proceeds");
+  assert.ok(Math.abs((s0 - s1) - wMin) / Math.max(1, s0) < 1e-6, "stock fall equals mineralized");
+  assert.ok(Math.abs((f.resources.biologicalProduction[0] - bioA0) - wMinA) < 1e-6, "A received exactly mineralized_a");
+  assert.ok(Math.abs((f.resources.biologicalProduction[1] - bioB0) - wMinB) < 1e-6, "B received exactly mineralized_b");
+  console.log(`mineralization isolation: PASS (mineralized ${wMin.toFixed(1)}: A ${wMinA.toFixed(1)} / B ${wMinB.toFixed(1)})`);
+}
+
+function testAccountingClosure() {
+  // AC12: both accounting identities close on a full-economy run —
+  // detritus field and the receiving A/B books.
+  const sim = new Simulation(config(7)) as any;
+  for (let t = 0; t < 10000; t++) sim.step();
+  const da = sim.resources.detritus.accounting();
+  const t = sim.resources.detritus.totals();
+  const scale = Math.max(1, da.deposited);
+  assert.ok(Math.abs(da.residual) / scale < 1e-6, `detritus identity closes (residual ${da.residual})`);
+  assert.ok(Math.abs(da.deposited - da.consumed - da.mineralized - t.stock - t.pending) / scale < 1e-6, "components reconcile");
+  const ra = sim.resources.accounting();
+  const rScale = Math.max(1, ...ra.absolute_residual.map((v: number, k: number) => Math.abs(ra.initial_stock[k]! + ra.environmental_input[k]!)));
+  assert.ok(ra.absolute_residual.every((v: number) => v / rScale < 1e-6), `A/B identity closes (residuals ${ra.absolute_residual})`);
+  console.log(`accounting closure: PASS (detritus residual ${da.residual.toExponential(1)}, A/B ${ra.absolute_residual.map((v: number) => v.toExponential(1)).join("/")})`);
+}
+
 testBodyProxy();
 testDeathCausality();
 testNextTickAvailability();
 testRecyclerAdvantage();
 testOpportunityDependence();
+testMineralizationIsolation();
+testAccountingClosure();
 console.log(`detritus validation: PASS (engine ${ENGINE_VERSION})`);
