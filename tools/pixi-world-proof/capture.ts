@@ -190,7 +190,7 @@ async function main(): Promise<void> {
           textureReuses: number; movementTextureCreateDelta: number; remainingCanvasCount: number;
           movementDisplayCreateDelta: number; movementDisplayCountBefore: number; movementDisplayCountAfter: number;
           worldReplacementDisplayCountBefore: number; worldReplacementDisplayCountAfter: number;
-          worldReplacementLiveTextures: number; worldReplacementTextureCreates: number; worldReplacementTextureCreateDelta: number;
+          worldReplacementLiveTextures: number; worldReplacementTextureCreates: number;
           initialEnvironmentTextureCreates: number; pannedEnvironmentTextureCreates: number;
           pannedEnvironmentRebuilt: boolean; initialEnvironmentTiles: number; pannedEnvironmentTiles: number;
           initialWasteCueTextureCreates: number; pannedWasteCueTextureCreates: number;
@@ -207,8 +207,8 @@ async function main(): Promise<void> {
           `${count} world replacement retains only new-world displays`);
         assert.ok(measured.worldReplacementLiveTextures > 0 && measured.worldReplacementLiveTextures <= measured.worldReplacementDisplayCountAfter,
           `${count} world replacement keeps only current-world texture resources`);
-        assert.equal(measured.worldReplacementTextureCreateDelta, measured.worldReplacementLiveTextures,
-          `${count} world replacement prunes every obsolete texture resource`);
+        assert.equal(measured.worldReplacementTextureCreates, measured.worldReplacementLiveTextures,
+          `${count} world replacement metrics describe only new-world texture resources`);
         assert.equal(measured.pannedEnvironmentTextureCreates, measured.initialEnvironmentTextureCreates,
           `${count} camera-only update creates zero environment textures`);
         assert.equal(measured.pannedEnvironmentRebuilt, false, `${count} camera-only update reuses environment texture`);

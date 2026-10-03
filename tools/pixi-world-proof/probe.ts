@@ -188,12 +188,12 @@ async function main(): Promise<void> {
       renderer.update({ ...pannedProps, tick: 6, organisms: organisms.map((o, i) => ({ ...o, x: (o.x + 17) % 600, y: (o.y + 31) % 600 })) } as unknown as PixiWorldProps);
       const moved = renderer.metrics()!;
       const beforeReplacementDisplays = moved.organisms.liveDisplayCount;
-      const texturesBeforeReplacement = moved.organisms.textureCreates;
       const replacementProps = {
         ...pannedProps,
         worldId: 2,
         environment: { ...env, worldId: 2 },
         organisms: organisms.slice(0, Math.max(1, Math.floor(count / 2))).map((o) => ({ ...o, id: o.id + 10000 })),
+        resolvedPhenotypes: new Map(organisms.slice(0, Math.max(1, Math.floor(count / 2))).map((o) => [o.id + 10000, resolved.get(o.id)!])),
       } as unknown as PixiWorldProps;
       renderer.update(replacementProps);
       const replaced = renderer.metrics()!;
@@ -214,7 +214,6 @@ async function main(): Promise<void> {
         worldReplacementDisplayCountAfter: replaced.organisms.liveDisplayCount,
         worldReplacementLiveTextures: afterReplacementTextures,
         worldReplacementTextureCreates: replaced.organisms.textureCreates,
-        worldReplacementTextureCreateDelta: replaced.organisms.textureCreates - texturesBeforeReplacement,
         initialEnvironmentTextureCreates: first.environment.textureCreates,
         pannedEnvironmentTextureCreates: panned.environment.textureCreates,
         pannedEnvironmentRebuilt: panned.environment.rebuilt,
