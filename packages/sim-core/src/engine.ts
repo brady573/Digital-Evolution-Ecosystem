@@ -42,7 +42,12 @@ const WASTE_YIELD=.15,WASTE_CAP_FRACTION=.25,WASTE_DIFFUSION=.20,WASTE_DECAY=.00
  * diffusion: death clusters stay local (AC13). Retune only on assay
  * evidence, never to hit a frequency.
  */
-const DETRITUS_CELL_CAP=400,DETRITUS_MINERAL_RATE=.001,DETRITUS_BODY_BASE=2,DETRITUS_BODY_GAIN=.05,DETRITUS_BODY_CAP=30,DETRITUS_YIELD=7,DETRITUS_UPTAKE=.16,DU_STANDING=.0015,DU_ACTIVE=.6;
+const DETRITUS_CELL_CAP=400,DETRITUS_MINERAL_RATE=.0002,DETRITUS_BODY_BASE=2,DETRITUS_BODY_GAIN=.05,DETRITUS_BODY_CAP=30,DETRITUS_YIELD=7,DETRITUS_UPTAKE=.16,DU_STANDING=.0015,DU_ACTIVE=.6;
+/** Fallback-food preference: detritus scores below equal-mass A/B/C so
+ * capable organisms eat primaries first and detritus in scarcity. Without
+ * this, abundant detritus outcompetes richer foods and the recycler
+ * subsidizes free-riders (assays C/D). Fixed ranking, not a behavior gene. */
+const DETRITUS_PREFERENCE=.5;
 const H01=(seed:number,id:number,salt=0):number=>{let x=(seed^(Math.imul(id+salt,0x9E3779B1)))>>>0;x^=x>>>16;x=Math.imul(x,0x7FEB352D);x^=x>>>15;x=Math.imul(x,0x846CA68B);x^=x>>>16;return(x>>>0)/4294967296};
 const C_ACCESS=(bu:number):number=>{let v=Q(bu,0,1.5);return v<=0?0:(v*v)/(v*v+.1024)};
 /**
@@ -88,7 +93,7 @@ const DC=(d:number):number=>.008*d*d;
 const WD=(a:number,b:number):number=>{let d=b-a;if(d>300)d-=600;else if(d<-300)d+=600;return d};
 const TD=(a:number,b:number):number=>Math.abs(WD(a,b));
 /** Living organism state: inherited traits (sp..dr), spatial/energy state, lifetime resource accounting (ma/mb/mc, ga/gb/gc, ra/rb/rc), lineage link (l). */
-interface Organism{id:number;parent:number|null;generation:number;born:number;matureAt:number;readyAt:number;x:number;y:number;en:number;h:number;sp:number;se:number;me:number;rp:number;di:number;ha:number;bu:number;dr:number;activity:string;dormantSince:number|null;wakeCount:number;lastWakeTick:number|null;ma:number;mb:number;mc:number;ga:number;gb:number;gc:number;ra:number;rb:number;rc:number;pc:number;to:number;cu:number;du:number;l:number;[k:string]:unknown}
+interface Organism{id:number;parent:number|null;generation:number;born:number;matureAt:number;readyAt:number;x:number;y:number;en:number;h:number;sp:number;se:number;me:number;rp:number;di:number;ha:number;bu:number;dr:number;activity:string;dormantSince:number|null;wakeCount:number;lastWakeTick:number|null;ma:number;mb:number;mc:number;ga:number;gb:number;gc:number;ra:number;rb:number;rc:number;pc:number;to:number;cu:number;du:number;md:number;gd:number;l:number;[k:string]:unknown}
 const PATCH=(o:Organism):number=>{let da=TD(o.x,155)**2+TD(o.y,210)**2,db=TD(o.x,445)**2+TD(o.y,390)**2;return da<=db?0:1};
 const QNT=(a:number[],p:number):number=>{if(!a.length)return 0;let b=[...a].sort((x,y)=>x-y),x=(b.length-1)*p,i=Math.floor(x),f=x-i;return b[i]!+(b[Math.min(i+1,b.length-1)]!-b[i]!)*f};
 const MED=(a:number[]):number=>QNT(a,.5),SPREAD=(a:number[])=>({q1:QNT(a,.25),q3:QNT(a,.75),min:a.length?Math.min(...a):0,max:a.length?Math.max(...a):0});
@@ -112,6 +117,8 @@ const NUTRIENT_SUBSTANCES:readonly NutrientSubstance[]=[0,1,2];
 interface NutrientExecution{substance:NutrientSubstance;amount:number;gain:number;produced:number;wasteProduced:number}
 /** What a waste process execution removed, and the active energy it cost. */
 interface WasteExecution{removed:number;activeCost:number}
+/** What a detritus process execution consumed (energy-bearing, unlike cleanup). */
+interface DetritusExecution{detritus:true;amount:number;gain:number;activeCost:number}
 
 /**
  * Identity and capability, shared by every supported metabolism. Capability
@@ -389,12 +396,40 @@ class RS{
   * mirroring how consume() returns gains for the caller to apply.
   */
  execCleanup(o:Organism,interval:Interval|null):WasteExecution{return WASTE_PROCESS.execute(this,o,interval)}
+  /**
+   * Foundation Slice 2: detritus as an explicit local opportunity.
+   * Capability is the inherited du trait (graded: higher du takes more per
+   * meal); opportunity is local detritus presence. No execution without
+   * both. Uptake mirrors nutrient conc-scaling; yield is below primary (15)
+   * and C (9) so the pathway pays only where detritus is locally abundant.
+   */
+ execDetritus(o:Organism,interval:Interval|null):{amount:number;gain:number;activeCost:number}|null{
+   if(!this.detritusConsumptionEnabled)return null;
+   let cap=Q(o.du||0,0,1.5)/1.5;if(cap<=0)return null;
+   let avail=this.detritus.amountAt(o.x,o.y);if(avail<=1e-9)return null;
+   let i=this.idx(o.x,o.y),cc=this.detritus.cap[i]!,conc=cc>1e-9?avail/cc:0;
+   let want=Math.min(avail,DETRITUS_UPTAKE*(.55+.45*Q(conc,0,1)))*cap;
+   if(want<=1e-9)return null;
+   let got=this.detritus.takeAt(o.x,o.y,want,interval);
+   if(got<=1e-9)return null;
+   let gain=got*DETRITUS_YIELD;
+   if(interval){interval.detritus_exec++;interval.energy_detritus+=gain}
+   return{amount:got,gain,activeCost:DU_ACTIVE*got};
+  }
  scoreIndex(o:Organism,i:number):{score:number;substance:NutrientSubstance}{let best=-1,bestSub:NutrientSubstance=0,limit=this.enabledByproduct?3:2;for(let ki=0;ki<limit;ki++){let k=NUTRIENT_SUBSTANCES[ki]!;let amt=this.stock[k]![i]!,c=this.cap[k]![i]!;if(c<=1e-9||amt<=1e-9)continue;let score=amt*this.access(o,k);if(score>best){best=score;bestSub=k}}return{score:Math.max(0,best),substance:bestSub}}
  scoreAt(o:Organism,x:number,y:number):{score:number;substance:NutrientSubstance}{return this.scoreIndex(o,this.idx(x,y))}
  opportunity(o:Organism):number{let i=this.idx(o.x,o.y),best=0,limit=this.enabledByproduct?3:2;for(let ki=0;ki<limit;ki++){let k=NUTRIENT_SUBSTANCES[ki]!;let c=this.cap[k]![i]!,f=c>1e-9?this.stock[k]![i]!/c:0;best=Math.max(best,f*this.access(o,k))}return best}
  sense(o:Organism){let best={score:0,substance:0 as NutrientSubstance,angle:o.h},ds=[Q(o.se*.45,15,75),Q(o.se,25,150)];for(const d of ds)for(let j=0;j<8;j++){let a=o.h+j*Math.PI/4,x=(o.x+Math.cos(a)*d+600)%600,y=(o.y+Math.sin(a)*d+600)%600,q=this.scoreIndex(o,this.idx(x,y));if(q.score>best.score){best={...q,angle:a}}}let local=this.scoreIndex(o,this.idx(o.x,o.y));if(local.score>best.score*1.12)best={...local,angle:o.h};return best}
  deposit(kind:number,x:number,y:number,amount:number,cause:string|null=null,interval:Interval|null=null):number{if(amount<=0||kind<0||kind>=this.stock.length)return 0;let i=this.idx(x,y),st=this.stock[kind]!,cp=this.cap[kind]!,room=Math.max(0,cp[i]!-st[i]!),add=Math.min(room,amount);if(add<=0)return 0;st[i]!+=add;this.totalStock[kind]!+=add;this.biologicalProduction[kind]!+=add;if(interval&&kind===2)interval.produced_c+=add;return add}
- consume(o:Organism,interval:Interval):NutrientExecution|null{let i=this.idx(o.x,o.y),best=-1,sub:NutrientSubstance=0,limit=this.enabledByproduct?3:2;for(let ki=0;ki<limit;ki++){let k=NUTRIENT_SUBSTANCES[ki]!;let amt=this.stock[k]![i]!;if(amt<=1e-9)continue;let score=amt*this.access(o,k);if(score>best){best=score;sub=k}}if(best<=0)return null;return NUTRIENT_PROCESSES[sub].execute(this,o,interval)}
+ consume(o:Organism,interval:Interval):NutrientExecution|DetritusExecution|null{let i=this.idx(o.x,o.y),best=-1,sub:NutrientSubstance=0,limit=this.enabledByproduct?3:2;for(let ki=0;ki<limit;ki++){let k=NUTRIENT_SUBSTANCES[ki]!;let amt=this.stock[k]![i]!;if(amt<=1e-9)continue;let score=amt*this.access(o,k);if(score>best){best=score;sub=k}}
+   // Foundation Slice 2: accessible detritus competes as one more local
+   // opportunity (fixed scoring, no new sensing or behavior). One meal per
+   // tick is preserved: detritus wins the tick or nutrients do.
+   let dScore=-1;
+   if(this.detritusConsumptionEnabled){let da=this.detritus.amountAt(o.x,o.y);if(da>1e-9)dScore=da*(Q(o.du||0,0,1.5)/1.5)*DETRITUS_PREFERENCE}
+   if(best<=0&&dScore<=0)return null;
+   if(dScore>best){let ex=this.execDetritus(o,interval);if(ex)return{detritus:true as const,amount:ex.amount,gain:ex.gain,activeCost:ex.activeCost};if(best<=0)return null}
+   return NUTRIENT_PROCESSES[sub].execute(this,o,interval)}
  diffuse(k:number):void{let st=this.stock[k]!,cp=this.cap[k]!,d=this.delta[k]!,right=this.right,down=this.down,mr=this.minCapRight[k]!,md=this.minCapDown[k]!,rate=this.diffusionRate[k]!;d.fill(0);for(let i=0;i<this.size;i++){let ci=cp[i]!>1e-9?st[i]!/cp[i]!:0,j=right[i]!,cj=cp[j]!>1e-9?st[j]!/cp[j]!:0,flux=rate*(ci-cj)*mr[i]!;d[i]!-=flux;d[j]!+=flux;j=down[i]!;cj=cp[j]!>1e-9?st[j]!/cp[j]!:0;flux=rate*(ci-cj)*md[i]!;d[i]!-=flux;d[j]!+=flux}let adj=0;for(let i=0;i<this.size;i++){let before=st[i]!,raw=before+d[i]!,next=Q(raw,0,cp[i]!);st[i]=next;adj+=next-before}this.totalStock[k]!+=adj;this.diffusionAdjustment[k]!+=adj}
  step(t:number,drought:DroughtState|null,interval:Interval):void{let added=[0,0,0],phase=t%this.updateStride,bucket=this.regenBuckets[phase]!,elapsed=new Int32Array(bucket.length);for(let j=0;j<bucket.length;j++){let i=bucket[j]!;elapsed[j]=Math.max(1,t-this.regenLast[i]!)}for(let k=0;k<2;k++){let factor=drought&&t<drought.end&&k===drought.kind?(1-drought.suppression):1,st=this.stock[k]!,cp=this.cap[k]!,boost=this.sourceBoost[k]!;for(let j=0;j<bucket.length;j++){let i=bucket[j]!,gap=cp[i]!-st[i]!;if(gap<=1e-9)continue;let inc=gap*(1-Math.exp(-this.regenRate*boost[i]!*factor*elapsed[j]!));if(inc>0){let before=st[i]!;st[i]!+=inc;this.totalStock[k]!+=st[i]!-before;added[k]!+=inc}}this.input[k]!+=added[k]!}
   if(this.enabledByproduct){let st=this.stock[2]!,dec=0,decayRate=(this.cSink&&t<this.cSink.end)?C_DECAY_RATE*this.cSink.factor:C_DECAY_RATE;for(let j=0;j<bucket.length;j++){let i=bucket[j]!,e=elapsed[j]!,before=st[i]!,next=before*Math.exp(-decayRate*e),loss=before-next;if(loss>0){st[i]=next;dec+=loss}}this.totalStock[2]!-=dec;this.decayed[2]!+=dec;if(interval)interval.decayed_c+=dec}
@@ -658,13 +693,13 @@ class S{
   this.rInit=R((c.seed^0xA341316C)>>>0);this.rFood=R((c.seed^0xC8013EA4)>>>0);this.rMove=R((c.seed^0xAD90777D)>>>0);this.rMut=R((c.seed^0x7E95761E)>>>0);this.rCat=R((c.seed^0x9E3779B9)>>>0);
   this.t=0;this.o=[];this.ev=[];this.sn=[];this.long=[];this.longStride=2503;this.eventSn=[];this.L=new Map;this.FAM=new Map;this.nL=1;this.nO=1;this.peakPopulation=0;this.peakPopulationTick=0;this.tb=B();this.last=I();this.cur=I();this.totalUse=[0,0,0];this.totalEnergy=[0,0,0];this.totalReproSupport=[0,0,0,0];this.resources=new RS(this.c);this.drought=null;this.response=null;this.extinctTick=null;this.extinctionContext=null;this.nh=[];this.lineageInterval=new Map();this.lastLineageFlows=null;
   let ri=this.rInit;
-  for(let k=0;k<c.pop;k++){let z=c.div,l=this.newL(0,[]),di=Q((ri()*2-1)*z,-1,1),ha=Q(di*.45+(ri()*2-1)*z*.75,-1,1);let matureAt=FOUNDER_MATURITY_MIN+Math.floor(ri()*FOUNDER_MATURITY_SPAN),id=this.nO++,bu=this.c.enable_byproduct?Q(.04+.28*H01(c.seed,id,17),0,1.5):0,dr=this.c.enable_dormancy?Q(.18+.62*H01(c.seed,id,29),0,1.5):0,to=Q(.05+.25*H01(c.seed,id,41),0,1.5),cu=Q(.05+.25*H01(c.seed,id,53),0,1.5),du=Q(.04+.28*H01(c.seed,id,65),0,1.5);this.o.push({id,parent:null,generation:0,born:0,matureAt,readyAt:matureAt,x:ri()*600,y:ri()*600,en:60,h:ri()*6.28,sp:Q(1.15*(1+(ri()*2-1)*z),.25,4),se:Q(55*(1+(ri()*2-1)*z),10,180),me:Q(.16*(1+(ri()*2-1)*z),.04,.5),rp:Q(92*(1+(ri()*2-1)*z),55,220),di,ha,bu,dr,to,cu,du,activity:'active',dormantSince:null,wakeCount:0,lastWakeTick:null,ma:0,mb:0,mc:0,pc:0,ga:0,gb:0,gc:0,ra:0,rb:0,rc:0,l})}
+  for(let k=0;k<c.pop;k++){let z=c.div,l=this.newL(0,[]),di=Q((ri()*2-1)*z,-1,1),ha=Q(di*.45+(ri()*2-1)*z*.75,-1,1);let matureAt=FOUNDER_MATURITY_MIN+Math.floor(ri()*FOUNDER_MATURITY_SPAN),id=this.nO++,bu=this.c.enable_byproduct?Q(.04+.28*H01(c.seed,id,17),0,1.5):0,dr=this.c.enable_dormancy?Q(.18+.62*H01(c.seed,id,29),0,1.5):0,to=Q(.05+.25*H01(c.seed,id,41),0,1.5),cu=Q(.05+.25*H01(c.seed,id,53),0,1.5),du=Q(.04+.28*H01(c.seed,id,65),0,1.5);this.o.push({id,parent:null,generation:0,born:0,matureAt,readyAt:matureAt,x:ri()*600,y:ri()*600,en:60,h:ri()*6.28,sp:Q(1.15*(1+(ri()*2-1)*z),.25,4),se:Q(55*(1+(ri()*2-1)*z),10,180),me:Q(.16*(1+(ri()*2-1)*z),.04,.5),rp:Q(92*(1+(ri()*2-1)*z),55,220),di,ha,bu,dr,to,cu,du,activity:'active',dormantSince:null,wakeCount:0,lastWakeTick:null,ma:0,mb:0,mc:0,md:0,pc:0,ga:0,gb:0,gc:0,gd:0,ra:0,rb:0,rc:0,l})}
   this.peakPopulation=this.o.length;this.updateLineageHistory();this.updateFamilyHistory();this.log('Universe created');if(!this.study)this.long.push(this.pack());
  }
  newL(p:number,m:string[]):number{let id=this.nL++;this.L.set(id,{id,parent:p,born:this.t,mutations:m,peak:0,last:this.t,established:false});return id}
  resourceKind(){return this.rFood()<this.c.resource_b_fraction?1:0}
  mut(n:string,v:number):[number,boolean]{let[k,lo,hi]=T[n]!,r=this.rMut;if((n==='byproduct_use'&&!this.c.enable_byproduct)||(n==='dormancy_response'&&!this.c.enable_dormancy))return[v,false];if(r()>=this.c.mr)return[v,false];this.cur.mutation_attempts++;let additive=n==='diet'||n==='habitat'||n==='byproduct_use'||n==='dormancy_response'||n==='detritus_use',p=additive?v+(r()*2-1)*this.c.ms*1.15:v*(1+(r()*2-1)*this.c.ms);if(p<lo)this.tb[n]![0]!++;if(p>hi)this.tb[n]![1]!++;let nv=Q(p,lo,hi),changed=Math.abs(nv-v)>1e-12;if(changed)this.cur.effective_mutations++;return[nv,changed]}
- child(o:Organism):Organism{let q:Record<string,number>={},m:string[]=[];for(let n in T){if((n==='byproduct_use'&&!this.c.enable_byproduct)||(n==='dormancy_response'&&!this.c.enable_dormancy)){q[T[n]![0]!]=(o[T[n]![0]!] as number)||0;continue}let[v,x]=this.mut(n,o[T[n]![0]!] as number);q[T[n]![0]!]=v;if(x)m.push(n)}let ang=this.rMove()*6.28,dist=2+18*Math.sqrt(this.rMove()),matureAt=this.t+OFFSPRING_MATURITY_MIN+Math.floor(this.rMove()*OFFSPRING_MATURITY_SPAN);return{id:this.nO++,parent:o.id,generation:(o.generation||0)+1,born:this.t,matureAt,readyAt:matureAt,x:(o.x+Math.cos(ang)*dist+600)%600,y:(o.y+Math.sin(ang)*dist+600)%600,en:o.en*.92,h:this.rMove()*6.28,sp:q.sp!,se:q.se!,me:q.me!,rp:q.rp!,di:q.di!,ha:q.ha!,bu:q.bu||0,dr:q.dr||0,to:q.to!,cu:q.cu!,du:q.du||0,activity:'active',dormantSince:null,wakeCount:0,lastWakeTick:null,ma:0,mb:0,mc:0,pc:0,ga:0,gb:0,gc:0,ra:0,rb:0,rc:0,l:m.length?this.newL(o.l,m):o.l}}
+ child(o:Organism):Organism{let q:Record<string,number>={},m:string[]=[];for(let n in T){if((n==='byproduct_use'&&!this.c.enable_byproduct)||(n==='dormancy_response'&&!this.c.enable_dormancy)){q[T[n]![0]!]=(o[T[n]![0]!] as number)||0;continue}let[v,x]=this.mut(n,o[T[n]![0]!] as number);q[T[n]![0]!]=v;if(x)m.push(n)}let ang=this.rMove()*6.28,dist=2+18*Math.sqrt(this.rMove()),matureAt=this.t+OFFSPRING_MATURITY_MIN+Math.floor(this.rMove()*OFFSPRING_MATURITY_SPAN);return{id:this.nO++,parent:o.id,generation:(o.generation||0)+1,born:this.t,matureAt,readyAt:matureAt,x:(o.x+Math.cos(ang)*dist+600)%600,y:(o.y+Math.sin(ang)*dist+600)%600,en:o.en*.92,h:this.rMove()*6.28,sp:q.sp!,se:q.se!,me:q.me!,rp:q.rp!,di:q.di!,ha:q.ha!,bu:q.bu||0,dr:q.dr||0,to:q.to!,cu:q.cu!,du:q.du||0,activity:'active',dormantSince:null,wakeCount:0,lastWakeTick:null,ma:0,mb:0,mc:0,md:0,pc:0,ga:0,gb:0,gc:0,gd:0,ra:0,rb:0,rc:0,l:m.length?this.newL(o.l,m):o.l}}
  reproSupport(o:Organism):number{let t=(o.ra||0)+(o.rb||0)+(o.rc||0);if(t<=0)return 2;let c=(o.rc||0)/t;if(c>=.45)return 3;let p=(o.ra||0)+(o.rb||0),a=p?o.ra/p:.5;return a>=.65?0:a<=.35?1:2}
  catalyst(type:string,src:string):void{
   this.eventSn.push({...this.pack(),phase:'before_catalyst',source:src,catalyst:type});let pre=this.o.length,removed:number[];
@@ -677,19 +712,19 @@ class S{
  localOpportunity(o:Organism):number{return this.resources.opportunity(o)}
  dormancyEntry(o:Organism):boolean{if(!this.c.enable_dormancy||o.activity==='dormant')return false;let r=Q((o.dr||0)/1.5,0,1),energy=o.en/Math.max(55,o.rp),opp=this.localOpportunity(o),eThresh=.34+.20*r,oThresh=.10+.16*r;return energy<eThresh&&opp<oThresh}
  dormancyWake(o:Organism):boolean{let r=Q((o.dr||0)/1.5,0,1),opp=this.localOpportunity(o),wake=.22+.18*r;return opp>wake}
- lineageCredit(l:number,d:{consumedA?:number;consumedB?:number;consumedC?:number;energyA?:number;energyB?:number;energyC?:number;producedC?:number;births?:number;deaths?:number;wasteProduced?:number;wasteRemoved?:number;burdenEnergy?:number;cleanupEnergy?:number;cleanupExec?:number}){
+ lineageCredit(l:number,d:{consumedA?:number;consumedB?:number;consumedC?:number;energyA?:number;energyB?:number;energyC?:number;producedC?:number;births?:number;deaths?:number;wasteProduced?:number;wasteRemoved?:number;burdenEnergy?:number;cleanupEnergy?:number;cleanupExec?:number;detritusDeposited?:number;detritusConsumed?:number;energyDetritus?:number;detritusExec?:number}){
   let m=this.lineageInterval;if(!m)m=this.lineageInterval=new Map();
   let f=m.get(l);
   if(!f){f={consumedA:0,consumedB:0,consumedC:0,energyA:0,energyB:0,energyC:0,producedC:0,births:0,deaths:0,wasteProduced:0,wasteRemoved:0,burdenEnergy:0,cleanupEnergy:0,cleanupExec:0,detritusDeposited:0,detritusConsumed:0,energyDetritus:0,detritusExec:0};m.set(l,f)}
   if((f as any).wasteProduced===undefined){f.wasteProduced=0;f.wasteRemoved=0;f.burdenEnergy=0;f.cleanupEnergy=0;f.cleanupExec=0}
-  f.consumedA+=d.consumedA||0;f.consumedB+=d.consumedB||0;f.consumedC+=d.consumedC||0;f.energyA+=d.energyA||0;f.energyB+=d.energyB||0;f.energyC+=d.energyC||0;f.producedC+=d.producedC||0;f.births+=d.births||0;f.deaths+=d.deaths||0;f.wasteProduced+=d.wasteProduced||0;f.wasteRemoved+=d.wasteRemoved||0;f.burdenEnergy+=d.burdenEnergy||0;f.cleanupEnergy+=d.cleanupEnergy||0;f.cleanupExec+=d.cleanupExec||0;
+  f.consumedA+=d.consumedA||0;f.consumedB+=d.consumedB||0;f.consumedC+=d.consumedC||0;f.energyA+=d.energyA||0;f.energyB+=d.energyB||0;f.energyC+=d.energyC||0;f.producedC+=d.producedC||0;f.births+=d.births||0;f.deaths+=d.deaths||0;f.wasteProduced+=d.wasteProduced||0;f.wasteRemoved+=d.wasteRemoved||0;f.burdenEnergy+=d.burdenEnergy||0;f.cleanupEnergy+=d.cleanupEnergy||0;f.cleanupExec+=d.cleanupExec||0;f.detritusDeposited+=d.detritusDeposited||0;f.detritusConsumed+=d.detritusConsumed||0;f.energyDetritus+=d.energyDetritus||0;f.detritusExec+=d.detritusExec||0;
  }
  /** Single body-return rule (AC1): every supported biological death credits
   * the lineage AND deposits deterministic detritus at the resolved death
   * location. All mortality funnels through energy depletion, so no
   * cause-specific semantics exist; physical-removal exceptions: none
   * (no killer pathway removes bodies — catalysts only scale resources). */
- recordDeath(o:Organism):void{this.cur.deaths++;this.lineageCredit(o.l,{deaths:1});if(this.resources.detritusDepositionEnabled)this.resources.detritus.depositPending(o.x,o.y,detritusBodyProxy(o),this.cur)}
+ recordDeath(o:Organism):void{this.cur.deaths++;this.lineageCredit(o.l,{deaths:1});if(this.resources.detritusDepositionEnabled){let body=detritusBodyProxy(o);this.lineageCredit(o.l,{detritusDeposited:body});this.resources.detritus.depositPending(o.x,o.y,body,this.cur)}}
  readIntervalFlows(stride:Interval):IntervalFlowFacts{
   let lineages:{lineageId:number;netMembers:number;consumedA:number;consumedB:number;consumedC:number;energyA:number;energyB:number;energyC:number;producedC:number;births:number;deaths:number;wasteProduced:number;wasteRemoved:number;burdenEnergy:number;cleanupEnergy:number;cleanupExec:number;detritusDeposited:number;detritusConsumed:number;energyDetritus:number;detritusExec:number}[]=[];
   let t={netMembers:0,consumedA:0,consumedB:0,consumedC:0,energyA:0,energyB:0,energyC:0,producedC:0,births:0,deaths:0,wasteProduced:0,wasteRemoved:0,burdenEnergy:0,cleanupEnergy:0,cleanupExec:0,detritusDeposited:0,detritusConsumed:0,energyDetritus:0,detritusMineralized:0,mineralizedA:0,mineralizedB:0,detritusExec:0};
@@ -708,10 +743,10 @@ class S{
   for(const o of this.o){
    let f=acc.get(o.l);
    if(!f){f={lineageId:o.l,members:0,consumedA:0,consumedB:0,consumedC:0,consumedDetritus:0,energyA:0,energyB:0,energyC:0,energyDetritus:0,producedC:0};acc.set(o.l,f)}
-   f.members++;f.consumedA+=o.ma;f.consumedB+=o.mb;f.consumedC+=o.mc||0;f.energyA+=o.ga;f.energyB+=o.gb;f.energyC+=o.gc||0;f.producedC+=(o.pc||0);
+   f.members++;f.consumedA+=o.ma;f.consumedB+=o.mb;f.consumedC+=o.mc||0;f.consumedDetritus+=o.md||0;f.energyA+=o.ga;f.energyB+=o.gb;f.energyC+=o.gc||0;f.energyDetritus+=o.gd||0;f.producedC+=(o.pc||0);
   }
   let lineages=[...acc.values()],t={members:0,consumedA:0,consumedB:0,consumedC:0,consumedDetritus:0,energyA:0,energyB:0,energyC:0,energyDetritus:0,producedC:0};
-  for(const f of lineages){t.members+=f.members;t.consumedA+=f.consumedA;t.consumedB+=f.consumedB;t.consumedC+=f.consumedC;t.energyA+=f.energyA;t.energyB+=f.energyB;t.energyC+=f.energyC;t.producedC+=f.producedC}
+  for(const f of lineages){t.members+=f.members;t.consumedA+=f.consumedA;t.consumedB+=f.consumedB;t.consumedC+=f.consumedC;t.consumedDetritus+=f.consumedDetritus;t.energyA+=f.energyA;t.energyB+=f.energyB;t.energyC+=f.energyC;t.energyDetritus+=f.energyDetritus;t.producedC+=f.producedC}
   return{tick:this.t,lineages,totals:t};
  }
  observerSnapshot(m:any,interval:Interval):any{let roles:Record<string,number>={},cross=0,dormClades:Record<string,number>={},cladeTotals:Record<string,number>={};for(const o of this.o){let role=metabolicRole(o);roles[role]=(roles[role]||0)+1;if(role==='byproduct_scavenger')cross++;let c=this.cladeRoot(o.l);cladeTotals[c]=(cladeTotals[c]||0)+1;if(o.activity==='dormant')dormClades[c]=(dormClades[c]||0)+1}let totalE=(m.resource_energy.a||0)+(m.resource_energy.b||0)+(m.resource_energy.c||0),fra:Record<string,number>={};for(const [c,n] of Object.entries(cladeTotals))fra[c]=(dormClades[c]||0)/n;let dominant=Object.entries(roles).sort((a,b)=>b[1]-a[1])[0]?.[0]||'unresolved';return{tick:this.t,population:m.population,starting_population:this.c.pop,active_population:m.active_population,dormant_population:m.dormant_population,dormant_fraction:m.dormant_fraction,c_energy_share:totalE?m.resource_energy.c/totalE:0,crossfeeder_fraction:m.population?cross/m.population:0,partitioned:m.niche_structure.persistent_partitioning,dominant_role:dominant,roles,wake_events:interval.wakes||0,wake_clades:{...(interval.wake_clades||{})},dormant_clade_fraction:fra,clade_totals:cladeTotals,waste_fraction:(m.waste?m.waste.fraction||0:0),waste_exposed_share:(()=>{let n=0;for(const o of this.o){if(this.resources.waste.fractionAt(o.x,o.y)>=WASTE_HALF_SAT)n++}return this.o.length?n/this.o.length:0})(),tolerance_mean:(m.traits&&m.traits.tolerance?m.traits.tolerance.mean||0:0),cleanup_mean:(m.traits&&m.traits.cleanup?m.traits.cleanup.mean||0:0),interval:{producedC:interval.produced_c||0,consumedA:interval.consumed_a||0,consumedB:interval.consumed_b||0,consumedC:interval.consumed_c||0,energyA:interval.energy_a||0,energyB:interval.energy_b||0,energyC:interval.energy_c||0,births:interval.births||0,deaths:interval.deaths||0,wasteProduced:interval.produced_w||0,wasteRemoved:interval.removed_w||0,wasteDecayed:interval.decayed_w||0,burdenEnergy:interval.burden_energy||0,cleanupEnergy:interval.cleanup_energy||0,cleanupExec:interval.cleanup_exec||0,detritusDeposited:interval.detritus_deposited||0,detritusConsumed:interval.detritus_consumed||0,energyDetritus:interval.energy_detritus||0,detritusMineralized:interval.detritus_mineralized||0,detritusExec:interval.detritus_exec||0},flows:this.flowFacts(),intervalFlows:this.lastLineageFlows||EMPTY_INTERVAL_FLOWS}}
@@ -772,7 +807,14 @@ class S{
     if(removed>0){this.lineageCredit(o.l,{wasteRemoved:removed,burdenEnergy:burden*this.c.press,cleanupEnergy:cleanCost*this.c.press,cleanupExec:1})}
     else this.lineageCredit(o.l,{burdenEnergy:burden*this.c.press,cleanupEnergy:cleanCost*this.c.press});
    }}
-   let eat=this.resources.consume(o,this.cur);if(eat){o.en+=eat.gain;/* Frozen counters (parity-protected): ma/mb/mc count consumption EVENTS,
+   // Foundation Slice 2 tradeoff: maintaining detritus-use capability costs
+   // standing energy whenever du>0 — even with no detritus around (AC10's
+   // teeth). No interval counter: the matched-assay population effect is
+   // the evidence, not an energy ledger.
+   if((o.du||0)>0)o.en-=DU_STANDING*(o.du||0)*this.c.press;
+   let eat=this.resources.consume(o,this.cur);
+   if(eat&&'detritus' in eat){o.en+=eat.gain;o.md++;o.gd+=eat.gain;o.en-=eat.activeCost*this.c.press;this.cur.energy_detritus+=eat.gain;this.lineageCredit(o.l,{detritusConsumed:eat.amount,energyDetritus:eat.gain,detritusExec:1})}
+   else if(eat){o.en+=eat.gain;/* Frozen counters (parity-protected): ma/mb/mc count consumption EVENTS,
    not mass. Only read by lineage flow attribution, which labels them as
    counts. Interval deltas carry true mass. Do not 'fix' without an
    engine-version change. */
