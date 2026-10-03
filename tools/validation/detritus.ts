@@ -493,7 +493,5 @@ testNoOpportunityControl();
 testFrequencyCohort();
 testSeededPersistence();
 testScaleThroughput();
-// testSurveyArtifact(); // DEFERRED (DESIGN TENSION): no 0.25 artifact was
-// retained — the survey was never dispatched. Gate stays in-file for the
-// rework path; the suite must stay green without it meanwhile.
+testSurveyArtifact();
 console.log(`detritus validation: PASS (engine ${ENGINE_VERSION})`);
