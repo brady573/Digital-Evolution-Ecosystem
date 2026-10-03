@@ -28,6 +28,30 @@ async function tick(page:Page){
   return Number(text.replace(/[^0-9]/g,""));
 }
 
+/**
+ * Wait until the world has genuinely stopped moving.
+ *
+ * Clicking Pause stops the requestAnimationFrame scheduler on the next effect
+ * teardown, which is not synchronous with the click: one further advance can
+ * still be in flight, and the HUD it lands on repaints a frame later. Anything
+ * that then computes `target - tick(page)` from that lagging read sends one tick
+ * too many and lands one tick past its target.
+ *
+ * Two consecutive identical reads is the smallest honest condition: a moving
+ * world cannot produce the same tick twice at this cadence.
+ */
+async function settlePaused(page:Page,timeoutMs=10_000){
+  const deadline=Date.now()+timeoutMs;
+  let previous=await tick(page);
+  while(Date.now()<deadline){
+    await page.waitForTimeout(120);
+    const current=await tick(page);
+    if(current===previous)return current;
+    previous=current;
+  }
+  throw new Error(`world never settled after Pause (last tick ${previous})`);
+}
+
 async function waitForTickOrDecision(page:Page,target:number,timeoutMs=120_000){
   const deadline=Date.now()+timeoutMs;
   while(Date.now()<deadline){
@@ -88,6 +112,7 @@ async function main(){
     await page.getByRole("button",{name:"Play"}).click();
     await page.waitForTimeout(900);
     await page.getByRole("button",{name:"Pause"}).click();
+    await settlePaused(page);
     const advanced=await tick(page);
     assert.ok(advanced>0,"worker-owned simulation advances");
 
@@ -490,7 +515,10 @@ async function main(){
 
     await page.getByRole("button",{name:"Save"}).click();
     await page.getByText(/Saved tick/).waitFor();
-    const saved=await tick(page);
+    // `let`, not `const`: the F3a block below advances the world while proving
+    // playback intent survives a rejected load, so the exact-tick baseline is
+    // re-taken at a known-paused moment once that block returns to pause.
+    let saved=await tick(page);
     assert.ok(saved>=advanced,"checkpoint saved after runtime activity");
 
     await page.reload({waitUntil:"networkidle"});
@@ -499,6 +527,134 @@ async function main(){
     await page.getByText("Checkpoint restored").waitFor();
     await page.waitForTimeout(150);
     assert.equal(await tick(page),saved,"IndexedDB checkpoint restores exact tick");
+
+    // AC2 — a FAILED write is reported as a failure, and destroys nothing.
+    //
+    // Both halves are asserted here because both are observable in a browser:
+    // the truthful sentence, and the survival of the confirmed save across a
+    // reload. The Node suite proves the same survival through the transaction
+    // semantics directly (`testFailedOverwritePreservesPriorSave`).
+    let confirmedTick=0;
+    // Page-side scripts as STRINGS: esbuild's `__name` helper does not exist in the
+    // browser, so any page.evaluate given a compiled function that declares a named
+    // function fails with `ReferenceError: __name is not defined` before it runs.
+    const poisonIndexedDbPut=`(()=>{
+      const proto=IDBObjectStore.prototype;
+      window.__deeOriginalPut=proto.put;
+      proto.put=function(){throw new DOMException("The quota has been exceeded.","QuotaExceededError")};
+      window.__deeRestorePut=function(){proto.put=window.__deeOriginalPut;window.__deeRestorePut=null};
+      return true;
+    })()`;
+    const restoreIndexedDbPut=`(()=>{if(window.__deeRestorePut)window.__deeRestorePut();return true})()`;
+    const corruptCurrentSave=`(()=>new Promise((resolve,reject)=>{
+      const open=indexedDB.open("digital-evolution-ecosystem");
+      open.onerror=()=>reject(open.error);
+      open.onsuccess=()=>{
+        const db=open.result;
+        const tx=db.transaction("universes","readwrite");
+        tx.objectStore("universes").put({id:"current",savedAt:new Date().toISOString(),tick:1,engineVersion:"0.0.0",checkpoint:{not:"a checkpoint"}});
+        tx.oncomplete=()=>{db.close();resolve(true)};
+        tx.onerror=()=>{db.close();reject(tx.error)};
+        tx.onabort=()=>{db.close();reject(tx.error)};
+      };
+    }))()`;
+    const failedOverwriteIsReportedTruthfully=async()=>{
+      await page.getByRole("button",{name:"Save"}).click();
+      await page.getByText(/Saved tick/).waitFor();
+      confirmedTick=await tick(page);
+      // Force a real write failure at the storage engine's own boundary.
+      //
+      // Passed as a STRING, not a function: esbuild injects a `__name` helper into
+      // named function expressions it compiles, and that helper does not exist
+      // inside the page, so a function form throws `ReferenceError: __name is not
+      // defined` before reaching the browser. A string is evaluated as-is.
+      //
+      // A value containing a function is NOT the trigger: `put` throws
+      // DataCloneError SYNCHRONOUSLY on one, so such a record is never stored and
+      // cannot make anything fail. Instead the engine itself refuses the write —
+      // the shape a quota-exhausted device produces — so the app's own code path
+      // meets a genuine DOMException without the repository being stubbed.
+      await page.evaluate(poisonIndexedDbPut);
+      try{
+        await page.getByRole("button",{name:"Save"}).click();
+        await page.getByText(/Could not save/).waitFor({timeout:15_000});
+        assert.doesNotMatch(
+          await page.locator(".status").innerText(),
+          /QuotaExceededError|quota has been exceeded|DOMException/i,
+          "a failed write is reported in player prose, not as the raw DOM exception",
+        );
+      }finally{
+        await page.evaluate(restoreIndexedDbPut);
+      }
+      // And the previously confirmed save is still loadable — the failed write
+      // destroyed nothing.
+      await page.reload({waitUntil:"networkidle"});
+      await page.getByLabel("Evolution world").waitFor();
+      await page.getByRole("button",{name:"Resume"}).click();
+      await page.getByText("Checkpoint restored").waitFor({timeout:15_000});
+      await page.waitForTimeout(150);
+      assert.equal(await tick(page),confirmedTick,"a failed write leaves the previously confirmed save loadable");
+    };
+
+    // F3a — a rejected load must leave the live world alone and put playback
+    // back (AC7/AC9), against real IndexedDB and real app ordering — the only
+    // place these are observable, since App is not importable in Node.
+    //
+    // Precondition matters here: the suite arrives PAUSED (the speed gates above
+    // end on Pause, and the reload at :487 does not resume). Attempting a load
+    // from a paused world has no prior playback intent to restore, so AC9 would
+    // pass vacuously. So this starts playback, proves the load did not steal it,
+    // then pauses again — and the pause happens AFTER the tick is sampled, so
+    // the exact-tick baseline the later assertions compare against is re-taken
+    // at a known-paused moment.
+    const rejectedLoadPreservesWorld=async()=>{
+    // Corrupt the stored record through the page's own database, then attempt a
+    // load while playing. The player must get a truthful sentence, the world
+    // must stay usable, and playback must resume by itself.
+    await page.evaluate(corruptCurrentSave);
+    // Start playback FIRST: AC9 is about restoring a prior intent to RUN, which is
+    // only observable from a running world.
+    await page.getByRole("button",{name:"Play"}).click();
+    await page.waitForTimeout(400);
+    const beforeRejected=await tick(page);
+    await page.getByRole("button",{name:"Resume"}).click();
+    await page.getByText(/Restore failed/).waitFor({timeout:15_000});
+    assert.doesNotMatch(
+      await page.locator(".status").innerText(),
+      /not a checkpoint|undefined|\[object/i,
+      "the rejected-load message is player prose, not raw record text",
+    );
+    // The world is still usable: it is the pre-load world, still on screen.
+    assert.ok(await page.getByLabel("Evolution world").isVisible(),"the world remains usable after a rejected load");
+    // AC9: the app paused only to attempt the load, so it must resume for itself.
+    await page.waitForTimeout(2_500);
+    const afterRejected=await tick(page);
+    assert.ok(afterRejected>beforeRejected,`playback intent is restored after an ordinary rejected load (${beforeRejected} -> ${afterRejected})`);
+    // Resumed playback may have reached a decision. That is ordinary and
+    // expected — and a pending decision hides the secondary chrome, including
+    // the play/pause control — so clear it before returning to a paused world,
+    // exactly as the world-chrome section below does.
+    const interrupted=page.getByTestId("decision-sheet");
+    if(await interrupted.count()){
+      await interrupted.getByText("Keep watching").click();
+      await interrupted.waitFor({state:"detached",timeout:15_000});
+    }
+    // Back to paused for the exact-tick assertions that follow, sampled here so
+    // the baseline is taken at a known-paused moment.
+    if(await page.getByRole("button",{name:"Pause"}).count())await page.getByRole("button",{name:"Pause"}).click();
+    await settlePaused(page);
+    await page.waitForTimeout(300);
+    };
+
+    // Put a loadable save back so the rest of the suite has a slot to resume
+    // from: the corruption above made the slot unrestorable on purpose.
+    await rejectedLoadPreservesWorld();
+    await page.getByRole("button",{name:"Save"}).click();
+    await page.getByText(/Saved tick/).waitFor();
+    saved=await tick(page);
+    await failedOverwriteIsReportedTruthfully();
+    // failedOverwrite reloads the page and resumes, landing back on `saved`.
+    saved=await tick(page);
 
     // World view: minimap + zoom controls (uniform zoom into the same world).
     // A pending decision yields the overlay by design (Lane A: secondary World
@@ -749,6 +905,9 @@ async function main(){
     assert.match(await compactAfterFirstAdvance.innerText(),/observing/,
       "null retained detail also leaves live observation visible");
     await decisionPage.getByRole("button",{name:"Pause"}).click();
+    // The HUD can still be a frame behind the scheduler's teardown, so wait for
+    // the world to actually stop before computing a bounded advance from it.
+    await settlePaused(decisionPage);
 
     // Reach real T+25,000 through ordinary bounded runtime advances, without
     // opening History/Experiments or refreshing retained detail in observation.
@@ -820,6 +979,7 @@ async function main(){
     await decisionPage.waitForTimeout(900);
     assert.ok(await tick(decisionPage)>catalystTick,"explicit play resumes after a catalyst choice");
     await decisionPage.getByRole("button",{name:"Pause"}).click();
+    await settlePaused(decisionPage);
     await decisionPage.getByRole("button",{name:"History"}).click();
     await decisionPage.getByText(/World catalyst offered at tick/).waitFor();
     // A deliberate manual intervention remains available and clears the old
@@ -981,6 +1141,7 @@ async function runLandscapeChecks(context:import("playwright").BrowserContext){
   await page.getByRole("button",{name:"Play"}).click();
   await page.waitForTimeout(1200);
   await page.getByRole("button",{name:"Pause"}).click();
+  await settlePaused(page);
   const world=page.getByLabel("Evolution world");
 
   // Ink statistics over the drawn canvas: a mean/contrast pair that would
@@ -1140,6 +1301,7 @@ async function runLandscapeChecks(context:import("playwright").BrowserContext){
   await mobile.getByRole("button",{name:"Play"}).click();
   await mobile.waitForTimeout(1000);
   await mobile.getByRole("button",{name:"Pause"}).click();
+  await settlePaused(mobile);
   const mWorld=mobile.getByLabel("Evolution world");
   const mBox=await mWorld.boundingBox();
   const mvp=mobile.viewportSize()??{width:390,height:844};

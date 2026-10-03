@@ -1,13 +1,17 @@
 import type {
+  CheckpointRejectionReason,
   EngineConfig,
   EvidenceExport,
   PresentationFrame,
   RenderSnapshot,
   RuntimeCommand,
+  RuntimeRejectionKind,
   RuntimeResponse,
   SupportedUniverseCheckpoint,
   UniverseCheckpoint,
 } from "@digital-evolution/contracts";
+// A VALUE import: rehydrateRejection reconstructs the class the validator throws.
+import { CheckpointRejectionError } from "@digital-evolution/contracts";
 
 /**
  * The slice of Worker this client actually uses.
@@ -75,6 +79,49 @@ const LOAD_TIMEOUT_MS = 10_000;
 /** Bounded lifetime for an ordinary request. Chosen far above any observed
  *  worker turnaround: a stalled worker should fail visibly, not linger. */
 const REQUEST_TIMEOUT_MS = 30_000;
+
+/**
+ * F3a: a runtime command failure that is not a checkpoint rejection.
+ *
+ * `kind` is the classification the worker sent. `playerMessage` is written for
+ * the person who just lost their world, not for the log — the raw message stays
+ * on `message` for diagnostics.
+ */
+export class RuntimeCommandRejection extends Error {
+  readonly kind:RuntimeRejectionKind;
+  readonly playerMessage:string;
+  constructor(kind:RuntimeRejectionKind,message:string,playerMessage:string){
+    super(message);
+    this.name="RuntimeCommandRejection";
+    this.kind=kind;
+    this.playerMessage=playerMessage;
+  }
+}
+
+const REJECTION_PLAYER_MESSAGES:Readonly<Record<RuntimeRejectionKind,string>>={
+  "checkpoint-rejected":"This saved universe cannot be read by this version of the Explorer.",
+  "engine-mismatch":"This saved universe comes from a different version of the engine, so this build cannot restore it.",
+  "unsupported-command":"The Explorer asked for something this build does not support.",
+  "internal":"Something went wrong handling that request. Your current world is unchanged.",
+};
+
+/**
+ * Rebuild the typed rejection the session classified.
+ *
+ * A `checkpoint-rejected` carrying a reason becomes a real
+ * {@link CheckpointRejectionError}, so the existing player-message branch works
+ * across the worker boundary. Anything else becomes a
+ * {@link RuntimeCommandRejection}. A pre-F3a worker sends no classification at
+ * all; that degrades to `internal` rather than throwing, because an absent
+ * discriminator is not a reason to lose the failure.
+ */
+function rehydrateRejection(response:{readonly message:string;readonly rejectionKind?:RuntimeRejectionKind;readonly rejectionReason?:CheckpointRejectionReason;readonly rejectionField?:string}):Error{
+  const kind=response.rejectionKind??"internal";
+  if(kind==="checkpoint-rejected"&&response.rejectionReason){
+    return new CheckpointRejectionError(response.rejectionField??"checkpoint",response.rejectionReason,response.message);
+  }
+  return new RuntimeCommandRejection(kind,response.message,REJECTION_PLAYER_MESSAGES[kind]);
+}
 
 /** Best-effort description of a transport failure event, for the log line. */
 const describe=(event:unknown):string=>{
@@ -325,7 +372,11 @@ export class WorkerRuntimeClient implements RuntimeClient {
       return;
     }
     if(response.type==="ERROR"){
-      const failure=new Error(response.message);
+      // F3a: rebuild the typed error the worker classified, instead of flattening
+      // every failure to a bare Error. Without this the caller cannot tell "this
+      // build cannot restore that save" from an internal fault, and the only
+      // remaining option is matching message text.
+      const failure=rehydrateRejection(response);
       // Attribute by identity first. A load is tracked in #pendingLoad, not
       // #pending, and a failed restore's error always carries the load's own
       // requestId now that the field is required. Looking only in #pending would

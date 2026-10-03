@@ -277,6 +277,24 @@ export const UNITS: readonly ValidationUnit[] = [
       "Session lifecycle, forking, and pause gating behave exactly as specified; every named checkpoint migration rule is well-formed, hazard-classified and still matches the code that absorbs it; a save written before entity references carried their kind restores with the same reference count and no guessed namespace, and the current schema refuses that same bare-reference shape; a checkpoint from the maintained save path is accepted; each of the six rejection conditions refuses with the field named; a suppressed major-catalyst cooldown stays suppressed across restore from both the current schema and a real 0.3 save, while a 0.2 save predating the field migrates to the historically correct value; a source-schema preflight on the raw payload accepts each evidenced historical omission for its own schema and refuses every field its writer was required to emit, so a 0.3 save preserves its persisted lastDecisionTick and cannot omit it and a 0.2 save reconstructs the historically absent tick; present wrong-typed, malformed, non-finite, or self-contradicting values are refused at every supported schema across the encoded simulation with its resource, waste, organism, interval and identity state, the observer's detectors, history records and eras, entity references, and decision records, so named historical absence cannot excuse an invalid checked value; a preflight refusal leaves an existing running session unchanged; a preflighted source is then canonicalised into ONE restore representation and that representation is held to the current non-simulation contract before any state becomes live, with the candidate/validated distinction enforced by the compiler rather than by a runtime call; and the Owner-facing supported-save boundary document is generated rather than transcribed, carrying the live current schema version, no supported-version literal in code that could go stale behind it, the two independent schema and engine-version gates named separately, and the canonical ordering the implementation actually performs. export carries a versioned provenance block; dirty build → dirty; undeterminable revision → unknown, never clean.",
   },
   {
+    id: "persistence-integrity",
+    title: "Save envelope and storage failure integrity",
+    script: "test:persistence-integrity",
+    cls: "deterministic",
+    enforcement: "blocking",
+    mergeGate: true,
+    domains: withApparatus("contracts", "sim-runtime", "explorer"),
+    needs: [],
+    parallelSafe: true,
+    // Measured on the dev worktree, not estimated. The suite's own work is
+    // ~40ms; the rest is tsx startup plus resolving the Explorer's persistence
+    // and phenotype modules. ci-sim-c was 184s, so this is far from the
+    // critical path.
+    baselineSeconds: 11,
+    claim:
+      "A slot read returns the checkpoint and its presentation adjuncts from one record read in one transaction, so they cannot describe different record generations; a legacy unversioned record still loads and is never rewritten by loading; an absent slot is distinct from an unreadable one, and a truncated, malformed, or newer-than-this-build record is a typed failure rather than a silent 'no save' or a raw storage exception; a save reports success only after its transaction commits; and a failed overwrite leaves the previously committed save and its adjuncts intact and readable.",
+  },
+  {
     id: "runtime-boundary",
     title: "Runtime command and transport boundary",
     script: "test:runtime-boundary",
@@ -788,7 +806,11 @@ export const GROUPS: readonly ValidationGroup[] = [
     // gate while including it in `verify:fast` (or the reverse) is precisely the
     // local-versus-CI drift this manifest exists to prevent. `ci-fast` is
     // asserted to hold exactly this set.
-    unitIds: ["typecheck", "migration", "validation-arch", "decisions"],
+    // `persistence-integrity` is here for the same reason `decisions` is: it is
+    // Class B, but it is a sub-11s contract check whose failures are otherwise
+    // only visible hours later in the simulation shards. CI's fast gate is
+    // asserted to hold exactly this set, so both lists move together.
+    unitIds: ["typecheck", "migration", "validation-arch", "decisions", "persistence-integrity"],
     ci: false,
   },
   {
@@ -866,7 +888,7 @@ export const GROUPS: readonly ValidationGroup[] = [
   {
     id: "ci-fast",
     title: "Fast gate",
-    unitIds: ["typecheck", "validation-arch", "migration", "decisions"],
+    unitIds: ["typecheck", "validation-arch", "migration", "decisions", "persistence-integrity"],
     ci: true,
   },
   // Balanced from measured per-unit costs, not from intuition. The previous

@@ -14,9 +14,9 @@
  */
 import assert from "node:assert/strict";
 import type { EngineConfig, PresentationFrame, RenderSnapshot, WorldId, WorldLiveFrame } from "@digital-evolution/contracts";
-import { ENVIRONMENT_PERIOD_TICKS, READ_MODEL_VERSION } from "@digital-evolution/contracts";
+import { CheckpointRejectionError, ENVIRONMENT_PERIOD_TICKS, READ_MODEL_VERSION } from "@digital-evolution/contracts";
 import * as runtimeRoot from "@digital-evolution/sim-runtime";
-import { UniverseSession } from "../../packages/sim-runtime/src/session.ts";
+import { UniverseSession, __setRestorePrepareHookForTests } from "../../packages/sim-runtime/src/session.ts";
 import { buildCatalog, buildEnvironment, buildLive, buildPresentation, catalogMembershipSignature, interpretationPayloadKey, resolveCatalogEntry } from "../../packages/sim-runtime/src/presentation.ts";
 import {
   MAX_EVENT_SCAN_TICKS,
@@ -1552,6 +1552,247 @@ function testDetailRequestReturnsCurrentRetainedDetailWithoutAdvancing() {
   assert.ok(!responses.some((r) => r.type === "PRESENTATION"), "a pure detail query emits no live frames");
 }
 
+// --- F3a: restore atomicity -------------------------------------------------
+
+/**
+ * A checkpoint that passes the A3.3 source preflight and the engine-version
+ * guard, but that the A3.4 canonical validator rejects afterwards.
+ *
+ * Built the way checkpoint-historical-boundary.ts builds its own canonical
+ * failures — by corrupting the analysis layer — so this suite borrows a proven
+ * rejection shape rather than inventing one. What is new here is not the
+ * rejection: it is everything the session must NOT have touched when it happens.
+ */
+const lateRejectedCheckpoint = (base: unknown) => {
+  const broken = JSON.parse(JSON.stringify(base)) as { analysis: { dep?: unknown } };
+  broken.analysis.dep = "not a detector state";
+  return broken as never;
+};
+
+/**
+ * AC5/AC6/AC7: a restore that fails after the preflight must leave the live
+ * session exactly as it was — same world identity, same checkpoint, same
+ * deterministic continuation.
+ *
+ * Before the prepare/commit split, `restore()` minted a new `worldId` before it
+ * decoded anything, so a rejection here left the session advertising a brand-new
+ * displayed world while still holding the old simulation. `worldId` is what
+ * presentation identity, the store's world gate, and phenotype anchor scoping all
+ * key on, so that desync is the bug this pins shut.
+ */
+function testRejectedRestoreLeavesSessionUntouched() {
+  const session = liveSession();
+  session.advance(20);
+  const beforeId = session.worldId;
+  const beforeCheckpoint = session.checkpoint();
+  assert.throws(
+    () => session.restore(lateRejectedCheckpoint(beforeCheckpoint)),
+    (error: unknown) => error instanceof CheckpointRejectionError && error.field === "analysis.dep",
+    "the fixture is refused by canonical validation, not by the preflight (proved by field, not assumed)",
+  );
+  assert.equal(session.worldId, beforeId, "a refused restore never mints a new displayed-world identity");
+  assert.deepEqual(session.checkpoint(), beforeCheckpoint, "the live checkpoint is byte-identical after a refusal");
+
+  // Deterministic continuation: a refused restore leaves the session able to
+  // continue exactly as an un-refused one would. This proves determinism, not
+  // "consumed no RNG" — a refusal that consumed RNG symmetrically in both
+  // sessions would also agree. The per-step hook tests below are what prove no
+  // state was touched.
+  const twin = liveSession();
+  twin.advance(20);
+  assert.throws(() => twin.restore(lateRejectedCheckpoint(twin.checkpoint())), "the twin refuses identically");
+  session.advance(15);
+  twin.advance(15);
+  const a = session.checkpoint() as { experiment: unknown };
+  const b = twin.checkpoint() as { experiment: unknown };
+  assert.deepEqual(a.experiment, b.experiment, "a refused restore leaves deterministic continuation intact");
+}
+
+/**
+ * Every restore step that could fail after validation, each pinned to the same
+ * invariant: a step that throws leaves the session exactly as it was.
+ *
+ * Why a hook and not more corrupted checkpoints: a probe over the reachable
+ * corruptions (engine version, null/garbage simulation state, bad control, bad
+ * detector) found the A3.3 preflight refuses ALL of them before restore touches
+ * anything. That is good news today and no guarantee at all — the first decode
+ * step added without a matching preflight rule reintroduces the hazard silently.
+ * So the guarantee under test is structural ("no assignment precedes a
+ * fallible prepare step"), which is only reachable by making a step throw.
+ */
+const PREPARE_STEPS = [
+  "experiment",
+  "analysis",
+  "control",
+  "controlAnalysis",
+  "decisions",
+] as const;
+
+function testEveryPrepareStepIsAtomicWhenItThrows() {
+  for (const step of PREPARE_STEPS) {
+    const session = liveSession();
+    session.advance(20);
+    const beforeId = session.worldId;
+    const beforeCheckpoint = session.checkpoint();
+
+    __setRestorePrepareHookForTests((failingStep) => {
+      if (failingStep === step) throw new Error(`injected failure preparing ${step}`);
+    });
+    let refused: unknown = null;
+    try {
+      session.restore(beforeCheckpoint as never);
+    } catch (error) {
+      refused = error;
+    } finally {
+      __setRestorePrepareHookForTests(undefined);
+    }
+
+    assert.ok(refused !== null, `a failure preparing ${step} refuses the restore`);
+    assert.match(String((refused as Error).message), new RegExp(`preparing ${step}`), `the ${step} failure is the one that surfaced`);
+    assert.equal(session.worldId, beforeId, `a failure preparing ${step} mints no new displayed-world identity`);
+    assert.deepEqual(session.checkpoint(), beforeCheckpoint, `a failure preparing ${step} leaves the live checkpoint byte-identical`);
+
+    // And the session is still usable: the same checkpoint restores afterwards,
+    // so a refusal never poisons the session for the next attempt.
+    const restored = session.restore(beforeCheckpoint as never);
+    assert.equal(restored.worldId, session.worldId, `after a ${step} failure the session still restores normally`);
+  }
+}
+
+/** AC14: no presentation frames announce a candidate that was never accepted. */
+function testNoFramesAreEmittedForAPrepareStepFailure() {
+  for (const step of PREPARE_STEPS) {
+    const session = liveSession();
+    session.advance(20);
+    const before = session.checkpoint();
+    __setRestorePrepareHookForTests((failingStep) => {
+      if (failingStep === step) throw new Error(`injected failure preparing ${step}`);
+    });
+    let responses: readonly unknown[] = [];
+    try {
+      responses = session.handle({ type: "LOAD_CHECKPOINT", requestId: `f3a-${step}`, checkpoint: before as never });
+    } catch {
+      // handle() reports command failures as a correlated ERROR; the point of
+      // this test is the absence of frames either way.
+    } finally {
+      __setRestorePrepareHookForTests(undefined);
+    }
+    assert.ok(responses.length > 0, `a ${step} failure is reported as a response, not thrown`);
+    assert.ok(
+      responses.every((r) => (r as { type?: string }).type !== "PRESENTATION"),
+      `a ${step} failure announces no world to presentation`,
+    );
+    assert.deepEqual(session.checkpoint(), before, `a ${step} failure leaves the live checkpoint untouched`);
+  }
+}
+
+/**
+ * F3a: the classification survives the worker boundary.
+ *
+ * Before this, `client.ts` re-wrapped every `ERROR` in a bare `Error`, so the
+ * `instanceof CheckpointRejectionError` branch in App.tsx could never fire
+ * through the worker: a player met the developer message naming a field, a
+ * quoted value, and a reason code. These pin that the typed rejection arrives.
+ */
+async function testWorkerRejectionRehydratesTypedError() {
+  const fake = new FakeWorker();
+  const client = new WorkerRuntimeClient(() => fake, { requestTimeoutMs: 10_000 });
+  const snapshot = engineFixture().checkpoint as never;
+  const request = tracked(client.loadCheckpoint(snapshot));
+  const posted = fake.posted.at(-1) as { requestId: string };
+  fake.deliver({
+    type: "ERROR",
+    message: "Checkpoint engine 0.22.0 does not match 0.23.0",
+    requestId: posted.requestId,
+    rejectionKind: "engine-mismatch",
+  });
+  await tick();
+  assert.equal(request.state.settled, true, "the correlated rejection settles the load");
+  const error = request.state.error as Error;
+  assert.equal(error.name, "RuntimeCommandRejection", "a non-checkpoint rejection arrives typed, not as a bare Error");
+  assert.equal((error as { kind?: string }).kind, "engine-mismatch", "carrying the worker's classification");
+  assert.ok(
+    !/does not match/.test((error as { playerMessage?: string }).playerMessage ?? ""),
+    "the player-facing message is not the developer message",
+  );
+}
+
+/** An ERROR with no classification (a pre-F3a worker) still fails, typed. */
+async function testWorkerRejectionWithoutKindIsStillTyped() {
+  const fake = new FakeWorker();
+  const client = new WorkerRuntimeClient(() => fake, { requestTimeoutMs: 10_000 });
+  const request = tracked(client.loadCheckpoint(engineFixture().checkpoint as never));
+  const posted = fake.posted.at(-1) as { requestId: string };
+  fake.deliver({ type: "ERROR", message: "something went wrong", requestId: posted.requestId });
+  await tick();
+  const error = request.state.error as Error;
+  assert.equal((error as { kind?: string }).kind, "internal", "an unclassified failure degrades to internal, not to a lost failure");
+}
+
+/**
+ * The A3.3 player message must actually reach the player through the worker.
+ * This is the branch that was dead before F3a.
+ */
+async function testCheckpointRejectionKeepsPlayerMessage() {
+  const fake = new FakeWorker();
+  const client = new WorkerRuntimeClient(() => fake, { requestTimeoutMs: 10_000 });
+  const request = tracked(client.loadCheckpoint(engineFixture().checkpoint as never));
+  const posted = fake.posted.at(-1) as { requestId: string };
+  fake.deliver({
+    type: "ERROR",
+    message: "checkpoint rejected: analysis.dep — not a state (invalid_value)",
+    requestId: posted.requestId,
+    rejectionKind: "checkpoint-rejected",
+    rejectionReason: "invalid_value",
+    rejectionField: "analysis.dep",
+  });
+  await tick();
+  const error = request.state.error as Error;
+  assert.ok(error instanceof CheckpointRejectionError, "a checkpoint rejection arrives as the class the UI branches on");
+  assert.equal((error as CheckpointRejectionError).field, "analysis.dep", "naming the field the validator rejected");
+  assert.equal((error as CheckpointRejectionError).reason, "invalid_value", "and its reason");
+  assert.ok(
+    !/not a state/.test((error as CheckpointRejectionError).playerMessage),
+    "the player message is plain language, not the developer detail",
+  );
+}
+
+/** The successful path is unchanged: a restore still adopts the new world. */
+function testSuccessfulRestoreStillAdoptsTheNewWorld() {
+  const source = liveSession();
+  source.advance(20);
+  const saved = source.checkpoint();
+
+  const target = liveSession();
+  target.advance(20);
+  const beforeId = target.worldId;
+
+  const restored = target.restore(saved);
+  assert.notEqual(target.worldId, beforeId, "a successful restore is a new displayed world, not the old one continued");
+  assert.equal(restored.worldId, target.worldId, "the restored snapshot reports the identity the session adopted");
+  assert.equal(restored.tick, (saved as { createdTick: number }).createdTick, "and lands on the saved tick");
+}
+
+/**
+ * AC14: the canonical path stays mutation-free before commit, and no frames are
+ * emitted for a candidate that was never accepted.
+ */
+function testRejectedRestoreEmitsNoPresentationFrames() {
+  const session = liveSession();
+  session.advance(20);
+  const before = session.checkpoint();
+  const responses = session.handle({
+    type: "LOAD_CHECKPOINT",
+    requestId: "f3a-rejected",
+    checkpoint: lateRejectedCheckpoint(before),
+  });
+  assert.ok(
+    responses.every((r) => r.type !== "PRESENTATION"),
+    "a refused restore announces no world to presentation",
+  );
+  assert.deepEqual(session.checkpoint(), before, "and leaves the live checkpoint untouched");
+}
+
 /** Task 6: the on-demand detail request settles exactly once on its reply. */
 async function testDetailRequestSettlesOnItsCorrelatedReply() {
   const fake = new FakeWorker();
@@ -1614,6 +1855,14 @@ async function main() {
   testOptionalRequestIdMustBeAStringWhenPresent();
   testRejectedCommandMutatesNothingButStillReleasesBackpressure();
   testRefusedCommandIsReportedAndLeavesTheSessionWhereItWas();
+  testRejectedRestoreLeavesSessionUntouched();
+  await testWorkerRejectionRehydratesTypedError();
+  await testWorkerRejectionWithoutKindIsStillTyped();
+  await testCheckpointRejectionKeepsPlayerMessage();
+  testEveryPrepareStepIsAtomicWhenItThrows();
+  testNoFramesAreEmittedForAPrepareStepFailure();
+  testSuccessfulRestoreStillAdoptsTheNewWorld();
+  testRejectedRestoreEmitsNoPresentationFrames();
   console.log("runtime boundary validation: PASS");
 }
 
