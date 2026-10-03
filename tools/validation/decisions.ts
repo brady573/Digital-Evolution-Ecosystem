@@ -328,6 +328,8 @@ function testForwardCompatPolicyVersion() {
     session.resolveEventDecision(next.opportunityId, "keep-watching");
     next = session.advance(200_000).pendingDecision as CatalystOpportunity;
   }
+  console.log("MAP-RESOLUTIONS:" + JSON.stringify(session.decisionResolutions.map((r: any) => r.tick)));
+  console.log("MAP-EVENTS:" + JSON.stringify(session.analysis.observedEvents().map((e: any) => e.eventId)));
   assert.ok(next, "a fourth eligible post-horizon catalyst window is reached");
   // Slice 2B re-pin: detritus wealth delays guild establishment (crossfeeding
   // @133030 rather than @78312), so the fourth advance lands on the
@@ -340,7 +342,7 @@ function testForwardCompatPolicyVersion() {
     "dop:eco-crossfeeding-1-established-133030",
     "delayed establishment is deterministic",
   );
-  assert.equal(next.policyVersion, CATALYST_POLICY_VERSION, "the fourth window is stamped current");
+  assert.equal(next.policyVersion, DECISION_POLICY_VERSION, "the fourth opportunity carries the events catalog version");
   session.resolveEventDecision(next.opportunityId, "keep-watching");
 
   const protectedSnapshot = session.advance(12_000);
@@ -354,8 +356,6 @@ function testForwardCompatPolicyVersion() {
   // 78312 falls inside it — observed during protection, never prompted
   // (the flow resolves only catalyst windows afterwards). Same claim:
   // protected observation stays durable evidence, not a prompt.
-  console.log("MAP-RESOLUTIONS:" + JSON.stringify(session.decisionResolutions.map((r: any) => r.tick)));
-  console.log("MAP-EVENTS:" + JSON.stringify(session.analysis.observedEvents().map((e: any) => e.eventId)));
   const protectedEra = session.analysis.observedEvents().find(
     event => event.eventId === "eco-crossfeeding-1-established-78312",
   );

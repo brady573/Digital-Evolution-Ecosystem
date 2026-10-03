@@ -410,6 +410,8 @@ function testFixtureArc() {
   // 300k; structure unchanged.
   settle(session, 300000);
   const records = (session.analysis as any).records.filter((r: any) => r.kind === "cuse");
+  // TEMPORARY CI mapping (revert before merge): detritus-engine arc values.
+  console.log("MAP-ARC:" + JSON.stringify(records.map((r: any) => ({ phase: r.phase, tick: r.tick, refs: r.entity_refs }))));
   assert.equal(records.length, 1, "one establishment record (no disruption on this run)");
   assert.equal(records[0].phase, "established", "record establishes");
   assert.equal(records[0].tick, 276100, "establishment is deterministic under the current catalyst policy");
@@ -454,6 +456,10 @@ function testMultiSeedPossibility() {
   // 60k -> 150k and the pinned seed moves 55973 -> 70531. Same seed (no
   // seed-shopping); possibility structure unchanged (realizable somewhere,
   // required nowhere).
+  // Slice 2B re-pin: detritus wealth shifts guild timing again (probe:
+  // pinned seed establishes @141062, still inside the 150k horizon with
+  // thinning margin — flagged, not widened further without evidence).
+  // Same seed, same structure.
   for (const seed of [821947219, 2088626459, 3543950664, 2121676508]) {
     const session = new UniverseSession();
     session.create(fixtureConfig(seed));
@@ -465,7 +471,7 @@ function testMultiSeedPossibility() {
   }
   assert.ok(established.length >= 1, "dependency establishment must be realizable");
   assert.ok(
-    established.some((s) => s === "3543950664@70531"),
+    established.some((s) => s === "3543950664@141062"),
     "pinned establishment reproduces exactly",
   );
   console.log(`dependency multi-seed possibility [${established.join(", ")}]: PASS`);
