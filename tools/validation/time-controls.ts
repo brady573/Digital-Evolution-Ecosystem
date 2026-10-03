@@ -127,12 +127,16 @@ function fresh(seed: number): UniverseSession {
   const recordTicks = (chunk: number): number[] => {
     const session = fresh(seed);
     let guard = 0;
-    while (guard++ < 1200) {
+    // Slice 1 re-pin (delay pattern): the second record (dormancy-recovered)
+    // now lands @28363 instead of inside 25k, so the drive extends to 30k.
+    // Probe-verified both chunkings see [6777, 28363]; the claim —
+    // record ticks are chunk-independent — is unchanged.
+    while (guard++ < 1500) {
       const snap = session.advance(chunk);
       if (snap.pendingDecision) {
         session.resolveEventDecision(snap.pendingDecision.opportunityId, "keep-watching");
       }
-      if (snap.tick > 25000 && !session.advance(0).pendingDecision) break;
+      if (snap.tick > 30000 && !session.advance(0).pendingDecision) break;
     }
     const done = session.advance(0);
     return done.analysis.records.map((r) => r.tick);

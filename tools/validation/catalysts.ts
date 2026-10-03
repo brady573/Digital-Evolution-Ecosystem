@@ -252,7 +252,8 @@ testEligibilityBoundaries();
 testQuietAndCooldown();
 
 // --- Integration: first window, priority, gate, resolution -------------------
-// Deterministic seed 24681357 (keep watching): dormancy @7279; the first
+// Deterministic seed 24681357 (keep watching): dormancy @6777 (Slice 1
+// re-pin, was @7279); the first catalyst window now waits until the first
 // catalyst window now waits until the first eligible stride after the active
 // Aftermath's 25,000-tick horizon. Events observed before that remain evidence
 // but are not deferred into later decision prompts.
@@ -277,11 +278,16 @@ function testFirstWindow() {
     "first window opens at the first quiet stride after Aftermath protection");
   assert.equal(window.opportunityId, `wcat:${firstPostHorizonStride}`, "stable window id");
   assert.equal(window.policyVersion, CATALYST_POLICY_VERSION, "stamped with the catalyst catalog");
-  assert.deepEqual(window.catalystIds, ["drought-a", "drought-b"],
+  // Slice 1 re-pin (af9ad23 precedent): occupancy friction leaves slightly
+  // more abiotic stock standing (probe-verified 10.3% vs 9.4% on main at the
+  // window tick; threshold 10%), so global-crash is genuinely eligible here
+  // and correctly offered. Same claim — only eligible catalysts are offered —
+  // with the threshold crossing recorded, not assumed.
+  assert.deepEqual(window.catalystIds, ["drought-a", "drought-b", "global-crash"],
     "only catalysts still eligible after continued Aftermath observation are offered");
   assert.deepEqual(
     window.choices.map((c) => c.choiceId),
-    ["keep-watching", "drought-a", "drought-b"],
+    ["keep-watching", "drought-a", "drought-b", "global-crash"],
     "keep watching first, then catalog order",
   );
   assert.equal(session.snapshot().tick, firstPostHorizonStride, "gate stopped exactly at the window tick");
