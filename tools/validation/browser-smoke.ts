@@ -101,6 +101,61 @@ async function main(){
   const browser=await chromium.launch({headless:true});
   try{
     const context=await browser.newContext({viewport:{width:1280,height:900}});
+    // P1.5 route contract: deeTest substitutes the World renderer only; it is
+    // not a product setting. Keep the default production route Canvas2D and
+    // require one semantic World renderer on either route.
+    const routePage=await context.newPage();
+    await routePage.goto(baseUrl,{waitUntil:"domcontentloaded"});
+    await routePage.locator("canvas.world-canvas").waitFor();
+    assert.equal(await routePage.locator("canvas.world-canvas").count(),1,
+      "default route mounts exactly one Canvas2D World");
+    assert.equal(await routePage.locator(".world-pixi-host").count(),0,
+      "default route does not mount the Pixi host");
+    await routePage.close();
+    const pixiRoutePage=await context.newPage();
+    await pixiRoutePage.goto(`${baseUrl}?deeTest=1`,{waitUntil:"domcontentloaded"});
+    await pixiRoutePage.locator(".world-pixi-host canvas").waitFor({timeout:30_000});
+    assert.equal(await pixiRoutePage.locator("canvas.world-canvas").count(),0,
+      "deeTest route substitutes Pixi rather than rendering a second semantic World");
+    assert.equal(await pixiRoutePage.locator(".world-pixi-host").count(),1,
+      "deeTest route mounts exactly one Pixi World host");
+    assert.equal(await pixiRoutePage.locator(".world-pixi-host canvas").count(),1,
+      "StrictMode and async boot leave exactly one active Pixi canvas");
+    await pixiRoutePage.getByLabel("World minimap").waitFor();
+    await pixiRoutePage.getByRole("button",{name:"Zoom in"}).click();
+    assert.equal(await pixiRoutePage.getByTestId("zoom-level").innerText(),"1.5×",
+      "the existing React zoom control updates the Pixi test renderer");
+    await pixiRoutePage.getByRole("button",{name:"Reset view"}).click();
+    const initialCamX=Number(await pixiRoutePage.getByTestId("world-minimap").getAttribute("data-cam-x"));
+    const pixiBox=await pixiRoutePage.locator(".world-pixi-host canvas").boundingBox();
+    assert.ok(pixiBox,"Pixi canvas has measured CSS geometry in the real shell");
+    await pixiRoutePage.mouse.move(pixiBox!.x+pixiBox!.width/2,pixiBox!.y+pixiBox!.height/2);
+    await pixiRoutePage.mouse.down();
+    await pixiRoutePage.mouse.move(pixiBox!.x+pixiBox!.width/2+35,pixiBox!.y+pixiBox!.height/2,{steps:4});
+    await pixiRoutePage.mouse.up();
+    await expectAttr(pixiRoutePage.getByTestId("world-minimap"),"data-cam-x",v=>Math.abs(v-initialCamX)>.1,
+      "Pixi user pan is reported to React and the React minimap");
+    await pixiRoutePage.getByRole("button",{name:"Reset view"}).click();
+    const startTick=await tick(pixiRoutePage);
+    await pixiRoutePage.getByRole("button",{name:"Play"}).click();
+    await pixiRoutePage.waitForFunction((before)=>{
+      const text=document.querySelector('[data-testid="tick"]')?.textContent??"";
+      return Number(text.replace(/[^0-9]/g,""))>before;
+    },startTick,{timeout:10_000});
+    await pixiRoutePage.getByRole("button",{name:"Pause"}).click();
+    await settlePaused(pixiRoutePage);
+    await pixiRoutePage.getByRole("button",{name:"History"}).click();
+    await pixiRoutePage.getByRole("heading",{name:"History"}).waitFor();
+    await pixiRoutePage.getByRole("button",{name:"World",exact:true}).click();
+    await pixiRoutePage.getByLabel("Evolution world").waitFor();
+    assert.equal(await pixiRoutePage.locator(".world-pixi-host canvas").count(),1,
+      "navigation back to World does not duplicate or leak its canvas");
+    await pixiRoutePage.close();
+    if(process.env.DEE_PIXI_ROUTE_ONLY==="1"){
+      console.log("P1.5 renderer route substitution: PASS");
+      return;
+    }
+
     const page=await context.newPage();
     // deeTest enables the URL-gated runtime hook. Used by the throughput loop to
     // acknowledge the aftermath without racing the DOM (see the guarded branch
@@ -159,20 +214,36 @@ async function main(){
   // same interpolated cells. Zero ticks separate the two captures, so organisms
   // have not moved and any difference is the field itself.
   const GRID = 40;
-  const sampleWorld=async()=>await deltaPage.getByLabel("Evolution world").evaluate((el:HTMLCanvasElement,g:number)=>{
-    const d=el.getContext("2d")!.getImageData(0,0,el.width,el.height).data;
+  const sampleWorld=async()=>await deltaPage.getByLabel("Evolution world").evaluate((el:HTMLElement,g:number)=>{
+    const canvas=el instanceof HTMLCanvasElement?el:el.querySelector("canvas")!;
+    const ctx=canvas.getContext("2d");
+    let d:Uint8ClampedArray|Uint8Array;
+    if(ctx)d=ctx.getImageData(0,0,canvas.width,canvas.height).data;
+    else{
+      const gl=canvas.getContext("webgl2");if(!gl)throw new Error("World has neither 2D nor WebGL2 pixels");
+      const pixels=new Uint8Array(canvas.width*canvas.height*4);
+      gl.readPixels(0,0,canvas.width,canvas.height,gl.RGBA,gl.UNSIGNED_BYTE,pixels);d=pixels;
+    }
     const out:number[]=[];
     for(let gy=0;gy<g;gy++){
       for(let gx=0;gx<g;gx++){
-        const px=Math.floor((gx+0.5)*el.width/g),py=Math.floor((gy+0.5)*el.height/g);
-        const i=(py*el.width+px)*4;
+        const px=Math.floor((gx+0.5)*canvas.width/g),py=Math.floor((gy+0.5)*canvas.height/g);
+        const i=(py*canvas.width+px)*4;
         out.push(d[i]!,d[i+1]!,d[i+2]!);
       }
     }
     return out;
   },GRID);
-  const meanLuma=async()=>await deltaPage.getByLabel("Evolution world").evaluate((el:HTMLCanvasElement)=>{
-    const d=el.getContext("2d")!.getImageData(0,0,el.width,el.height).data;
+  const meanLuma=async()=>await deltaPage.getByLabel("Evolution world").evaluate((el:HTMLElement)=>{
+    const canvas=el instanceof HTMLCanvasElement?el:el.querySelector("canvas")!;
+    const ctx=canvas.getContext("2d");
+    let d:Uint8ClampedArray|Uint8Array;
+    if(ctx)d=ctx.getImageData(0,0,canvas.width,canvas.height).data;
+    else{
+      const gl=canvas.getContext("webgl2");if(!gl)throw new Error("World has neither 2D nor WebGL2 pixels");
+      const pixels=new Uint8Array(canvas.width*canvas.height*4);
+      gl.readPixels(0,0,canvas.width,canvas.height,gl.RGBA,gl.UNSIGNED_BYTE,pixels);d=pixels;
+    }
     let sum=0;for(let i=0;i<d.length;i+=4)sum+=0.2126*d[i]!+0.7152*d[i+1]!+0.0722*d[i+2]!;
     return sum/(d.length/4);
   });
@@ -376,9 +447,15 @@ async function main(){
     // engine while every other lens keeps the legacy voxel path. Both must
     // paint in-browser, render differently, and survive inspection zoom.
     const worldInk=()=>page.evaluate(`(()=>{
-      const c=document.querySelector('canvas[aria-label="Evolution world"]');
+      const host=document.querySelector('.world-pixi-host');
+      const c=host?host.querySelector('canvas'):document.querySelector('canvas[aria-label="Evolution world"]');
       const ctx=c.getContext('2d',{willReadFrequently:true});
-      const d=ctx.getImageData(0,0,c.width,c.height).data;
+      let d;
+      if(ctx)d=ctx.getImageData(0,0,c.width,c.height).data;
+      else{
+        const gl=c.getContext('webgl2');if(!gl)throw new Error('World has neither 2D nor WebGL2 pixels');
+        d=new Uint8Array(c.width*c.height*4);gl.readPixels(0,0,c.width,c.height,gl.RGBA,gl.UNSIGNED_BYTE,d);
+      }
       let bright=0;const sig=[];
       const nx=32,ny=18;
       for(let gy=0;gy<ny;gy++)for(let gx=0;gx<nx;gx++){
@@ -392,7 +469,7 @@ async function main(){
         sig.push(Math.round(sum/Math.max(1,n)));
       }
       return{bright,sig};
-    })()`);
+    })()`) as Promise<{bright:number;sig:number[]}>;
     await page.getByRole("button",{name:"Landscape",exact:true}).click();
     await page.waitForTimeout(300);
     const normalInk=await worldInk();
@@ -718,7 +795,7 @@ async function main(){
         return n;};
       const w=c.width,h=c.height,q=Math.floor(w*0.3);
       return[ink(0,0,q,q),ink(w-q,0,q,q),ink(0,h-q,q,q),ink(w-q,h-q,q,q)];
-    })()`);
+    })()`) as number[];
     assert.ok(minimapCoversWorld(quadrantInk),
       `minimap field covers the whole world (quadrants ${quadrantInk.join("/")}, sparsest must exceed a quarter of ${Math.max(...quadrantInk)})`);
 
@@ -788,7 +865,7 @@ async function main(){
     // something is selected, so it must be absent here rather than present.
     assert.equal(await touchPage.locator(".sheet-toggle").count(),0,
       "no inspector handle is shown until something is selected");
-    const touchAction=await touchPage.evaluate(`getComputedStyle(document.querySelector('canvas[aria-label="Evolution world"]')).touchAction`);
+    const touchAction=await touchPage.evaluate(`getComputedStyle(document.querySelector('.world-pixi-host canvas, canvas[aria-label="Evolution world"]')).touchAction`);
     assert.equal(touchAction,"none","world canvas owns touch gestures (touch-action:none)");
     const tickBeforeTouch=await tick(touchPage);
     const camBefore=await touchPage.getByTestId("world-minimap").getAttribute("data-cam-x");
@@ -1051,9 +1128,16 @@ async function main(){
     // A genuine drag of a few percent of the frame moves the camera tens of
     // world units, so 20 sits far above a no-op and far below a real pan.
     const MEANINGFUL=20;
-    const fieldInk=async()=>await panWorld.evaluate((el:HTMLCanvasElement)=>{
-      const ctx=el.getContext("2d");if(!ctx)return 0;
-      const d=ctx.getImageData(0,0,el.width,el.height).data;
+    const fieldInk=async()=>await panWorld.evaluate((el:HTMLElement)=>{
+      const canvas=el instanceof HTMLCanvasElement?el:el.querySelector("canvas")!;
+      const ctx=canvas.getContext("2d");
+      let d:Uint8ClampedArray|Uint8Array;
+      if(ctx)d=ctx.getImageData(0,0,canvas.width,canvas.height).data;
+      else{
+        const gl=canvas.getContext("webgl2");if(!gl)return 0;
+        const pixels=new Uint8Array(canvas.width*canvas.height*4);
+        gl.readPixels(0,0,canvas.width,canvas.height,gl.RGBA,gl.UNSIGNED_BYTE,pixels);d=pixels;
+      }
       // Count substrate pixels: the field is the bulk of the frame, and
       // organisms are a small minority, so a blank canvas reads near zero.
       let field=0;

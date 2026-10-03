@@ -23,7 +23,10 @@ import { AFTERMATH_OBSERVATION_TICKS, type AftermathLifecycleEvent, type Afterma
 import { projectLiveAftermath } from "./experience/aftermath/project";
 import { drawPhenotypeOrganism, phenotypeCache, tierForZoom } from "./phenotype";
 import { familyArtwork } from "./familyArt";
-import { TRAIT_DISPLAY_RANGES, type Lens, type ResourceView, type TraitView, type WorldCamera } from "./worldViewTypes";
+import { TRAIT_DISPLAY_RANGES, type Lens, type PixiWorldProps, type ResourceView, type TraitView, type WorldCamera } from "./worldViewTypes";
+import { WorldPixi } from "./pixiWorld/WorldPixi";
+
+const EMPTY_RESOLVED_PHENOTYPES:PixiWorldProps["resolvedPhenotypes"]=new Map();
 
 /** Details card for a selected organism, incl. its base family portrait. */
 function SelectedOrganismCard({ selected, onViewLineage, onClear }: {
@@ -886,6 +889,21 @@ export function App(){
   // gate: it arrives only with request-correlated replies now.
   const live=presentation.live,env=presentation.environment,interp=presentation.interpretation,ident=presentation.identity,catalog=presentation.catalog;
   if(!live||!env||!interp||!ident||!catalog)return <main className="loading">{status}</main>;
+  // P1.5 validation seam only: production remains on the maintained Canvas2D
+  // World. The test route substitutes Pixi in the same slot and feeds it the
+  // same React-owned read-model state; this is not a product renderer setting.
+  const testPixiWorld=typeof window!=="undefined"&&new URLSearchParams(window.location.search).has("deeTest");
+  const pixiWorldProps:PixiWorldProps={
+    worldId:ident.worldId,
+    tick:live.tick,
+    environment:env,
+    organisms:presentation.organisms,
+    resolvedPhenotypes:testPixiWorld
+      ?phenotypeCache.resolveSnapshot({worldId:ident.worldId,organisms:presentation.organisms})
+      :EMPTY_RESOLVED_PHENOTYPES,
+    lens,resourceView,traitView,selectedId,camera:cam,zoom,
+    onSelect:setSelectedId,onCamera:setCam,onView:reportView,
+  };
   const m=interp.metrics;
   const pending=interp.pendingDecision;
   const aftermathPresentationForRender=synchronizeAftermathPresentation(aftermathPresentation,interp.aftermath,!!pending);
@@ -948,7 +966,9 @@ export function App(){
         </div>
         <div className="world-wrap">
           <div className="world-scene" aria-hidden="true"><div className="glow g-a"/><div className="glow g-b"/><div className="glow g-c"/><div className="ambient"/></div>
-          <WorldCanvas worldId={ident.worldId} tick={live.tick} env={env} organisms={presentation.organisms} lens={lens} resourceView={resourceView} traitView={traitView} selectedId={selectedId} onSelect={setSelectedId} cam={cam} zoom={zoom} onCamera={setCam} onView={reportView}/>
+          {testPixiWorld
+            ?<WorldPixi {...pixiWorldProps}/>
+            :<WorldCanvas worldId={ident.worldId} tick={live.tick} env={env} organisms={presentation.organisms} lens={lens} resourceView={resourceView} traitView={traitView} selectedId={selectedId} onSelect={setSelectedId} cam={cam} zoom={zoom} onCamera={setCam} onView={reportView}/>}
           {showCompactAftermath&&aftermathProjection&&aftermathPresentationForRender&&<AftermathStage2Panel
             projection={aftermathProjection}
             presentation={aftermathPresentationForRender}

@@ -50,5 +50,5 @@ export function WorldPixi(_props: PixiWorldProps): ReactElement {
     rendererRef.current?.update(_props);
   });
 
-  return <div ref={hostRef} className="world-pixi-host" aria-label="Evolution world" data-renderer-backend={backend} />;
+  return <div ref={hostRef} className="world-pixi-host" role="img" aria-label="Evolution world" data-renderer-backend={backend} />;
 }

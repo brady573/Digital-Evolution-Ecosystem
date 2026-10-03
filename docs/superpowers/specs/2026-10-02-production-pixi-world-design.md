@@ -1,6 +1,6 @@
 # Production PixiJS World Migration — Stage P1
 
-**Status:** Design sections approved; awaiting written-spec review. No product implementation is authorized by this document until the Owner approves the written spec and selects an implementation plan/execution method.
+**Status:** Core Stage P1 and detailed P1.5 design approved. P1.5 implementation is authorized only within the Task 0 reconciliation condition and Tasks 1–4; production cutover remains separately gated.
 
 **Issue:** [#102 — Lane 2: Production PixiJS World migration (M4B Stage P1)](https://github.com/brady573/Digital-Evolution-Ecosystem/issues/102)
 
@@ -187,3 +187,66 @@ On the implementation PR/issue return:
 ## 9. Open design decisions
 
 None within the approved handoff and clarifications. Renderer details expressly left to implementation freedom remain open to the Coding Agent as long as they preserve the contracts above. Any newly encountered meaning-changing issue returns to the Owner before implementation crosses that boundary.
+
+## 10. P1.5 React/Pixi integration design
+
+**Status:** P1.5 detailed design approved. Implementation remains limited to the separately approved plan and successful Task 0 reconciliation; this section does not authorize production cutover.
+
+**P1.4 evidence boundary:** P1.4 is implemented and focused-browser validated on exact head `6252b4598bf0a4e4bd7bd5b15aadd232c526a612`, run [37139103105](https://github.com/brady573/Digital-Evolution-Ecosystem/actions/runs/37139103105). Its synthetic renderer evidence does not establish React-shell integration. P1.5 must add that evidence separately. Owner accepted this P1.5 design direction in issue comment `5972048516` and recorded it in the M4B handoff.
+
+### 10.1 Goal and non-goals
+
+Exercise the existing Pixi host inside the real Explorer React shell behind the existing `?deeTest` test/development gate. The integrated journey should expose actual `world-wrap` geometry, phone visibility, DOM/Pixi stacking, minimap coexistence, decision/Aftermath priority, and React state/playback ownership before any production cutover is considered.
+
+This is one renderer at a time: for a `?deeTest` session, React mounts `WorldPixi` instead of `WorldCanvas`; without the gate, React continues to mount `WorldCanvas`. Never render both semantic World renderers simultaneously. `WorldMinimap` remains its existing subordinate Canvas2D overlay. The gate is test-only, not user-facing configuration, a permanent renderer selector, or a production fallback.
+
+P1.5 does not switch the production default, retire Canvas2D, claim P1.6 readiness, or establish Android runtime behavior. It does not add a second shell, change simulation/runtime/analysis authority, redesign overlays, or change product behavior to accommodate the test renderer. If integration reveals a required meaning-changing behavior or a host limitation that forces such a change, stop and return to the Owner.
+
+### 10.2 Component and state ownership
+
+- `App.tsx` remains the only owner of product state: world/read-model selection, playback intent, lens/resource/trait choices, camera/zoom, selected organism, navigation, pending decision, Aftermath projection/stages, and React controls/sheets.
+- Both renderer branches receive equivalent current, already-resolved props from that same React render. Pixi receives no runtime subscription, worker handle, mutable simulation state, or decision/Aftermath record. The existing phenotype resolver/cache boundary supplies resolved phenotype data where required; renderer choice must not create a second state/cache authority.
+- `WorldPixi` owns only its host/application/renderer resources and forwards bounded user-originated camera, selection, and visible-world results through existing callbacks. Programmatic prop synchronization must not echo as a user callback. Mount, unmount, resize, remount, and renderer failure must not start, pause, resume, reset, or otherwise alter playback.
+- Renderer changes under `?deeTest` may remount presentation resources but must preserve the React-owned state and read-model identity. World identity changes must replace old-world displays according to the existing renderer contract; no ghost selection or cross-world display retention.
+
+### 10.3 Shell geometry, overlays, and interaction priority
+
+- Mount the selected renderer inside the existing `.world-wrap` alongside the existing decorative scene and existing React overlays. Keep the actual Explorer shell, responsive layout, navigation, controls, selected-organism presentation, and accessibility labels under test; do not approximate them in a separate page.
+- Preserve the current single large sheet slot and priority rules: pending mandatory decisions outrank passive inspection and Aftermath; Aftermath state remains retained beneath a decision and resumes its existing presentation after resolution. Stage 2 observation/settlement behavior and automatic playback semantics remain React-owned and unchanged.
+- The World stays materially visible as context beneath phone controls and sheets. Preserve the established phone World dominance/visibility rules and existing compact Aftermath placement. DOM controls/sheets remain operable above the Pixi canvas; pointer input reaches the World only where the current interaction design allows it. Minimap and zoom controls coexist at their current overlay positions and priority (including their existing suppression under a pending decision).
+- Establish explicit, tested stacking and pointer-event behavior for the Pixi canvas, decorative scene, minimap, controls, compact Aftermath panel, and sheet slot. Pixi must not intercept taps intended for React overlays; overlays must not accidentally make otherwise interactive World regions inert. Preserve touch-action and pointer-capture behavior required for pan/select.
+- Keep current logical camera, selection, and minimap viewport meanings. Resize or device-pixel-ratio changes may alter backing resolution only; they must not alter CSS-pixel hit behavior, camera math, or React state. Do not add `boot.ts` to scope preemptively: include it only if focused integrated evidence demonstrates that the current boot/resize lifecycle cannot satisfy these requirements, and report the evidence and bounded defect before changing it.
+
+### 10.4 Lifecycle and bounded callback contract
+
+The integrated renderer must survive React StrictMode mount → cleanup → remount with exactly one live canvas for the active generation and no leaked observer/listener/ticker work. Async boot completion after unmount must not attach a stale canvas; cleanup must be idempotent and generation-safe. ResizeObserver and any DPR observation/listeners must be detached on cleanup, and no work may target a detached host. These are host properties; this test-only route must not introduce runtime subscriptions or a renderer-owned playback loop.
+
+Callbacks remain bounded to existing renderer outputs (camera, selected identity/null, visible viewport). They must be tied to actual input rather than ordinary prop synchronization, avoid React feedback loops, and remain harmless when a host generation is retired. Minimap viewport reporting must correspond to the active renderer's logical viewport and camera, not backing-store pixels.
+
+### 10.5 Scope and acceptance evidence
+
+Expected implementation/test files, subject to narrow evidence-driven additions:
+
+- `apps/explorer/src/App.tsx`: test-gated, mutually exclusive renderer selection using the existing shell and same props/state.
+- `apps/explorer/src/styles.css`: only host sizing, stacking, pointer/touch, and responsive adjustments demonstrated necessary by integrated evidence.
+- `apps/explorer/src/pixiWorld/WorldPixi.tsx`: only integration/accessibility/callback/lifecycle defects demonstrated by tests.
+- `tools/validation/browser-smoke.ts` and `tools/validation/mobile-ui.ts`: real-shell desktop/phone evidence; add focused test helpers only where needed.
+- `boot.ts` or validation routing/configuration: only when evidence establishes necessity; validation gates may not be weakened or bypassed.
+
+Focused browser evidence on the exact pushed head must demonstrate:
+
+1. With no `deeTest` gate, the production branch still mounts Canvas2D and does not mount Pixi; with `?deeTest`, Pixi is mounted and the semantic Canvas2D World is absent. In either case exactly one World renderer is active, while the subordinate minimap may remain Canvas2D.
+2. Pixi host/canvas is accessible, fills the same measured `.world-wrap` geometry as the maintained World, and responds correctly to representative desktop and phone resizing. Record CSS dimensions separately from backing dimensions; exercise DPR/resize if the browser environment supports controlled DPR.
+3. React lens, zoom, navigation, selection/inspector, create/restore/world replacement, and playback controls continue to use React-owned state. Renderer remount or test-route entry/exit does not change playback intent or create duplicate state. Confirm with observable UI/read-model behavior rather than internal assumptions alone.
+4. Phone-sized journeys establish World visibility/dominance under controls and each relevant sheet state. Pending decision takes the one sheet slot ahead of Aftermath; Aftermath is retained and returns through its existing stages/settlement behavior. No duplicate large sheet appears.
+5. Minimap and zoom overlay coexist with Pixi, remain correctly stacked and usable when not suppressed by decision priority, and represent the same camera/visible-world window. Pointer interactions over React overlays activate those controls; World pan/select works in the exposed World area without overlay interception.
+6. StrictMode mount/cleanup/remount and world identity replacement leave one active canvas and no stale display/observer/callback effects. Boot cancellation, host resize, and cleanup checks must be tied to actual observable evidence available in the browser harness.
+7. `App.tsx` production default remains Canvas2D. The evidence report labels results **P1.5 test-gated React integration evidence only** and explicitly excludes production parity/cutover and Android runtime claims.
+
+Run focused browser/mobile suites in GitHub CI on the exact head. Run local lightweight typecheck/diff checks as appropriate. Apply manifest-routed blocking validations for the actual diff; do not run sustained browser/mobile capture workloads on the Owner device. Any new validation unit must follow the central manifest contract. Report exact SHA, CI URLs, test dimensions/device scale, observed renderer/backend, and failures/gaps. Passing integrated browser evidence does not prove Android runtime behavior.
+
+### 10.6 Stop conditions and transition
+
+Stop for Owner/design input if the real shell requires changing decision/Aftermath priority, playback semantics, camera/hit meaning, product visibility hierarchy, or runtime/read-model authority to accommodate Pixi; if both renderers are needed simultaneously to pass; if a visible fallback is required; or if a supported phone/browser behavior cannot be preserved without a product decision. Ordinary CSS stacking, host sizing, and listener cleanup remain implementation details when they preserve the accepted observable contract.
+
+P1.5 completion means only that the test-gated Pixi host has passed the stated integrated browser/mobile claims while the production World remains Canvas2D. It is a prerequisite input to a separately reviewed and authorized P1.6 cutover design/implementation, not permission to perform that cutover.

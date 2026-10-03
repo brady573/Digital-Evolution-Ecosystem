@@ -8,7 +8,7 @@
  * - collision guard (hash hit with different bitmap throws);
  * - layer order + toroidal camera parity with the Canvas2D World contract;
  * - asset registry completeness against assets/asset-manifest.json;
- * - renderer isolation (no sim-core/sim-runtime imports; App.tsx has no pixi/ import);
+ * - renderer isolation (no sim-core/sim-runtime imports; App.tsx keeps Pixi behind the test-only route);
  * - no new contracts types in the P0 adapter;
  * - 50/250/1000/3000 organism cache measurements (spike fixtures, exact keys).
  *
@@ -365,7 +365,7 @@ function traitsForAxes(mob: number, sen: number, met: number, spec: number) {
     "App.tsx leaves low-level phenotype GPU cache ownership to pixiWorld");
   const adapterSrc = readFileSync(join(pixiDir, "adapter.ts"), "utf8");
   assert.ok(!/interface\s+\w*(Checkpoint|Command|EngineConfig|Universe)\w*/.test(adapterSrc), "adapter must not declare new contracts types");
-  console.log(`p0 isolation: PASS (${sources.length} modules sim-free/pixi-free; App.tsx has no pixi/ import and stays Canvas2D)`);
+  console.log(`p0 isolation: PASS (${sources.length} modules sim-free/pixi-free; App.tsx does not own the low-level Pixi cache)`);
 }
 
 // 8. P1 rendering-only scaffold: production location, inactive, unbound.
@@ -479,9 +479,12 @@ function traitsForAxes(mob: number, sen: number, met: number, spec: number) {
   assert.ok(bootSrc.includes("app.destroy()"), "production boot disposes GPU resources");
   assert.ok(!bootSrc.includes("RenderSnapshot"), "production boot takes no snapshot");
   const appSrc = readFileSync(join(root, "apps/explorer/src/App.tsx"), "utf8");
-  assert.ok(!appSrc.includes("pixiWorld"), "App.tsx must not import pixiWorld (no cutover)");
+  assert.ok(appSrc.includes('has("deeTest")'), "App.tsx gates Pixi substitution on the existing test-only deeTest seam");
+  assert.ok(/testPixiWorld\s*\?\s*<WorldPixi\s+\{\.\.\.pixiWorldProps\}/.test(appSrc)
+    &&/\s*:\s*<WorldCanvas/.test(appSrc),
+    "App.tsx substitutes Pixi only on deeTest and keeps Canvas2D as the default renderer");
   assert.ok(appSrc.includes('canvas.getContext("2d")'), "production World stays Canvas2D");
-  console.log(`p1 scaffold: PASS (${pwSources.length} modules sim-free, bounded environment read-model input, production App cutover still gated)`);
+  console.log(`p1.5 route guard: PASS (${pwSources.length} renderer modules stay bounded; Pixi is deeTest-only and production remains Canvas2D)`);
 }
 
 // P1.1 lifecycle and logical viewport math remain DPR-independent.
