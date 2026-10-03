@@ -120,10 +120,10 @@
 - `updateOrganismLayer(layer: Container, input: OrganismInput): OrganismMetrics` reconciles organism ID→display object, updates transforms, and acquires/releases exact mask textures when bitmap/tier/activity identity changes.
 - `OrganismMetrics` reports live display count, texture creates/reuses/releases/prunes, and texture/source counts for evidence; it is not a gameplay signal.
 
-- [ ] **Step 1: Add failing tests** `testMovementReusesOrganismDisplaysWithoutTextureCreation`, `testLensTintAndSelectionDoNotChangeMorphologyKey`, `testActivityAndLodIdentityRemapTexture`, and `testWorldReplacementReleasesOldOrganismDisplays`.
-- [ ] **Step 2: Run `pnpm test:pixi-p0`** and confirm the tests fail for production reconciliation (the current pure P0 cache alone does not own persistent GPU displays).
-- [ ] **Step 3: Implement organism reconciliation** using `phenotypeCache` output passed from Explorer, exact `bitmap + tier + activity` texture identity, nearest filtering for phenotype masks, and caller-owned tint/dormancy/selection. Release zero-user textures and owned sources correctly; do not change family mapping or portraits.
-- [ ] **Step 4: Run `pnpm test:pixi-p0`, `pnpm test:phenotype`, and `pnpm test:pixi-world`**; browser probes must prove movement causes zero new morphology textures and world switch prunes obsolete objects/resources.
+- [x] **Step 1: Add failing tests** for movement display reuse/zero texture churn, lens + selection morphology neutrality, activity/LOD remapping, and world replacement resource cleanup. Use an injected headless resource factory only for Node contract tests.
+- [x] **Step 2: Run `pnpm test:pixi-p0`**; initial production reconciler test failed because the real path requires browser `document` canvas. Add narrow resource factory seam and assert the production reconciliation logic with Pixi-shaped test textures.
+- [x] **Step 3: Implement organism reconciliation** retaining Explorer phenotype authority and exact semantic bitmap + tier + activity keys; nearest-filtered production masks, persistent sprites, lens tint/dormancy as display treatment, and zero-user/world-replacement cleanup. No family mapping or portrait changes.
+- [ ] **Step 4: Run `pnpm test:pixi-p0` and `pnpm test:phenotype` locally; run `pnpm test:pixi-world` on GitHub CI**. Browser proof is limited to organism display/cache claims: movement no new morphology textures/displays, tier/activity remapping, and old-world resource pruning.
 - [ ] **Step 5: Review metrics for movement, LOD, activity, and churn** and commit only if separately authorized.
 
 ### Task 4: Analytical Lenses, Selection, and Toroidal Interaction (P1.4)

@@ -55,6 +55,8 @@ import { toTextureRequests } from "../../apps/explorer/src/pixi/adapter.ts";
 import { environmentIdentity, environmentMatchesWorld, sameNormalFieldInput } from "../../apps/explorer/src/pixiWorld/environmentIdentity.ts";
 import { hitTestOrganism } from "../../apps/explorer/src/pixiWorld/interaction.ts";
 import { dormantChannel, organismColor } from "../../apps/explorer/src/organismEncoding.ts";
+import { updateOrganismLayer, destroyOrganismLayer, type OrganismTextureFactory } from "../../apps/explorer/src/pixiWorld/organisms.ts";
+import { Container, Sprite, Texture } from "pixi.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "../..");
@@ -200,6 +202,80 @@ function traitsForAxes(mob: number, sen: number, met: number, spec: number) {
   assert.equal(cache.size, cache.live(), "prune must drop all zero-user entries");
   assert.ok(cache.live() <= cache.cumulative, "live cannot exceed cumulative");
   console.log(`p0 lifecycle: PASS (remap-neutral users=${u0}; churn replaced=${replaced} pruned=${dead.length} live=${cache.live()} cum=${cache.cumulative})`);
+}
+
+// 3b. Production organism reconciliation contract (headless Pixi containers).
+{
+  const resolved = resolvePhenotype(traitsForAxes(0.6, 0.7, 0.5, 0.5), { organismId: 1, lineageId: 1 });
+  const makeRows = (worldId: number, activity: "active" | "dormant" = "active") => [{
+    id: 1, parent: null, generation: 0, lineageId: 1, cladeId: 1,
+    x: 100, y: 120, energy: 80, activity, speed: 1.5, sensing: 70,
+    metabolism: 0.2, reproduction: 100, diet: 0, habitat: 0,
+    byproductUse: 0, dormancyResponse: 1, tolerance: 0, cleanup: 0,
+    worldId,
+  }];
+  const layer = new Container();
+  const destroyedTextures: Texture[] = [];
+  const createdTextures: Texture[] = [];
+  const fakeTexture = (size: number): Texture => ({
+    source: { scaleMode: "nearest" },
+    orig: { width: size, height: size },
+    frame: { width: size, height: size },
+    destroy: () => undefined,
+  } as unknown as Texture);
+  const makeTestTexture: OrganismTextureFactory = (bits, size) => {
+    void bits;
+    const texture = fakeTexture(size);
+    createdTextures.push(texture);
+    return { texture, destroy: () => { destroyedTextures.push(texture); } };
+  };
+  const baseInput = {
+    worldId: 1,
+    organisms: makeRows(1) as never,
+    resolvedPhenotypes: new Map([[1, resolved]]),
+    tier: "population" as const,
+    lens: "normal" as const,
+    traitView: "speed" as const,
+    traitRange: [0.25, 4] as [number, number],
+    selectedId: null,
+    scale: 1,
+  };
+  const initial = updateOrganismLayer(layer, baseInput, makeTestTexture);
+  assert.equal(initial.liveDisplayCount, 1);
+  const sprite = layer.children[0] as Sprite;
+  const initialTexture = sprite.texture;
+  const moved = updateOrganismLayer(layer, { ...baseInput, organisms: [{ ...makeRows(1)[0]!, x: 230, y: 310 }] as never, selectedId: 1 }, makeTestTexture);
+  assert.equal(layer.children[0], sprite, "movement and selection retain the display object");
+  assert.equal(sprite.texture, initialTexture, "movement and selection retain the morphology texture");
+  assert.equal(moved.displayCreates, 1);
+  assert.equal(moved.textureCreates, initial.textureCreates, "movement creates no morphology texture");
+  assert.equal(sprite.position.x, 230);
+
+  const analytical = updateOrganismLayer(layer, { ...baseInput, lens: "traits", selectedId: 1 }, makeTestTexture);
+  assert.equal(layer.children[0], sprite, "lens treatment retains the persistent display");
+  assert.equal(analytical.textureCreates, initial.textureCreates, "lens tint does not alter morphology identity");
+  assert.equal(analytical.liveTextures, 1, "morphology texture remains cached while the persistent sprite is lens-treated");
+  assert.equal(sprite.texture, initialTexture, "lens changes leave the morphology texture attached and unchanged");
+
+  const activeAgain = updateOrganismLayer(layer, baseInput, makeTestTexture);
+  const activeTexture = sprite.texture;
+  const dormant = updateOrganismLayer(layer, { ...baseInput, organisms: makeRows(1, "dormant") as never }, makeTestTexture);
+  assert.notEqual(sprite.texture, activeTexture, "activity has distinct phenotype mask identity");
+  assert.ok(dormant.textureCreates > activeAgain.textureCreates);
+  assert.equal(createdTextures.at(-1)!.source.scaleMode, "nearest", "phenotype mask factory configures nearest filtering");
+  const ecosystem = updateOrganismLayer(layer, { ...baseInput, tier: "ecosystem" }, makeTestTexture);
+  assert.ok(ecosystem.textureCreates > dormant.textureCreates, "LOD tier remaps texture identity");
+
+  const beforeWorld = layer.children[0];
+  const beforeReplacementDestroyed = destroyedTextures.length;
+  const replaced = updateOrganismLayer(layer, { ...baseInput, worldId: 2, organisms: makeRows(2) as never }, makeTestTexture);
+  assert.equal(replaced.liveDisplayCount, 1);
+  assert.notEqual(layer.children[0], beforeWorld, "world replacement retires obsolete display object");
+  assert.equal(replaced.liveTextures, 1, "world replacement retains only the new world's texture");
+  assert.ok(destroyedTextures.length > beforeReplacementDestroyed, "world replacement destroys prior GPU resources");
+  destroyOrganismLayer(layer);
+  assert.equal(layer.children.length, 0, "destroy releases all organism displays");
+  console.log("p1 organisms: PASS (movement/lens identity, activity+LOD remap, world replacement cleanup)");
 }
 
 // 4. Layer order + camera parity.

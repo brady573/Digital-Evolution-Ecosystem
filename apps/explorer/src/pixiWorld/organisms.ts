@@ -9,6 +9,13 @@ import { organismColor, dormantChannel } from "../organismEncoding";
 import { destroyTexture, textureFromBits } from "./textures";
 import { PHENOTYPE_CELL_FRACTION } from "../phenotype";
 
+export interface OrganismTextureResource {
+  readonly texture: Texture;
+  destroy(): void;
+}
+
+export type OrganismTextureFactory = (bits: string, size: number) => OrganismTextureResource;
+
 export interface OrganismInput {
   readonly worldId: number;
   readonly organisms: readonly RenderOrganism[];
@@ -37,7 +44,7 @@ interface DisplayRecord {
 }
 
 interface GpuTextureRecord {
-  readonly texture: Texture;
+  readonly resource: OrganismTextureResource;
   users: number;
 }
 
@@ -55,8 +62,9 @@ interface OrganismLayerState {
 
 const states = new WeakMap<Container, OrganismLayerState>();
 
-function makeTexture(bits: string, size: number): Texture {
-  return textureFromBits(bits, size, "#ffffff");
+function makeTexture(bits: string, size: number): OrganismTextureResource {
+  const texture = textureFromBits(bits, size, "#ffffff");
+  return { texture, destroy: () => destroyTexture(texture) };
 }
 
 function cssColorToTint(color: string): number {
@@ -84,7 +92,11 @@ function cssColorToTint(color: string): number {
   return (r << 16) | (g << 8) | b;
 }
 
-export function updateOrganismLayer(layer: Container, input: OrganismInput): OrganismMetrics {
+export function updateOrganismLayer(
+  layer: Container,
+  input: OrganismInput,
+  createTexture: OrganismTextureFactory = makeTexture,
+): OrganismMetrics {
   let state = states.get(layer);
   if (!state || state.worldId !== input.worldId) {
     if (state) destroyOrganismLayer(layer);
@@ -141,12 +153,12 @@ export function updateOrganismLayer(layer: Container, input: OrganismInput): Org
       const cacheEntry = state.cache.acquire(input.resolvedPhenotypes.get(request.organismId)!, input.tier, request.activity);
       let gpu = state.textures.get(cacheEntry.key);
       if (!gpu) {
-        gpu = { texture: makeTexture(cacheEntry.bits, cacheEntry.size), users: 0 };
+        gpu = { resource: createTexture(cacheEntry.bits, cacheEntry.size), users: 0 };
         state.textures.set(cacheEntry.key, gpu);
         state.textureCreates++;
       } else state.textureReuses++;
       gpu.users++;
-      display.sprite.texture = gpu.texture;
+      display.sprite.texture = gpu.resource.texture;
       if (display.textureKey) {
         state.cache.release(display.textureKey);
         state.textureReleases++;
@@ -180,7 +192,7 @@ export function updateOrganismLayer(layer: Container, input: OrganismInput): Org
   for (const key of deadKeys) {
     const gpu = state.textures.get(key);
     if (gpu && gpu.users <= 0) {
-      destroyTexture(gpu.texture);
+      gpu.resource.destroy();
       state.textures.delete(key);
       state.texturePrunes++;
     }
@@ -205,7 +217,7 @@ export function destroyOrganismLayer(layer: Container): void {
     sprite.texture = Texture.EMPTY;
     sprite.destroy();
   }
-  for (const gpu of state.textures.values()) destroyTexture(gpu.texture);
+  for (const gpu of state.textures.values()) gpu.resource.destroy();
   state.displays.clear();
   state.textures.clear();
   state.cache.prune();

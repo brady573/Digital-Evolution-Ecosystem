@@ -1,6 +1,6 @@
 /**
  * pixiWorld browser proof: serves the production Pixi modules,
- * drives boot/resize/mint/retire/teardown and reconciliation via __pixiworld
+ * drives boot/resize/mint/retire/teardown and organism reconciliation via __pixiworld
  * handle (string-form evaluates only), and records backend evidence.
  *
  * Run: pnpm test:pixi-world
@@ -11,6 +11,8 @@
  * - host resize reaches the renderer/canvas;
  * - textureFromBits() mints a nearest-filtered population-tier texture;
  * - destroyTexture() retires texture AND source (AC-P7: no indefinite leak);
+ * - organism movement retains displays and does not mint morphology textures;
+ * - world replacement retires the prior organism display/resource set;
  * - destroy() removes the canvas and releases renderer resources.
  * Independent of live RenderSnapshot/runtime binding; the maintained World
  * stays Canvas2D (this page never touches App.tsx).
@@ -18,7 +20,9 @@
  * Browser WebGL required. Fails LOUDLY (non-zero exit) when the backend is
  * not WebGL2. Headless SwiftShader presents no pixels on-device, but every
  * assertion here is state-based (flags, sizes, labels), never pixel-based,
- * so software GL proves the full lifecycle.
+ * so software GL proves only the asserted renderer/organism lifecycle claims;
+ * it does not prove production App integration, environment/camera parity,
+ * analytical-field exactness, phone overlays, or Android runtime behavior.
  */
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
@@ -184,6 +188,9 @@ async function main(): Promise<void> {
           count: number; initialLiveDisplays: number; movedLiveDisplays: number;
           initialTextureCreates: number; movedTextureCreates: number;
           textureReuses: number; movementTextureCreateDelta: number; remainingCanvasCount: number;
+          movementDisplayCreateDelta: number; movementDisplayCountBefore: number; movementDisplayCountAfter: number;
+          worldReplacementDisplayCountBefore: number; worldReplacementDisplayCountAfter: number;
+          worldReplacementLiveTextures: number; worldReplacementTextureCreates: number; worldReplacementTextureCreateDelta: number;
           initialEnvironmentTextureCreates: number; pannedEnvironmentTextureCreates: number;
           pannedEnvironmentRebuilt: boolean; initialEnvironmentTiles: number; pannedEnvironmentTiles: number;
           initialWasteCueTextureCreates: number; pannedWasteCueTextureCreates: number;
@@ -193,6 +200,15 @@ async function main(): Promise<void> {
         assert.equal(measured.initialLiveDisplays, count, `${count} fixture displays mounted`);
         assert.equal(measured.movedLiveDisplays, count, `${count} displays retained after movement`);
         assert.equal(measured.movementTextureCreateDelta, 0, `${count} movement-only update creates zero morphology textures`);
+        assert.equal(measured.movementDisplayCreateDelta, 0, `${count} movement-only update creates zero display objects`);
+        assert.equal(measured.movementDisplayCountAfter, measured.movementDisplayCountBefore,
+          `${count} movement retains the same display-object population`);
+        assert.equal(measured.worldReplacementDisplayCountAfter, Math.max(1, Math.floor(count / 2)),
+          `${count} world replacement retains only new-world displays`);
+        assert.ok(measured.worldReplacementLiveTextures > 0 && measured.worldReplacementLiveTextures <= measured.worldReplacementDisplayCountAfter,
+          `${count} world replacement keeps only current-world texture resources`);
+        assert.equal(measured.worldReplacementTextureCreateDelta, measured.worldReplacementLiveTextures,
+          `${count} world replacement prunes every obsolete texture resource`);
         assert.equal(measured.pannedEnvironmentTextureCreates, measured.initialEnvironmentTextureCreates,
           `${count} camera-only update creates zero environment textures`);
         assert.equal(measured.pannedEnvironmentRebuilt, false, `${count} camera-only update reuses environment texture`);

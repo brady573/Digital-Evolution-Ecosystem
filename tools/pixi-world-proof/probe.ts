@@ -177,6 +177,7 @@ async function main(): Promise<void> {
       } as unknown as PixiWorldProps;
       renderer.update(props);
       const first = renderer.metrics()!;
+      const firstOrganismDisplays = first.organisms.displayCreates;
       const pannedProps = { ...props, camera: { x: 599, y: 599 } } as PixiWorldProps;
       renderer.update(pannedProps);
       const panned = renderer.metrics()!;
@@ -186,6 +187,17 @@ async function main(): Promise<void> {
       const resized = renderer.metrics()!;
       renderer.update({ ...pannedProps, tick: 6, organisms: organisms.map((o, i) => ({ ...o, x: (o.x + 17) % 600, y: (o.y + 31) % 600 })) } as unknown as PixiWorldProps);
       const moved = renderer.metrics()!;
+      const beforeReplacementDisplays = moved.organisms.liveDisplayCount;
+      const texturesBeforeReplacement = moved.organisms.textureCreates;
+      const replacementProps = {
+        ...pannedProps,
+        worldId: 2,
+        environment: { ...env, worldId: 2 },
+        organisms: organisms.slice(0, Math.max(1, Math.floor(count / 2))).map((o) => ({ ...o, id: o.id + 10000 })),
+      } as unknown as PixiWorldProps;
+      renderer.update(replacementProps);
+      const replaced = renderer.metrics()!;
+      const afterReplacementTextures = replaced.organisms.liveTextures;
       renderer.destroy();
       const result = {
         count,
@@ -195,6 +207,14 @@ async function main(): Promise<void> {
         movedTextureCreates: moved.organisms.textureCreates,
         textureReuses: moved.organisms.textureReuses,
         movementTextureCreateDelta: moved.organisms.textureCreates - first.organisms.textureCreates,
+        movementDisplayCreateDelta: moved.organisms.displayCreates - firstOrganismDisplays,
+        movementDisplayCountBefore: first.organisms.liveDisplayCount,
+        movementDisplayCountAfter: moved.organisms.liveDisplayCount,
+        worldReplacementDisplayCountBefore: beforeReplacementDisplays,
+        worldReplacementDisplayCountAfter: replaced.organisms.liveDisplayCount,
+        worldReplacementLiveTextures: afterReplacementTextures,
+        worldReplacementTextureCreates: replaced.organisms.textureCreates,
+        worldReplacementTextureCreateDelta: replaced.organisms.textureCreates - texturesBeforeReplacement,
         initialEnvironmentTextureCreates: first.environment.textureCreates,
         pannedEnvironmentTextureCreates: panned.environment.textureCreates,
         pannedEnvironmentRebuilt: panned.environment.rebuilt,
