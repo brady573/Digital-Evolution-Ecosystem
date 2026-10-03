@@ -807,11 +807,12 @@ class S{
     if(removed>0){this.lineageCredit(o.l,{wasteRemoved:removed,burdenEnergy:burden*this.c.press,cleanupEnergy:cleanCost*this.c.press,cleanupExec:1})}
     else this.lineageCredit(o.l,{burdenEnergy:burden*this.c.press,cleanupEnergy:cleanCost*this.c.press});
    }}
-   // Foundation Slice 2 tradeoff: maintaining detritus-use capability costs
-   // standing energy whenever du>0 — even with no detritus around (AC10's
-   // teeth). No interval counter: the matched-assay population effect is
-   // the evidence, not an energy ledger.
-   if((o.du||0)>0)o.en-=DU_STANDING*(o.du||0)*this.c.press;
+   // Foundation Slice 2 tradeoff is execution-gated only (active cost per
+   // meal + the yield-7-vs-15 substitution): there is deliberately NO
+   // standing charge for holding du. A standing charge selects against rare
+   // carriers during the ~4k pre-death ticks before any detritus exists,
+   // trapping the capability at zero from all founder conditions. AC10's
+   // poor-world evidence is use-gated cost with no offsetting benefit.
    let eat=this.resources.consume(o,this.cur);
    if(eat&&'detritus' in eat){o.en+=eat.gain;o.md++;o.gd+=eat.gain;o.en-=eat.activeCost*this.c.press;this.cur.energy_detritus+=eat.gain;this.lineageCredit(o.l,{detritusConsumed:eat.amount,energyDetritus:eat.gain,detritusExec:1})}
    else if(eat){o.en+=eat.gain;/* Frozen counters (parity-protected): ma/mb/mc count consumption EVENTS,
