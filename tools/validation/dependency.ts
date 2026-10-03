@@ -403,17 +403,21 @@ function testFixtureArc() {
     { schemaVersion: 1, kind: "nutrient_disturbance", mode: "drought_b" },
     "dependency validation",
   );
-  // Slice 1 re-pin (af9ad23 precedent): drought-shocked guild buildup is
-  // markedly slower under occupancy friction, so establishment lands
-  // @276100 rather than @91615 (probe-verified to 400k; same single diffuse
-  // record, still no disruption). Horizon follows the trajectory 120k ->
-  // 300k; structure unchanged.
+  // History: @91615 (0.22) -> @276100 single record (Slice 1 occupancy,
+  // horizon 120k -> 300k) -> full cycle below (Slice 2B detritus).
   settle(session, 300000);
   const records = (session.analysis as any).records.filter((r: any) => r.kind === "cuse");
-  assert.equal(records.length, 1, "one establishment record (no disruption on this run)");
-  assert.equal(records[0].phase, "established", "record establishes");
-  assert.equal(records[0].tick, 276100, "establishment is deterministic under the current catalyst policy");
-  assert.deepEqual(records[0].entity_refs, [], "diffuse founding names nobody");
+  // Slice 2B re-derivation (CI-measured run 37139141294): under detritus
+  // wealth the shocked guild establishes EARLIER (@140309 vs @276100) and
+  // runs the full establish -> disrupt -> recover cycle by 300k
+  // (@176704, @249996), all with diffuse founding (refs [] throughout —
+  // attribution measured, not assumed). Trajectory, not capability loss:
+  // the complete arc machinery fires on this run. Same seed, same
+  // drought_b shock, same structure (horizon already 300k).
+  assert.equal(records.length, 3, "establishment, disruption, and recovery records");
+  assert.deepEqual(records.map((r: any) => r.phase), ["established", "disrupted", "recovered"], "full guild cycle phases in order");
+  assert.deepEqual(records.map((r: any) => r.tick), [140309, 176704, 249996], "cycle ticks deterministic under the current policy");
+  assert.ok(records.every((r: any) => Array.isArray(r.entity_refs) && r.entity_refs.length === 0), "diffuse founding names nobody throughout");
   console.log("dependency fixture arc: PASS");
 }
 
@@ -454,6 +458,10 @@ function testMultiSeedPossibility() {
   // 60k -> 150k and the pinned seed moves 55973 -> 70531. Same seed (no
   // seed-shopping); possibility structure unchanged (realizable somewhere,
   // required nowhere).
+  // Slice 2B re-pin: detritus wealth shifts guild timing again (probe:
+  // pinned seed establishes @141062, still inside the 150k horizon with
+  // thinning margin — flagged, not widened further without evidence).
+  // Same seed, same structure.
   for (const seed of [821947219, 2088626459, 3543950664, 2121676508]) {
     const session = new UniverseSession();
     session.create(fixtureConfig(seed));
@@ -465,7 +473,7 @@ function testMultiSeedPossibility() {
   }
   assert.ok(established.length >= 1, "dependency establishment must be realizable");
   assert.ok(
-    established.some((s) => s === "3543950664@70531"),
+    established.some((s) => s === "3543950664@141062"),
     "pinned establishment reproduces exactly",
   );
   console.log(`dependency multi-seed possibility [${established.join(", ")}]: PASS`);
@@ -499,9 +507,13 @@ function testWashoutReliance() {
   // to 4-6% against 20-27% control while population holds: material reliance
   // on continued C availability, demonstrated by controlled comparison
   // rather than temporal order. Deterministic on the fixture seed.
+  // Slice 2B re-pin (delay pattern): guild establishment on the fixture
+  // seed moved to @133030 under detritus wealth (probe-mapped), so the
+  // fork moves 60k -> 135k to perturb an ESTABLISHED guild, not an
+  // unformed one. Same seed, same shock, same 15k assay age, same claim.
   const session = new UniverseSession();
   session.create(fixtureConfig(FIXTURE_SEED));
-  settle(session, 60000);
+  settle(session, 135000);
   session.createControlFork();
   session.applyIntervention(
     { schemaVersion: 1, kind: "nutrient_disturbance", mode: "c_washout" },

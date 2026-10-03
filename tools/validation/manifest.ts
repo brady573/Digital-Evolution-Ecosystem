@@ -380,6 +380,20 @@ export const UNITS: readonly ValidationUnit[] = [
       "Local space is finite identity-free opportunity: settlement and birth placement resolve deterministically by seniority with deflection and atomic discard, vacancy recolonizes, lineage never steers, and throughput stays viable at thousands scale.",
   },
   {
+    id: "detritus",
+    title: "Detritus and recycling (Slice 2)",
+    script: "test:detritus",
+    cls: "deterministic",
+    enforcement: "blocking",
+    mergeGate: true,
+    domains: withApparatus("contracts", "sim-core", "sim-runtime"),
+    needs: [],
+    parallelSafe: true,
+    baselineSeconds: 300,
+    claim:
+      "Death deposits deterministic local detritus available next tick; the inherited du capability pays a real tradeoff and advantages recyclers only with opportunity; mineralization returns mass into A/B with closed accounting on both ledgers; hotspots form and are consumed; the strategy is maintained iff opportunity persists; checkpoints and forks stay exact.",
+  },
+  {
     id: "aftermath",
     title: "Aftermath state and comparison",
     script: "test:aftermath",
@@ -833,6 +847,7 @@ export const GROUPS: readonly ValidationGroup[] = [
       "dependency-tradeoff",
       "dependency-washout",
       "spatial-occupancy",
+      "detritus",
     ],
     ci: false,
   },
@@ -912,7 +927,7 @@ export const GROUPS: readonly ValidationGroup[] = [
   {
     id: "ci-sim-c",
     title: "Deterministic suites C (niche, ecology, runtime boundary)",
-    unitIds: ["niche", "ecology", "runtime-boundary", "spatial-occupancy"],
+    unitIds: ["niche", "ecology", "runtime-boundary", "spatial-occupancy", "detritus"],
     ci: true,
   },
   {

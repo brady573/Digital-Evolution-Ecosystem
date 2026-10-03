@@ -34,6 +34,7 @@
     "test:catalysts:fast": "tsx tools/validation/catalysts.ts -- --fast",
     "test:niche": "tsx tools/validation/niche.ts",
     "test:spatial-occupancy": "tsx tools/validation/spatial-occupancy.ts",
+    "test:detritus": "tsx tools/validation/detritus.ts",
     "test:niche-survey": "tsx tools/validation/niche-survey.ts",
     "test:detritus-survey": "tsx tools/validation/detritus-survey.ts",
     "test:washout-reliance": "tsx tools/validation/washout-reliance.ts",
