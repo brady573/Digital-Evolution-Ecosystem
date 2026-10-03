@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { Simulation, detritusBodyProxy } from "../../packages/sim-core/src/engine.ts";
+import { Simulation, detritusBodyProxy, createSimulationCheckpoint, restoreSimulationCheckpoint } from "../../packages/sim-core/src/engine.ts";
 import { ENGINE_VERSION } from "../../packages/sim-core/src/index.ts";
 
 /**
@@ -188,6 +188,34 @@ function testAccountingClosure() {
   console.log(`accounting closure: PASS (detritus residual ${da.residual.toExponential(1)}, A/B ${ra.absolute_residual.map((v: number) => v.toExponential(1)).join("/")})`);
 }
 
+function testCheckpointFork() {
+  // AC16: save/load round-trip and matched-fork continuation with nonzero
+  // detritus, an unmerged pending buffer, and evolved (here overridden —
+  // validation-only, same stand-in as assays C/D) recycler capability.
+  const base = new Simulation(config(7)) as any;
+  for (let t = 0; t < 20000; t++) base.step();
+  for (const o of base.o) o.du = 1.0;
+  const anchor = base.o[0];
+  base.resources.detritus.depositPending(anchor.x, anchor.y, 5, null);
+  const d0 = base.resources.detritus;
+  assert.ok(d0.totals().stock > 0, "nonzero detritus precondition");
+  assert.ok(d0.totals().pending > 0, "unmerged pending precondition");
+  const duMean = (s: any) => s.o.reduce((a: number, o: any) => a + o.du, 0) / s.o.length;
+  const du0 = duMean(base);
+  const revived = restoreSimulationCheckpoint(JSON.parse(JSON.stringify(createSimulationCheckpoint(base)))) as any;
+  const r0 = revived.resources.detritus;
+  assert.deepEqual(Array.from(r0.stock), Array.from(d0.stock), "detritus stock round-trips exactly");
+  assert.deepEqual(Array.from(r0.pending), Array.from(d0.pending), "pending buffer round-trips exactly");
+  assert.equal(r0.deposited, d0.deposited, "lifetime counters round-trip");
+  assert.equal(duMean(revived), du0, "recycler capability round-trips");
+  for (let i = 0; i < 502; i++) { base.step(); revived.step(); }
+  assert.equal(revived.t, base.t, "fork continues to the same tick");
+  assert.equal(revived.o.length, base.o.length, "fork continues with the same population");
+  assert.deepEqual(revived.metrics().detritus, base.metrics().detritus, "fork detritus state identical");
+  assert.equal(duMean(revived), duMean(base), "fork capability identical");
+  console.log("checkpoint/fork with detritus: PASS");
+}
+
 testBodyProxy();
 testDeathCausality();
 testNextTickAvailability();
@@ -195,4 +223,5 @@ testRecyclerAdvantage();
 testOpportunityDependence();
 testMineralizationIsolation();
 testAccountingClosure();
+testCheckpointFork();
 console.log(`detritus validation: PASS (engine ${ENGINE_VERSION})`);
