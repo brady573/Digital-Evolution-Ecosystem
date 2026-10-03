@@ -1,4 +1,4 @@
-export { WorkerRuntimeClient } from "./client";
+export { WorkerRuntimeClient, RuntimeCommandRejection } from "./client";
 export { RUNTIME_IDENTITY } from "./provenance";
 /** Test-only: deeTest transport seam. Never part of the production contract. */
 export { InstrumentedTransport, createInstrumentedTransport } from "./test-transport";

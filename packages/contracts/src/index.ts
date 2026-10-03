@@ -996,6 +996,22 @@ export class CheckpointRejectionError extends Error {
   }
 }
 
+/**
+ * F3a: the classifications a caller can branch on without reading prose.
+ *
+ * `checkpoint-rejected` is the A3.3/A3.4 contract doing its job and carries a
+ * {@link CheckpointRejectionReason}. `engine-mismatch` is the separate gate that
+ * refuses a save from another engine build — deliberately NOT folded into
+ * `checkpoint-rejected`, because the player's remedy differs (the save is fine,
+ * this build is not) and because keeping them apart preserves the two
+ * independent gates the supported-save boundary document names.
+ */
+export type RuntimeRejectionKind =
+  | "checkpoint-rejected"
+  | "engine-mismatch"
+  | "unsupported-command"
+  | "internal";
+
 // A function declaration, not a const arrow: TypeScript only narrows control
 // flow past a `never` call when the callee is a declared function, and every
 // check below relies on that narrowing to reach the next field.
@@ -2687,7 +2703,24 @@ export type RuntimeResponse =
    * - live: every advance.
    */
   | { readonly type: "PRESENTATION"; readonly frame: PresentationFrame }
-  | { readonly type: "ERROR"; readonly message: string; readonly requestId?: string };
+  | {
+      readonly type: "ERROR";
+      readonly message: string;
+      readonly requestId?: string;
+      /**
+       * F3a: why the command failed, as a classification rather than prose.
+       *
+       * The message is for logs. A player needs to be told "this build cannot
+       * restore that save", which is not recoverable from the message text and
+       * must not be recovered from it by string-matching. Absent on a pre-F3a
+       * worker, which is why consumers must tolerate its absence.
+       */
+      readonly rejectionKind?: RuntimeRejectionKind;
+      /** Present only for `checkpoint-rejected`, carrying the A3.3/A3.4 reason. */
+      readonly rejectionReason?: CheckpointRejectionReason;
+      /** The field the rejection named. Present only for `checkpoint-rejected`. */
+      readonly rejectionField?: string;
+    };
 
 /* ------------------------------------------------------------------ *
  * A6 evidence export: typed, versioned export contract with revision
