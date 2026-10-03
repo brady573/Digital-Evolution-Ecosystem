@@ -1053,6 +1053,7 @@ const CHECKPOINT_TAGS: readonly string[] = [
   "simulation",
   "resource-system",
   "waste-field",
+  "detritus-field",
   "legacy-observer",
   "map",
   "undefined",
@@ -1098,7 +1099,7 @@ function validateEncodedSimulation(value: unknown, path: string, source: Checkpo
       if (typeof tag !== "string" || !CHECKPOINT_TAGS.includes(tag)) {
         reject(at, "unsupported-tag", `unrecognised checkpoint tag ${JSON.stringify(tag)}`);
       }
-      if (["simulation", "resource-system", "waste-field", "legacy-observer"].includes(tag)) {
+      if (["simulation", "resource-system", "waste-field", "detritus-field", "legacy-observer"].includes(tag)) {
         if (!isPlainObject(node.props)) reject(`${at}.props`, "malformed-container", "tagged state needs object props");
         for (const [key, item] of Object.entries(node.props)) walk(item, `${at}.props.${key}`);
       } else if (tag === "map") {
