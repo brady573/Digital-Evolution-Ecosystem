@@ -140,9 +140,9 @@
 - Analytical presentation uses existing `organismColor`, `dormantChannel`, `nutrientOverlayCell`, and `wasteOverlayCell` semantics; filter choice remains implementation freedom if values are not falsely interpolated.
 
 - [x] **Step 1: Add toroidal hit tests** in `tools/validation/pixi-p0.ts` across both seams and confirm outside-radius misses.
-- [ ] **Step 2: Run `pnpm test:pixi-p0`** and confirm the new hit tests fail before/after implementation as appropriate; add constant-CSS-radius tests at zoom limits. Analytical browser assertions run with Task 5 integration.
-- [ ] **Step 3: Implement Pixi pointer routing and lens layers**. Pointer capture, the current drag/click threshold, normalized pan, closest toroidal selection, and screen-space focus remain aligned with Canvas2D; seam copies never create selectable duplicate IDs. Deduplicate camera/view callbacks so React prop synchronization cannot form a feedback loop or masquerade as user input.
-- [ ] **Step 4: Run `pnpm test:pixi-p0` and browser World checks**; verify exact data-to-encoding output and screenshot evidence for Nutrients, Waste, Clades, Traits, and normal World.
+- [x] **Step 2: Run `pnpm test:pixi-p0`** and add constant-CSS-radius tests at zoom limits; 25 CSS px hits and 27 CSS px misses at zoom 1 and 3, with existing seam-aware hit tests retained.
+- [x] **Step 3: Implement Pixi pointer routing and lens presentation**. Existing pointer capture/drag/click behavior and shortest-toroidal hit selection remain; pan callback duplicates are suppressed. Normal mode presents resolved Pixel Phenotype sprites; analytical modes present the deterministic existing voxel form with semantic organism colors and independent dormancy alpha/hollow treatment. Focus is separate from morphology; phenotype texture/cache identity is lens- and selection-neutral.
+- [ ] **Step 4: Run `pnpm test:pixi-p0` locally and focused organism/lens interaction proof on GitHub CI**. CI claims are bounded to CSS-radius selection behavior, analytical display/focus treatment, and P1.3 cache neutrality; do not claim all Explorer field lenses, torus product parity, or screenshots until integrated Task 5 browser work.
 - [ ] **Step 5: Review lens changes for morphology-cache neutrality** and commit only if separately authorized.
 
 ### Task 5: React Integration and Phone/Aftermath Coexistence (P1.5)

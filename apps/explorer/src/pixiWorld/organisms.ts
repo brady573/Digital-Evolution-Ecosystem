@@ -1,6 +1,6 @@
 import type { RenderOrganism } from "@digital-evolution/contracts";
 import type { LodTier, ResolvedPhenotype } from "@digital-evolution/phenotype";
-import { Container, Sprite, Texture } from "pixi.js";
+import { Container, Graphics, Sprite, Texture } from "pixi.js";
 import { renderPhenotypeGrid } from "@digital-evolution/phenotype";
 import { toTextureRequests } from "../pixi/adapter";
 import { PhenotypeTextureCache } from "../pixi/textureCache";
@@ -40,7 +40,9 @@ export interface OrganismMetrics {
 
 interface DisplayRecord {
   readonly sprite: Sprite;
+  readonly voxel: Graphics;
   textureKey: string | null;
+  voxelSignature: string | null;
 }
 
 interface GpuTextureRecord {
@@ -92,6 +94,41 @@ function cssColorToTint(color: string): number {
   return (r << 16) | (g << 8) | b;
 }
 
+function drawVoxel(
+  graphic: Graphics,
+  organism: RenderOrganism,
+  lens: Lens,
+  traitView: TraitView,
+  traitRange: [number, number],
+  scale: number,
+): void {
+  graphic.clear();
+  const dormant = organism.activity === "dormant";
+  const span = dormant ? 2 : organism.energy > 120 ? 4 : organism.energy > 60 ? 3 : 2;
+  const unit = Math.max(2, scale * 2.2);
+  let hash = Math.imul(organism.id, 2654435761) ^ 0x9e3779b9;
+  hash ^= hash >>> 15;
+  hash = Math.imul(hash, 0x85ebca6b) >>> 0;
+  const color = cssColorToTint(organismColor(organism as never, lens, traitView, traitRange));
+  for (let gy = 0; gy < span; gy++) {
+    for (let gx = 0; gx < span; gx++) {
+      const edge = gx === 0 || gy === 0 || gx === span - 1 || gy === span - 1;
+      let solid = true;
+      if (edge) {
+        if (organism.diet < -0.25) solid = ((hash >> ((gy * span + gx) % 24)) & 1) === 1;
+        else if (organism.diet > 0.25) solid = true;
+        else solid = ((gx * 7 + gy * 13 + (hash & 3)) & 3) !== 0;
+      }
+      if (!solid) continue;
+      const x = (gx - span / 2) * unit;
+      const y = (gy - span / 2) * unit;
+      const cell = graphic.rect(x, y, unit, unit);
+      if (dormant) cell.stroke({ color, width: 1 });
+      else cell.fill({ color });
+    }
+  }
+}
+
 export function updateOrganismLayer(
   layer: Container,
   input: OrganismInput,
@@ -114,18 +151,17 @@ export function updateOrganismLayer(
     states.set(layer, state);
   }
 
-  const requests = input.lens === "normal"
-    ? toTextureRequests(input.organisms, input.resolvedPhenotypes, input.tier)
-    : [];
+  const requests = toTextureRequests(input.organisms, input.resolvedPhenotypes, input.tier);
   const requestById = new Map(requests.map((request) => [request.organismId, request]));
-  const organismById = new Map(input.organisms.map((organism) => [organism.id, organism]));
   const liveIds = new Set<number>(input.organisms.map((organism) => Number(organism.id)));
 
   for (const [id, record] of state.displays) {
     if (liveIds.has(id)) continue;
     layer.removeChild(record.sprite);
+    layer.removeChild(record.voxel);
     record.sprite.texture = Texture.EMPTY;
     record.sprite.destroy();
+    record.voxel.destroy();
     if (record.textureKey) {
       state.cache.release(record.textureKey);
       state.textureReleases++;
@@ -138,15 +174,16 @@ export function updateOrganismLayer(
   const rows = input.organisms;
   for (const organism of rows) {
     const request = requestById.get(organism.id);
-    if (!request && input.lens === "normal") continue;
     const id = organism.id;
     let display = state.displays.get(id);
     if (!display) {
       const sprite = new Sprite(Texture.EMPTY);
       sprite.anchor.set(0.5);
-      display = { sprite, textureKey: null };
+      const voxel = new Graphics();
+      display = { sprite, voxel, textureKey: null, voxelSignature: null };
       state.displays.set(id, display);
       layer.addChild(sprite);
+      layer.addChild(voxel);
       state.displayCreates++;
     }
     if (request && display.textureKey !== request.key) {
@@ -178,14 +215,20 @@ export function updateOrganismLayer(
       const cell = Math.max(2, 2.2 * PHENOTYPE_CELL_FRACTION[input.tier]);
       display.sprite.width = grid.size * cell;
       display.sprite.height = grid.size * cell;
-      display.sprite.visible = true;
-    } else {
-      const span = organism.activity === "dormant" ? 2 : organism.energy > 120 ? 4 : organism.energy > 60 ? 3 : 2;
-      display.sprite.width = span * Math.max(2, input.scale * 2.2);
-      display.sprite.height = display.sprite.width;
-      display.sprite.visible = true;
-      if (dormantChannel(organism as never).hollow) display.sprite.alpha = 0.55;
     }
+    display.sprite.visible = input.lens === "normal" && !!request && !!resolved;
+    const voxelSignature = [
+      organism.id, organism.activity, organism.energy, organism.diet, input.lens,
+      input.traitView, input.traitRange[0], input.traitRange[1], input.scale,
+      cssColorToTint(tint),
+    ].join("/");
+    if (display.voxelSignature !== voxelSignature) {
+      drawVoxel(display.voxel, organism, input.lens, input.traitView, input.traitRange, input.scale);
+      display.voxelSignature = voxelSignature;
+    }
+    display.voxel.visible = input.lens !== "normal";
+    display.voxel.position.set(organism.x, organism.y);
+    display.voxel.alpha = dormantChannel(organism as never).alpha;
   }
 
   const deadKeys = state.cache.prune();
@@ -212,10 +255,12 @@ export function updateOrganismLayer(
 export function destroyOrganismLayer(layer: Container): void {
   const state = states.get(layer);
   if (!state) return;
-  for (const { sprite } of state.displays.values()) {
+  for (const { sprite, voxel } of state.displays.values()) {
     layer.removeChild(sprite);
+    layer.removeChild(voxel);
     sprite.texture = Texture.EMPTY;
     sprite.destroy();
+    voxel.destroy();
   }
   for (const gpu of state.textures.values()) gpu.resource.destroy();
   state.displays.clear();

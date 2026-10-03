@@ -7,6 +7,9 @@ import { LOD_GRID_SIZE, renderPhenotypeGrid, resolvePhenotype } from "../../pack
 import type { Texture } from "pixi.js";
 import { createWorldRenderer } from "../../apps/explorer/src/pixiWorld/renderer.ts";
 import type { PixiWorldProps } from "../../apps/explorer/src/worldViewTypes.ts";
+import { Sprite, Graphics } from "pixi.js";
+import { selectAtScreenPoint } from "../../apps/explorer/src/pixiWorld/interaction.ts";
+import { viewScale } from "../../apps/explorer/src/pixiWorld/camera.ts";
 
 let handle: PixiWorldHandle | null = null;
 let minted: Texture | null = null;
@@ -185,8 +188,49 @@ async function main(): Promise<void> {
       const resizedHost = await waitForSize(800, 500);
       await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
       const resized = renderer.metrics()!;
+      const rect = sceneHandle.app.canvas.getBoundingClientRect();
+      const selectionChecks = [1, 3].map((zoom) => {
+        const camera = { x: 599, y: 300 };
+        const scale = viewScale(rect.width, rect.height, zoom);
+        const seamOrganism = [{ id: 707, x: 2, y: 300 }];
+        return {
+          zoom,
+          hit25: selectAtScreenPoint(rect.left + rect.width / 2 + 25, rect.top + rect.height / 2, rect, camera, scale,
+            [{ id: 707, x: camera.x, y: camera.y }]),
+          miss27: selectAtScreenPoint(rect.left + rect.width / 2 + 27, rect.top + rect.height / 2, rect, camera, scale,
+            [{ id: 707, x: camera.x, y: camera.y }]),
+          seamIdentity: selectAtScreenPoint(rect.left + rect.width / 2, rect.top + rect.height / 2, rect, camera, scale, seamOrganism),
+        };
+      });
       renderer.update({ ...pannedProps, tick: 6, organisms: organisms.map((o, i) => ({ ...o, x: (o.x + 17) % 600, y: (o.y + 31) % 600 })) } as unknown as PixiWorldProps);
       const moved = renderer.metrics()!;
+      const organismLayer = sceneHandle.layers.layers.organisms;
+      const selectedId = organisms[0]!.id;
+      const phenotypeSprite = organismLayer.children[0] as Sprite;
+      const morphologyTexture = phenotypeSprite.texture;
+      const lensResults: Array<{ lens: string; visibleTextureCount: number; textureCreates: number; liveDisplays: number }> = [];
+      for (const lens of ["nutrients", "waste", "clades", "traits"] as const) {
+        renderer.update({ ...pannedProps, lens, selectedId } as PixiWorldProps);
+        const lensMetrics = renderer.metrics()!;
+        const voxel = organismLayer.children[1] as Graphics;
+        if (phenotypeSprite.visible || !voxel.visible || phenotypeSprite.texture !== morphologyTexture) {
+          throw new Error(`${lens} lens changed phenotype identity or failed to show analytical voxel presentation`);
+        }
+        lensResults.push({
+          lens,
+          visibleTextureCount: lensMetrics.organisms.liveTextures,
+          textureCreates: lensMetrics.organisms.textureCreates,
+          liveDisplays: lensMetrics.organisms.liveDisplayCount,
+        });
+      }
+      const focusLayer = sceneHandle.layers.layers["selection-focus"];
+      const focusVisible = focusLayer.children[0]?.visible === true;
+      renderer.update(pannedProps);
+      const restoredNormalPhenotype = phenotypeSprite.visible && phenotypeSprite.texture === morphologyTexture;
+      const dormantRows = organisms.map((organism, index) => index === 0 ? { ...organism, activity: "dormant" as const } : organism);
+      renderer.update({ ...pannedProps, lens: "traits", organisms: dormantRows } as unknown as PixiWorldProps);
+      const dormantVoxel = organismLayer.children[1] as Graphics;
+      const dormantAnalyticalAlpha = dormantVoxel.alpha;
       const beforeReplacementDisplays = moved.organisms.liveDisplayCount;
       const replacementProps = {
         ...pannedProps,
@@ -210,6 +254,11 @@ async function main(): Promise<void> {
         movementDisplayCreateDelta: moved.organisms.displayCreates - firstOrganismDisplays,
         movementDisplayCountBefore: first.organisms.liveDisplayCount,
         movementDisplayCountAfter: moved.organisms.liveDisplayCount,
+        analyticalLensResults: lensResults,
+        focusVisible,
+        restoredNormalPhenotype,
+        selectionChecks,
+        dormantAnalyticalAlpha,
         worldReplacementDisplayCountBefore: beforeReplacementDisplays,
         worldReplacementDisplayCountAfter: replaced.organisms.liveDisplayCount,
         worldReplacementLiveTextures: afterReplacementTextures,

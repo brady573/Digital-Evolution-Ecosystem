@@ -189,6 +189,10 @@ async function main(): Promise<void> {
           initialTextureCreates: number; movedTextureCreates: number;
           textureReuses: number; movementTextureCreateDelta: number; remainingCanvasCount: number;
           movementDisplayCreateDelta: number; movementDisplayCountBefore: number; movementDisplayCountAfter: number;
+          analyticalLensResults: Array<{ lens: string; visibleTextureCount: number; textureCreates: number; liveDisplays: number }>;
+          focusVisible: boolean; restoredNormalPhenotype: boolean;
+          selectionChecks: Array<{ zoom: number; hit25: number | null; miss27: number | null; seamIdentity: number | null }>;
+          dormantAnalyticalAlpha: number;
           worldReplacementDisplayCountBefore: number; worldReplacementDisplayCountAfter: number;
           worldReplacementLiveTextures: number; worldReplacementTextureCreates: number;
           initialEnvironmentTextureCreates: number; pannedEnvironmentTextureCreates: number;
@@ -203,6 +207,20 @@ async function main(): Promise<void> {
         assert.equal(measured.movementDisplayCreateDelta, 0, `${count} movement-only update creates zero display objects`);
         assert.equal(measured.movementDisplayCountAfter, measured.movementDisplayCountBefore,
           `${count} movement retains the same display-object population`);
+        assert.deepEqual(measured.analyticalLensResults.map((result) => result.lens), ["nutrients", "waste", "clades", "traits"]);
+        for (const result of measured.analyticalLensResults) {
+          assert.equal(result.textureCreates, measured.initialTextureCreates, `${count} ${result.lens} view leaves morphology identity unchanged`);
+          assert.equal(result.visibleTextureCount, measured.initialTextureCreates,
+            `${count} ${result.lens} view retains current phenotype texture resources`);
+          assert.equal(result.liveDisplays, count, `${count} ${result.lens} view retains organism displays`);
+        }
+        assert.equal(measured.focusVisible, true, `${count} selection focus remains presentation-visible in analytical mode`);
+        assert.equal(measured.restoredNormalPhenotype, true, `${count} returning to normal restores the same Pixel Phenotype texture`);
+        assert.deepEqual(measured.selectionChecks, [
+          { zoom: 1, hit25: 707, miss27: null, seamIdentity: 707 },
+          { zoom: 3, hit25: 707, miss27: null, seamIdentity: 707 },
+        ], `${count} toroidal selection preserves 26 CSS-pixel radius and one seam identity`);
+        assert.equal(measured.dormantAnalyticalAlpha, 0.55, `${count} analytical dormancy remains independently legible`);
         assert.equal(measured.worldReplacementDisplayCountAfter, Math.max(1, Math.floor(count / 2)),
           `${count} world replacement retains only new-world displays`);
         assert.ok(measured.worldReplacementLiveTextures > 0 && measured.worldReplacementLiveTextures <= measured.worldReplacementDisplayCountAfter,

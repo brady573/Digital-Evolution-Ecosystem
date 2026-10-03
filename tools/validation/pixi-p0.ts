@@ -53,10 +53,10 @@ import {
 import { ASSET_REGISTRY, registryManifestIds } from "../../apps/explorer/src/pixi/assetRegistry.ts";
 import { toTextureRequests } from "../../apps/explorer/src/pixi/adapter.ts";
 import { environmentIdentity, environmentMatchesWorld, sameNormalFieldInput } from "../../apps/explorer/src/pixiWorld/environmentIdentity.ts";
-import { hitTestOrganism } from "../../apps/explorer/src/pixiWorld/interaction.ts";
+import { hitTestOrganism, selectAtScreenPoint } from "../../apps/explorer/src/pixiWorld/interaction.ts";
 import { dormantChannel, organismColor } from "../../apps/explorer/src/organismEncoding.ts";
 import { updateOrganismLayer, destroyOrganismLayer, type OrganismTextureFactory } from "../../apps/explorer/src/pixiWorld/organisms.ts";
-import { Container, Sprite, Texture } from "pixi.js";
+import { Container, Graphics, Sprite, Texture } from "pixi.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "../..");
@@ -92,6 +92,16 @@ const pixiDir = join(root, "apps/explorer/src/pixi");
   assert.equal(hitTestOrganism({ x: 300, y: 599 }, organisms, 26), 4);
   assert.equal(hitTestOrganism({ x: 300, y: 1 }, organisms, 26), 3);
   assert.equal(hitTestOrganism({ x: 300, y: 300 }, organisms, 26), null);
+  const rect = { left: 20, top: 40, width: 600, height: 600 };
+  for (const zoom of [1, 3]) {
+    const scale = zoom;
+    const center = { x: 300, y: 300 };
+    const target = [{ id: 99, x: 300, y: 300 }];
+    assert.equal(selectAtScreenPoint(rect.left + 300 + 25, rect.top + 300, rect, center, scale, target), 99,
+      `25 CSS px hit at zoom ${zoom}`);
+    assert.equal(selectAtScreenPoint(rect.left + 300 + 27, rect.top + 300, rect, center, scale, target), null,
+      `27 CSS px miss at zoom ${zoom}`);
+  }
   console.log("p1 hit test: PASS (nearest toroidal identity across both seams)");
 }
 
@@ -251,14 +261,30 @@ function traitsForAxes(mob: number, sen: number, met: number, spec: number) {
   assert.equal(moved.textureCreates, initial.textureCreates, "movement creates no morphology texture");
   assert.equal(sprite.position.x, 230);
 
-  const analytical = updateOrganismLayer(layer, { ...baseInput, lens: "traits", selectedId: 1 }, makeTestTexture);
-  assert.equal(layer.children[0], sprite, "lens treatment retains the persistent display");
-  assert.equal(analytical.textureCreates, initial.textureCreates, "lens tint does not alter morphology identity");
-  assert.equal(analytical.liveTextures, 1, "morphology texture remains cached while the persistent sprite is lens-treated");
-  assert.equal(sprite.texture, initialTexture, "lens changes leave the morphology texture attached and unchanged");
-
+  const voxel = layer.children.find((child) => child instanceof Graphics) as Graphics | undefined;
+  assert.ok(voxel, "each organism owns a persistent analytical voxel display");
+  for (const lens of ["nutrients", "waste", "clades", "traits"] as const) {
+    const analytical = updateOrganismLayer(layer, { ...baseInput, lens, selectedId: 1 }, makeTestTexture);
+    assert.equal(layer.children[0], sprite, "lens treatment retains the persistent display");
+    assert.equal(analytical.textureCreates, initial.textureCreates, `${lens} tint does not alter morphology identity`);
+    assert.equal(analytical.liveTextures, 1, "morphology texture remains cached while voxel view is shown");
+    assert.equal(sprite.texture, initialTexture, "lens changes leave the morphology texture identity unchanged");
+    assert.equal(sprite.visible, false, "analytical lens presents the accepted voxel view, not the phenotype mask");
+    assert.ok(voxel.visible, "analytical voxel presentation is visible");
+    assert.equal(voxel.alpha, 1, "active analytical organism remains fully opaque");
+  }
   const activeAgain = updateOrganismLayer(layer, baseInput, makeTestTexture);
-  const activeTexture = sprite.texture;
+  assert.equal(sprite.visible, true, "normal lens restores the resolved Pixel Phenotype morphology");
+  assert.equal(sprite.texture, initialTexture, "returning to normal reuses the same morphology texture");
+  const dormantAnalytical = updateOrganismLayer(layer, {
+    ...baseInput,
+    lens: "clades",
+    organisms: makeRows(1, "dormant") as never,
+  }, makeTestTexture);
+  assert.equal(voxel.alpha, 0.55, "dormancy alpha remains independent of analytical encoding");
+  assert.equal(dormantAnalytical.textureCreates, activeAgain.textureCreates + 1, "dormancy remaps morphology independently of lens");
+
+  const activeTexture = initialTexture;
   const dormant = updateOrganismLayer(layer, { ...baseInput, organisms: makeRows(1, "dormant") as never }, makeTestTexture);
   assert.notEqual(sprite.texture, activeTexture, "activity has distinct phenotype mask identity");
   assert.ok(dormant.textureCreates > activeAgain.textureCreates);

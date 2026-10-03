@@ -25,7 +25,7 @@ export function createWorldRenderer(handle: PixiWorldHandle): WorldRenderer {
   let organismMetrics: OrganismMetrics | null = null;
   let environmentMetrics: EnvironmentMetrics | null = null;
   let lastProps: PixiWorldProps | null = null;
-  let pointer: { id: number; x: number; y: number; camera: WorldCamera; moved: boolean } | null = null;
+  let pointer: { id: number; x: number; y: number; camera: WorldCamera; moved: boolean; lastCamera: WorldCamera | null } | null = null;
   const focus = new Container();
   focus.label = "selection-focus-marker";
   const focusGraphic = new Graphics();
@@ -57,7 +57,7 @@ export function createWorldRenderer(handle: PixiWorldHandle): WorldRenderer {
   const onPointerDown = (event: PointerEvent) => {
     if (!lastProps) return;
     canvas.setPointerCapture(event.pointerId);
-    pointer = { id: event.pointerId, x: event.clientX, y: event.clientY, camera: lastProps.camera, moved: false };
+    pointer = { id: event.pointerId, x: event.clientX, y: event.clientY, camera: lastProps.camera, moved: false, lastCamera: null };
   };
   const onPointerMove = (event: PointerEvent) => {
     const drag = pointer;
@@ -70,7 +70,11 @@ export function createWorldRenderer(handle: PixiWorldHandle): WorldRenderer {
     const rect = canvas.getBoundingClientRect();
     const scale = viewScale(rect.width, rect.height, props.zoom);
     const next = { x: wrapCoord(drag.camera.x - dx / scale), y: wrapCoord(drag.camera.y - dy / scale) };
-    if (next.x !== props.camera.x || next.y !== props.camera.y) props.onCamera(next);
+    if (next.x !== props.camera.x || next.y !== props.camera.y) {
+      if (drag.lastCamera?.x === next.x && drag.lastCamera.y === next.y) return;
+      drag.lastCamera = next;
+      props.onCamera(next);
+    }
   };
   const onPointerUp = (event: PointerEvent) => {
     const drag = pointer;
