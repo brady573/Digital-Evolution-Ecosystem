@@ -1,0 +1,45 @@
+name: detritus-survey-025
+
+# Manual scientific survey: detritus-regime characterization. Mirrors
+# niche-survey-023.yml precedent (dispatch-only, artifact upload, never
+# merge-gating). The runner is resume-safe: each invocation completes only
+# missing rows and rewrites the retained file, so re-dispatch continues
+# rather than restarts. Device execution is off limits for long suites; CI
+# is the execution environment.
+#
+# Dispatch with BOTH a matching ref and out (Slice 1 lesson: the checkout
+# uses inputs.ref, so --ref alone surveys a stale branch):
+#   gh workflow run detritus-survey-025 --ref <branch> \
+#     -f ref=<branch> -f out=testdata/detritus-survey-0.25.json
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch to survey (must carry the survey script + engine under test)"
+        required: false
+        default: "feat/foundation-slice2-detritus"
+      out:
+        description: "Retained artifact path"
+        required: false
+        default: "testdata/detritus-survey-0.25.json"
+
+permissions:
+  contents: read
+
+jobs:
+  survey:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: ./.github/actions/setup-project
+      - run: pnpm test:detritus-survey
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: detritus-survey-025-results
+          path: ${{ inputs.out }}
+          if-no-files-found: error
+          retention-days: 30
