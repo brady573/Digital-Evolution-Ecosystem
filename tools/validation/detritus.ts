@@ -387,7 +387,7 @@ function testSurveyArtifact() {
     assert.equal(artifact.rows.filter((r: any) => r.config === c).length, 6, `${c}: every surveyed seed represented`);
   }
   for (const row of artifact.rows) {
-    for (const k of ["config", "seed", "horizon", "detMax", "detFinal", "detCapFraction", "detrivMaxShare", "duBase", "duFinal", "hotspot", "energyDetritus", "mineralShareAB", "population", "response"]) {
+    for (const k of ["config", "seed", "horizon", "detMax", "detFinal", "detCapFraction", "detrivMaxShare", "duBase", "duFinal", "hotspot", "energyDetritus", "mineralShareAB", "population", "response", "wasteMax", "nicheState", "nicheEstablished"]) {
       assert.ok(row[k] !== undefined, `survey row carries ${k}`);
     }
   }

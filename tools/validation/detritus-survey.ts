@@ -66,7 +66,7 @@ for (const name of ["patchwork", "balanced", "harsh"]) {
     const session = new UniverseSession();
     session.create(config(name, seed));
     let detMax = 0, detrivMaxShare = 0, eDet = 0, execs = 0;
-    let duBase = -1, duMax = 0;
+    let duBase = -1, duMax = 0, wasteMax = 0;
     for (let i = 0; i < 2000 && session.snapshot().tick < HORIZON; i++) {
       const snapshot = session.advance(1000);
       const pending = snapshot.pendingDecision;
@@ -75,6 +75,7 @@ for (const name of ["patchwork", "balanced", "harsh"]) {
       const m = session.snapshot().metrics as any;
       const t = sim.resources.detritus.totals();
       detMax = Math.max(detMax, t.stock);
+      wasteMax = Math.max(wasteMax, m.waste.fraction);
       const roles = m.metabolic_roles.counts;
       const share = m.population ? (roles.detritivore || 0) / m.population : 0;
       detrivMaxShare = Math.max(detrivMaxShare, share);
@@ -89,6 +90,12 @@ for (const name of ["patchwork", "balanced", "harsh"]) {
     const sim = session.simulation as any;
     const m = session.snapshot().metrics as any;
     const t = sim.resources.detritus.totals();
+    // Niche-reachability sweep (2B §9): the same runs double as the bounded
+    // search for Waste niche construction under detritus wealth. Track waste
+    // peak + niche records per row; 0 establishments across all rows feeds
+    // the TENSION verdict, any establishment feeds the two-layer re-pin.
+    const nrecs = ((session.analysis as any).records as any[]).filter((r: any) => r.kind === "niche");
+    const nicheEst = nrecs.filter((r: any) => r.phase === "established").map((r: any) => r.tick);
     // Hotspot flag: top-decile mass share (uniform field = 0.10).
     const arr = Array.from(sim.resources.detritus.stock as Float32Array).sort((a: number, b: number) => b - a);
     const sum = arr.reduce((a: number, b: number) => a + b, 0);
@@ -109,6 +116,9 @@ for (const name of ["patchwork", "balanced", "harsh"]) {
       detritusExecs: execs,
       mineralShareAB: +(minIn / Math.max(1, minIn + regIn)).toFixed(3),
       population: m.population,
+      wasteMax: +wasteMax.toFixed(4),
+      nicheState: (session.analysis as any).niche.state,
+      nicheEstablished: nicheEst,
     };
     entry.response =
       entry.detrivMaxShare >= 0.05 ? "specialization" :
