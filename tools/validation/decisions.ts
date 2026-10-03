@@ -191,9 +191,11 @@ function testVerticalSliceAndGate() {
   // placement shift energy/trajectories slightly; the first durable
   // formation lands @6777 rather than @7279. Counts/structure unchanged:
   // still the earliest formation.
+  // Slice 2B re-pin: detritus wealth shifts early dormancy slightly later;
+  // the first durable formation lands @7530. Same claim, same structure.
   assert.equal(
     pending.sourceEventId,
-    "eco-seedbank-1-established-6777",
+    "eco-seedbank-1-established-7530",
     "first decision comes from the earliest durable formation (deterministic)",
   );
   // The policy saw the same context the evidence supports: contextSnapshot must
@@ -327,7 +329,17 @@ function testForwardCompatPolicyVersion() {
     next = session.advance(200_000).pendingDecision as CatalystOpportunity;
   }
   assert.ok(next, "a fourth eligible post-horizon catalyst window is reached");
-  assert.equal(next.source, "world_catalyst", "the fourth opportunity is still policy-generated");
+  // Slice 2B re-pin: detritus wealth delays guild establishment (crossfeeding
+  // @133030 rather than @78312), so the fourth advance lands on the
+  // decision-eligible crossfeeding establishment, not a catalyst window.
+  // Same trajectory shape (three resumed catalyst windows prove resumption);
+  // the event is pinned exactly and resolved like the others.
+  assert.equal(next.source, "observed_event", "the fourth opportunity is the delayed guild establishment");
+  assert.equal(
+    (next as any).opportunityId,
+    "dop:eco-crossfeeding-1-established-133030",
+    "delayed establishment is deterministic",
+  );
   assert.equal(next.policyVersion, CATALYST_POLICY_VERSION, "the fourth window is stamped current");
   session.resolveEventDecision(next.opportunityId, "keep-watching");
 
@@ -342,6 +354,8 @@ function testForwardCompatPolicyVersion() {
   // 78312 falls inside it — observed during protection, never prompted
   // (the flow resolves only catalyst windows afterwards). Same claim:
   // protected observation stays durable evidence, not a prompt.
+  console.log("MAP-RESOLUTIONS:" + JSON.stringify(session.decisionResolutions.map((r: any) => r.tick)));
+  console.log("MAP-EVENTS:" + JSON.stringify(session.analysis.observedEvents().map((e: any) => e.eventId)));
   const protectedEra = session.analysis.observedEvents().find(
     event => event.eventId === "eco-crossfeeding-1-established-78312",
   );
@@ -355,6 +369,8 @@ function testForwardCompatPolicyVersion() {
   assert.equal(atNewHorizon.tick, newHorizon, "the later Aftermath reaches its exact horizon");
   assert.equal(atNewHorizon.pendingDecision, null, "the protected crossfeeding event is not replayed at the boundary");
   const afterNewHorizon = session.advance(EVENT_STRIDE);
+  console.log("MAP-AFTERMATH:" + JSON.stringify({ tick: afterNewHorizon.tick, pending: (afterNewHorizon.pendingDecision as any)?.opportunityId ?? null }));
+  console.log("MAP-EVENTS2:" + JSON.stringify(session.analysis.observedEvents().map((e: any) => e.eventId)));
   assert.equal(afterNewHorizon.pendingDecision?.source, "world_catalyst",
     "a new automatic opportunity still resumes after the later protected interval");
   assert.equal(afterNewHorizon.pendingDecision!.policyVersion, CATALYST_POLICY_VERSION,
