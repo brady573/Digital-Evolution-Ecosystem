@@ -403,19 +403,21 @@ function testFixtureArc() {
     { schemaVersion: 1, kind: "nutrient_disturbance", mode: "drought_b" },
     "dependency validation",
   );
-  // Slice 1 re-pin (af9ad23 precedent): drought-shocked guild buildup is
-  // markedly slower under occupancy friction, so establishment lands
-  // @276100 rather than @91615 (probe-verified to 400k; same single diffuse
-  // record, still no disruption). Horizon follows the trajectory 120k ->
-  // 300k; structure unchanged.
+  // History: @91615 (0.22) -> @276100 single record (Slice 1 occupancy,
+  // horizon 120k -> 300k) -> full cycle below (Slice 2B detritus).
   settle(session, 300000);
   const records = (session.analysis as any).records.filter((r: any) => r.kind === "cuse");
-  // TEMPORARY CI mapping (revert before merge): detritus-engine arc values.
-  console.log("MAP-ARC:" + JSON.stringify(records.map((r: any) => ({ phase: r.phase, tick: r.tick, refs: r.entity_refs }))));
-  assert.equal(records.length, 1, "one establishment record (no disruption on this run)");
-  assert.equal(records[0].phase, "established", "record establishes");
-  assert.equal(records[0].tick, 276100, "establishment is deterministic under the current catalyst policy");
-  assert.deepEqual(records[0].entity_refs, [], "diffuse founding names nobody");
+  // Slice 2B re-derivation (CI-measured run 37139141294): under detritus
+  // wealth the shocked guild establishes EARLIER (@140309 vs @276100) and
+  // runs the full establish -> disrupt -> recover cycle by 300k
+  // (@176704, @249996), all with diffuse founding (refs [] throughout —
+  // attribution measured, not assumed). Trajectory, not capability loss:
+  // the complete arc machinery fires on this run. Same seed, same
+  // drought_b shock, same structure (horizon already 300k).
+  assert.equal(records.length, 3, "establishment, disruption, and recovery records");
+  assert.deepEqual(records.map((r: any) => r.phase), ["established", "disrupted", "recovered"], "full guild cycle phases in order");
+  assert.deepEqual(records.map((r: any) => r.tick), [140309, 176704, 249996], "cycle ticks deterministic under the current policy");
+  assert.ok(records.every((r: any) => Array.isArray(r.entity_refs) && r.entity_refs.length === 0), "diffuse founding names nobody throughout");
   console.log("dependency fixture arc: PASS");
 }
 
