@@ -42,12 +42,10 @@ const WASTE_YIELD=.15,WASTE_CAP_FRACTION=.25,WASTE_DIFFUSION=.20,WASTE_DECAY=.00
  * diffusion: death clusters stay local (AC13). Retune only on assay
  * evidence, never to hit a frequency.
  */
-const DETRITUS_CELL_CAP=400,DETRITUS_MINERAL_RATE=.0002,DETRITUS_BODY_BASE=2,DETRITUS_BODY_GAIN=.05,DETRITUS_BODY_CAP=30,DETRITUS_YIELD=7,DETRITUS_UPTAKE=.16,DU_STANDING=.0015,DU_ACTIVE=.6;
-/** Fallback-food preference: detritus scores below equal-mass A/B/C so
- * capable organisms eat primaries first and detritus in scarcity. Without
- * this, abundant detritus outcompetes richer foods and the recycler
- * subsidizes free-riders (assays C/D). Fixed ranking, not a behavior gene. */
-const DETRITUS_PREFERENCE=.5;
+const DETRITUS_CELL_CAP=400,DETRITUS_MINERAL_RATE=.0002,DETRITUS_BODY_BASE=2,DETRITUS_BODY_GAIN=.05,DETRITUS_BODY_CAP=30,DETRITUS_YIELD=7,DETRITUS_UPTAKE=.16,DU_ACTIVE=.6,DU_CONST=.0005;
+/** Ordinary shortfall energy below which detritus top-up is eligible (~20%
+ * of a full primary meal). Fixed physiological threshold, not choice. */
+const DETRITUS_SHORTFALL=.5;
 const H01=(seed:number,id:number,salt=0):number=>{let x=(seed^(Math.imul(id+salt,0x9E3779B1)))>>>0;x^=x>>>16;x=Math.imul(x,0x7FEB352D);x^=x>>>15;x=Math.imul(x,0x846CA68B);x^=x>>>16;return(x>>>0)/4294967296};
 const C_ACCESS=(bu:number):number=>{let v=Q(bu,0,1.5);return v<=0?0:(v*v)/(v*v+.1024)};
 /**
@@ -117,8 +115,6 @@ const NUTRIENT_SUBSTANCES:readonly NutrientSubstance[]=[0,1,2];
 interface NutrientExecution{substance:NutrientSubstance;amount:number;gain:number;produced:number;wasteProduced:number}
 /** What a waste process execution removed, and the active energy it cost. */
 interface WasteExecution{removed:number;activeCost:number}
-/** What a detritus process execution consumed (energy-bearing, unlike cleanup). */
-interface DetritusExecution{detritus:true;amount:number;gain:number;activeCost:number}
 
 /**
  * Identity and capability, shared by every supported metabolism. Capability
@@ -421,15 +417,7 @@ class RS{
  opportunity(o:Organism):number{let i=this.idx(o.x,o.y),best=0,limit=this.enabledByproduct?3:2;for(let ki=0;ki<limit;ki++){let k=NUTRIENT_SUBSTANCES[ki]!;let c=this.cap[k]![i]!,f=c>1e-9?this.stock[k]![i]!/c:0;best=Math.max(best,f*this.access(o,k))}return best}
  sense(o:Organism){let best={score:0,substance:0 as NutrientSubstance,angle:o.h},ds=[Q(o.se*.45,15,75),Q(o.se,25,150)];for(const d of ds)for(let j=0;j<8;j++){let a=o.h+j*Math.PI/4,x=(o.x+Math.cos(a)*d+600)%600,y=(o.y+Math.sin(a)*d+600)%600,q=this.scoreIndex(o,this.idx(x,y));if(q.score>best.score){best={...q,angle:a}}}let local=this.scoreIndex(o,this.idx(o.x,o.y));if(local.score>best.score*1.12)best={...local,angle:o.h};return best}
  deposit(kind:number,x:number,y:number,amount:number,cause:string|null=null,interval:Interval|null=null):number{if(amount<=0||kind<0||kind>=this.stock.length)return 0;let i=this.idx(x,y),st=this.stock[kind]!,cp=this.cap[kind]!,room=Math.max(0,cp[i]!-st[i]!),add=Math.min(room,amount);if(add<=0)return 0;st[i]!+=add;this.totalStock[kind]!+=add;this.biologicalProduction[kind]!+=add;if(interval&&kind===2)interval.produced_c+=add;return add}
- consume(o:Organism,interval:Interval):NutrientExecution|DetritusExecution|null{let i=this.idx(o.x,o.y),best=-1,sub:NutrientSubstance=0,limit=this.enabledByproduct?3:2;for(let ki=0;ki<limit;ki++){let k=NUTRIENT_SUBSTANCES[ki]!;let amt=this.stock[k]![i]!;if(amt<=1e-9)continue;let score=amt*this.access(o,k);if(score>best){best=score;sub=k}}
-   // Foundation Slice 2: accessible detritus competes as one more local
-   // opportunity (fixed scoring, no new sensing or behavior). One meal per
-   // tick is preserved: detritus wins the tick or nutrients do.
-   let dScore=-1;
-   if(this.detritusConsumptionEnabled){let da=this.detritus.amountAt(o.x,o.y);if(da>1e-9)dScore=da*(Q(o.du||0,0,1.5)/1.5)*DETRITUS_PREFERENCE}
-   if(best<=0&&dScore<=0)return null;
-   if(dScore>best){let ex=this.execDetritus(o,interval);if(ex)return{detritus:true as const,amount:ex.amount,gain:ex.gain,activeCost:ex.activeCost};if(best<=0)return null}
-   return NUTRIENT_PROCESSES[sub].execute(this,o,interval)}
+  consume(o:Organism,interval:Interval):NutrientExecution|null{let i=this.idx(o.x,o.y),best=-1,sub:NutrientSubstance=0,limit=this.enabledByproduct?3:2;for(let ki=0;ki<limit;ki++){let k=NUTRIENT_SUBSTANCES[ki]!;let amt=this.stock[k]![i]!;if(amt<=1e-9)continue;let score=amt*this.access(o,k);if(score>best){best=score;sub=k}}if(best<=0)return null;return NUTRIENT_PROCESSES[sub].execute(this,o,interval)}
  diffuse(k:number):void{let st=this.stock[k]!,cp=this.cap[k]!,d=this.delta[k]!,right=this.right,down=this.down,mr=this.minCapRight[k]!,md=this.minCapDown[k]!,rate=this.diffusionRate[k]!;d.fill(0);for(let i=0;i<this.size;i++){let ci=cp[i]!>1e-9?st[i]!/cp[i]!:0,j=right[i]!,cj=cp[j]!>1e-9?st[j]!/cp[j]!:0,flux=rate*(ci-cj)*mr[i]!;d[i]!-=flux;d[j]!+=flux;j=down[i]!;cj=cp[j]!>1e-9?st[j]!/cp[j]!:0;flux=rate*(ci-cj)*md[i]!;d[i]!-=flux;d[j]!+=flux}let adj=0;for(let i=0;i<this.size;i++){let before=st[i]!,raw=before+d[i]!,next=Q(raw,0,cp[i]!);st[i]=next;adj+=next-before}this.totalStock[k]!+=adj;this.diffusionAdjustment[k]!+=adj}
  step(t:number,drought:DroughtState|null,interval:Interval):void{let added=[0,0,0],phase=t%this.updateStride,bucket=this.regenBuckets[phase]!,elapsed=new Int32Array(bucket.length);for(let j=0;j<bucket.length;j++){let i=bucket[j]!;elapsed[j]=Math.max(1,t-this.regenLast[i]!)}for(let k=0;k<2;k++){let factor=drought&&t<drought.end&&k===drought.kind?(1-drought.suppression):1,st=this.stock[k]!,cp=this.cap[k]!,boost=this.sourceBoost[k]!;for(let j=0;j<bucket.length;j++){let i=bucket[j]!,gap=cp[i]!-st[i]!;if(gap<=1e-9)continue;let inc=gap*(1-Math.exp(-this.regenRate*boost[i]!*factor*elapsed[j]!));if(inc>0){let before=st[i]!;st[i]!+=inc;this.totalStock[k]!+=st[i]!-before;added[k]!+=inc}}this.input[k]!+=added[k]!}
   if(this.enabledByproduct){let st=this.stock[2]!,dec=0,decayRate=(this.cSink&&t<this.cSink.end)?C_DECAY_RATE*this.cSink.factor:C_DECAY_RATE;for(let j=0;j<bucket.length;j++){let i=bucket[j]!,e=elapsed[j]!,before=st[i]!,next=before*Math.exp(-decayRate*e),loss=before-next;if(loss>0){st[i]=next;dec+=loss}}this.totalStock[2]!-=dec;this.decayed[2]!+=dec;if(interval)interval.decayed_c+=dec}
@@ -807,19 +795,25 @@ class S{
     if(removed>0){this.lineageCredit(o.l,{wasteRemoved:removed,burdenEnergy:burden*this.c.press,cleanupEnergy:cleanCost*this.c.press,cleanupExec:1})}
     else this.lineageCredit(o.l,{burdenEnergy:burden*this.c.press,cleanupEnergy:cleanCost*this.c.press});
    }}
-   // Foundation Slice 2 tradeoff is execution-gated only (active cost per
-   // meal + the yield-7-vs-15 substitution): there is deliberately NO
-   // standing charge for holding du. A standing charge selects against rare
-   // carriers during the ~4k pre-death ticks before any detritus exists,
-   // trapping the capability at zero from all founder conditions. AC10's
-   // poor-world evidence is use-gated cost with no offsetting benefit.
+   // Foundation Slice 2B tradeoff: modest constitutive machinery cost for
+   // holding du (neutrality-acceptable in rich worlds per §6) + execution
+   // cost per fallback meal. No substitution cost exists: R1-strict order
+   // means detritus never displaces a realized ordinary uptake.
+   if((o.du||0)>0)o.en-=DU_CONST*(o.du||0)*this.c.press;
    let eat=this.resources.consume(o,this.cur);
-   if(eat&&'detritus' in eat){o.en+=eat.gain;o.md++;o.gd+=eat.gain;o.en-=eat.activeCost*this.c.press;this.cur.energy_detritus+=eat.gain;this.lineageCredit(o.l,{detritusConsumed:eat.amount,energyDetritus:eat.gain,detritusExec:1})}
-   else if(eat){o.en+=eat.gain;/* Frozen counters (parity-protected): ma/mb/mc count consumption EVENTS,
+   if(eat){o.en+=eat.gain;/* Frozen counters (parity-protected): ma/mb/mc count consumption EVENTS,
    not mass. Only read by lineage flow attribution, which labels them as
    counts. Interval deltas carry true mass. Do not 'fix' without an
    engine-version change. */
    if(eat.substance===0){o.ma++;o.ga+=eat.gain;o.ra+=eat.gain;this.cur.energy_a+=eat.gain;this.lineageCredit(o.l,{consumedA:eat.amount,energyA:eat.gain,producedC:eat.produced,wasteProduced:eat.wasteProduced})}else if(eat.substance===1){o.mb++;o.gb+=eat.gain;o.rb+=eat.gain;this.cur.energy_b+=eat.gain;this.lineageCredit(o.l,{consumedB:eat.amount,energyB:eat.gain,producedC:eat.produced,wasteProduced:eat.wasteProduced})}else{o.mc=(o.mc||0)+1;o.gc=(o.gc||0)+eat.gain;o.rc=(o.rc||0)+eat.gain;this.cur.energy_c+=eat.gain;this.lineageCredit(o.l,{consumedC:eat.amount,energyC:eat.gain})}this.totalUse[eat.substance]!+=eat.amount;this.totalEnergy[eat.substance]!+=eat.gain}
+   // Foundation Slice 2B (R1-threshold): detritus top-up on ordinary
+   // shortfall. The ordinary result above is never reduced or revisited —
+   // preferred priority is structural (this block only appends). Eligibility:
+   // ordinary meal missing or below DETRITUS_SHORTFALL energy, local
+   // detritus present, du capability present (execDetritus gates both).
+   // Fixed physiological order, not choice; one ordinary + at most one
+   // fallback meal per tick.
+   if((!eat||eat.gain<DETRITUS_SHORTFALL)&&this.resources.detritusConsumptionEnabled){let du=this.resources.execDetritus(o,this.cur);if(du){o.en+=du.gain;o.md++;o.gd+=du.gain;o.en-=du.activeCost*this.c.press;this.cur.energy_detritus+=du.gain;this.lineageCredit(o.l,{detritusConsumed:du.amount,energyDetritus:du.gain,detritusExec:1})}}
    if(this.t>=(o.matureAt||0)&&this.t>=(o.readyAt||0)&&o.en>=o.rp){let support=this.reproSupport(o);this.totalReproSupport[support]!++;if(support===0)this.cur.repro_supported_a++;else if(support===1)this.cur.repro_supported_b++;else if(support===3)this.cur.repro_supported_c++;else this.cur.repro_supported_mixed++;this.cur.repro_eligible=(this.cur.repro_eligible as number||0)+1;let baby=this.child(o);pendingBirths.push({parent:o,baby});}if(o.en>0)live.push(o);else{this.recordDeath(o);occ.vacate(occ.cellOf(o.x,o.y))}
   }
     // Slice 1 birth placement (§9, phase 3): atomic commit in parent-id order

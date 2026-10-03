@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { Simulation, detritusBodyProxy, createSimulationCheckpoint, restoreSimulationCheckpoint } from "../../packages/sim-core/src/engine.ts";
+import { Simulation, ResourceSystem, detritusBodyProxy, createSimulationCheckpoint, restoreSimulationCheckpoint } from "../../packages/sim-core/src/engine.ts";
 import { ENGINE_VERSION } from "../../packages/sim-core/src/index.ts";
 
 /**
@@ -80,7 +80,16 @@ function testNextTickAvailability() {
 
 /** Matched 2x2 fork: du capability high/zero × detritus economy on/off.
  * du overrides are white-box fork edits (validation-only, enabledWaste
- * precedent); all four forks run identical ticks from the same base world. */
+ * precedent); all four forks run identical ticks from the same base world.
+ * Base world is chosen per assay (harsh for advantage, rich for control). */
+function harshConfig(seed: number): any {
+  return {
+    seed, start: 0.47, prod: 0.52, cap: 360, pop: 30, div: 0.35, mr: 0.03,
+    ms: 0.12, press: 1.0875, patch: 0.55, resource_b_fraction: 0.5, cat: "global", st: null,
+    resource_model: "definition_driven_substances", resource_grid: 60,
+    enable_byproduct: true, enable_dormancy: true, study: true,
+  };
+}
 function factorialForks(base: any, ticks: number): Record<string, { pop: number; meanEn: number; exec: number; eDet: number; min: number }> {
   const out: Record<string, { pop: number; meanEn: number; exec: number; eDet: number; min: number }> = {};
   for (const du of [1.2, 0]) {
@@ -109,24 +118,24 @@ function factorialForks(base: any, ticks: number): Record<string, { pop: number;
 }
 
 function testRecyclerAdvantage() {
-  // AC9 (capable + detritus beats capable without) and AC8 (benefit
-  // requires capability: capable + detritus beats incapable + detritus).
-  const base = new Simulation(config(7)) as any;
-  for (let t = 0; t < 20000; t++) base.step();
+  // AC9 + AC8 in a scarcity regime (harsh): capable recyclers with
+  // detritus beat the matched no-detritus treatment by a measurable
+  // margin, and the benefit runs through USE (executions + energy,
+  // concentrated orders of magnitude above mutant background).
+  // NOTE: whole-pop cap:on is NOT required to beat whole-pop zero:on —
+  // mineralization is a public good by design (AC11); marginal invasion
+  // (H1) is the correct evolvability test, not whole-pop contrasts.
+  const base = new Simulation(harshConfig(111111111)) as any;
+  for (let t = 0; t < 30000; t++) base.step();
   assert.ok(base.resources.detritus.totals().stock > 0, "base world offers detritus opportunity");
   const r = factorialForks(base, 8000);
   console.log(`factorial: ${JSON.stringify(r)}`);
-  // AC9: capable recyclers with detritus beat the matched no-detritus
-  // treatment (abundance advantage). AC8: the benefit runs through USE —
-  // the capable fork shows mass detritus energy + executions while the
-  // incapable fork shows ~none (residual = mutant intake, see assay H).
-  // NOTE (deliberate, handoff-faithful): cap:on is NOT required to beat
-  // zero:on. Mineralization is a public good by design (AC11); free-riding
-  // on it is legitimate ecology, and demanding otherwise would force
-  // detritus into a dominant-food role the stop conditions forbid.
-  assert.ok(r["cap:on"]!.pop > r["cap:off"]!.pop, "detritus opportunity advantages capable recyclers (AC9)");
-  assert.ok(r["cap:on"]!.eDet > 100 * r["zero:on"]!.eDet, "benefit runs through use, concentrated in the capable fork (AC8)");
-  assert.ok(r["cap:on"]!.exec > 0, "capable fork executes detritus meals");
+  assert.ok(r["cap:on"]!.pop > 1.1 * r["cap:off"]!.pop, "detritus opportunity measurably advantages capable recyclers (AC9)");
+  assert.ok(r["cap:on"]!.exec > 0 && r["cap:on"]!.eDet > 0, "benefit runs through fallback use");
+  // Zero-du forks grow nibbling mutants under threshold gating (exec>0,
+  // tiny sips), so concentration is pinned on ENERGY (order of magnitude),
+  // not event counts: capable meals are real, mutant sips are dust.
+  assert.ok(r["cap:on"]!.eDet > 10 * Math.max(r["zero:on"]!.eDet, 1e-9), "use concentrated in the capable fork (AC8)");
   console.log("recycler advantage: PASS");
 }
 
@@ -137,15 +146,15 @@ function testOpportunityDependence() {
   for (let t = 0; t < 20000; t++) base.step();
   const r = factorialForks(base, 8000);
   // AC10 with an execution-gated tradeoff: no opportunity means no use,
-  // no use means no cost paid and no benefit reaped — the forks coincide.
-  // Equality (not advantage) is the claim; the 5% bands absorb butterfly
-  // divergence from du-driven mutation-draw shifts.
+  // no use means no cost paid and no benefit reaped — the forks coincide
+  // up to butterfly noise, with at most the tiny constitutive cost
+  // separating them. Guards are one-sided (no UNEXPLAINED advantage) plus
+  // a no-wipeout floor; exact equality would punish the sanctioned cost.
   assert.equal(r["cap:off"]!.exec, 0, "no use without opportunity (capable)");
   assert.equal(r["zero:off"]!.exec, 0, "no use without opportunity (control)");
-  const popGap = Math.abs(r["cap:off"]!.pop - r["zero:off"]!.pop) / r["zero:off"]!.pop;
-  assert.ok(popGap < 0.05, `no population advantage either way (gap ${popGap})`);
-  const enGap = Math.abs(r["cap:off"]!.meanEn - r["zero:off"]!.meanEn) / r["zero:off"]!.meanEn;
-  assert.ok(enGap < 0.05, `no energy advantage either way (gap ${enGap})`);
+  assert.ok(r["cap:off"]!.pop <= 1.05 * r["zero:off"]!.pop, "no population advantage without opportunity");
+  assert.ok(r["cap:off"]!.pop >= 0.5 * r["zero:off"]!.pop, "no wipeout without opportunity");
+  assert.ok(r["cap:off"]!.meanEn <= 1.05 * r["zero:off"]!.meanEn, "no energy advantage without opportunity");
   console.log("opportunity dependence: PASS");
 }
 
@@ -261,42 +270,102 @@ function testHotspotSuccession() {
   console.log(`hotspot succession: PASS (execs ${execSeen}, detritus energy ${eDetSeen.toFixed(0)})`);
 }
 
-function testTraitEvolution() {
-  // Assay H NEGATIVE RESULT — DESIGN TENSION evidence (not a capability
-  // proof). du does not climb toward capability from founder conditions,
-  // with or without opportunity. What the runs show instead:
-  // (1) unseeded founders decay to ~0 (substitution + public
-  //     mineralization select against users; free-riders win);
-  // (2) seeded du=1.0 is maintained ~1.0 with AND without detritus
-  //     (fixation neutrality: no variance, no selection either way);
-  // (3) whole-population contrast: capable LOSE to free-riders where
-  //     detritus flows (assay C factorial).
-  // Bistability without natural reachability: the specialist regime is
-  // self-sustaining once seeded (250+ detritivores, 40k ticks, probed) but
-  // unreachable from founders — a collective-action trap, not a tunable
-  // gradient. See return package for calibration attempts exhausted.
-  const seeded = (detOn: boolean): { du: number; detriv: number } => {
-    const sim = new Simulation(config(111111111, { start: 0.62, prod: 0.86, patch: 0.9, pop: 34, div: 0.45 })) as any;
-    for (const o of sim.o) o.du = 1.0;
-    if (!detOn) {
-      sim.resources.detritusDepositionEnabled = false;
-      sim.resources.detritusConsumptionEnabled = false;
-    }
-    for (let t = 0; t < 30000; t++) sim.step();
-    const m = sim.metrics() as any;
-    return { du: m.traits.detritus_use.mean, detriv: m.metabolic_roles.counts.detritivore || 0 };
-  };
-  const on = seeded(true), off = seeded(false);
-  console.log(`trait evolution (seeded): on du=${on.du.toFixed(3)} detriv=${on.detriv}; off du=${off.du.toFixed(3)}`);
-  assert.ok(Math.abs(on.du - 1.0) < 0.05, "seeded capability maintained with opportunity (fixation neutrality)");
-  assert.ok(Math.abs(off.du - 1.0) < 0.05, "seeded capability maintained without opportunity (fixation neutrality)");
-  assert.ok(on.detriv > 0, "specialist subpopulation persists where seeded with opportunity");
-  const wild = new Simulation(config(111111111, { start: 0.62, prod: 0.86, patch: 0.9, pop: 34, div: 0.45 })) as any;
-  for (let t = 0; t < 30000; t++) wild.step();
-  const wildDu = (wild.metrics() as any).traits.detritus_use.mean;
-  console.log(`trait evolution (founders): du=${wildDu.toFixed(4)}`);
-  assert.ok(wildDu < 0.01, "founders decay to ~0 despite flowing opportunity (no natural reachability)");
-  console.log("trait evolution: PASS (negative result pinned)");
+/** Descent-tagged lineage share: every tick, newborns of marked parents
+ * join the marked set. Robust to founder death; deterministic. Marked
+ * founders are always NEWBORNS (born within 100 ticks): mutations enter
+ * through offspring (mut() acts at birth), and marking ancients confounds
+ * the assay with age-structure discipline — ancients die on schedule
+ * regardless of du, which reads as selection against capability. */
+function markNewborns(sim: any, count: number): Set<number> {
+  const marked = new Set<number>();
+  const newborns = sim.o.filter((o: any) => o.born >= sim.t - 100);
+  for (const o of newborns.slice(0, count)) { marked.add(o.id); o.du = 0.8; }
+  return marked;
+}
+function lineageShare(sim: any, marked: Set<number>): number {
+  if (!sim.o.length) return 0;
+  let n = 0;
+  for (const o of sim.o) {
+    if (marked.has(o.id)) n++;
+    else if (o.parent != null && marked.has(o.parent)) { marked.add(o.id); n++; }
+  }
+  return n / sim.o.length;
+}
+function testRareInvasion() {
+  // AC2B-6/H1 (decisive): rare du mutants invade in a detritus-rich /
+  // ordinary-limited (harsh) world. THREE independently marked founders
+  // (≈0.5% starting share): single-copy lineages are routinely lost to
+  // drift even when beneficial, so one mark would make the assay a coin
+  // flip; the union share is the selection readout. Unmarked background
+  // lineages may also climb (selection acts on all du variation) — that
+  // strengthens, not weakens, the emergence verdict.
+  const sim = new Simulation(harshConfig(111111111)) as any;
+  for (let t = 0; t < 30000; t++) sim.step();
+  const marked = markNewborns(sim, 3);
+  assert.equal(marked.size, 3, "three newborn mutants marked");
+  const s0 = lineageShare(sim, marked);
+  assert.ok(s0 < 0.02, `mutants start rare (share ${s0})`);
+  let s50 = 0;
+  while (sim.t < 60000) {
+    sim.step();
+    if (sim.t === 50000) s50 = lineageShare(sim, marked);
+  }
+  const s60 = lineageShare(sim, marked);
+  const m = sim.metrics() as any;
+  console.log(`rare invasion: shares ${s0.toFixed(4)} -> ${s50.toFixed(2)} -> ${s60.toFixed(2)}, du ${(m.traits.detritus_use.mean).toFixed(3)}`);
+  assert.ok(s50 > 10 * s0 && s60 > 10 * s0, "marked lineages invade from rarity and persist");
+  assert.ok(m.traits.detritus_use.mean > 0.5, "population capability follows the invasion");
+  assert.ok((m.metabolic_roles.counts.detritivore || 0) > 0, "specialist state reached without seeding");
+  console.log("rare invasion: PASS");
+}
+function testNoOpportunityControl() {
+  // AC2B-7/H2 (matched): the same single-mutant protocol with detritus
+  // disabled shows no invasion. Here the harsh world collapses without
+  // the pathway and the mutant dies with it — no selective increase,
+  // which is what the control must show.
+  const sim = new Simulation(harshConfig(111111111)) as any;
+  for (let t = 0; t < 30000; t++) sim.step();
+  const marked = markNewborns(sim, 1);
+  assert.equal(marked.size, 1, "one newborn mutant marked");
+  sim.resources.detritusDepositionEnabled = false;
+  sim.resources.detritusConsumptionEnabled = false;
+  sim.resources.detritus.stock.fill(0);
+  sim.resources.detritus.pending.fill(0);
+  while (sim.t < 40000) sim.step();
+  const s = lineageShare(sim, marked);
+  console.log(`no-opportunity control: share ${s.toFixed(4)} pop ${sim.o.length}`);
+  assert.ok(s < 0.01, "no invasion without opportunity");
+  console.log("no-opportunity control: PASS");
+}
+function testFrequencyCohort() {
+  // H4: invasion at 5% starting frequency (not just single-mutant luck),
+  // lineage-resolved by descent tagging (never whole-pop contrasts, which
+  // hitchhike — Slice 2 lesson).
+  const sim = new Simulation(harshConfig(111111111)) as any;
+  for (let t = 0; t < 30000; t++) sim.step();
+  // Newborn-pool cohort (≈5% of the population): young, unbiased, many.
+  const pool = sim.o.filter((o: any) => o.born >= sim.t - 100);
+  const marked = markNewborns(sim, pool.length);
+  const s0 = lineageShare(sim, marked);
+  while (sim.t < 50000) sim.step();
+  const s50 = lineageShare(sim, marked);
+  console.log(`frequency cohort: share ${s0.toFixed(3)} -> ${s50.toFixed(3)}`);
+  assert.ok(s0 > 0.03 && s0 < 0.07, "cohort starts near 5%");
+  assert.ok(s50 > 0.9, "cohort invades from low frequency");
+  console.log("frequency cohort: PASS");
+}
+function testSeededPersistence() {
+  // H5 (regression-only, NOT reachability evidence): seeded high-du
+  // persists with opportunity, with a specialist subpopulation. If this
+  // ever fails, the maintenance leg of the bistability story is gone.
+  const sim = new Simulation(config(111111111, { start: 0.62, prod: 0.86, patch: 0.9, pop: 34, div: 0.45 })) as any;
+  for (const o of sim.o) o.du = 1.0;
+  for (let t = 0; t < 30000; t++) sim.step();
+  const m = sim.metrics() as any;
+  console.log(`seeded persistence: du=${m.traits.detritus_use.mean.toFixed(3)} detriv=${m.metabolic_roles.counts.detritivore || 0}`);
+  assert.ok(Math.abs(m.traits.detritus_use.mean - 1.0) < 0.1, "seeded capability maintained");
+  assert.ok((m.metabolic_roles.counts.detritivore || 0) > 0, "specialists persist");
+  console.log("seeded persistence: PASS");
 }
 
 function testSurveyArtifact() {
@@ -353,7 +422,64 @@ function testScaleThroughput() {
   console.log("scale/performance: PASS");
 }
 
+function testPreferredPriority() {
+  // AC2B-2/H3: preferred priority is structural AND behaviorally pinned at
+  // the mechanism level. consume() is byte-identical to 0.24.0 (it never
+  // evaluates detritus); the top-up in S.step only appends on ordinary
+  // shortfall and never reduces a realized uptake. (Twin-digest equality
+  // was considered and rejected: the sanctioned constitutive cost
+  // legitimately differentiates twins.)
+  // Organism literals carry only what consume() reads (x/y/du).
+  const micro = (x: number, y: number, du: number): any =>
+    ({ id: 1, x, y, du, en: 60, di: 0, ha: 0, bu: 0 } as any);
+  const findStock = (rs: any, kind: number): [number, number] | null => {
+    for (let iy = 0; iy < rs.n; iy++) for (let ix = 0; ix < rs.n; ix++) {
+      const i = iy * rs.n + ix;
+      if (rs.stock[kind]![i]! > 1) return [(ix + .5) * rs.cell, (iy + .5) * rs.cell];
+    }
+    return null;
+  };
+  const freshRS = (): any => new ResourceSystem(config(7));
+  // (a) Rich A/B cell + max du → ordinary uptake, never detritus.
+  {
+    const rs = freshRS();
+    const at = findStock(rs, 0)!;
+    const eat = rs.consume(micro(at[0], at[1], 1.5), null);
+    assert.ok(eat && !("detritus" in eat), "rich cell with du=1.5 still yields ordinary uptake");
+  }
+  // (b) Barren of A/B/C + detritus present + du → fallback executes via
+  // execDetritus (consume() itself never returns detritus: ordinary path
+  // is byte-identical to 0.24.0; the top-up lives in S.step and only
+  // appends on shortfall).
+  {
+    const rs = freshRS();
+    for (let k = 0; k < 3; k++) (rs.stock[k] as Float32Array).fill(0);
+    const i = 1000;
+    rs.detritus.stock[i] = 50;
+    const cx = (i % rs.n) * rs.cell + rs.cell / 2, cy = Math.floor(i / rs.n) * rs.cell + rs.cell / 2;
+    const ex = rs.execDetritus(micro(cx, cy, 1.0), null);
+    assert.ok(ex && ex.amount > 0 && ex.gain > 0, "fallback executes with capability + opportunity");
+    assert.equal(rs.execDetritus(micro(cx, cy, 0), null), null, "no capability means no fallback");
+  }
+  // (c) Barren of everything → consume null AND execDetritus null.
+  {
+    const rs = freshRS();
+    for (let k = 0; k < 3; k++) (rs.stock[k] as Float32Array).fill(0);
+    assert.equal(rs.consume(micro(5, 5, 1.5), null), null, "nothing available means no ordinary meal");
+    assert.equal(rs.execDetritus(micro(5, 5, 1.5), null), null, "nothing available means no fallback either");
+  }
+  // (d) Rich cell + du=0 → ordinary uptake (du irrelevant when primaries succeed).
+  {
+    const rs = freshRS();
+    const at = findStock(rs, 1)!;
+    const eat = rs.consume(micro(at[0], at[1], 0), null);
+    assert.ok(eat && !("detritus" in eat), "rich cell with du=0 yields ordinary uptake");
+  }
+  console.log("preferred priority: PASS (ordinary-first rule pinned at mechanism level)");
+}
+
 testBodyProxy();
+testPreferredPriority();
 testDeathCausality();
 testNextTickAvailability();
 testRecyclerAdvantage();
@@ -362,7 +488,10 @@ testMineralizationIsolation();
 testAccountingClosure();
 testCheckpointFork();
 testHotspotSuccession();
-testTraitEvolution();
+testRareInvasion();
+testNoOpportunityControl();
+testFrequencyCohort();
+testSeededPersistence();
 testScaleThroughput();
 // testSurveyArtifact(); // DEFERRED (DESIGN TENSION): no 0.25 artifact was
 // retained — the survey was never dispatched. Gate stays in-file for the

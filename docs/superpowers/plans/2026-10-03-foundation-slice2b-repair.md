@@ -26,7 +26,17 @@
 
 ---
 
-### Task R1: R1-strict conditional consumption + tradeoff reshape
+### Task R1: R1-threshold conditional consumption + tradeoff reshape
+
+R1-null (detritus iff ordinary returned null) was built first and REJECTED
+by probe: cells are never literally barren (regen/diffusion), so fallback
+fired ~never (exec≈0) and the capability stayed dead. R1-threshold
+replaces it: ordinary `consume()` is byte-identical to 0.24.0; S.step
+appends ONE detritus top-up meal iff ordinary gain < DETRITUS_SHORTFALL
+(0.5 energy ≈ 20% of a full primary meal). Preferred priority is
+structural (ordinary never reduced); DETRITUS_PREFERENCE deleted.
+Whole-pop free-rider gap persists by design (public mineralization) —
+marginal invasion (H1), not whole-pop contrasts, is the evolvability test.
 
 **Files:**
 - Modify: `packages/sim-core/src/engine.ts` (`consume()`, remove `DETRITUS_PREFERENCE` competition, `DU_CONST` constitutive cost, keep graded uptake/yield/exec cost), `tools/validation/detritus.ts` (H3 twin-digest assay + C/D rework)
