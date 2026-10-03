@@ -1,238 +1,409 @@
-# Agent Instructions
+Agent Instructions
 
-This file defines standard working practices for any coding agent (or human contributor) working in this repository. It is the single source of truth for how to build, verify, and submit changes here.
+This file defines the repository-wide working contract for coding agents and human contributors working in Digital Evolution Ecosystem.
 
-## What this repo is
+It governs implementation practice, architecture boundaries, validation, and submission behavior. It does not define product direction, autonomous agent orchestration, or project-management topology.
 
-Digital Evolution Ecosystem is an offline-first evolutionary simulation and investigation product. The **Living Evolution Explorer** lets users create worlds, watch autonomous evolution unfold, investigate ecological history and ancestry, intervene transparently, and compare matched evolutionary branches.
+Authority and working model
 
-```text
-apps/explorer          Living Evolution Explorer UI and platform adapters
-packages/contracts     Cross-boundary configuration, snapshot, command, checkpoint, and export types
-packages/sim-core      Deterministic biological simulation authority
-packages/sim-analysis  Read-only ecological interpretation, clades, metrics, and history
-packages/sim-runtime   Worker/session orchestration, speed control, matched forks, persistence handoff
-packages/sim-decisions  Pure event-to-choice policy: ObservedEvent -> DecisionOpportunity (read-only)
-legacy/prototype       Immutable prototype regression sources (do not edit)
-tools/validation       Parity, ecology, and browser validation tooling
-```
+The Project Owner is the product and design decision authority.
 
-See `README.md` for product direction and `docs/architecture/MIGRATION.md` for module boundaries.
+Product meaning, simulation semantics, user-visible behavior, and accepted design are established outside this repository workflow and supplied to implementation through a bounded handoff.
 
-## Agent roles
+The ordinary implementation flow is:
 
-Repository automation uses a two-tier topology defined in `.opencode/agents/`. Every agent in it opens by reading this file, so this section is what tells an agent where it sits.
+Project Owner / Design Partner
+        |
+        | accepted design + bounded implementation handoff
+        v
+    Coding Agent
+        |
+        | implementation + validation evidence
+        v
+      Review
 
-```text
-Owner  ->  project-manager  ->  five lane specialists   (read-only analysis)
-              |
-              +-- bounded handoff -->  digital-evolution  ->  source changes
-```
+The Coding Agent owns implementation strategy, source changes, low-level architecture, tests, and engineering execution within the accepted handoff and the repository constraints in this file.
 
-| Agent | Mode | Responsibility |
-|---|---|---|
-| `project-manager` | primary, default | Coordinates lanes and writes bounded handoffs. Read-only: no source edits, and no shell beyond a read-only `git status`. |
-| `digital-evolution` | primary | The Coding Agent. Implements an accepted handoff. Source changes happen here. |
-| `lane/simulation-ecology` | subagent | L1 — what can evolve, and why the world behaves this way. |
-| `lane/product-experience` | subagent | L2 — what the player does, notices, understands, and investigates. |
-| `lane/visual-systems` | subagent | L3 — what evolution looks and feels like, while staying truthful to simulation state. |
-| `lane/platform-delivery` | subagent | L4 — can the product reliably run, preserve, resume, and ship evolving worlds. |
-| `lane/validation-quality` | subagent | L5 — what is actually known to work, and on what evidence. |
+The Coding Agent must not invent or silently redefine material product behavior, simulation meaning, reproducibility semantics, scientific claims, or evidence semantics.
 
-`.opencode/opencode.json` sets `default_agent`, so a new session starts as the coordinator. A session stores its selected agent separately, so changing that file does not retarget a session that already exists.
+Implementation activation
 
-### Dispatching a lane
+Implementation work should begin from a bounded, self-contained handoff on the relevant GitHub issue or equivalent explicitly supplied task context.
 
-A lane starts with no conversation history: it sees only its own instructions and the prompt it was given, and it cannot ask a follow-up question. Every lane prompt therefore has to carry the objective, the **accepted design text verbatim**, the scope boundary, the specific question, and the shared return shape. A dispatch that omits the design text makes the lane correctly report the design as missing and return nothing else — that is a dispatch defect, not a lane defect, and retrying the same prompt fails the same way.
+A valid implementation handoff should provide enough controlling design context to execute without requiring private or unavailable external sources.
 
-Lanes return a shared seven-field shape: lane fit, current implementation facts, accepted-design implications, cross-lane dependencies, risks or tensions, acceptance/evidence needs, and Owner decisions. `lane/validation-quality` returns a declared variant that separates supported from unsupported claims; that separation is the point of an evidence lane and must not be flattened to satisfy the common shape.
+Google Drive is the durable product/design workspace, but Coding Agents must not assume they have Drive access. Drive references may provide provenance; the implementation handoff itself must contain the requirements, invariants, acceptance criteria, stop conditions, and material design semantics required for the task.
 
-Two rules the coordinator is held to:
+Before implementing an issue-based handoff, read the current issue thread, including later comments that may amend or supersede earlier instructions.
 
-- An empty search result is never evidence that something is absent. Confirm a negative a second way before reporting it, and keep "this search did not find it" distinct from "it does not exist".
-- Never resolve a material product or simulation design conflict by agent vote or majority. Surface it to the Owner.
+If repository prose conflicts with an explicitly supplied newer accepted design handoff, stop and surface the conflict rather than silently choosing one.
 
-### Coverage gap
+What this repository is
 
-No unit in `tools/validation/manifest.ts` reads `.opencode/`, so `pnpm verify` cannot exercise any of these agent definitions and a regression in them is invisible to every gate. This is deliberate for now — a gate that merely asserts these files parse would prove little — but it should be read as a known blind spot rather than as coverage. A documentation-only change routes to `validation-arch` alone; adding or editing an agent is not covered by any check.
+Digital Evolution Ecosystem implements the Living Evolution Explorer, an offline-first evolutionary simulation and investigation product.
 
-## Toolchain
+Users can create evolving worlds, observe autonomous evolution, investigate ecological history and ancestry, intervene transparently, and compare evolutionary outcomes.
 
-- **Node** >= 24 (see `.nvmrc`), **pnpm** 12.5.1 via corepack (`packageManager` field pins it).
-- No other runtimes are required. There is no build step outside the package scripts below.
+apps/explorer           Living Evolution Explorer UI and platform adapters
+packages/contracts      Cross-boundary configuration, snapshots, commands,
+                        checkpoints, read models, and export contracts
+packages/sim-core       Deterministic biological simulation authority
+packages/sim-analysis   Read-only ecological interpretation, metrics,
+                        clades, history, and explanatory analysis
+packages/sim-decisions  Pure observed-event -> decision-opportunity policy
+packages/sim-runtime    Worker/session authority, execution, persistence
+                        handoff, matched forks, and live read models
+packages/phenotype      Presentation-facing phenotype derivation and assets
+legacy/prototype        Frozen historical regression sources; never edit
+tools/validation        Repository, simulation, presentation, browser,
+                        scientific, platform, and evidence validation tooling
 
-### Local toolchain note: proot / hardlinked native binaries
+Use the current repository implementation rather than historical project documents to determine what code exists today.
 
-Applies to local proot-distro (Termux) environments only. CI and normal Linux/macOS installs are unaffected, and nothing here belongs in the repo.
+Toolchain
 
-pnpm hardlinks packages out of its content-addressable store by default. TypeScript 7 is a Go binary that locates its bundled `lib.*.d.ts` via `os.Executable()`, and **proot cannot resolve `/proc/self/exe` for a hardlinked file**. The binary therefore computes a bogus directory and dies at startup:
+- Node >= 24
+- pnpm 12.5.1 via Corepack
+- TypeScript monorepo
+- React + Vite Explorer
+- PixiJS where currently integrated
+- Capacitor Android packaging
 
-```text
-panic: bundled: /.l2s/lib.d.ts does not exist; this executable may be misplaced
-```
+Install dependencies with:
 
-This is misleading — the lib files are present and readable. Two tells: the panic happens before any source is read, and `stat -c %h` on the `tsc` binary reports `2` instead of `1`. To confirm, copy the binary to any plain directory and run it; if it works there, the hardlink is the cause.
+pnpm install --frozen-lockfile
 
-Fix, in order of preference:
+Do not add another runtime, package manager, backend, database, hosted service, or network dependency without explicit approval.
 
-1. `pnpm config set package-import-method copy --global` (writes outside the repo), then reinstall. Prevents recurrence.
-2. To repair an already-broken install, `rm` the binary **before** copying a replacement. Copying over a hardlink writes through the shared inode and corrupts the pnpm store for every other project on the machine.
+Validation authority
 
-While proot is flaky, a `pnpm install` can leave `tsc` reporting **phantom** `TS2307 Cannot find module` errors that change between runs and vanish on re-run. Re-run before investigating a missing module after an install; do not edit `package.json` or the lockfile to chase one.
+Validation is defined centrally in:
 
-## Commands
+tools/validation/manifest.ts
 
-Validation is defined in exactly one place: `tools/validation/manifest.ts`. Every command below is either a thin wrapper over that manifest or a deliberate single-unit escape hatch. The list in this file describes the interface; the manifest holds the meaning, and `pnpm validation:check` fails the build if the two disagree.
+The manifest is authoritative for validation units, evidence classes, routing, and blocking behavior.
 
-| Task | Command |
-|---|---|
-| Install dependencies | `pnpm install --frozen-lockfile` |
-| **Blocking repository contract** | `pnpm verify` |
-| Fast invariant gate only | `pnpm verify:fast` |
-| Deterministic product behaviour only | `pnpm verify:simulation` |
-| Presentation and build only | `pnpm verify:presentation` |
-| Browser behaviour (needs a `vite preview` server) | `pnpm verify:browser` |
-| Human-review evidence (needs a `vite preview` server) | `pnpm verify:evidence` |
-| Scientific characterisation (manual, long) | `pnpm verify:survey` |
-| Dev server | `pnpm dev` |
-| Sync web assets to Android | `pnpm --filter @digital-evolution/explorer cap:sync` (after `pnpm build`) |
+Primary commands:
 
-Single-unit escape hatches exist for iterating on one check (`pnpm test:ecology`, `pnpm test:browser`, `pnpm test:migration`, and the rest in `package.json`). They are not the completion contract: running one proves one claim, and `pnpm verify` proves the set.
+pnpm validation:check
+pnpm validation:plan
 
-**A handoff's validation list is a floor, not a substitute.** Bounded handoffs name the checks that are *focused* on the work unit — the ones a reviewer most needs to see run. They are not the repository's blocking contract, and they are usually shorter than it. Completion requires both: the handoff's named checks, **and** every blocking unit and CI shard the manifest routes for the actual diff. Learned the hard way in Tranche A: a handoff's list omitted `test:catalysts` and `test:aftermath`, treating that list as exhaustive skipped both locally, and CI's `sim-d` shard failed on a stale assertion in `catalysts.ts` that a local run had structurally could not reach. The manifest and the shards it defines remain authoritative; the handoff list narrows attention, it does not bound it.
+pnpm verify
+pnpm verify:fast
+pnpm verify:simulation
+pnpm verify:presentation
+pnpm verify:browser
+pnpm verify:evidence
+pnpm verify:survey
 
-To see what CI will run, and what each check costs, use `pnpm validation:plan`. To see what a diff requires, use `pnpm validation:check` for the architecture gate and `pnpm ci:group <shard> --dry-run` to list a shard.
+Single-purpose scripts in "package.json" may be used while iterating on a bounded change.
 
-### What `pnpm verify` does and does not include
+Completion rule
 
-`pnpm verify` is the blocking **repository** contract: every claim provable in Node at full strength. It is not the whole of CI, by design. The evidence classes are distinct and each needs its own environment:
+A handoff's named validation checks are a minimum focused set, not the complete repository contract.
 
-| Class | Question | Runs in | Lane-blocking? | Merge gate? |
-|---|---|---|---|---|
-| A `invariant` | Is the repository structurally sound? | `pnpm verify:fast` | yes | yes |
-| B `deterministic` | Is exact supported behaviour still exact? | `pnpm verify:simulation` | yes | yes |
-| C `presentation` | Does the product build, and do presentation contracts hold? | `pnpm verify:presentation` | yes | yes |
-| D `browser` | Does it work in a real browser? | `pnpm verify:browser`, CI | yes | yes for blocking units; visual captures no |
-| E `platform` | Does the Android packaging integrate? | CI `android` workflow | yes | no |
-| F `scientific` | What actually happens across seeds and horizons? | `pnpm verify:survey` | no — manual | no |
-| G `evidence` | Can a human inspect it? | `pnpm verify:evidence`, CI | no — evidence only | no |
+Completion requires:
 
-Lane-blocking means failure fails that validation lane; merge gate means
-successful completion is required for merge readiness (see `mergeGate` in
-`tools/validation/manifest.ts`). Android packaging is blocking but not
-merge-gating: a red APK fails the platform lane without holding up the
-merge-ready result.
+1. the checks explicitly required by the handoff;
+2. every additional blocking validation unit that the manifest routes for the actual diff;
+3. any environment-specific evidence required for the claims being made.
 
-The classes are not interchangeable. A Node run cannot prove browser correctness, a single seed cannot prove emergence, and an APK assembling says nothing about behaviour. A check is only ever moved between classes when the claim it proves changes, and that is a design decision rather than a refactor.
+Do not infer that one class of evidence proves another.
 
-Groups, unlike classes, are defined by *when* rather than *what*: `fast` is whatever a developer waits for before getting an answer, so it carries `decisions` (Class B) because 74 seconds of decision-policy checking is worth having early. `pnpm validation:check` asserts the CI fast shard runs exactly the same set, so "the fast gate" cannot mean two different things depending on which file someone edited.
+Examples:
 
-**Before considering any change complete, run `pnpm verify`.** Browser, platform, and evidence classes are gated separately by CI; scientific characterisation is manual by design.
+- Node validation does not prove browser behavior.
+- Browser success does not prove Android runtime behavior.
+- Android packaging does not prove application behavior.
+- A single deterministic run does not establish population-level scientific behavior.
+- Visual evidence does not establish simulation correctness.
+- A successful build does not establish biological validity.
 
-### Prefer GitHub Actions over the device for validation
+Validation supports only the claim actually tested.
 
-The phone (Termux + proot) is the *authoring* environment, not the place to
-wait for evidence. It is slower than CI, its proot layer is flaky, and long
-runs get killed by device or session restarts — which has repeatedly
-destroyed multi-minute `verify`, survey, and capture runs mid-flight.
+Changing validation
 
-**Default: run narrow checks locally, let CI carry everything slow.**
+When adding or materially changing a validation check:
 
-| Check | Where it should run |
-|---|---|
-| `pnpm verify:fast` | Local. ~1–2 min, and it answers most "is this structurally broken" questions. |
-| A single validation suite (`test:migration`, `test:niche`, `test:landscape`, `test:flows`) | Local, while iterating. |
-| Full `pnpm verify` | Either, but prefer **CI** once a change is more than a line or two. The CI `quick` shard runs the fast gate first, so a structural failure surfaces in about a minute. |
-| `pnpm verify:browser`, `pnpm verify:evidence` | **CI.** Both need Playwright Chromium plus a preview server, and the visual capture only reaches a meaningful world depth on CI hardware. |
-| `pnpm verify:survey` | **CI or a machine that will not be interrupted.** The surveys are resume-safe; if one dies, re-run and it continues from the retained artifact. |
-| Android packaging | **CI only.** Gradle and the emulator are not viable on the device. |
+1. add or update the corresponding package script;
+2. register the validation unit in "tools/validation/manifest.ts";
+3. assign its evidence class, enforcement behavior, domains, and claim;
+4. place blocking validation in the appropriate groups and CI routing;
+5. run "pnpm validation:check".
 
-Practical consequences:
+Do not create independent validation behavior directly in workflow files when it belongs in the manifest.
 
-- A green CI run on the pushed head is the completion signal. Do not
-  re-run `pnpm verify` on the device to "confirm" something CI has already
-  proved — that only burns the device and risks another restart.
-- Push to a **branch** and read results with `gh pr checks <n>`. Do not
-  push to `main`: `gh pr edit --body` is broken (Projects-classic sunset)
-  and the same breakage cancels in-flight main runs.
-- Retrieve CI evidence artifacts instead of regenerating locally:
-  `gh run download <run-id> -n landscape-visual-evidence -D <dir>`. Reading
-  the captured PNGs caught two real rendering defects that every
-  statistical canvas assertion had passed. The `validation-summary` artifact
-  gives the per-unit cost and skip reason for a run.
-- When a local run dies from a restart, resume the resume-safe runner rather
-  than restarting it; the retained artifact is the expensive part.
+Do not weaken, remove, bypass, reclassify, or make a validation gate non-blocking merely to make a change pass.
 
-### Adding or changing a check
+Owner-device execution rule
 
-Validation knowledge is machine-readable in `tools/validation/manifest.ts`, and
-the CI workflows only choose which runner each shard lands on. To add a check:
+The Project Owner's device is an authoring and short-diagnostic environment, not a long-running compute environment.
 
-1. Add a `package.json` script for it.
-2. Add a unit to `UNITS` in the manifest: its `id`, `script`, evidence `cls`,
-   `enforcement` (blocking / evidence / manual), the `domains` whose change
-   forces it, and the `claim` it proves.
-3. Put it in a group. Blocking units go in exactly one `ci-*` shard and in
-   exactly one of `fast` / `simulation` / `presentation`, so `verify` and CI
-   cannot diverge.
-4. Run `pnpm validation:check`.
+Short, bounded commands needed to inspect or diagnose a change may run locally.
 
-That last step is the point. It fails if the unit is in no shard, in two shards,
-missing from `verify`, absent from `package.json`, or if a workflow has started
-running validation outside the manifest. Do not add a check by editing a
-workflow or by appending to a command chain — both are how the Android job came
-to re-run the whole repository contract for 19 minutes.
+Do not launch or leave sustained workloads running on the Owner's device, including:
 
-Two conventions worth keeping:
+- full or exhaustive repository validation;
+- scientific surveys or long-horizon simulation characterization;
+- browser evidence capture requiring sustained execution;
+- performance characterization;
+- large production builds;
+- Android builds, emulator work, or runtime evidence collection;
+- other multi-minute or unattended workloads.
 
-- **Shard by measured cost.** `baselineSeconds` in the manifest comes from real
-  CI runs, not estimates. A shard that is much longer than its siblings is the
-  critical path, and the fix is to move or split units, not to add runners.
-- **Splitting a suite must be provably lossless.** When `test:dependency` was
-  split across three shards, `test:validation-arch` was extended to assert that
-  the shards' `--only` lists union to exactly the suite's full test set. If you
-  split a suite, add the equivalent assertion.
+Route sustained validation and evidence generation to GitHub Actions, another remote runner, or another explicitly approved execution environment.
 
-## Architecture rules (enforced by review, not tooling)
+If CI has already proved a claim against the same relevant commit and configuration, reuse that evidence rather than rerunning the same expensive work locally.
 
-Dependency direction:
+Architecture rules
 
-```text
+The intended dependency direction is:
+
 apps/explorer -> sim-runtime -> sim-core
 apps/explorer -> sim-analysis
-sim-runtime   -> sim-analysis, sim-decisions
-sim-decisions -> contracts (pure policy; never sim-core)
-all product packages -> contracts
-```
+apps/explorer -> phenotype
 
-- `sim-core` is the biological authority. It must not depend on React, DOM APIs, workers, storage, filesystem APIs, `requestAnimationFrame`, or wall-clock time.
-- `sim-analysis` interprets immutable / read-only simulation observations. Analysis output may affect presentation and fast-forward stopping conditions, never biology.
-- `sim-runtime` owns the live session and the module worker. The application never directly owns mutable simulation state.
-- `sim-decisions` is pure read-only choice policy. It maps observed events to offered choices and may never mutate simulation state, advance time, create comparison worlds, or predict outcomes.
-- A pending decision opportunity is a hard pause gate owned by `sim-runtime`: while one is pending, no further tick may execute through any command path.
-- Same engine version + resolved config + seed + command sequence must remain deterministic.
-- Population abundance, ecological structure, dormancy, and cross-feeding must remain emergent — never scripted.
-- Matched-control forks clone exact state and RNG streams.
-- Evidence exports and resumable checkpoints are separate contracts (`UniverseCheckpoint` vs export types in `packages/contracts`).
+sim-runtime   -> sim-analysis
+sim-runtime   -> sim-decisions
 
-## Working conventions
+sim-decisions -> contracts
+sim-analysis  -> contracts
+phenotype     -> contracts where cross-boundary data is required
 
-1. **Inspect before abstracting.** Read the existing implementation (especially `packages/sim-core/src/engine.ts` and `packages/contracts/src/index.ts`) before introducing new abstractions.
-2. **Do not edit `legacy/prototype/`.** Those files are frozen regression evidence; the parity harness compares against them.
-3. **Keep simulation, UI, and analysis changes separate.** A single PR should not mix biology changes with presentation changes unless they are genuinely inseparable — say so in the PR description when they are.
-4. **Tests over assertions.** Behavioral claims (determinism, parity, round-trips) must be backed by `tools/validation/*` or package checks, not comments.
-5. **Small, reviewable diffs.** Prefer focused PRs; use the PR template in `.github/pull_request_template.md`.
-6. **Offline-first.** Simulation, saves, history, experiments, and inspection must remain usable with no network.
-7. **Review outputs go to shared storage, repos stay on local disk.** On Termux/proot devices the repo must stay under the Linux home (`/root/...`): shared phone storage (`/sdcard`) is mounted `noexec` and may reject symlinks, so `node_modules` native binaries and `pnpm` linking break there. Copy *reviewable outputs only* — viewer HTML, `EVIDENCE.md`, exports, screenshots, handoff files — to `/sdcard/DEE/<topic>/` (e.g. `/sdcard/DEE/review/phenotype-art-review.html`) and open them from the phone. Never move the repo, `node_modules`, or OpenCode state (`~/.local/share/opencode`, SQLite db) to shared storage. This is a copy, not a move: the repo remains the source of truth.
+all product packages -> contracts as appropriate
 
-## Prohibitions
+Treat the current repository and its architecture validation as authoritative for exact enforced import boundaries.
 
-- Never weaken or delete tests, validation gates, CI checks, or security controls merely to make a change pass.
-- Never edit generated output (`dist/`, `node_modules/`) or commit them.
-- Never commit the local toolchain workarounds in `node_modules/`; they are gitignored and machine-specific.
-- Do not commit, push, open PRs, change remote settings, or request elevated credentials unless explicitly authorized.
-- Do not add network calls, analytics, or external services to the product without explicit approval — offline-first is a core guarantee.
+Simulation authority
 
-## When to stop and ask
+"packages/sim-core" is the biological authority.
 
-Stop for human input if: a change would break a parity gate and you cannot preserve behavior; a security control would be weakened; `legacy/prototype` sources appear to need modification; the task requires elevated permissions; or the request conflicts with the architecture rules above.
+It must not depend on:
+
+- React;
+- DOM APIs;
+- browser workers;
+- storage APIs;
+- filesystem APIs;
+- presentation frame timing;
+- "requestAnimationFrame";
+- wall-clock time;
+- presentation-only state.
+
+Biological outcomes must arise from simulation rules rather than presentation needs.
+
+Analysis authority
+
+"packages/sim-analysis" interprets read-only observations.
+
+Analysis may explain, classify, aggregate, or detect patterns in simulation state.
+
+Analysis output may affect presentation and explicitly designed observation/fast-forward behavior, but it must not mutate biological state or manufacture evidence.
+
+Runtime authority
+
+"packages/sim-runtime" owns the live simulation session and worker execution boundary.
+
+The Explorer must not independently own mutable biological state.
+
+Runtime commands must preserve the defined simulation authority, request settlement, persistence, and deterministic continuation contracts.
+
+Decision policy
+
+"packages/sim-decisions" is pure read-only policy.
+
+It may map observed events to decision opportunities.
+
+It must not:
+
+- mutate simulation state;
+- advance simulation time;
+- create comparison worlds;
+- own worker/session state;
+- manufacture predicted outcomes.
+
+A pending decision opportunity is a hard simulation pause wherever the accepted runtime contract requires it.
+
+Presentation and phenotype
+
+Presentation systems and "packages/phenotype" may derive visual state from resolved simulation/read-model state.
+
+They must not become biological authority.
+
+Rendering constraints must not introduce population caps, alter abundance, rewrite ecology, or change simulation behavior merely to make presentation easier or faster.
+
+Reproducibility
+
+The supported reproducibility contract must remain:
+
+engine version
++ resolved configuration
++ seed
++ command sequence
+= reproducible supported run
+
+Do not introduce hidden state, wall-clock dependence, nondeterministic mutation order, presentation-owned RNG, or other behavior that violates that contract.
+
+Emergence
+
+Population abundance and ecological structure are simulation outcomes.
+
+Do not introduce target-population rules, scripted ecosystem composition, artificial abundance control, or presentation-driven biological limits unless an explicit accepted design changes this principle.
+
+Matched comparisons
+
+Matched-control or matched-branch comparisons must preserve whatever exact state and RNG continuity the relevant comparison contract requires.
+
+Do not approximate matched state when exact cloning is part of the supported behavior.
+
+Checkpoints and evidence
+
+Resumable checkpoints and evidence exports are different contracts.
+
+Do not merge their authority or semantics merely because they contain overlapping data.
+
+A checkpoint exists to preserve supported resumable state.
+
+An evidence export exists to support inspection, analysis, provenance, or scientific review.
+
+Working conventions
+
+1. Inspect before abstracting. Read the implementation that owns a behavior before introducing a new abstraction.
+
+2. Respect authority boundaries. Put biology in simulation authority, interpretation in analysis, session execution in runtime, and presentation behavior in presentation systems.
+
+3. Keep diffs bounded. Prefer focused changes with a clear relationship to one accepted handoff.
+
+4. Separate unrelated domains. Do not combine biological, presentation, runtime, persistence, and infrastructure changes in one change unless the handoff genuinely requires them to move together.
+
+5. Test behavioral claims. Determinism, migration, parity, persistence, recovery, presentation, and biological claims require appropriate validation rather than comments or assumptions.
+
+6. Preserve offline-first behavior. Simulation, saves, history, experiments, inspection, and supported evidence workflows must remain usable without a network connection unless an explicit accepted product decision changes that guarantee.
+
+7. Prefer existing contracts. Extend current architecture where appropriate rather than inventing parallel state models or duplicate authority.
+
+8. Preserve implementation freedom. Accepted design constrains observable behavior and product meaning. Low-level structure, naming, internal algorithms, batching, caching, test organization, and similar engineering choices belong to the Coding Agent unless explicitly constrained.
+
+9. Do not optimize by changing meaning. Performance work may change representation and execution strategy, but must not silently change simulation semantics, evidence semantics, or supported user behavior.
+
+10. Keep historical evidence historical. Completed experiments, superseded handoffs, prototypes, and old validation results remain provenance. They do not automatically define current product behavior.
+
+Frozen sources
+
+Do not edit:
+
+legacy/prototype/
+
+These files are historical regression evidence.
+
+If a task appears to require modifying them, stop and surface the conflict.
+
+Do not modify generated output such as:
+
+dist/
+node_modules/
+
+Do not commit machine-specific toolchain repairs or temporary generated evidence unless the repository explicitly defines that artifact as versioned source.
+
+Repository and Git safety
+
+Unless explicitly authorized for the current task, do not:
+
+- commit;
+- push;
+- merge;
+- open or modify pull requests;
+- rewrite branch history;
+- force-push;
+- reset or clean away user work;
+- change remotes;
+- change repository permissions;
+- request elevated credentials.
+
+Do not destroy or overwrite unrelated working-tree changes.
+
+Do not use destructive Git operations as a troubleshooting shortcut.
+
+Security and product boundaries
+
+Do not:
+
+- weaken security controls to make a task pass;
+- add analytics or telemetry without explicit approval;
+- add runtime network dependencies without explicit approval;
+- add external services solely for implementation convenience;
+- expose secrets or credentials;
+- commit local secrets, tokens, private keys, or environment-specific credentials.
+
+The product is offline-first by design. Repository tooling may use networked development infrastructure such as GitHub Actions, but that does not grant permission to introduce runtime network requirements into the product.
+
+Product delivery domains
+
+Current product work is commonly organized into three durable domains:
+
+Game & Evolution
+Experience & World
+Foundation & Trust
+
+These describe product ownership and dependency reasoning. They are not mandatory coding-agent identities or an autonomous implementation topology.
+
+A task may affect more than one domain, but it should have one clear primary purpose and name concrete cross-domain dependencies rather than blocking on an entire domain.
+
+Evidence & Validation is cross-cutting and is part of the definition of done for every relevant change. It is not a separate implementation authority.
+
+Do not encode old global sequencing gates into implementation unless a current handoff explicitly requires the named dependency.
+
+Handoff interpretation
+
+When implementing a bounded handoff:
+
+1. identify the requested observable outcome;
+2. identify the controlling architecture and simulation constraints;
+3. inspect the current implementation;
+4. identify the smallest implementation scope that satisfies the handoff;
+5. identify concrete dependencies rather than assuming broad project gates;
+6. implement within the accepted design;
+7. validate the actual claims introduced by the diff;
+8. report deviations, unsupported assumptions, and remaining evidence gaps.
+
+Distinguish:
+
+- implementation freedom — an engineering choice that does not change accepted product meaning;
+- design-significant drift — implementation would materially change accepted behavior or semantics;
+- evidence gap — implementation exists but the required claim has not been demonstrated;
+- Owner decision — more than one materially different product/simulation meaning remains possible.
+
+Do not silently convert the last three categories into implementation freedom.
+
+When to stop and return for design input
+
+Stop implementation and surface the issue when:
+
+- the requested work conflicts with an accepted architecture or simulation invariant;
+- multiple materially different product or simulation meanings are possible and the handoff does not choose between them;
+- the change would alter reproducibility semantics;
+- the change would alter checkpoint or evidence authority;
+- a presentation optimization would require changing biological behavior;
+- a migration would accept state whose meaning is ambiguous;
+- a security control or validation gate would need to be weakened;
+- "legacy/prototype/" appears to require modification;
+- elevated permissions or credentials are required;
+- a required dependency or accepted design contract is missing;
+- current implementation contradicts the controlling handoff in a way that cannot be resolved as ordinary implementation freedom.
+
+Do not stop for ordinary engineering choices such as internal naming, local file organization, DTO names, cache implementation, serialization-library details within existing constraints, batching strategy, or test-file organization.
+
+Definition of complete
+
+A Coding Agent task is complete only when:
+
+- the bounded requested behavior is implemented;
+- architecture and authority boundaries remain intact;
+- the handoff's focused acceptance checks pass;
+- all blocking validation required by the actual diff is satisfied in the appropriate environment;
+- relevant evidence is reported truthfully and only for the claims it supports;
+- no design-significant deviation is hidden as an implementation detail;
+- residual gaps or unsupported claims are explicitly identified;
+- no unrelated user work was destroyed or rewritten.
+
+Merged code, passing tests, scientific evidence, and design acceptance are distinct facts. Report them as such.
