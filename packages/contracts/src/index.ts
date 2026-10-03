@@ -2348,12 +2348,6 @@ export interface IntervalLineageFlow {
   readonly detritusConsumed: number;
   /** Realized energy from detritus consumption. */
   readonly energyDetritus: number;
-  /** Detritus mass mineralized into A/B. */
-  readonly detritusMineralized: number;
-  /** Mineralized mass received by Nutrient A. */
-  readonly mineralizedA: number;
-  /** Mineralized mass received by Nutrient B. */
-  readonly mineralizedB: number;
   /** Detritus-use process executions. */
   readonly detritusExec: number;
 }

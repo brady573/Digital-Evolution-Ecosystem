@@ -34,6 +34,15 @@ const C_BYPRODUCT_YIELD=.32,C_ENERGY_YIELD=9,C_DECAY_RATE=.00022,C_DIFFUSION_RAT
  */
 // impl: REQ-SLICE-002 (Slice 2 waste-field calibration)
 const WASTE_YIELD=.15,WASTE_CAP_FRACTION=.25,WASTE_DIFFUSION=.20,WASTE_DECAY=.0001,WASTE_HALF_SAT=.3,WASTE_BURDEN_MAX=.45,WASTE_TOL_EFFICACY=.75,WASTE_TOL_COST=.001,CU_STANDING=.0015,CU_ACTIVE=.6,CU_RATE=.09;
+/**
+ * Foundation Slice 2 (detritus): starting calibration. Detritus inflow is
+ * an order below waste inflow (deaths, not meals), so the field cap is
+ * smaller; mineralization (.001/tick) turns stock over in ~1000 ticks —
+ * fast enough to be a bounded sink, slow enough to hold hotspots. No
+ * diffusion: death clusters stay local (AC13). Retune only on assay
+ * evidence, never to hit a frequency.
+ */
+const DETRITUS_CAP_FRACTION=.05,DETRITUS_MINERAL_RATE=.001,DETRITUS_BODY_BASE=2,DETRITUS_BODY_GAIN=.05,DETRITUS_BODY_CAP=30,DETRITUS_YIELD=7,DETRITUS_UPTAKE=.16,DU_STANDING=.0015,DU_ACTIVE=.6;
 const H01=(seed:number,id:number,salt=0):number=>{let x=(seed^(Math.imul(id+salt,0x9E3779B1)))>>>0;x^=x>>>16;x=Math.imul(x,0x7FEB352D);x^=x>>>15;x=Math.imul(x,0x846CA68B);x^=x>>>16;return(x>>>0)/4294967296};
 const C_ACCESS=(bu:number):number=>{let v=Q(bu,0,1.5);return v<=0?0:(v*v)/(v*v+.1024)};
 const BUC=(bu:number):number=>BU_MAINT_COST*bu*bu;
@@ -46,9 +55,9 @@ const F=(n:number):string=>`L-${String(n).padStart(4,'0')}`;
 const B=():Record<string,[number,number]>=>Object.fromEntries(Object.keys(T).map(k=>[k,[0,0]])) as Record<string,[number,number]>;
 /** Per-stride biological interval counters (births, deaths, resource flows, dormancy transitions). */
 // impl: REQ-POP-001 (birth/death/flow counters drive emergent population arcs)
-interface LineageDelta{consumedA:number;consumedB:number;consumedC:number;energyA:number;energyB:number;energyC:number;producedC:number;births:number;deaths:number;wasteProduced:number;wasteRemoved:number;burdenEnergy:number;cleanupEnergy:number;cleanupExec:number}
-interface Interval{births:number;deaths:number;mutation_attempts:number;effective_mutations:number;resources_spawned:number;resources_suppressed:number;resources_consumed:number;spawned_a:number;spawned_b:number;consumed_a:number;consumed_b:number;consumed_c:number;produced_c:number;decayed_c:number;energy_a:number;energy_b:number;energy_c:number;repro_supported_a:number;repro_supported_b:number;repro_supported_mixed:number;repro_supported_c:number;dormancy_entries:number;wakes:number;wake_clades:Record<string,number>;proc_exec_a:number;proc_exec_b:number;proc_exec_c:number;movement_intents:number;movement_settled:number;movement_blocked:number;movement_redirected:number;repro_eligible:number;blocked_births:number;produced_w:number;removed_w:number;decayed_w:number;burden_energy:number;cleanup_energy:number;cleanup_exec:number;[k:string]:number|Record<string,number>}
-const I=():Interval=>({births:0,deaths:0,mutation_attempts:0,effective_mutations:0,resources_spawned:0,resources_suppressed:0,resources_consumed:0,spawned_a:0,spawned_b:0,consumed_a:0,consumed_b:0,consumed_c:0,produced_c:0,decayed_c:0,energy_a:0,energy_b:0,energy_c:0,repro_supported_a:0,repro_supported_b:0,repro_supported_mixed:0,repro_supported_c:0,dormancy_entries:0,wakes:0,wake_clades:{},proc_exec_a:0,proc_exec_b:0,proc_exec_c:0,movement_intents:0,movement_settled:0,movement_blocked:0,movement_redirected:0,repro_eligible:0,blocked_births:0,produced_w:0,removed_w:0,decayed_w:0,burden_energy:0,cleanup_energy:0,cleanup_exec:0});
+interface LineageDelta{consumedA:number;consumedB:number;consumedC:number;energyA:number;energyB:number;energyC:number;producedC:number;births:number;deaths:number;wasteProduced:number;wasteRemoved:number;burdenEnergy:number;cleanupEnergy:number;cleanupExec:number;detritusDeposited:number;detritusConsumed:number;energyDetritus:number;detritusExec:number}
+interface Interval{births:number;deaths:number;mutation_attempts:number;effective_mutations:number;resources_spawned:number;resources_suppressed:number;resources_consumed:number;spawned_a:number;spawned_b:number;consumed_a:number;consumed_b:number;consumed_c:number;produced_c:number;decayed_c:number;energy_a:number;energy_b:number;energy_c:number;repro_supported_a:number;repro_supported_b:number;repro_supported_mixed:number;repro_supported_c:number;dormancy_entries:number;wakes:number;wake_clades:Record<string,number>;proc_exec_a:number;proc_exec_b:number;proc_exec_c:number;movement_intents:number;movement_settled:number;movement_blocked:number;movement_redirected:number;repro_eligible:number;blocked_births:number;produced_w:number;removed_w:number;decayed_w:number;burden_energy:number;cleanup_energy:number;cleanup_exec:number;detritus_deposited:number;detritus_consumed:number;energy_detritus:number;detritus_mineralized:number;mineralized_a:number;mineralized_b:number;detritus_exec:number;[k:string]:number|Record<string,number>}
+const I=():Interval=>({births:0,deaths:0,mutation_attempts:0,effective_mutations:0,resources_spawned:0,resources_suppressed:0,resources_consumed:0,spawned_a:0,spawned_b:0,consumed_a:0,consumed_b:0,consumed_c:0,produced_c:0,decayed_c:0,energy_a:0,energy_b:0,energy_c:0,repro_supported_a:0,repro_supported_b:0,repro_supported_mixed:0,repro_supported_c:0,dormancy_entries:0,wakes:0,wake_clades:{},proc_exec_a:0,proc_exec_b:0,proc_exec_c:0,movement_intents:0,movement_settled:0,movement_blocked:0,movement_redirected:0,repro_eligible:0,blocked_births:0,produced_w:0,removed_w:0,decayed_w:0,burden_energy:0,cleanup_energy:0,cleanup_exec:0,detritus_deposited:0,detritus_consumed:0,energy_detritus:0,detritus_mineralized:0,mineralized_a:0,mineralized_b:0,detritus_exec:0});
 const H_STD=[50000,100000,200000,300000],H_DEEP=[100000,300000,500000,1000000];
 const SCI={disclaimer:'Sources inform experimental design and interpretation; the exact simulation equations remain deliberate abstractions.',sources:[
 {key:'avida',authors:'Ofria & Wilke',year:2004,title:'Avida: A Software Platform for Research in Computational Evolutionary Biology',doi:'10.1162/106454604773563612',url:'https://doi.org/10.1162/106454604773563612',informs:['digital evolution','controlled experiments']},
@@ -256,7 +265,7 @@ const PROCESSES:Record<ProcessId,BioProcess>={
 };
 function processFor(id:ProcessId):BioProcess{return PROCESSES[id]}
 /** Empty interval facts for pre-first-stride and pre-counter restores. Never mutated. */
-const EMPTY_INTERVAL_FLOWS:IntervalFlowFacts={tick:0,strideTicks:EVENT_STRIDE,lineages:[],totals:{netMembers:0,consumedA:0,consumedB:0,consumedC:0,energyA:0,energyB:0,energyC:0,producedC:0,births:0,deaths:0,wasteProduced:0,wasteRemoved:0,burdenEnergy:0,cleanupEnergy:0,cleanupExec:0}};
+const EMPTY_INTERVAL_FLOWS:IntervalFlowFacts={tick:0,strideTicks:EVENT_STRIDE,lineages:[],totals:{netMembers:0,consumedA:0,consumedB:0,consumedC:0,energyA:0,energyB:0,energyC:0,producedC:0,births:0,deaths:0,wasteProduced:0,wasteRemoved:0,burdenEnergy:0,cleanupEnergy:0,cleanupExec:0,detritusDeposited:0,detritusConsumed:0,energyDetritus:0,detritusMineralized:0,mineralizedA:0,mineralizedB:0,detritusExec:0}};
 /**
  * RETAINED ONLY to decode pre-removal checkpoints carrying the
  * "legacy-observer" tag. Never instantiated or advanced: ecological
@@ -336,11 +345,11 @@ class RS{
  declare stock:Float32Array[];declare cap:Float32Array[];declare source:Float32Array[];
  declare input:number[];declare biologicalProduction:number[];declare consumed:number[];declare decayed:number[];declare externalRemoved:number[];declare removalEvents:RemovalEvent[];declare diffusionAdjustment:number[];declare minFraction:number;declare maxFraction:number;declare lastInput:number[];declare diffusionRate:number[];declare delta:Float32Array[];
  declare sourceBoost:Float64Array[];declare right:Int32Array;declare down:Int32Array;declare minCapRight:Float64Array[];declare minCapDown:Float64Array[];declare totalStock:number[];declare totalCapacity:number[];declare regenLast:Int32Array;declare regenBuckets:number[][];
- declare regenRate:number;declare totalCapTarget:number;declare initialFraction:number;declare initialStock:number[];declare waste:WasteField;
+ declare regenRate:number;declare totalCapTarget:number;declare initialFraction:number;declare initialStock:number[];declare waste:WasteField;declare detritus:DetritusField;declare detritusDepositionEnabled:boolean;declare detritusConsumptionEnabled:boolean;
  /** Temporary external C sink (validation washout assays): multiplies C decay while active. Null when absent. */
  declare cSink:{end:number;factor:number}|null;
  constructor(c:EngineConfig){
-  this.n=FIELD_N;this.cell=FIELD_CELL;this.size=FIELD_CELLS;this.updateStride=FIELD_UPDATE;this.uptake=FIELD_UPTAKE;this.enabledByproduct=c.enable_byproduct!==false;this.enabledWaste=true;
+  this.n=FIELD_N;this.cell=FIELD_CELL;this.size=FIELD_CELLS;this.updateStride=FIELD_UPDATE;this.uptake=FIELD_UPTAKE;this.enabledByproduct=c.enable_byproduct!==false;this.enabledWaste=true;this.detritusDepositionEnabled=true;this.detritusConsumptionEnabled=true;
   this.defs=[
    {id:'nutrient_a',display_name:'Nutrient A',role:'abiotic_primary',energy_yield:15,source_mode:'seeded_environmental',regeneration_rate:null,diffusion_rate:.08,decay_rate:0},
    {id:'nutrient_b',display_name:'Nutrient B',role:'abiotic_primary',energy_yield:15,source_mode:'seeded_environmental',regeneration_rate:null,diffusion_rate:.08,decay_rate:0},
@@ -357,7 +366,7 @@ class RS{
   for(let iy=0;iy<this.n;iy++)for(let ix=0;ix<this.n;ix++){let i=iy*this.n+ix;this.right[i]=iy*this.n+((ix+1)%this.n);this.down[i]=((iy+1)%this.n)*this.n+ix}
   let regenLoad=new Float64Array(this.updateStride);for(let i=0;i<this.size;i++){let phase=0;for(let q=1;q<this.updateStride;q++)if((regenLoad[q]!)<(regenLoad[phase]!))phase=q;this.regenBuckets[phase]!.push(i);regenLoad[phase]!+=this.cap[0]![i]!+this.cap[1]![i]!}
   for(let k=0;k<3;k++)for(let i=0;i<this.size;i++){this.minCapRight[k]![i]=Math.min(this.cap[k]![i]!,this.cap[k]![this.right[i]!]!);this.minCapDown[k]![i]=Math.min(this.cap[k]![i]!,this.cap[k]![this.down[i]!]!)}
-  this.initialStock=[...this.totalStock];this.cSink=null;this.waste=new WasteField(this.totalCapTarget,this.updateStride);this.recalcBounds();
+  this.initialStock=[...this.totalStock];this.cSink=null;this.waste=new WasteField(this.totalCapTarget,this.updateStride);this.detritus=new DetritusField(this.totalCapTarget);this.recalcBounds();
  }
  idx(x:number,y:number):number{let ix=Math.floor((((x%600)+600)%600)/this.cell)%this.n,iy=Math.floor((((y%600)+600)%600)/this.cell)%this.n;return iy*this.n+ix}
  fractionAt(kind:number,x:number,y:number):number{let i=this.idx(x,y),c=this.cap[kind]![i]!;return c>1e-9?this.stock[kind]![i]!/c:0}
@@ -382,7 +391,7 @@ class RS{
  diffuse(k:number):void{let st=this.stock[k]!,cp=this.cap[k]!,d=this.delta[k]!,right=this.right,down=this.down,mr=this.minCapRight[k]!,md=this.minCapDown[k]!,rate=this.diffusionRate[k]!;d.fill(0);for(let i=0;i<this.size;i++){let ci=cp[i]!>1e-9?st[i]!/cp[i]!:0,j=right[i]!,cj=cp[j]!>1e-9?st[j]!/cp[j]!:0,flux=rate*(ci-cj)*mr[i]!;d[i]!-=flux;d[j]!+=flux;j=down[i]!;cj=cp[j]!>1e-9?st[j]!/cp[j]!:0;flux=rate*(ci-cj)*md[i]!;d[i]!-=flux;d[j]!+=flux}let adj=0;for(let i=0;i<this.size;i++){let before=st[i]!,raw=before+d[i]!,next=Q(raw,0,cp[i]!);st[i]=next;adj+=next-before}this.totalStock[k]!+=adj;this.diffusionAdjustment[k]!+=adj}
  step(t:number,drought:DroughtState|null,interval:Interval):void{let added=[0,0,0],phase=t%this.updateStride,bucket=this.regenBuckets[phase]!,elapsed=new Int32Array(bucket.length);for(let j=0;j<bucket.length;j++){let i=bucket[j]!;elapsed[j]=Math.max(1,t-this.regenLast[i]!)}for(let k=0;k<2;k++){let factor=drought&&t<drought.end&&k===drought.kind?(1-drought.suppression):1,st=this.stock[k]!,cp=this.cap[k]!,boost=this.sourceBoost[k]!;for(let j=0;j<bucket.length;j++){let i=bucket[j]!,gap=cp[i]!-st[i]!;if(gap<=1e-9)continue;let inc=gap*(1-Math.exp(-this.regenRate*boost[i]!*factor*elapsed[j]!));if(inc>0){let before=st[i]!;st[i]!+=inc;this.totalStock[k]!+=st[i]!-before;added[k]!+=inc}}this.input[k]!+=added[k]!}
   if(this.enabledByproduct){let st=this.stock[2]!,dec=0,decayRate=(this.cSink&&t<this.cSink.end)?C_DECAY_RATE*this.cSink.factor:C_DECAY_RATE;for(let j=0;j<bucket.length;j++){let i=bucket[j]!,e=elapsed[j]!,before=st[i]!,next=before*Math.exp(-decayRate*e),loss=before-next;if(loss>0){st[i]=next;dec+=loss}}this.totalStock[2]!-=dec;this.decayed[2]!+=dec;if(interval)interval.decayed_c+=dec}
-  this.waste.stepWaste(t,interval);if(t%100===0){this.diffuse(0);this.diffuse(1);if(this.enabledByproduct)this.diffuse(2)}for(let j=0;j<bucket.length;j++)this.regenLast[bucket[j]!]=t;this.lastInput=added;if(interval){interval.resources_spawned+=added[0]!+added[1]!;interval.spawned_a+=added[0]!;interval.spawned_b+=added[1]!;if(drought&&t<drought.end&&t%this.updateStride===0)interval.resources_suppressed+=1}this.recalcBounds();
+  this.waste.stepWaste(t,interval);this.detritus.stepDetritus(this,interval);if(t%100===0){this.diffuse(0);this.diffuse(1);if(this.enabledByproduct)this.diffuse(2)}for(let j=0;j<bucket.length;j++)this.regenLast[bucket[j]!]=t;this.lastInput=added;if(interval){interval.resources_spawned+=added[0]!+added[1]!;interval.spawned_a+=added[0]!;interval.spawned_b+=added[1]!;if(drought&&t<drought.end&&t%this.updateStride===0)interval.resources_suppressed+=1}this.recalcBounds();
  }
  scale(kind:null,factor:number,meta?:{tick:number|null;type:string|null;source:string|null;reason?:string}|null):number[];
  scale(kind:number,factor:number,meta?:{tick:number|null;type:string|null;source:string|null;reason?:string}|null):number;
@@ -390,7 +399,7 @@ class RS{
  totals(){let a=this.totalStock[0]!,b=this.totalStock[1]!,c=this.totalStock[2]!,ca=this.totalCapacity[0]!,cb=this.totalCapacity[1]!,cc=this.totalCapacity[2]!,primaryCap=ca+cb,primary=a+b,all=primary+c;return{a,b,c,a_capacity:ca,b_capacity:cb,c_capacity:cc,total:primary,total_with_byproduct:all,total_capacity:primaryCap,total_capacity_with_byproduct:primaryCap+cc,fraction:primaryCap?primary/primaryCap:0,c_fraction:cc?c/cc:0,min_fraction:this.minFraction,max_fraction:this.maxFraction}}
  recalcBounds(){let cap=this.totalCapacity[0]!+this.totalCapacity[1]!,tot=this.totalStock[0]!+this.totalStock[1]!,f=cap?tot/cap:0;this.minFraction=Math.min(this.minFraction,f);this.maxFraction=Math.max(this.maxFraction,f)}
  accounting(){let final=[...this.totalStock],residual=[0,1,2].map(k=>this.initialStock[k]!+this.input[k]!+this.biologicalProduction[k]!-this.consumed[k]!-this.decayed[k]!-this.externalRemoved[k]!+this.diffusionAdjustment[k]!-final[k]!);return{initial_stock:[...this.initialStock],environmental_input:[...this.input],biological_production:[...this.biologicalProduction],biological_consumption:[...this.consumed],decay:[...this.decayed],external_removal:[...this.externalRemoved],diffusion_clamp_adjustment:[...this.diffusionAdjustment],final_stock:final,residual,absolute_residual:residual.map(Math.abs),removal_events:this.removalEvents.map(v=>({...v,amounts:[...v.amounts]})),identity:'initial + environmental input + biological production - biological consumption - decay - external removal + diffusion clamp adjustment = final stock + residual'}}
- clone(){let n=Object.create(RS.prototype);for(const [k,v] of Object.entries(this)){if(v instanceof WasteField)n[k]=v.clone();else if(Array.isArray(v)&&v.length&&ArrayBuffer.isView(v[0]))n[k]=v.map(a=>new a.constructor(a));else if(ArrayBuffer.isView(v))n[k]=new (v.constructor as any)(v);else if(Array.isArray(v))n[k]=v.map(x=>x&&typeof x==='object'?JSON.parse(JSON.stringify(x)):x);else if(v&&typeof v==='object')n[k]=JSON.parse(JSON.stringify(v));else n[k]=v}return n}
+ clone(){let n=Object.create(RS.prototype);for(const [k,v] of Object.entries(this)){if(v instanceof WasteField||v instanceof DetritusField)n[k]=v.clone();else if(Array.isArray(v)&&v.length&&ArrayBuffer.isView(v[0]))n[k]=v.map(a=>new a.constructor(a));else if(ArrayBuffer.isView(v))n[k]=new (v.constructor as any)(v);else if(Array.isArray(v))n[k]=v.map(x=>x&&typeof x==='object'?JSON.parse(JSON.stringify(x)):x);else if(v&&typeof v==='object')n[k]=JSON.parse(JSON.stringify(v));else n[k]=v}return n}
  export(){let q=this.totals();return{model:'definition_driven_spatial_substance_field',grid:{width:this.n,height:this.n,cell_world_units:this.cell,toroidal:true},definitions:this.defs.map(v=>({...v})),update_stride_ticks:this.updateStride,uptake_per_tick:this.uptake,totals:q,environmental_input:[...this.input],biological_production:[...this.biologicalProduction],biological_consumption:[...this.consumed],decay:[...this.decayed],external_removal:[...this.externalRemoved],accounting:this.accounting(),stock_fields:this.stock.map(a=>Array.from(a)),capacity_fields:this.cap.map(a=>Array.from(a)),source_fields:this.source.map(a=>Array.from(a))}}
 }
 
@@ -466,6 +475,82 @@ class WasteField{
  accounting():{identity:string;initial:number;produced:number;bio_removed:number;decayed:number;clamp_adjustment:number;saturated_loss:number;final_stock:number;residual:number}{let final=this.totals().stock,residual=this.produced-this.bioRemoved-this.decayed+this.clampAdj-final;return{identity:'generated = deposited (produced) + saturated loss (discarded); deposited - biological removal - decay + clamp adjustment = final stock + residual',initial:0,produced:this.produced,bio_removed:this.bioRemoved,decayed:this.decayed,clamp_adjustment:this.clampAdj,saturated_loss:this.discarded,final_stock:final,residual}}
  clone():WasteField{let n=Object.create(WasteField.prototype);for(const [k,v] of Object.entries(this)){if(ArrayBuffer.isView(v))n[k]=new (v.constructor as any)(v);else if(Array.isArray(v))n[k]=v.map(x=>x&&typeof x==='object'?JSON.parse(JSON.stringify(x)):x);else if(v&&typeof v==='object')n[k]=JSON.parse(JSON.stringify(v));else n[k]=v}return n}
  export():{model:string;grid:number;cell_world_units:number;diffusion_rate:number;decay_rate:number;totals:unknown;accounting:unknown}{return{model:'spatial_waste_substance_field',grid:this.n,cell_world_units:this.cell,diffusion_rate:this.diffusionRate,decay_rate:this.decayRate,totals:this.totals(),accounting:this.accounting()}}
+}
+
+/**
+ * Foundation Slice 2: explicit persistent local detritus (dead biological
+ * material). Same spatial topology as waste (60x60 toroidal cells), no
+ * diffusion: death clusters stay local so hotspots are real. Deaths deposit
+ * into `pending`, which merges into available `stock` at the next
+ * environment step — newly deposited detritus is structurally unavailable
+ * to same-tick consumers (AC5). Unconsumed stock mineralizes into existing
+ * A/B opportunity through the capped nutrient deposit (overflow stays
+ * detritus, never silently disappears). Merge overflow likewise stays
+ * pending and retries next tick: no silent mass loss anywhere.
+ */
+class DetritusField{
+ declare n:number;declare cell:number;declare size:number;
+ declare stock:Float32Array;declare cap:Float32Array;declare pending:Float32Array;
+ declare deposited:number;declare consumed:number;declare mineralized:number;declare mineralizedA:number;declare mineralizedB:number;declare discarded:number;
+ declare mineralRate:number;
+ declare right:Int32Array;declare down:Int32Array;
+ constructor(totalCap:number){
+  this.n=FIELD_N;this.cell=FIELD_CELL;this.size=FIELD_CELLS;
+  this.mineralRate=DETRITUS_MINERAL_RATE;
+  let per=totalCap*DETRITUS_CAP_FRACTION/this.size;
+  this.stock=new Float32Array(this.size);this.cap=new Float32Array(this.size).fill(per);this.pending=new Float32Array(this.size);
+  this.deposited=0;this.consumed=0;this.mineralized=0;this.mineralizedA=0;this.mineralizedB=0;this.discarded=0;
+  this.right=new Int32Array(this.size);this.down=new Int32Array(this.size);
+  for(let iy=0;iy<this.n;iy++)for(let ix=0;ix<this.n;ix++){let i=iy*this.n+ix;this.right[i]=iy*this.n+((ix+1)%this.n);this.down[i]=((iy+1)%this.n)*this.n+ix}
+ }
+ idx(x:number,y:number):number{let ix=Math.floor((((x%600)+600)%600)/this.cell)%this.n,iy=Math.floor((((y%600)+600)%600)/this.cell)%this.n;return iy*this.n+ix}
+ amountAt(x:number,y:number):number{return this.stock[this.idx(x,y)]!}
+ /** Death deposition: recorded immediately, available next tick. Pending is
+  * uncapped (every death is recorded); the cap binds at merge, with
+  * overflow retrying next tick. */
+ depositPending(x:number,y:number,amount:number,interval:Interval|null):number{
+  if(amount<=0)return 0;
+  let i=this.idx(x,y);this.pending[i]!+=amount;this.deposited+=amount;
+  if(interval)interval.detritus_deposited+=amount;
+  return amount;
+ }
+ /** Merge pending into available stock (next environment step). Overflow
+  * stays pending — never discarded, never duplicated. */
+ mergePending():void{
+  for(let i=0;i<this.size;i++){let p=this.pending[i]!;if(p<=0)continue;let room=Math.max(0,this.cap[i]!-this.stock[i]!),add=Math.min(room,p);if(add>0){this.stock[i]!+=add;this.pending[i]!-=add}}
+ }
+ /** Direct take for tests/assays (production path is takeAt via process). */
+ takeAt(x:number,y:number,amount:number,interval:Interval|null):number{
+  if(amount<=0)return 0;
+  let i=this.idx(x,y),take=Math.min(this.stock[i]!,amount);
+  if(take<=1e-9)return 0;
+  this.stock[i]!-=take;this.consumed+=take;
+  if(interval)interval.detritus_consumed+=take;
+  return take;
+ }
+ /** Mineralize available stock into A/B through the capped nutrient
+  * deposit: proportional to destination room (identity-neutral), remainder
+  * stays detritus. Runs every tick (3600 cells is trivial). */
+ mineralizeInto(rs:RS,interval:Interval|null):void{
+  for(let i=0;i<this.size;i++){
+   let before=this.stock[i]!;if(before<=1e-9)continue;
+   let loss=before*(1-Math.exp(-this.mineralRate));if(loss<=1e-9)continue;
+   let roomA=Math.max(0,rs.cap[0]![i]!-rs.stock[0]![i]!),roomB=Math.max(0,rs.cap[1]![i]!-rs.stock[1]![i]!),room=roomA+roomB;
+   if(room<=1e-9)continue;
+   let wantA=loss*roomA/room,wantB=loss-wantA;
+   let cx=(i%this.n)*this.cell+this.cell/2,cy=Math.floor(i/this.n)*this.cell+this.cell/2;
+   let gotA=rs.deposit(0,cx,cy,Math.min(wantA,roomA),'detritus mineralization',interval);
+   let gotB=rs.deposit(1,cx,cy,Math.min(wantB,roomB),'detritus mineralization',interval);
+   let got=gotA+gotB;if(got<=1e-9)continue;
+   this.stock[i]!-=got;this.mineralized+=got;this.mineralizedA+=gotA;this.mineralizedB+=gotB;
+   if(interval){interval.detritus_mineralized+=got;interval.mineralized_a+=gotA;interval.mineralized_b+=gotB}
+  }
+ }
+ stepDetritus(rs:RS,interval:Interval|null):void{this.mergePending();this.mineralizeInto(rs,interval)}
+ totals():{stock:number;pending:number;capacity:number;fraction:number}{let s=0,p=0,c=0;for(let i=0;i<this.size;i++){s+=this.stock[i]!;p+=this.pending[i]!;c+=this.cap[i]!}return{stock:s,pending:p,capacity:c,fraction:c>0?s/c:0}}
+ accounting():{identity:string;deposited:number;consumed:number;mineralized:number;mineralized_a:number;mineralized_b:number;pending:string;final_stock:number;residual:number}{let t=this.totals(),residual=this.deposited-this.consumed-this.mineralized-t.stock-t.pending;return{identity:'deposited - biological consumption - mineralization = available stock + unmerged pending + residual; mineralized_a/b appear as biological production in the receiving A/B accounting',deposited:this.deposited,consumed:this.consumed,mineralized:this.mineralized,mineralized_a:this.mineralizedA,mineralized_b:this.mineralizedB,pending:`unmerged death deposits awaiting next tick (mass, not loss)`,final_stock:t.stock,residual}}
+ clone():DetritusField{let n=Object.create(DetritusField.prototype);for(const [k,v] of Object.entries(this)){if(ArrayBuffer.isView(v))n[k]=new (v.constructor as any)(v);else n[k]=v}return n}
+ export():{model:string;grid:number;cell_world_units:number;mineral_rate:number;totals:unknown;accounting:unknown}{return{model:'spatial_detritus_substance_field',grid:this.n,cell_world_units:this.cell,mineral_rate:this.mineralRate,totals:this.totals(),accounting:this.accounting()}}
 }
 
 /**
@@ -586,32 +671,35 @@ class S{
  lineageCredit(l:number,d:{consumedA?:number;consumedB?:number;consumedC?:number;energyA?:number;energyB?:number;energyC?:number;producedC?:number;births?:number;deaths?:number;wasteProduced?:number;wasteRemoved?:number;burdenEnergy?:number;cleanupEnergy?:number;cleanupExec?:number}){
   let m=this.lineageInterval;if(!m)m=this.lineageInterval=new Map();
   let f=m.get(l);
-  if(!f){f={consumedA:0,consumedB:0,consumedC:0,energyA:0,energyB:0,energyC:0,producedC:0,births:0,deaths:0,wasteProduced:0,wasteRemoved:0,burdenEnergy:0,cleanupEnergy:0,cleanupExec:0};m.set(l,f)}
+  if(!f){f={consumedA:0,consumedB:0,consumedC:0,energyA:0,energyB:0,energyC:0,producedC:0,births:0,deaths:0,wasteProduced:0,wasteRemoved:0,burdenEnergy:0,cleanupEnergy:0,cleanupExec:0,detritusDeposited:0,detritusConsumed:0,energyDetritus:0,detritusExec:0};m.set(l,f)}
   if((f as any).wasteProduced===undefined){f.wasteProduced=0;f.wasteRemoved=0;f.burdenEnergy=0;f.cleanupEnergy=0;f.cleanupExec=0}
   f.consumedA+=d.consumedA||0;f.consumedB+=d.consumedB||0;f.consumedC+=d.consumedC||0;f.energyA+=d.energyA||0;f.energyB+=d.energyB||0;f.energyC+=d.energyC||0;f.producedC+=d.producedC||0;f.births+=d.births||0;f.deaths+=d.deaths||0;f.wasteProduced+=d.wasteProduced||0;f.wasteRemoved+=d.wasteRemoved||0;f.burdenEnergy+=d.burdenEnergy||0;f.cleanupEnergy+=d.cleanupEnergy||0;f.cleanupExec+=d.cleanupExec||0;
  }
- readIntervalFlows():IntervalFlowFacts{
-  let lineages:{lineageId:number;netMembers:number;consumedA:number;consumedB:number;consumedC:number;energyA:number;energyB:number;energyC:number;producedC:number;births:number;deaths:number;wasteProduced:number;wasteRemoved:number;burdenEnergy:number;cleanupEnergy:number;cleanupExec:number}[]=[];
-  let t={netMembers:0,consumedA:0,consumedB:0,consumedC:0,energyA:0,energyB:0,energyC:0,producedC:0,births:0,deaths:0,wasteProduced:0,wasteRemoved:0,burdenEnergy:0,cleanupEnergy:0,cleanupExec:0};
+ readIntervalFlows(stride:Interval):IntervalFlowFacts{
+  let lineages:{lineageId:number;netMembers:number;consumedA:number;consumedB:number;consumedC:number;energyA:number;energyB:number;energyC:number;producedC:number;births:number;deaths:number;wasteProduced:number;wasteRemoved:number;burdenEnergy:number;cleanupEnergy:number;cleanupExec:number;detritusDeposited:number;detritusConsumed:number;energyDetritus:number;detritusExec:number}[]=[];
+  let t={netMembers:0,consumedA:0,consumedB:0,consumedC:0,energyA:0,energyB:0,energyC:0,producedC:0,births:0,deaths:0,wasteProduced:0,wasteRemoved:0,burdenEnergy:0,cleanupEnergy:0,cleanupExec:0,detritusDeposited:0,detritusConsumed:0,energyDetritus:0,detritusMineralized:0,mineralizedA:0,mineralizedB:0,detritusExec:0};
   for(const [id,f] of (this.lineageInterval||new Map()).entries()){
    let net=f.births-f.deaths;
-   lineages.push({lineageId:id,netMembers:net,consumedA:f.consumedA,consumedB:f.consumedB,consumedC:f.consumedC,energyA:f.energyA,energyB:f.energyB,energyC:f.energyC,producedC:f.producedC,births:f.births,deaths:f.deaths,wasteProduced:f.wasteProduced||0,wasteRemoved:f.wasteRemoved||0,burdenEnergy:f.burdenEnergy||0,cleanupEnergy:f.cleanupEnergy||0,cleanupExec:f.cleanupExec||0});
-   t.netMembers+=net;t.consumedA+=f.consumedA;t.consumedB+=f.consumedB;t.consumedC+=f.consumedC;t.energyA+=f.energyA;t.energyB+=f.energyB;t.energyC+=f.energyC;t.producedC+=f.producedC;t.births+=f.births;t.deaths+=f.deaths;t.wasteProduced+=(f.wasteProduced||0);t.wasteRemoved+=(f.wasteRemoved||0);t.burdenEnergy+=(f.burdenEnergy||0);t.cleanupEnergy+=(f.cleanupEnergy||0);t.cleanupExec+=(f.cleanupExec||0);
+   lineages.push({lineageId:id,netMembers:net,consumedA:f.consumedA,consumedB:f.consumedB,consumedC:f.consumedC,energyA:f.energyA,energyB:f.energyB,energyC:f.energyC,producedC:f.producedC,births:f.births,deaths:f.deaths,wasteProduced:f.wasteProduced||0,wasteRemoved:f.wasteRemoved||0,burdenEnergy:f.burdenEnergy||0,cleanupEnergy:f.cleanupEnergy||0,cleanupExec:f.cleanupExec||0,detritusDeposited:f.detritusDeposited,detritusConsumed:f.detritusConsumed,energyDetritus:f.energyDetritus,detritusExec:f.detritusExec});
+   t.netMembers+=net;t.consumedA+=f.consumedA;t.consumedB+=f.consumedB;t.consumedC+=f.consumedC;t.energyA+=f.energyA;t.energyB+=f.energyB;t.energyC+=f.energyC;t.producedC+=f.producedC;t.births+=f.births;t.deaths+=f.deaths;t.wasteProduced+=(f.wasteProduced||0);t.wasteRemoved+=(f.wasteRemoved||0);t.burdenEnergy+=(f.burdenEnergy||0);t.cleanupEnergy+=(f.cleanupEnergy||0);t.cleanupExec+=(f.cleanupExec||0);t.detritusDeposited+=f.detritusDeposited;t.detritusConsumed+=f.detritusConsumed;t.energyDetritus+=f.energyDetritus;t.detritusExec+=f.detritusExec;
   }
+  // Mineralization is environmental (no lineage attribution): totals read
+  // the stride counters, so they need not equal the per-lineage sums.
+  t.detritusMineralized=stride.detritus_mineralized;t.mineralizedA=stride.mineralized_a;t.mineralizedB=stride.mineralized_b;
   return{tick:this.t,strideTicks:EVENT_STRIDE,lineages,totals:t};
  }
  flowFacts():FlowFacts{
-  let acc=new Map<number,{lineageId:number;members:number;consumedA:number;consumedB:number;consumedC:number;energyA:number;energyB:number;energyC:number;producedC:number}>();
+  let acc=new Map<number,{lineageId:number;members:number;consumedA:number;consumedB:number;consumedC:number;consumedDetritus:number;energyA:number;energyB:number;energyC:number;energyDetritus:number;producedC:number}>();
   for(const o of this.o){
    let f=acc.get(o.l);
-   if(!f){f={lineageId:o.l,members:0,consumedA:0,consumedB:0,consumedC:0,energyA:0,energyB:0,energyC:0,producedC:0};acc.set(o.l,f)}
+   if(!f){f={lineageId:o.l,members:0,consumedA:0,consumedB:0,consumedC:0,consumedDetritus:0,energyA:0,energyB:0,energyC:0,energyDetritus:0,producedC:0};acc.set(o.l,f)}
    f.members++;f.consumedA+=o.ma;f.consumedB+=o.mb;f.consumedC+=o.mc||0;f.energyA+=o.ga;f.energyB+=o.gb;f.energyC+=o.gc||0;f.producedC+=(o.pc||0);
   }
-  let lineages=[...acc.values()],t={members:0,consumedA:0,consumedB:0,consumedC:0,energyA:0,energyB:0,energyC:0,producedC:0};
+  let lineages=[...acc.values()],t={members:0,consumedA:0,consumedB:0,consumedC:0,consumedDetritus:0,energyA:0,energyB:0,energyC:0,energyDetritus:0,producedC:0};
   for(const f of lineages){t.members+=f.members;t.consumedA+=f.consumedA;t.consumedB+=f.consumedB;t.consumedC+=f.consumedC;t.energyA+=f.energyA;t.energyB+=f.energyB;t.energyC+=f.energyC;t.producedC+=f.producedC}
   return{tick:this.t,lineages,totals:t};
  }
- observerSnapshot(m:any,interval:Interval):any{let roles:Record<string,number>={},cross=0,dormClades:Record<string,number>={},cladeTotals:Record<string,number>={};for(const o of this.o){let role=metabolicRole(o);roles[role]=(roles[role]||0)+1;if(role==='byproduct_scavenger')cross++;let c=this.cladeRoot(o.l);cladeTotals[c]=(cladeTotals[c]||0)+1;if(o.activity==='dormant')dormClades[c]=(dormClades[c]||0)+1}let totalE=(m.resource_energy.a||0)+(m.resource_energy.b||0)+(m.resource_energy.c||0),fra:Record<string,number>={};for(const [c,n] of Object.entries(cladeTotals))fra[c]=(dormClades[c]||0)/n;let dominant=Object.entries(roles).sort((a,b)=>b[1]-a[1])[0]?.[0]||'unresolved';return{tick:this.t,population:m.population,starting_population:this.c.pop,active_population:m.active_population,dormant_population:m.dormant_population,dormant_fraction:m.dormant_fraction,c_energy_share:totalE?m.resource_energy.c/totalE:0,crossfeeder_fraction:m.population?cross/m.population:0,partitioned:m.niche_structure.persistent_partitioning,dominant_role:dominant,roles,wake_events:interval.wakes||0,wake_clades:{...(interval.wake_clades||{})},dormant_clade_fraction:fra,clade_totals:cladeTotals,waste_fraction:(m.waste?m.waste.fraction||0:0),waste_exposed_share:(()=>{let n=0;for(const o of this.o){if(this.resources.waste.fractionAt(o.x,o.y)>=WASTE_HALF_SAT)n++}return this.o.length?n/this.o.length:0})(),tolerance_mean:(m.traits&&m.traits.tolerance?m.traits.tolerance.mean||0:0),cleanup_mean:(m.traits&&m.traits.cleanup?m.traits.cleanup.mean||0:0),interval:{producedC:interval.produced_c||0,consumedA:interval.consumed_a||0,consumedB:interval.consumed_b||0,consumedC:interval.consumed_c||0,energyA:interval.energy_a||0,energyB:interval.energy_b||0,energyC:interval.energy_c||0,births:interval.births||0,deaths:interval.deaths||0,wasteProduced:interval.produced_w||0,wasteRemoved:interval.removed_w||0,wasteDecayed:interval.decayed_w||0,burdenEnergy:interval.burden_energy||0,cleanupEnergy:interval.cleanup_energy||0,cleanupExec:interval.cleanup_exec||0},flows:this.flowFacts(),intervalFlows:this.lastLineageFlows||EMPTY_INTERVAL_FLOWS}}
+ observerSnapshot(m:any,interval:Interval):any{let roles:Record<string,number>={},cross=0,dormClades:Record<string,number>={},cladeTotals:Record<string,number>={};for(const o of this.o){let role=metabolicRole(o);roles[role]=(roles[role]||0)+1;if(role==='byproduct_scavenger')cross++;let c=this.cladeRoot(o.l);cladeTotals[c]=(cladeTotals[c]||0)+1;if(o.activity==='dormant')dormClades[c]=(dormClades[c]||0)+1}let totalE=(m.resource_energy.a||0)+(m.resource_energy.b||0)+(m.resource_energy.c||0),fra:Record<string,number>={};for(const [c,n] of Object.entries(cladeTotals))fra[c]=(dormClades[c]||0)/n;let dominant=Object.entries(roles).sort((a,b)=>b[1]-a[1])[0]?.[0]||'unresolved';return{tick:this.t,population:m.population,starting_population:this.c.pop,active_population:m.active_population,dormant_population:m.dormant_population,dormant_fraction:m.dormant_fraction,c_energy_share:totalE?m.resource_energy.c/totalE:0,crossfeeder_fraction:m.population?cross/m.population:0,partitioned:m.niche_structure.persistent_partitioning,dominant_role:dominant,roles,wake_events:interval.wakes||0,wake_clades:{...(interval.wake_clades||{})},dormant_clade_fraction:fra,clade_totals:cladeTotals,waste_fraction:(m.waste?m.waste.fraction||0:0),waste_exposed_share:(()=>{let n=0;for(const o of this.o){if(this.resources.waste.fractionAt(o.x,o.y)>=WASTE_HALF_SAT)n++}return this.o.length?n/this.o.length:0})(),tolerance_mean:(m.traits&&m.traits.tolerance?m.traits.tolerance.mean||0:0),cleanup_mean:(m.traits&&m.traits.cleanup?m.traits.cleanup.mean||0:0),interval:{producedC:interval.produced_c||0,consumedA:interval.consumed_a||0,consumedB:interval.consumed_b||0,consumedC:interval.consumed_c||0,energyA:interval.energy_a||0,energyB:interval.energy_b||0,energyC:interval.energy_c||0,births:interval.births||0,deaths:interval.deaths||0,wasteProduced:interval.produced_w||0,wasteRemoved:interval.removed_w||0,wasteDecayed:interval.decayed_w||0,burdenEnergy:interval.burden_energy||0,cleanupEnergy:interval.cleanup_energy||0,cleanupExec:interval.cleanup_exec||0,detritusDeposited:interval.detritus_deposited||0,detritusConsumed:interval.detritus_consumed||0,energyDetritus:interval.energy_detritus||0,detritusMineralized:interval.detritus_mineralized||0,detritusExec:interval.detritus_exec||0},flows:this.flowFacts(),intervalFlows:this.lastLineageFlows||EMPTY_INTERVAL_FLOWS}}
  step(){
   this.t++;if(this.c.st===this.t)this.catalyst(this.c.cat,'scheduled');if(this.drought&&this.t>=this.drought.end){this.log(`Nutrient ${this.drought.kind?'B':'A'} drought ended`);this.drought=null}if(this.resources.cSink&&this.t>=this.resources.cSink.end){this.log('Metabolite C sink dissipated');this.resources.cSink=null}
   this.resources.step(this.t,this.drought,this.cur);let born:(Organism)[]=[],live:(Organism)[]=[],pendingBirths:{parent:Organism;baby:Organism}[]=[];
@@ -707,7 +795,7 @@ class S{
   this.o=live.concat(born);if(this.o.length>this.peakPopulation){this.peakPopulation=this.o.length;this.peakPopulationTick=this.t}
   if(!this.o.length&&this.extinctTick===null){this.extinctTick=this.t;let prev=this.sn.length?this.sn[this.sn.length-1]:this.long[this.long.length-1];this.extinctionContext={tick:this.t,previous_snapshot:prev||null,nutrient_field:this.resources.totals(),interval:{...this.cur}};this.log('Population extinct')}
   if(this.response)this.trackResponse();
-  if(this.t%EVENT_STRIDE===0){this.updateLineageHistory();this.updateFamilyHistory();let obsM=this.metrics();this.last={...this.cur,wake_clades:{...this.cur.wake_clades}};this.lastLineageFlows=this.readIntervalFlows();this.lineageInterval=new Map();this.cur=I();let ns=obsM.niche_structure;this.nh.push({tick:this.t,partitioned:ns.partitioned_now,effective_niches:ns.effective_niches,coverage:ns.realized_coverage,alignment:ns.spatial.alignment});while(this.nh.length&&this.nh[0]!.tick<this.t-PART_WINDOW)this.nh.shift();if(!this.study){this.sn.push(this.pack());if(this.sn.length>120)this.sn.shift()}}
+  if(this.t%EVENT_STRIDE===0){this.updateLineageHistory();this.updateFamilyHistory();let obsM=this.metrics();this.last={...this.cur,wake_clades:{...this.cur.wake_clades}};this.lastLineageFlows=this.readIntervalFlows(this.cur);this.lineageInterval=new Map();this.cur=I();let ns=obsM.niche_structure;this.nh.push({tick:this.t,partitioned:ns.partitioned_now,effective_niches:ns.effective_niches,coverage:ns.realized_coverage,alignment:ns.spatial.alignment});while(this.nh.length&&this.nh[0]!.tick<this.t-PART_WINDOW)this.nh.shift();if(!this.study){this.sn.push(this.pack());if(this.sn.length>120)this.sn.shift()}}
   if(!this.study&&this.t%this.longStride===0){this.long.push(this.pack());if(this.long.length>500){this.long=this.long.filter((_,i)=>i%2===0);this.longStride*=2}}
  }
  trackResponse(){let r=this.response!,p=this.o.length;if(p<r.deepest_population){r.deepest_population=p;r.deepest_tick=this.t}let b=p<=r.pre_population*r.bottleneck_threshold,rec=p>=r.pre_population*r.recovery_threshold;if(b&&r.active_episode_index===null){if(r.episodes.length)r.relapses++;r.episodes.push({start_tick:this.t,min_population:p,min_tick:this.t,durable_recovery_tick:null});r.active_episode_index=r.episodes.length-1;r.stable_since=null}if(r.active_episode_index!==null){let ep=r.episodes[r.active_episode_index]!;if(p<ep.min_population){ep.min_population=p;ep.min_tick=this.t}if(rec){if(r.stable_since===null)r.stable_since=this.t;if(this.t-r.stable_since!>=r.recovery_hold_ticks){ep.durable_recovery_tick=this.t;r.durable_recovery_tick=this.t;if(r.first_durable_recovery_tick===null)r.first_durable_recovery_tick=this.t;r.active_episode_index=null;r.stable_since=null}}else r.stable_since=null}}
@@ -752,6 +840,7 @@ function encodeCheckpointValue(v:any):any{
  if(v instanceof S)return{[CHECKPOINT_TAG]:"simulation",props:Object.fromEntries(Object.entries(v).map(([k,x])=>[k,encodeCheckpointValue(x)]))};
  if(v instanceof RS)return{[CHECKPOINT_TAG]:"resource-system",props:Object.fromEntries(Object.entries(v).map(([k,x])=>[k,encodeCheckpointValue(x)]))};
  if(v instanceof WasteField)return{[CHECKPOINT_TAG]:"waste-field",props:Object.fromEntries(Object.entries(v).map(([k,x])=>[k,encodeCheckpointValue(x)]))};
+ if(v instanceof DetritusField)return{[CHECKPOINT_TAG]:"detritus-field",props:Object.fromEntries(Object.entries(v).map(([k,x])=>[k,encodeCheckpointValue(x)]))};
  if(v instanceof EcologyObserver)return{[CHECKPOINT_TAG]:"legacy-observer",props:Object.fromEntries(Object.entries(v).map(([k,x])=>[k,encodeCheckpointValue(x)]))};
  if(v instanceof Map)return{[CHECKPOINT_TAG]:"map",entries:[...v].map(([k,x])=>[encodeCheckpointValue(k),encodeCheckpointValue(x)])};
  if(ArrayBuffer.isView(v)&&!(v instanceof DataView))return{[CHECKPOINT_TAG]:"typed-array",ctor:v.constructor.name,values:Array.from(v as unknown as ArrayLike<number>)};
@@ -768,8 +857,8 @@ function decodeCheckpointValue(v:any):any{
  if(tag==="rng"){let r=R(0);r.setState(v.state);return r}
  if(tag==="typed-array"){let C:any={Float32Array,Float64Array,Int32Array,Uint32Array,Uint16Array,Uint8Array,Int16Array,Int8Array}[(v.ctor as string)];if(!C)throw new Error("Unsupported checkpoint typed array: "+v.ctor);return new C(v.values)}
  if(tag==="map")return new Map(v.entries.map(([k,x]:any)=>[decodeCheckpointValue(k),decodeCheckpointValue(x)]));
- if(tag==="simulation"||tag==="resource-system"||tag==="legacy-observer"||tag==="waste-field"){
-  let o=Object.create(tag==="simulation"?S.prototype:tag==="resource-system"?RS.prototype:tag==="waste-field"?WasteField.prototype:EcologyObserver.prototype);
+ if(tag==="simulation"||tag==="resource-system"||tag==="legacy-observer"||tag==="waste-field"||tag==="detritus-field"){
+  let o=Object.create(tag==="simulation"?S.prototype:tag==="resource-system"?RS.prototype:tag==="waste-field"?WasteField.prototype:tag==="detritus-field"?DetritusField.prototype:EcologyObserver.prototype);
   for(const [k,x] of Object.entries(v.props))o[k]=decodeCheckpointValue(x);
   return o;
  }
