@@ -6,3 +6,16 @@ export function environmentIdentity(
 ): string {
   return `${env.worldId}/${env.tick}/${lens}/${resourceView}`;
 }
+
+export function environmentMatchesWorld(currentWorldId: string, frameWorldId: number): boolean {
+  return currentWorldId === String(frameWorldId);
+}
+
+/** Camera/viewport are intentionally absent: identical channel input at the same live tick reuses smoothing output. */
+export function sameNormalFieldInput(
+  previous: { readonly liveTick: number; readonly fieldIdentity: string } | null,
+  liveTick: number,
+  fieldIdentity: string,
+): boolean {
+  return previous !== null && previous.liveTick === liveTick && previous.fieldIdentity === fieldIdentity;
+}

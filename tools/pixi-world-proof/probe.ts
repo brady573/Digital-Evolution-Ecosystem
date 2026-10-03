@@ -114,7 +114,18 @@ async function main(): Promise<void> {
       document.body.appendChild(sceneHost);
       const sceneHandle = await bootPixiWorld(sceneHost);
       if (!sceneHandle) throw new Error("unexpected scene boot cancellation");
+      const waitForSize = async (width: number, height: number) => {
+        const start = performance.now();
+        while (performance.now() - start < 2000) {
+          const size = sceneHandle.size();
+          if (size.w === width && size.h === height) return size;
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        }
+        throw new Error(`Pixi host resize not observed: wanted ${width}x${height}, got ${JSON.stringify(sceneHandle.size())}`);
+      };
+      await waitForSize(800, 600);
       const renderer = createWorldRenderer(sceneHandle);
+      const reportedViews: Array<{ w: number; h: number }> = [];
       const organisms = Array.from({ length: count }, (_, i) => ({
         id: i + 1,
         parent: null,
@@ -162,21 +173,39 @@ async function main(): Promise<void> {
         zoom: 1,
         onSelect: () => undefined,
         onCamera: () => undefined,
-        onView: () => undefined,
+        onView: (view: { w: number; h: number }) => reportedViews.push(view),
       } as unknown as PixiWorldProps;
       renderer.update(props);
       const first = renderer.metrics()!;
-      renderer.update({ ...props, tick: 6, organisms: organisms.map((o, i) => ({ ...o, x: (o.x + 17) % 600, y: (o.y + 31) % 600 })) });
+      const pannedProps = { ...props, camera: { x: 599, y: 599 } } as PixiWorldProps;
+      renderer.update(pannedProps);
+      const panned = renderer.metrics()!;
+      sceneHost.style.height = "500px";
+      const resizedHost = await waitForSize(800, 500);
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+      const resized = renderer.metrics()!;
+      renderer.update({ ...pannedProps, tick: 6, organisms: organisms.map((o, i) => ({ ...o, x: (o.x + 17) % 600, y: (o.y + 31) % 600 })) } as unknown as PixiWorldProps);
       const moved = renderer.metrics()!;
       renderer.destroy();
       const result = {
         count,
-        initialLiveDisplays: first.liveDisplayCount,
-        movedLiveDisplays: moved.liveDisplayCount,
-        initialTextureCreates: first.textureCreates,
-        movedTextureCreates: moved.textureCreates,
-        textureReuses: moved.textureReuses,
-        movementTextureCreateDelta: moved.textureCreates - first.textureCreates,
+        initialLiveDisplays: first.organisms.liveDisplayCount,
+        movedLiveDisplays: moved.organisms.liveDisplayCount,
+        initialTextureCreates: first.organisms.textureCreates,
+        movedTextureCreates: moved.organisms.textureCreates,
+        textureReuses: moved.organisms.textureReuses,
+        movementTextureCreateDelta: moved.organisms.textureCreates - first.organisms.textureCreates,
+        initialEnvironmentTextureCreates: first.environment.textureCreates,
+        pannedEnvironmentTextureCreates: panned.environment.textureCreates,
+        pannedEnvironmentRebuilt: panned.environment.rebuilt,
+        initialEnvironmentTiles: first.environment.tileCount,
+        pannedEnvironmentTiles: panned.environment.tileCount,
+        initialWasteCueTextureCreates: first.environment.wasteCueTextureCreates,
+        pannedWasteCueTextureCreates: panned.environment.wasteCueTextureCreates,
+        movedEnvironmentTextureCreates: moved.environment.textureCreates,
+        resizedEnvironmentTextureCreates: resized.environment.textureCreates,
+        resizedCanvas: resizedHost,
+        reportedViews,
         remainingCanvasCount: sceneHost.querySelectorAll("canvas").length,
       };
       sceneHost.remove();

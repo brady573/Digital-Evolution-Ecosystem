@@ -25,6 +25,34 @@ export interface ViewRect {
   readonly height: number;
 }
 
+export interface TorusTilePosition {
+  readonly x: number;
+  readonly y: number;
+}
+
+/** Tile origins in world space for a viewport rendered beneath the camera root. */
+export function torusTilePositions(
+  camera: WorldCamera,
+  viewWidth: number,
+  viewHeight: number,
+  scale: number,
+): TorusTilePosition[] {
+  if (!(scale > 0) || !(viewWidth > 0) || !(viewHeight > 0)) return [];
+  const halfWidth = viewWidth / scale / 2;
+  const halfHeight = viewHeight / scale / 2;
+  const iStart = Math.floor((camera.x - halfWidth) / WORLD_EXTENT);
+  const iEnd = Math.ceil((camera.x + halfWidth) / WORLD_EXTENT) - 1;
+  const jStart = Math.floor((camera.y - halfHeight) / WORLD_EXTENT);
+  const jEnd = Math.ceil((camera.y + halfHeight) / WORLD_EXTENT) - 1;
+  const positions: TorusTilePosition[] = [];
+  for (let i = iStart; i <= iEnd; i++) {
+    for (let j = jStart; j <= jEnd; j++) {
+      positions.push({ x: i * WORLD_EXTENT, y: j * WORLD_EXTENT });
+    }
+  }
+  return positions;
+}
+
 /**
  * Uniform scale for a stage, never a stretch. Mirrors WorldCanvas: portrait
  * stages fit by height so the world fills the frame; wide stages fit the

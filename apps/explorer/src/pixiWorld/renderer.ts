@@ -2,7 +2,12 @@ import { TRAIT_DISPLAY_RANGES, type PixiWorldProps } from "../worldViewTypes";
 import type { OrganismId } from "@digital-evolution/contracts";
 import { viewScale, visibleWindow, wrapCoord, type WorldCamera } from "./camera";
 import { selectAtScreenPoint } from "./interaction";
-import { updateEnvironmentLayer, destroyEnvironmentLayer, destroyEnvironmentWorld } from "./environment";
+import {
+  updateEnvironmentLayer,
+  destroyEnvironmentLayer,
+  destroyEnvironmentWorld,
+  type EnvironmentMetrics,
+} from "./environment";
 import { updateOrganismLayer, destroyOrganismLayer, type OrganismMetrics } from "./organisms";
 import type { PixiWorldHandle } from "./boot";
 import { Container, Graphics } from "pixi.js";
@@ -10,7 +15,7 @@ import { Container, Graphics } from "pixi.js";
 export interface WorldRenderer {
   update(props: PixiWorldProps): void;
   destroy(): void;
-  metrics(): OrganismMetrics | null;
+  metrics(): { readonly environment: EnvironmentMetrics; readonly organisms: OrganismMetrics } | null;
 }
 
 export function createWorldRenderer(handle: PixiWorldHandle): WorldRenderer {
@@ -18,6 +23,7 @@ export function createWorldRenderer(handle: PixiWorldHandle): WorldRenderer {
   let currentWorld: number | null = null;
   let lastView = { w: -1, h: -1 };
   let organismMetrics: OrganismMetrics | null = null;
+  let environmentMetrics: EnvironmentMetrics | null = null;
   let lastProps: PixiWorldProps | null = null;
   let pointer: { id: number; x: number; y: number; camera: WorldCamera; moved: boolean } | null = null;
   const focus = new Container();
@@ -41,7 +47,10 @@ export function createWorldRenderer(handle: PixiWorldHandle): WorldRenderer {
     props.onView(view);
   };
 
-  const resizeObserver = new ResizeObserver(() => reportView());
+  const resizeObserver = new ResizeObserver(() => {
+    if (lastProps) update(lastProps);
+    else reportView();
+  });
   resizeObserver.observe(handle.app.canvas.parentElement!);
 
   const canvas = handle.app.canvas;
@@ -97,12 +106,16 @@ export function createWorldRenderer(handle: PixiWorldHandle): WorldRenderer {
     root.scale.set(scale);
     root.position.set(size.w / 2 - props.camera.x * scale, size.h / 2 - props.camera.y * scale);
 
-    updateEnvironmentLayer(layers.environment, {
+    environmentMetrics = updateEnvironmentLayer(layers.environment, {
       worldId: String(props.worldId),
       tick: props.tick,
       environment: props.environment,
       lens: props.lens,
       resourceView: props.resourceView,
+      camera: props.camera,
+      viewWidth: size.w,
+      viewHeight: size.h,
+      scale,
     });
 
     organismMetrics = updateOrganismLayer(layers.organisms, {
@@ -141,6 +154,8 @@ export function createWorldRenderer(handle: PixiWorldHandle): WorldRenderer {
       if (currentWorld !== null) destroyEnvironmentWorld(String(currentWorld));
       handle.destroy();
     },
-    metrics: () => organismMetrics,
+    metrics: () => organismMetrics && environmentMetrics
+      ? { environment: environmentMetrics, organisms: organismMetrics }
+      : null,
   };
 }

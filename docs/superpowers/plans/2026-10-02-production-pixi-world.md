@@ -103,8 +103,8 @@
 
 - [x] **Step 1: Add camera/DPR parity assertion** in `tools/validation/pixi-p0.ts` at zoom limits.
 - [x] **Step 2: Run `pnpm test:pixi-p0`**; camera projection and visible-window results remained invariant across simulated backing DPR 1/2/3.
-- [ ] **Step 3: Implement environment and camera layers** by reusing `landscape.ts` color/fraction/tile helpers and the P0 layer order. Normal environment may use its accepted smooth treatment; analytical output must preserve exact semantic values without false interpolation, but no particular GPU filter is mandated. A camera-only update must not mint an environment texture.
-- [ ] **Step 4: Run `pnpm test:pixi-p0` and `pnpm test:pixi-world`**; add browser proof for panning across both torus seams and resized host viewport reporting.
+- [x] **Step 3: Implement environment and camera layers** by reusing `landscape.ts` color/fraction/tile helpers and the P0 layer order. The camera root transforms world-space torus copies; CSS viewport and camera updates reconcile tile positions without texture churn. Mismatched displayed-world/environment channels are hidden rather than composited.
+- [ ] **Step 4: Run `pnpm test:pixi-p0` locally and `pnpm test:pixi-world` on GitHub CI**; browser proof asserts panning across both torus seams, camera/resize-only texture reuse, and resized host viewport reporting.
 - [ ] **Step 5: Review the layer update metrics** and commit only if separately authorized.
 
 ### Task 3: Persistent Organisms, Pixel Phenotype Textures, and Cache Lifecycle (P1.3)

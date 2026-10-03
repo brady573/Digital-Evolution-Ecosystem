@@ -38,6 +38,7 @@ import {
   worldToScreen,
   wrapCoord as pwWrapCoord,
   wrapDelta as pwWrapDelta,
+  torusTilePositions,
 } from "../../apps/explorer/src/pixiWorld/camera.ts";
 import { PhenotypeTextureCache } from "../../apps/explorer/src/pixi/textureCache.ts";
 import {
@@ -51,7 +52,7 @@ import {
 } from "../../apps/explorer/src/pixi/layers.ts";
 import { ASSET_REGISTRY, registryManifestIds } from "../../apps/explorer/src/pixi/assetRegistry.ts";
 import { toTextureRequests } from "../../apps/explorer/src/pixi/adapter.ts";
-import { environmentIdentity } from "../../apps/explorer/src/pixiWorld/environmentIdentity.ts";
+import { environmentIdentity, environmentMatchesWorld, sameNormalFieldInput } from "../../apps/explorer/src/pixiWorld/environmentIdentity.ts";
 import { hitTestOrganism } from "../../apps/explorer/src/pixiWorld/interaction.ts";
 import { dormantChannel, organismColor } from "../../apps/explorer/src/organismEncoding.ts";
 
@@ -67,6 +68,12 @@ const pixiDir = join(root, "apps/explorer/src/pixi");
   assert.equal(identityAtLive12, identityAtLive15);
   assert.notEqual(identityAtLive15, environmentIdentity({ worldId: 4, tick: 15 } as never, "normal", "combined"));
   assert.notEqual(identityAtLive15, environmentIdentity(frame, "nutrients", "combined"));
+  assert.equal(environmentMatchesWorld("4", 4), true);
+  assert.equal(environmentMatchesWorld("5", 4), false, "new identity must never be paired with an old world's environment channel");
+  assert.equal(sameNormalFieldInput({ liveTick: 12, fieldIdentity: "world-4/channel-10/raw-A" }, 12, "world-4/channel-10/raw-A"), true,
+    "camera/viewport-only changes must reuse the current normal smoothing result");
+  assert.equal(sameNormalFieldInput({ liveTick: 12, fieldIdentity: "world-4/channel-10/raw-A" }, 13, "world-4/channel-10/raw-A"), false,
+    "a new live tick may advance the normal smoothing result");
   console.log("p1 environment identity: PASS (environment channel tick/world/lens, not live cadence)");
 }
 
@@ -295,6 +302,26 @@ function traitsForAxes(mob: number, sen: number, met: number, spec: number) {
   // and every round-trip above (both directions share one scale).
   assert.equal(viewScale(720, 720, 2), 2 * viewScale(720, 720, 1), "zoom scales the view");
   console.log("p1 camera: PASS (wrap parity, exact projection round-trip, App fit rule, zoom clamp + scale)");
+
+  // Under the Pixi-transformed world root, field copies must be in world
+  // coordinates and cover the entire visible logical viewport across seams.
+  for (const scenario of [
+    { camera: { x: 300, y: 300 }, width: 800, height: 500, scale: 1, expected: 3 },
+    { camera: { x: 599, y: 599 }, width: 800, height: 700, scale: 1, expected: 4 },
+    { camera: { x: 2, y: 598 }, width: 390, height: 844, scale: 844 / 600, expected: 4 },
+  ]) {
+    const tiles = torusTilePositions(scenario.camera, scenario.width, scenario.height, scenario.scale);
+    assert.equal(tiles.length, scenario.expected, "only tiles intersecting visible viewport are planned");
+    const left = scenario.camera.x - scenario.width / scenario.scale / 2;
+    const right = scenario.camera.x + scenario.width / scenario.scale / 2;
+    const top = scenario.camera.y - scenario.height / scenario.scale / 2;
+    const bottom = scenario.camera.y + scenario.height / scenario.scale / 2;
+    for (const [x, y] of [[left + 1e-6, top + 1e-6], [right - 1e-6, top + 1e-6], [left + 1e-6, bottom - 1e-6], [right - 1e-6, bottom - 1e-6]]) {
+      assert.ok(tiles.some((tile) => x >= tile.x && x < tile.x + WORLD_EXTENT && y >= tile.y && y < tile.y + WORLD_EXTENT),
+        `visible viewport corner (${x},${y}) has a torus field tile`);
+    }
+  }
+  console.log("p1 torus field plan: PASS (world-space tiles cover viewport at center, both seams, phone zoom)");
 
   // Layer assembly absorbs the P0 order: same constant, Containers in order.
   // The expected order is pinned as a literal here (not re-imported), so a

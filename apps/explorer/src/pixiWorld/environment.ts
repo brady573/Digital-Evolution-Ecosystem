@@ -1,10 +1,9 @@
 import type { WorldEnvironmentFrame } from "@digital-evolution/contracts";
 import { Container, Sprite, Texture } from "pixi.js";
 import { fillEnvironmentFractions, landscapeCell, LandscapeSmoother, microTexture, nutrientOverlayCell, wasteOverlayCell } from "../landscape";
-import { environmentIdentity } from "./environmentIdentity";
+import { environmentIdentity, environmentMatchesWorld, sameNormalFieldInput } from "./environmentIdentity";
 import { WORLD_EXTENT } from "./layers";
-import { landscapeTileLayout } from "../landscape";
-import type { WorldCamera } from "./camera";
+import { torusTilePositions, type WorldCamera } from "./camera";
 
 export type WorldLens = "normal" | "nutrients" | "waste" | "clades" | "traits";
 export type WorldResourceView = "combined" | "a" | "b" | "c";
@@ -15,10 +14,10 @@ export interface EnvironmentInput {
   readonly environment: WorldEnvironmentFrame;
   readonly lens: WorldLens;
   readonly resourceView: WorldResourceView;
-  readonly camera?: WorldCamera;
-  readonly viewWidth?: number;
-  readonly viewHeight?: number;
-  readonly scale?: number;
+  readonly camera: WorldCamera;
+  readonly viewWidth: number;
+  readonly viewHeight: number;
+  readonly scale: number;
 }
 
 export interface EnvironmentMetrics {
@@ -29,11 +28,11 @@ export interface EnvironmentMetrics {
   readonly textureCreates: number;
   readonly wasteCueCells: number;
   readonly wasteCueTextureCreates: number;
+  readonly tileCount: number;
 }
 
 interface EnvironmentState {
   signature: string;
-  readonly sprite: Sprite;
   texture: Texture;
   textureCreates: number;
   readonly tiles: Sprite[];
@@ -41,10 +40,54 @@ interface EnvironmentState {
 
 const stateByLayer = new WeakMap<Container, EnvironmentState>();
 const normalSmootherByWorld = new Map<string, LandscapeSmoother>();
-const wasteCueByLayer = new WeakMap<Container, { signature: string; sprite: Sprite; texture: Texture; creates: number }>();
+const normalFieldByWorld = new Map<string, { liveTick: number; fieldIdentity: string; values: Float32Array }>();
+const wasteCueByLayer = new WeakMap<Container, { signature: string; sprites: Sprite[]; texture: Texture; creates: number }>();
+
+function reconcileTiles(
+  layer: Container,
+  sprites: Sprite[],
+  texture: Texture,
+  positions: readonly { readonly x: number; readonly y: number }[],
+): void {
+  while (sprites.length < positions.length) {
+    const tile = new Sprite(texture);
+    sprites.push(tile);
+    layer.addChild(tile);
+  }
+  while (sprites.length > positions.length) {
+    const tile = sprites.pop()!;
+    layer.removeChild(tile);
+    tile.destroy();
+  }
+  positions.forEach((position, index) => {
+    const tile = sprites[index]!;
+    tile.texture = texture;
+    tile.position.set(position.x, position.y);
+    tile.width = WORLD_EXTENT;
+    tile.height = WORLD_EXTENT;
+  });
+}
 
 export function updateEnvironmentLayer(layer: Container, input: EnvironmentInput): EnvironmentMetrics {
   const { environment: env } = input;
+  if (!environmentMatchesWorld(input.worldId, env.worldId)) {
+    destroyEnvironmentLayer(layer);
+    destroyEnvironmentWorld(String(env.worldId));
+    layer.visible = false;
+    const cueLayer = layer.parent?.children.find((child) => child.label === "waste-cue") as Container | undefined;
+    if (cueLayer) cueLayer.visible = false;
+    return {
+      cellCount: 0,
+      effectiveTick: env.tick,
+      identity: environmentIdentity(env, input.lens, input.resourceView),
+      rebuilt: false,
+      textureCreates: 0,
+      wasteCueCells: 0,
+      wasteCueTextureCreates: 0,
+      tileCount: 0,
+    };
+  }
+  layer.visible = true;
   const grid = env.resources.gridSize;
   const n = grid * grid;
   const a = new Float32Array(n);
@@ -56,12 +99,22 @@ export function updateEnvironmentLayer(layer: Container, input: EnvironmentInput
   let values = { a, b, c, waste };
   if (input.lens === "normal") {
     const worldKey = String(env.worldId);
+    const fieldIdentity = `${env.worldId}/${env.tick}/${a.join(",")}/${b.join(",")}/${c.join(",")}/${waste.join(",")}`;
     let smoother = normalSmootherByWorld.get(worldKey);
     if (!smoother) {
       smoother = new LandscapeSmoother(n);
       normalSmootherByWorld.set(worldKey, smoother);
     }
-    const smoothed = smoother.advance(`w${env.worldId}`, input.tick, a, b, c, waste, 0.35);
+    let cached = normalFieldByWorld.get(worldKey);
+    if (!sameNormalFieldInput(cached ?? null, input.tick, fieldIdentity)) {
+      cached = {
+        liveTick: input.tick,
+        fieldIdentity,
+        values: Float32Array.from(smoother.advance(`w${env.worldId}`, input.tick, a, b, c, waste, 0.35)),
+      };
+      normalFieldByWorld.set(worldKey, cached);
+    }
+    const smoothed = cached!.values;
     const sa = new Float32Array(n), sb = new Float32Array(n), sc = new Float32Array(n), sw = new Float32Array(n);
     for (let i = 0; i < n; i++) {
       const j = i * 4;
@@ -74,7 +127,7 @@ export function updateEnvironmentLayer(layer: Container, input: EnvironmentInput
   }
 
   const identity = environmentIdentity(env, input.lens, input.resourceView);
-  const signature = `${identity}/${input.lens === "normal" ? input.tick : "exact"}/${values.a.join(",")}/${values.b.join(",")}/${values.c.join(",")}/${values.waste.join(",")}`;
+  const signature = `${env.worldId}/${input.lens}/${input.resourceView}/${values.a.join(",")}/${values.b.join(",")}/${values.c.join(",")}/${values.waste.join(",")}`;
   let state = stateByLayer.get(layer);
   let rebuilt = false;
   let wasteCueTextureCreates = 0;
@@ -114,51 +167,26 @@ export function updateEnvironmentLayer(layer: Container, input: EnvironmentInput
     texture.source.scaleMode = input.lens === "normal" ? "linear" : "nearest";
 
     if (state) {
-      state.sprite.texture = Texture.EMPTY;
+      for (const tile of state.tiles) tile.texture = Texture.EMPTY;
       state.texture.destroy(true);
       state.texture = texture;
-      state.sprite.texture = texture;
       state.signature = signature;
       state.textureCreates++;
     } else {
-      const sprite = new Sprite(texture);
-      state = { signature, sprite, texture, textureCreates: 1, tiles: [] };
+      state = { signature, texture, textureCreates: 1, tiles: [] };
       stateByLayer.set(layer, state);
     }
     rebuilt = true;
   }
 
-  if (state && input.camera && input.viewWidth && input.viewHeight && input.scale) {
-    const layout = landscapeTileLayout(input.camera.x, input.camera.y, input.scale, input.viewWidth, input.viewHeight, WORLD_EXTENT);
-    // Sprite copies are presentation-only. Keep one shared exact field texture;
-    // remove old copies before placing the viewport-covering torus copies.
-    const positions: Array<{ x: number; y: number }> = [];
-    for (let i = layout.iStart; i <= layout.iEnd; i++) {
-      for (let j = layout.jStart; j <= layout.jEnd; j++) {
-        positions.push({ x: layout.baseX + i * layout.periodX, y: layout.baseY + j * layout.periodY });
-      }
-    }
-    while (state.tiles.length < positions.length) {
-      const tile = state.tiles.length === 0 ? state.sprite : new Sprite(state.texture);
-      tile.width = layout.periodX;
-      tile.height = layout.periodY;
-      state.tiles.push(tile);
-      layer.addChild(tile);
-    }
-    while (state.tiles.length > positions.length) state.tiles.pop()!.destroy();
-    positions.forEach((position, index) => {
-      const tile = state!.tiles[index]!;
-      tile.texture = state!.texture;
-      tile.position.set(position.x, position.y);
-      tile.width = layout.periodX;
-      tile.height = layout.periodY;
-    });
-  }
+  const tilePositions = torusTilePositions(input.camera, input.viewWidth, input.viewHeight, input.scale);
+  if (state) reconcileTiles(layer, state.tiles, state.texture, tilePositions);
 
   if (input.lens === "normal") {
     const cueLayer = (layer.parent?.children.find((child) => child.label === "waste-cue") as Container | undefined);
     if (cueLayer) {
-      const cueSignature = `${env.worldId}/${env.tick}/${input.tick}/${values.waste.join(",")}`;
+      cueLayer.visible = true;
+      const cueSignature = `${env.worldId}/${values.waste.join(",")}`;
       const cueState = wasteCueByLayer.get(cueLayer);
       if (!cueState || cueState.signature !== cueSignature) {
         const cueResolution = grid * 8;
@@ -189,32 +217,35 @@ export function updateEnvironmentLayer(layer: Container, input: EnvironmentInput
         const texture = Texture.from(canvas);
         texture.source.scaleMode = "nearest";
         if (cueState) {
-          cueState.sprite.texture = Texture.EMPTY;
+          for (const sprite of cueState.sprites) sprite.texture = Texture.EMPTY;
           cueState.texture.destroy(true);
-          cueState.sprite.texture = texture;
           wasteCueTextureCreates = cueState.creates + 1;
-          wasteCueByLayer.set(cueLayer, { signature: cueSignature, sprite: cueState.sprite, texture, creates: wasteCueTextureCreates });
+          reconcileTiles(cueLayer, cueState.sprites, texture, tilePositions);
+          wasteCueByLayer.set(cueLayer, { signature: cueSignature, sprites: cueState.sprites, texture, creates: wasteCueTextureCreates });
         } else {
-          const sprite = new Sprite(texture);
-          sprite.width = WORLD_EXTENT;
-          sprite.height = WORLD_EXTENT;
-          cueLayer.addChild(sprite);
+          const sprites: Sprite[] = [];
+          reconcileTiles(cueLayer, sprites, texture, tilePositions);
           wasteCueTextureCreates = 1;
-          wasteCueByLayer.set(cueLayer, { signature: cueSignature, sprite, texture, creates: 1 });
+          wasteCueByLayer.set(cueLayer, { signature: cueSignature, sprites, texture, creates: 1 });
         }
+      } else if (cueState) {
+        reconcileTiles(cueLayer, cueState.sprites, cueState.texture, tilePositions);
       }
       wasteCueTextureCreates = wasteCueByLayer.get(cueLayer)?.creates ?? 0;
     }
   } else {
     const cueLayer = layer.parent?.children.find((child) => child.label === "waste-cue") as Container | undefined;
     if (cueLayer) {
+      cueLayer.visible = false;
       const cue = wasteCueByLayer.get(cueLayer);
       if (cue) {
-        cue.sprite.texture = Texture.EMPTY;
+        for (const sprite of cue.sprites) {
+          sprite.texture = Texture.EMPTY;
+          cueLayer.removeChild(sprite);
+          sprite.destroy();
+        }
         cue.texture.destroy(true);
-        cue.sprite.destroy();
       }
-      cueLayer.removeChildren();
       wasteCueByLayer.delete(cueLayer);
     }
   }
@@ -227,34 +258,37 @@ export function updateEnvironmentLayer(layer: Container, input: EnvironmentInput
     textureCreates: state?.textureCreates ?? 0,
     wasteCueCells: input.lens === "normal" ? waste.filter((v) => v >= 0.18).length : 0,
     wasteCueTextureCreates,
+    tileCount: tilePositions.length,
   };
 }
 
 export function destroyEnvironmentLayer(layer: Container): void {
   const state = stateByLayer.get(layer);
   if (state) {
-    state.sprite.texture = Texture.EMPTY;
-    state.texture.destroy(true);
     for (const tile of state.tiles) {
       tile.texture = Texture.EMPTY;
+      layer.removeChild(tile);
       tile.destroy();
     }
-    if (!state.tiles.includes(state.sprite)) state.sprite.destroy();
+    state.texture.destroy(true);
     stateByLayer.delete(layer);
   }
   const cueLayer = layer.parent?.children.find((child) => child.label === "waste-cue") as Container | undefined;
   if (cueLayer) {
     const cue = wasteCueByLayer.get(cueLayer);
     if (cue) {
-      cue.sprite.texture = Texture.EMPTY;
+      for (const sprite of cue.sprites) {
+        sprite.texture = Texture.EMPTY;
+        cueLayer.removeChild(sprite);
+        sprite.destroy();
+      }
       cue.texture.destroy(true);
-      cue.sprite.destroy();
       wasteCueByLayer.delete(cueLayer);
     }
-    cueLayer.removeChildren();
   }
 }
 
 export function destroyEnvironmentWorld(worldId: string): void {
   normalSmootherByWorld.delete(worldId);
+  normalFieldByWorld.delete(worldId);
 }

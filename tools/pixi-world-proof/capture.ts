@@ -184,17 +184,39 @@ async function main(): Promise<void> {
           count: number; initialLiveDisplays: number; movedLiveDisplays: number;
           initialTextureCreates: number; movedTextureCreates: number;
           textureReuses: number; movementTextureCreateDelta: number; remainingCanvasCount: number;
+          initialEnvironmentTextureCreates: number; pannedEnvironmentTextureCreates: number;
+          pannedEnvironmentRebuilt: boolean; initialEnvironmentTiles: number; pannedEnvironmentTiles: number;
+          initialWasteCueTextureCreates: number; pannedWasteCueTextureCreates: number;
+          movedEnvironmentTextureCreates: number; resizedEnvironmentTextureCreates: number;
+          resizedCanvas: { w: number; h: number }; reportedViews: Array<{ w: number; h: number }>;
         };
         assert.equal(measured.initialLiveDisplays, count, `${count} fixture displays mounted`);
         assert.equal(measured.movedLiveDisplays, count, `${count} displays retained after movement`);
         assert.equal(measured.movementTextureCreateDelta, 0, `${count} movement-only update creates zero morphology textures`);
+        assert.equal(measured.pannedEnvironmentTextureCreates, measured.initialEnvironmentTextureCreates,
+          `${count} camera-only update creates zero environment textures`);
+        assert.equal(measured.pannedEnvironmentRebuilt, false, `${count} camera-only update reuses environment texture`);
+        assert.equal(measured.pannedWasteCueTextureCreates, measured.initialWasteCueTextureCreates,
+          `${count} camera-only update reuses waste-cue texture`);
+        assert.ok(measured.pannedEnvironmentTiles > 0 && measured.pannedEnvironmentTiles !== measured.initialEnvironmentTiles,
+          `${count} pan across both torus seams reconciles world-space field tiles`);
+        assert.equal(measured.resizedCanvas.w, 800);
+        assert.equal(measured.resizedCanvas.h, 500, `${count} host resize reaches renderer CSS dimensions`);
+        assert.ok(measured.reportedViews.some((view) => view.w === 960 && view.h === 600),
+          `${count} resized viewport is reported in world units at the fit scale`);
+        assert.equal(measured.resizedEnvironmentTextureCreates, measured.initialEnvironmentTextureCreates,
+          `${count} resize-only update creates zero environment textures`);
+        assert.equal(measured.movedEnvironmentTextureCreates, measured.initialEnvironmentTextureCreates,
+          `${count} unchanged environment fields reuse their texture across live movement`);
         assert.equal(measured.remainingCanvasCount, 0, `${count} scene teardown removes its canvas`);
         scenes.push(measured);
-        console.log(`production scene n=${count}: textures=${measured.initialTextureCreates}, reused=${measured.textureReuses}, movement creates=${measured.movementTextureCreateDelta}`);
+        console.log(`production scene n=${count}: organism textures=${measured.initialTextureCreates}, reused=${measured.textureReuses}, movement creates=${measured.movementTextureCreateDelta}; environment tiles=${measured.initialEnvironmentTiles}->${measured.pannedEnvironmentTiles}, camera/resize texture creates=0`);
       }
       evidence.productionScenes = scenes;
 
       assert.ok(errors.length === 0, `page errors: ${errors.join("; ")}`);
+      assert.ok(consoleErrors.length === 0, `console errors: ${consoleErrors.join("; ")}`);
+      assert.ok(failedResponses.length === 0, `failed requests: ${failedResponses.join("; ")}`);
     } finally {
       await page.close().catch(() => undefined);
     }
