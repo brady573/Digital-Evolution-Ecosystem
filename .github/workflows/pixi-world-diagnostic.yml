@@ -1,12 +1,8 @@
 name: pixi-world diagnostic
 
 on:
-  workflow_dispatch:
-    inputs:
-      expected_sha:
-        description: Exact commit SHA expected on the selected ref
-        required: true
-        type: string
+  push:
+    branches: [feat/lane2-pixi-production-world]
 
 permissions:
   contents: read
@@ -26,7 +22,7 @@ jobs:
       - uses: ./.github/actions/setup-project
       - name: Verify exact requested head
         env:
-          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          EXPECTED_SHA: ${{ github.sha }}
         run: |
           actual="$(git rev-parse HEAD)"
           echo "expected_sha=$EXPECTED_SHA"
