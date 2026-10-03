@@ -172,6 +172,17 @@ assert.ok(detritusBodyProxy({ga:0,gb:0,gc:0} as any) >= 2, "newborn carcass floo
 
 ### Task 8: Hotspot/succession + trait evolution (AC13/AC14; assays G/H)
 
+OUTCOME: G passes (hotspot share/CV + consumption response). H as specified
+(du responds upward) is EMPIRICALLY FALSE — DESIGN TENSION declared by Owner.
+Pinned instead as a negative result: seeded du=1.0 maintained ±0.05 with and
+without opportunity (fixation neutrality), specialists persist where seeded,
+founders decay to <0.01. Collective-action trap documented in-code; the
+mixed 50/50 probe was discarded as hitchhiking-confounded (only whole-pop
+contrasts identify du effects). Calibration exhausted: fallback preference,
+5× mineral cut, standing removal. Deliberately NOT tried (mechanism reasoning
+in ledger): lossy mineralization (shrinks the public good but private net
+stays negative), yield raise (needs ≈15 = dominant-food stop).
+
 **Files:**
 - Modify: `tools/validation/detritus.ts` (assays G, H)
 - Test: the assays themselves (read-only evidence over engine from Tasks 2–7)
