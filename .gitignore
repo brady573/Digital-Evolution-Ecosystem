@@ -23,3 +23,6 @@ testdata/pixi-spike/
 testdata/pixi-world-proof/
 # Validation run telemetry: a run byproduct, never committed evidence.
 validation-telemetry/
+
+# agent scratch (ledger, briefs, review packages)
+.superpowers/
