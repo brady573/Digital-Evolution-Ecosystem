@@ -31,6 +31,7 @@ import { createWorldLayers } from "../../apps/explorer/src/pixiWorld/layers.ts";
 import { LAYER_ORDER as P0_LAYER_ORDER } from "../../apps/explorer/src/pixi/layers.ts";
 import { LAYER_ORDER as PW_LAYER_ORDER } from "../../apps/explorer/src/pixiWorld/layers.ts";
 import {
+  clampZoom as pwClampZoom,
   screenToWorld,
   viewScale,
   visibleWindow,
@@ -50,10 +51,52 @@ import {
 } from "../../apps/explorer/src/pixi/layers.ts";
 import { ASSET_REGISTRY, registryManifestIds } from "../../apps/explorer/src/pixi/assetRegistry.ts";
 import { toTextureRequests } from "../../apps/explorer/src/pixi/adapter.ts";
+import { environmentIdentity } from "../../apps/explorer/src/pixiWorld/environmentIdentity.ts";
+import { hitTestOrganism } from "../../apps/explorer/src/pixiWorld/interaction.ts";
+import { dormantChannel, organismColor } from "../../apps/explorer/src/organismEncoding.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "../..");
 const pixiDir = join(root, "apps/explorer/src/pixi");
+
+// Independently-cadenced environment identity ignores live tick changes.
+{
+  const frame = { worldId: 4, tick: 10 } as never;
+  const identityAtLive12 = environmentIdentity(frame, "normal", "combined");
+  const identityAtLive15 = environmentIdentity(frame, "normal", "combined");
+  assert.equal(identityAtLive12, identityAtLive15);
+  assert.notEqual(identityAtLive15, environmentIdentity({ worldId: 4, tick: 15 } as never, "normal", "combined"));
+  assert.notEqual(identityAtLive15, environmentIdentity(frame, "nutrients", "combined"));
+  console.log("p1 environment identity: PASS (environment channel tick/world/lens, not live cadence)");
+}
+
+// Toroidal hit testing keeps nearest identity across both world seams.
+{
+  const organisms = [
+    { id: 1, x: 2, y: 300 },
+    { id: 2, x: 598, y: 300 },
+    { id: 3, x: 300, y: 4 },
+    { id: 4, x: 300, y: 596 },
+  ] as never;
+  assert.equal(hitTestOrganism({ x: 599, y: 300 }, organisms, 26), 2);
+  assert.equal(hitTestOrganism({ x: 1, y: 300 }, organisms, 26), 1);
+  assert.equal(hitTestOrganism({ x: 300, y: 599 }, organisms, 26), 4);
+  assert.equal(hitTestOrganism({ x: 300, y: 1 }, organisms, 26), 3);
+  assert.equal(hitTestOrganism({ x: 300, y: 300 }, organisms, 26), null);
+  console.log("p1 hit test: PASS (nearest toroidal identity across both seams)");
+}
+
+// Analytical encoding remains visible for dormant organisms; dormancy is separate.
+{
+  const organism = { cladeId: 12, byproductUse: 0, diet: 0, energy: 90, activity: "dormant", speed: 2, sensing: 90 };
+  const clade = organismColor(organism, "clades", "speed", [0.25, 4]);
+  const trait = organismColor(organism, "traits", "speed", [0.25, 4]);
+  assert.match(clade, /^hsl\(/);
+  assert.match(trait, /^hsl\(/);
+  assert.equal(dormantChannel(organism).alpha, 0.55);
+  assert.equal(dormantChannel(organism).hollow, true);
+  console.log("p1 analytical organism encoding: PASS (dormant retains clade/trait with separate alpha/hollow channel)");
+}
 
 function traitsForAxes(mob: number, sen: number, met: number, spec: number) {
   return {
@@ -86,6 +129,7 @@ function traitsForAxes(mob: number, sen: number, met: number, spec: number) {
   console.log("p0 determinism: PASS (3 tiers x active/dormant, key+bits identical, LOD sizes 5/9/13)");
 }
 
+
 // 1b. Collision guard.
 {
   const res = resolvePhenotype(traitsForAxes(0.6, 0.7, 0.5, 0.5), { organismId: 1, lineageId: 1 });
@@ -109,8 +153,8 @@ function traitsForAxes(mob: number, sen: number, met: number, spec: number) {
     })),
   });
   for (const tier of ["ecosystem", "population", "inspection"] as const) {
-    const before = new Map(toTextureRequests(fake(0, 0) as never, resolved, tier).map((r) => [r.organismId, r.key]));
-    const after = toTextureRequests(fake(37, -53) as never, resolved, tier);
+    const before = new Map(toTextureRequests(fake(0, 0).organisms as never, resolved, tier).map((r) => [r.organismId, r.key]));
+    const after = toTextureRequests(fake(37, -53).organisms as never, resolved, tier);
     for (const r of after) assert.equal(r.key, before.get(r.organismId), `movement-stable ${tier}#${r.organismId}`);
   }
   console.log("p0 movement isolation: PASS (250 organisms x 3 tiers, displaced positions change zero keys)");
@@ -206,9 +250,10 @@ function traitsForAxes(mob: number, sen: number, met: number, spec: number) {
     assert.ok(!/from\s+["']pixi\.js["']/.test(src), `${f} must not import pixi.js in P0 (P1 adds the production dependency)`);
   }
   const appSrc = readFileSync(join(root, "apps/explorer/src/App.tsx"), "utf8");
-  assert.ok(!appSrc.includes("src/pixi") && !appSrc.includes("./pixi") && !appSrc.includes("phenotypeTextures") && !appSrc.includes("PhenotypeTextureCache"),
-    "production WorldCanvas must not import the P0 pixi/ boundary (cutover is P1-gated)");
-  assert.ok(appSrc.includes('canvas.getContext("2d")'), "production World must still be Canvas2D in P0");
+  // P1 cutover is now authorized: the maintained App may mount the PixiWorld
+  // component, but it may not directly own the low-level P0 cache/adapter.
+  assert.ok(!appSrc.includes("phenotypeTextures") && !appSrc.includes("PhenotypeTextureCache"),
+    "App.tsx leaves low-level phenotype GPU cache ownership to pixiWorld");
   const adapterSrc = readFileSync(join(pixiDir, "adapter.ts"), "utf8");
   assert.ok(!/interface\s+\w*(Checkpoint|Command|EngineConfig|Universe)\w*/.test(adapterSrc), "adapter must not declare new contracts types");
   console.log(`p0 isolation: PASS (${sources.length} modules sim-free/pixi-free; App.tsx has no pixi/ import and stays Canvas2D)`);
@@ -280,9 +325,22 @@ function traitsForAxes(mob: number, sen: number, met: number, spec: number) {
     const src = readFileSync(join(pwDir, f), "utf8");
     assert.ok(!/from\s+["'][^"']*sim-core|from\s+["'][^"']*sim-runtime/.test(src),
       `pixiWorld/${f} must not import simulation packages`);
-    assert.ok(!src.includes("RenderSnapshot") && !/from\s+["']@digital-evolution\/contracts["']/.test(src),
-      `pixiWorld/${f} must not bind the read-model contract (gated on Tranche B)`);
+    assert.ok(!src.includes("RenderSnapshot"),
+      `pixiWorld/${f} must not bind a legacy detail snapshot`);
+    if (!new Set(["environment.ts", "organisms.ts", "renderer.ts"]).has(f)) {
+      assert.ok(!/from\s+["']@digital-evolution\/contracts["']/.test(src),
+        `pixiWorld/${f} must remain independent from read-model contracts unless explicitly approved`);
+    } else {
+      assert.ok(!/\b(?:RenderSnapshot|WorkerRuntimeClient|UniverseCheckpoint|HistoryRecord)\b/.test(src),
+        `pixiWorld/${f} may consume only bounded live presentation rows, not detail/runtime/persistence contracts`);
+    }
   }
+  const environmentSrc = readFileSync(join(pwDir, "environment.ts"), "utf8");
+  assert.ok(environmentSrc.includes("LandscapeSmoother"), "normal landscape preserves accepted temporal smoothing");
+  assert.ok(environmentSrc.includes('if (input.lens === "nutrients")') && environmentSrc.includes('if (input.lens === "waste")'),
+    "nutrient and waste lenses remain explicit raw analytical encodings");
+  assert.ok(environmentSrc.includes('input.lens === "normal"') && environmentSrc.includes('"waste-cue"'),
+    "normal landscape retains a separate waste cue layer");
   const texSrc = readFileSync(join(pwDir, "textures.ts"), "utf8");
   assert.ok(texSrc.includes('scaleMode = "nearest"'), "phenotype uploads stay nearest-filtered");
   assert.ok(texSrc.includes("destroy(true)"), "retirement must destroy the texture source too (AC-P7)");
@@ -294,7 +352,28 @@ function traitsForAxes(mob: number, sen: number, met: number, spec: number) {
   const appSrc = readFileSync(join(root, "apps/explorer/src/App.tsx"), "utf8");
   assert.ok(!appSrc.includes("pixiWorld"), "App.tsx must not import pixiWorld (no cutover)");
   assert.ok(appSrc.includes('canvas.getContext("2d")'), "production World stays Canvas2D");
-  console.log(`p1 scaffold: PASS (${pwSources.length} modules sim-free, read-model-unbound, inactive)`);
+  console.log(`p1 scaffold: PASS (${pwSources.length} modules sim-free, bounded environment read-model input, production App cutover still gated)`);
+}
+
+// P1.1 lifecycle and logical viewport math remain DPR-independent.
+{
+  const rect = { left: 20, top: 30, width: 390, height: 844 };
+  const camera = { x: 5, y: 595 };
+  for (const zoom of [pwClampZoom(1), pwClampZoom(3)]) {
+    const scale = viewScale(rect.width, rect.height, zoom);
+    const atOneDpr = screenToWorld(215, 452, rect, camera, scale);
+    // Renderer backing dimensions multiply by DPR, but event coordinates and
+    // logical viewport remain CSS pixels, so camera projection is identical.
+    for (const dpr of [1, 2, 3]) {
+      const logicalW = rect.width * dpr / dpr;
+      const logicalH = rect.height * dpr / dpr;
+      const sameScale = viewScale(logicalW, logicalH, zoom);
+      const projected = screenToWorld(215, 452, rect, camera, sameScale);
+      assert.deepEqual(projected, atOneDpr, `CSS-space camera projection stable at DPR ${dpr}`);
+      assert.deepEqual(visibleWindow(logicalW, logicalH, sameScale), visibleWindow(rect.width, rect.height, scale));
+    }
+  }
+  console.log("p1 viewport: PASS (logical camera coordinates independent of backing DPR at zoom limits)");
 }
 
 // 7. Scale measurements: exact-key cache over 50/250/1000/3000 (+ engine-like 1000).

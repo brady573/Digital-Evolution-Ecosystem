@@ -2,14 +2,14 @@
  * P0 — local read-only adapter from current presentation data to P0 texture
  * requests (no new contracts types; issue #54 may replace this boundary).
  *
- * Consumes what the Canvas2D World already resolves: a RenderSnapshot plus the
- * phenotype resolutions memoized per organism (see
+ * Consumes what the Explorer presentation store already resolves: joined
+ * organism rows plus phenotype resolutions memoized per organism (see
  * apps/explorer/src/phenotype.ts PhenotypeCache.resolveSnapshot). It never
  * reimplements family selection, normalization, or hysteresis, and it never
  * mutates simulation, analysis, checkpoint, or command state.
  */
 
-import type { RenderSnapshot } from "@digital-evolution/contracts";
+import type { RenderOrganism } from "@digital-evolution/contracts";
 import type { LodTier, ResolvedPhenotype } from "@digital-evolution/phenotype";
 import { describeTexture, type ActivityState } from "./phenotypeTextures";
 
@@ -24,17 +24,17 @@ export interface OrganismTextureRequest {
 }
 
 /**
- * Map one snapshot to texture requests. `resolved` is the live resolution
+ * Map joined read-model rows to texture requests. `resolved` is the live resolution
  * pass output (organism id -> ResolvedPhenotype); organisms without a
  * resolution are skipped (caller decides the fallback — P0 never guesses).
  */
 export function toTextureRequests(
-  snapshot: RenderSnapshot,
+  organisms: readonly RenderOrganism[],
   resolved: ReadonlyMap<number, ResolvedPhenotype>,
   tier: LodTier,
 ): OrganismTextureRequest[] {
   const out: OrganismTextureRequest[] = [];
-  for (const o of snapshot.organisms) {
+  for (const o of organisms) {
     const res = resolved.get(o.id);
     if (!res) continue;
     const activity: ActivityState = o.activity === "dormant" ? "dormant" : "active";

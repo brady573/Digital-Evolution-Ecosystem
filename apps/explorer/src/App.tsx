@@ -22,6 +22,7 @@ import { AFTERMATH_OBSERVATION_TICKS, type AftermathLifecycleEvent, type Afterma
 import { projectLiveAftermath } from "./experience/aftermath/project";
 import { drawPhenotypeOrganism, phenotypeCache, tierForZoom } from "./phenotype";
 import { familyArtwork } from "./familyArt";
+import { TRAIT_DISPLAY_RANGES, type Lens, type ResourceView, type TraitView, type WorldCamera } from "./worldViewTypes";
 
 /** Details card for a selected organism, incl. its base family portrait. */
 function SelectedOrganismCard({ selected, onViewLineage, onClear }: {
@@ -46,9 +47,6 @@ function SelectedOrganismCard({ selected, onViewLineage, onClear }: {
 }
 
 type Surface="world"|"history"|"tree"|"experiments";
-type Lens="normal"|"nutrients"|"waste"|"clades"|"traits";
-type ResourceView="combined"|"a"|"b"|"c";
-type TraitView="speed"|"sensing"|"metabolism"|"reproduction"|"diet"|"habitat"|"byproductUse"|"dormancyResponse";
 /** Display names for the lens set. The active-lens chip uses the same labels
  *  as the expanded buttons, so the two never disagree. */
 const LENS_LABELS:Record<Lens,string>={
@@ -87,16 +85,7 @@ const PRESETS:Record<string,{settings:Omit<WorldSettings,"seed">,note:string}>={
   Abundant:{settings:{richness:3.2,separation:.6,variety:1,population:30,variation:.35,mutation:.03,pressure:.45},note:"Abundant turns nutrient production far beyond balanced levels to sustain thousands of living organisms; built for large populations and deep-time runs."},
 };
 
-const TRAIT_RANGES:Record<TraitView,[number,number,string]>={
-  speed:[.25,4,"Movement"],
-  sensing:[10,180,"Nutrient sensing"],
-  metabolism:[.04,.5,"Energy use"],
-  reproduction:[55,220,"Reproduction energy"],
-  diet:[-1.5,1.5,"Nutrient tendency"],
-  habitat:[-1.5,1.5,"Home-zone preference"],
-  byproductUse:[0,1.5,"Byproduct use"],
-  dormancyResponse:[0,1.5,"Dormancy response"],
-};
+const TRAIT_RANGES=TRAIT_DISPLAY_RANGES;
 
 function configFromSettings(s:WorldSettings):EngineConfig{
   return{
@@ -160,7 +149,7 @@ function settingsFromConfig(c:EngineConfig|undefined|null):WorldSettings{
 // minimap of the whole field. Presentation only; the simulation is untouched.
 const WORLD_EXTENT=600;
 const ZOOM_MIN=1,ZOOM_MAX=3;
-type Camera={x:number;y:number};
+type Camera=WorldCamera;
 // Shortest toroidal delta from a to b. Correct for any separation, not just
 // one period: normalizing the camera during pan keeps this well-conditioned,
 // and the modulo keeps it correct regardless.
