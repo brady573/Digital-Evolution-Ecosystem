@@ -328,8 +328,6 @@ function testForwardCompatPolicyVersion() {
     session.resolveEventDecision(next.opportunityId, "keep-watching");
     next = session.advance(200_000).pendingDecision as CatalystOpportunity;
   }
-  console.log("MAP-RESOLUTIONS:" + JSON.stringify(session.decisionResolutions.map((r: any) => r.tick)));
-  console.log("MAP-EVENTS:" + JSON.stringify(session.analysis.observedEvents().map((e: any) => e.eventId)));
   assert.ok(next, "a fourth eligible post-horizon catalyst window is reached");
   // Slice 2B re-pin: detritus wealth delays guild establishment (crossfeeding
   // @133030 rather than @78312), so the fourth advance lands on the
@@ -348,29 +346,47 @@ function testForwardCompatPolicyVersion() {
   const protectedSnapshot = session.advance(12_000);
 
 
-  // Slice 1 re-pin: no second era forms under occupancy (no era event
-  // through 1.3M ticks), so the protected-observation fixture moves to the
-  // decision-eligible crossfeeding establishment @78312. Protection math
-  // (probe-verified resolutions [6777,31877,56977,...]): the @56977
-  // keep-watching resolution opens a 25k Aftermath covering to ~81977, and
-  // 78312 falls inside it — observed during protection, never prompted
-  // (the flow resolves only catalyst windows afterwards). Same claim:
-  // protected observation stays durable evidence, not a prompt.
-  const protectedEra = session.analysis.observedEvents().find(
-    event => event.eventId === "eco-crossfeeding-1-established-78312",
+  // (Protection-window history: Slice 1 pinned crossfeeding @78312 observed
+  // inside Aftermath coverage; Slice 2B re-derivation above audits the
+  // prompt-or-consume invariant over all eligible events instead.)
+  // Slice 2B re-derivation: detritus wealth delays guild establishment to
+  // @133030, which is PROMPTED (resolved) rather than landing inside a
+  // protection window — the 107930-resolution Aftermath covers to 132930
+  // and the event lands 100 ticks past it (deterministic near-miss,
+  // probe-verified). No decision-eligible event on this trajectory is
+  // observed during an active Aftermath, so the protected-observation
+  // claim is AUDITED, not storied: every eligible observed event is either
+  // prompted exactly once or consumed inside a resolved 25k Aftermath. A
+  // deferred or replayed prompt fails the audit. (The audit form also
+  // future-proofs the claim: any engine retune that moves an eligible
+  // event inside a window exercises the consumed branch automatically.)
+  const eligible = session.analysis.observedEvents().filter(isDecisionEligible);
+  assert.ok(eligible.length > 0, "eligible events exist to audit");
+  for (const event of eligible) {
+    const prompts = session.decisionResolutions.filter((r: any) => r.sourceEventId === event.eventId);
+    const consumed = session.decisionResolutions.some(
+      (r: any) => r.tick < event.tick && event.tick < r.tick + 25_000,
+    );
+    assert.ok(
+      prompts.length === 1 || (prompts.length === 0 && consumed),
+      `eligible event ${event.eventId} prompted once or consumed in protection`,
+    );
+  }
+  assert.ok(
+    eligible.every((event: any) =>
+      session.decisionResolutions.some((r: any) => r.sourceEventId === event.eventId),
+    ),
+    "on this trajectory every eligible event was prompted (consumed-set documented empty)",
   );
-  assert.ok(protectedEra, "the known crossfeeding event is durably observed during the foreground Aftermath");
   assert.equal(protectedSnapshot.pendingDecision, null,
-    "a decision-eligible event observed during protection is not promoted or deferred");
+    "nothing is promoted or deferred at the observation point");
   const newHorizon = session.aftermath!.resolutionTick + 25_000;
   assert.equal(session.advance(newHorizon - 1 - protectedSnapshot.tick).tick, newHorizon - 1,
-    "the protected crossfeeding event remains consumed through T+24,999");
+    "the later Aftermath reaches T+24,999 exactly");
   const atNewHorizon = session.advance(1);
   assert.equal(atNewHorizon.tick, newHorizon, "the later Aftermath reaches its exact horizon");
-  assert.equal(atNewHorizon.pendingDecision, null, "the protected crossfeeding event is not replayed at the boundary");
+  assert.equal(atNewHorizon.pendingDecision, null, "no prompt fires exactly at the boundary");
   const afterNewHorizon = session.advance(EVENT_STRIDE);
-  console.log("MAP-AFTERMATH:" + JSON.stringify({ tick: afterNewHorizon.tick, pending: (afterNewHorizon.pendingDecision as any)?.opportunityId ?? null }));
-  console.log("MAP-EVENTS2:" + JSON.stringify(session.analysis.observedEvents().map((e: any) => e.eventId)));
   assert.equal(afterNewHorizon.pendingDecision?.source, "world_catalyst",
     "a new automatic opportunity still resumes after the later protected interval");
   assert.equal(afterNewHorizon.pendingDecision!.policyVersion, CATALYST_POLICY_VERSION,
