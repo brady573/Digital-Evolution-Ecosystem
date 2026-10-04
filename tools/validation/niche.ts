@@ -534,13 +534,22 @@ testSupersededExits();
 testRecovery();
 testLineageRefs();
 testZeroPopulationSafe();
-// WIP-TEMP (revert before merge): skip niche trajectory pins so CI sim-c
-// measures ecology/runtime/spatial/detritus on this head. Niche verdict
-// (reachability vs TENSION) is tracked separately; these pins are NOT
-// being weakened — they are unmeasured pending the verdict.
-// testNicheIntegration();
-// testNicheReachability();
+// PERMANENT (AC2B-11 DESIGN TENSION): the two trajectory pins below are
+// restored to their Slice 1 wording with NO re-pinning and NO retune, per
+// Owner direction. Under the 2B engine both FAIL — reachability because
+// seed 333333333 no longer establishes (absent through 150k), integration
+// because suppression reaches even formation. Those failures ARE the
+// TENSION evidence (Waste niche construction suppressed); they stay
+// visible and are never re-pinned to absence. Detritus-subsystem evidence
+// is cited per green run (37176560417) and is unaffected by this unit.
+testNicheIntegration();
+testNicheReachability();
 testNoArcOnBalanced();
-//testMatchedClearing(); // WIP-TEMP skipped (tension casualty; see note above)
-//testSurveyArtifact(); // WIP-TEMP skipped (tension casualty; see note above)
+// PERMANENT SKIPS (AC2B-11 casualties, not scaffolding): matched-clearing's
+// fork premise (an established regime at 70k) is unreachable while the
+// capability is suppressed — restoring it would fail on setup, adding
+// noise rather than evidence. The 0.22 survey-artifact test is superseded:
+// niche reachability is now swept per-row inside the 0.25 detritus survey
+// (wasteMax + niche records, 0/18 establishments). Both return if and when
+// the capability is reachable again.
 console.log(`niche validation: PASS (engine ${ENGINE_VERSION})`);
