@@ -1,32 +1,38 @@
-# pixiWorld — P1 rendering-only production scaffold (INACTIVE)
+# pixiWorld — production semantic World renderer
 
-P1 work area in production location, authorized by Owner decision 2026-09-30
-(parallel gate removals: rendering-only slices). **Not activated**: nothing
-here is imported by `App.tsx`, and the maintained production World is still
-the Canvas2D `WorldCanvas`.
+`WorldPixi` is the maintained semantic World renderer mounted by `App.tsx`.
+It consumes bounded Explorer presentation props and owns Pixi display/GPU
+resources only. React remains authoritative for simulation-facing product
+state, controls, camera/selection state, decisions, Aftermath, and persistence.
+`?deeTest` enables test instrumentation/fixtures; it does not select a renderer.
+Renderer initialization or unrecoverable context failure is shown in the World
+slot and never falls back to a second semantic renderer. The subordinate
+read-only World minimap may use Canvas2D.
 
-## What lives here
+## Modules
 
-| Module | Role | Runtime needs |
-|---|---|---|
-| `camera.ts` | Toroidal camera contract: wrap math, uniform zoom, world↔screen projection, visible-window reporting. Pure — Node-tested for parity with `App.tsx`. | none |
-| `layers.ts` | Scene-layer `Container` assembly in `LAYER_ORDER` (later = on top). Absorbs the P0 order — the single source stays `../pixi/layers`. | pixi.js `Container` only (headless-safe) |
-| `textures.ts` | Phenotype bitmap → GPU `Texture` upload with nearest scale mode. Mirrors the spike's `textureFromBits`; caller owns color/alpha; retirement destroys texture **and** source (AC-P7). | DOM canvas + WebGL (browser proof) |
-| `boot.ts` | `Application` boot (WebGL preference, genuine backend probe), host-following resize, dispose. Takes no snapshot. | DOM + WebGL (browser CI) |
+| Module | Role |
+|---|---|
+| `WorldPixi.tsx` | React-owned Pixi host lifecycle, bounded prop bridge, accessible renderer failure state. |
+| `boot.ts` | WebGL renderer initialization/backend evidence, host-following resize, generation-safe teardown. |
+| `renderer.ts` | Presentation reconciliation for environment, organisms, focus, camera, and bounded input callbacks. |
+| `environment.ts`, `organisms.ts` | Derived display resources for exact field semantics and resolved phenotype presentation. |
+| `camera.ts`, `interaction.ts` | Toroidal projection and CSS-pixel selection/pan behavior. |
+| `textures.ts`, `layers.ts` | Pixi texture ownership and ordered display-layer assembly. |
 
-## Forbidden in this directory (still gated on Tranche B + reconciliation)
+No module in this directory may acquire simulation/runtime authority, advance
+simulation, alter analysis, or persist GPU/cache state. The renderer receives
+resolved read-model values and reports only bounded user-originated selection,
+camera, and visible-window results.
 
-- Snapshot/read-model binding (`RenderSnapshot`, worker client, runtime imports).
-- `sim-core` / `sim-runtime` imports of any kind.
-- Selection, lenses, hit-testing against live data (math helpers are fine; live wiring is not).
-- Importing this directory from `App.tsx` or any production surface (cutover is P1.6, after the gate).
-- Storing GPU/render cache in checkpoints; network asset loading.
+## Validation
 
-## Coverage
-
-Pure parts (`camera`, layer assembly) are asserted by `pnpm test:pixi-p0`
-(§8). DOM/WebGL parts (`textures`, `boot`) are proven by
-`pnpm test:pixi-world` (isolated browser harness: WebGL2 boot, resize,
-nearest mint, texture+source retirement, teardown) — registered as the
-blocking `pixi-world-proof` browser unit in `tools/validation/manifest.ts`,
-retained on CI as `pixi-world-proof-evidence`.
+- `pnpm test:pixi-p0` covers pure camera, layer, organism, texture identity,
+  movement isolation, and resource lifecycle contracts.
+- `pnpm test:pixi-world` remains a **blocking** browser proof for the production
+  Pixi modules' WebGL2 boot, resize, nearest-filtered texture creation and
+  source retirement, organism reconciliation, world replacement, and teardown.
+- `pnpm test:browser` and `pnpm test:mobile-ui` cover integrated production
+  route behavior, presented-frame semantics, React overlays, and phone layout.
+- These browser checks do not establish Android Pixi/WebGL2 runtime behavior;
+  that evidence remains separately gated.

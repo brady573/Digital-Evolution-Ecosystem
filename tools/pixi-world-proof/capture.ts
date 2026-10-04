@@ -14,8 +14,8 @@
  * - organism movement retains displays and does not mint morphology textures;
  * - world replacement retires the prior organism display/resource set;
  * - destroy() removes the canvas and releases renderer resources.
- * Independent of live RenderSnapshot/runtime binding; the maintained World
- * stays Canvas2D (this page never touches App.tsx).
+ * Exercises production PixiWorld modules in an isolated proof page; integrated
+ * App/read-model behavior is separately covered by browser-smoke and mobile-ui.
  *
  * Browser WebGL required. Fails LOUDLY (non-zero exit) when the backend is
  * not WebGL2. Headless SwiftShader presents no pixels on-device, but every

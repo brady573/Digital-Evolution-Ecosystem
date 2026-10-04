@@ -553,7 +553,7 @@ export const UNITS: readonly ValidationUnit[] = [
     parallelSafe: true,
     baselineSeconds: 2,
     claim:
-      "The P0 Pixi texture/cache/layer preparation is deterministic, movement-isolated, ref-count sound, camera-aligned with the Canvas2D World, and covered by the asset manifest — while the production World stays Canvas2D.",
+      "Pixi texture/cache/layer preparation is deterministic, movement-isolated, ref-count sound, aligned with the accepted camera contract, and covered by the asset manifest; production integration is validated by browser and mobile units.",
   },
 
   // --- Class D: browser / runtime ------------------------------------------
@@ -763,7 +763,7 @@ export const UNITS: readonly ValidationUnit[] = [
   },
   {
     id: "pixi-world-proof",
-    title: "pixiWorld scaffold browser proof",
+    title: "Production Pixi renderer lifecycle proof",
     script: "test:pixi-world",
     cls: "browser",
     enforcement: "blocking",
@@ -774,7 +774,7 @@ export const UNITS: readonly ValidationUnit[] = [
     artifact: "pixi-world-proof-evidence",
     baselineSeconds: 5,
     claim:
-      "The inactive production scaffold boots WebGL2, follows resize, mints nearest-filtered textures, retires texture and source, and tears down. State-based and timing/pixel independent, so software-GL execution proves the lifecycle.",
+      "Production Pixi modules boot WebGL2, follow resize, mint nearest-filtered textures, retire texture/source and organism resources across replacement, and tear down. The lifecycle proof must run in browser contexts with available WebGL; integrated App semantics are separately covered by browser-smoke and mobile-ui.",
   },
 ];
 

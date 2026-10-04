@@ -1,4 +1,4 @@
-// Probe entry: boots the INACTIVE production scaffold and exposes a
+// Probe entry: boots the production Pixi modules in isolation and exposes a
 // string-callable handle for the playwright driver. No RenderSnapshot, no
 // runtime, no World activation — the driver asserts lifecycle only.
 import { bootPixiWorld, type PixiWorldHandle } from "../../apps/explorer/src/pixiWorld/boot.ts";

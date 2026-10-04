@@ -39,6 +39,7 @@ export async function bootPixiWorld(
   host: HTMLElement,
   isCurrent: () => boolean = () => true,
 ): Promise<PixiWorldHandle | null> {
+  if (!isCurrent()) return null;
   const app = new Application();
   let initialized = false;
   let destroyed = false;
@@ -48,8 +49,13 @@ export async function bootPixiWorld(
     destroyed = true;
     ro?.disconnect();
     ro = null;
-    app.canvas?.remove();
-    if (initialized) app.destroy();
+    // Pixi's canvas getter dereferences its renderer and throws if Application
+    // initialization rejected before creating one. Preserve the original boot
+    // error and only inspect/destroy renderer-owned resources after init passed.
+    if (initialized) {
+      app.canvas.remove();
+      app.destroy();
+    }
   };
 
   try {

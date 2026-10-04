@@ -16,10 +16,12 @@ migration/validation); M7 investigation work is on hold.
 
 ## Technology Stack
 
-TypeScript modular monorepo (pnpm workspaces). React + Vite explorer app,
-Canvas2D maintained World renderer with PixiJS v8/WebGL2 approved for production,
-a validated spike/P0 preparation path, and an inactive unbound production-shaped
-`apps/explorer/src/pixiWorld` scaffold on main. Capacitor Android packaging.
+TypeScript modular monorepo (pnpm workspaces). React + Vite Explorer app with
+the P1.6 production World cutover implemented in the active feature worktree:
+PixiJS v8/WebGL2 is the sole semantic World renderer in `App.tsx`; Canvas2D
+remains only for the subordinate minimap. P1.6 browser/mobile evidence is still
+pending exact-head CI. Capacitor Android packaging does not establish Android
+Pixi/WebGL2 runtime behavior.
 No backend, no database, no network at runtime.
 
 ## Architecture
@@ -70,21 +72,20 @@ None. Offline-first single-user product; no accounts, no network services.
 ## Current Implementation
 
 All six product feature families exist and run: world lifecycle, deterministic
-engine core, explorer shell + time controls, events/clades/population story,
+engine core, Explorer shell + time controls, events/clades/population story,
 experiments + evidence export, waste-field niche-construction slice. Tranche A
 hardening has merged A1, A2, A3.1, A3.2, and A3.3; PR #70 established the strict
-runtime checkpoint schema 0.4. M4B P0 (PR #71), validation workflow optimization
-(PR #72), and an inactive/unbound production-shaped Pixi scaffold with browser
-proof (PR #73) are merged. The maintained World is still Canvas2D.
+runtime checkpoint schema 0.4. P1.5 test-gated Pixi integration was design
+accepted. P1.6 production cutover is authorized and implemented in the current
+feature worktree, with required browser/mobile/WebGL validation still pending.
 
 ## Current Focus
 
 A6 typed EvidenceExport provenance merged as PR #74, the canonical restore
 ordering unit (A3.4) as PR #76, and the worker-transport trust boundary (A7,
-issue #54 items 3-5) after it. Tranche A is complete; issue #54 items 6-12 are
-Tranche B work and need a fresh bounded handoff after A7 acceptance. M7 remains
-on hold, and the merged Pixi scaffold does not release the production World cutover
-gate.
+issue #54 items 3-5) after it. Tranche A is complete. P1.6 remains incomplete
+until exact-head production browser/mobile CI clears; P1.7, Android Pixi/WebGL2
+runtime evidence, and final Stage P1 acceptance remain out of scope.
 
 ## Important Constraints
 

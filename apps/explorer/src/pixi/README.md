@@ -1,37 +1,28 @@
-# P0 Pixi preparation — non-production boundary (read this first)
+# Pixi preparation helpers
 
-Stage P0 of the M4B handoff: safe parallel preparation. **The maintained
-production World is still Canvas2D** (`apps/explorer/src/App.tsx`
-`WorldCanvas` calls `canvas.getContext("2d")`). Nothing in this directory is
-imported by production code, and nothing here may be wired into the World
-until the pre-M7 Tranches A/B/C gate releases P1.
+This directory contains pure preparation helpers and cache contracts reused by
+the production renderer in `../pixiWorld/`. The maintained semantic World is
+`WorldPixi`, mounted by `App.tsx`; this directory is not a second renderer and
+does not own WebGL resources directly.
 
-## What lives here
+## Modules
 
 | Module | Role |
 |---|---|
-| `phenotypeTextures.ts` | Deterministic CPU-side texture descriptors from resolved phenotype geometry (exact grid identity + tier + activity). No GPU, no Pixi import — P1 adds `Texture.from` upload. |
-| `textureCache.ts` | Production-shaped ref-counted texture-cache mirror (acquire/release/prune, collision guard). Extracted from `tools/pixi-spike/cache.ts` without duplicating phenotype semantics. |
-| `layers.ts` | Scene-layer order + 600x600 toroidal camera contract (pure data + pure helpers, no Pixi import). |
-| `assetRegistry.ts` | Asset-class registry (A in-world phenotype textures, B portraits, C environment/substrate, D interaction/effects) mapping manifest ids to runtime handling. |
-| `adapter.ts` | Local read-only adapter from current presentation data (`RenderSnapshot` + resolved phenotypes) to texture requests. No new contracts types. |
+| `phenotypeTextures.ts` | Deterministic CPU-side texture descriptors from resolved phenotype geometry (grid identity + tier + activity). |
+| `textureCache.ts` | Ref-counted texture-cache contract (acquire/release/prune, collision guard). |
+| `layers.ts` | Scene-layer order and pure 600×600 toroidal helpers. |
+| `assetRegistry.ts` | Asset-class registry for in-world textures, portraits, environment, and effects. |
+| `adapter.ts` | Read-only adapter from bounded presentation inputs and resolved phenotypes to texture requests. |
 
-## Rules
+## Rules and coverage
 
-- No `sim-core` / `sim-runtime` imports anywhere in this directory (renderer is presentation-only).
-- No phenotype selection/hysteresis reimplementation: consume `ResolvedPhenotype` from `packages/phenotype` / `apps/explorer/src/phenotype.ts`.
-- P1 production modules (`../pixiWorld/`) may absorb this directory's pure
-  helpers (layer order, camera math, key descriptors) by import — that is the
-  prep paying off, not a boundary violation. `App.tsx` activation of any of
-  it stays gated (P1.6, after Tranches A/B/C + reconciliation).
-- Exact bitmap-equivalent texture identity only. A relaxed cache key needs current evidence it merges no meaningful visual states.
-- Nearest-neighbor filtering for organism pixel textures; analytical field views stay exact/flat (never smoothed).
-- Offline-first: no runtime network asset loading.
-- Validation: `pnpm test:pixi-p0` (P0 harness) + existing `pnpm test:phenotype`, `pnpm test:pixi-spike`, `pnpm test:art-review`, `pnpm test:landscape`.
-
-## P1 gate
-
-P1 (production cutover: Pixi as Explorer dependency, maintained Pixi World,
-Canvas2D retirement) starts only after pre-M7 Tranches A/B/C are accepted and
-this handoff is reconciled against current main. Do not build a temporary
-production Pixi API against a boundary issue #54 may replace.
+- No `sim-core` or `sim-runtime` imports; rendering remains presentation-only.
+- Phenotype selection, normalization, hysteresis, and geometry remain owned by
+  the phenotype package and Explorer adapter.
+- Exact morphology texture identity includes bitmap, LOD tier, and activity;
+  lens color and selection are presentation treatments, not morphology identity.
+- Organism textures use nearest filtering; analytical fields retain exact
+  encodings. Runtime asset loading remains offline.
+- `pnpm test:pixi-p0` covers preparation/cache contracts; production integration
+  and lifecycle are covered by `pixi-world-proof`, browser smoke, and mobile UI.

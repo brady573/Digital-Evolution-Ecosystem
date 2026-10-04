@@ -368,7 +368,7 @@ function traitsForAxes(mob: number, sen: number, met: number, spec: number) {
   console.log(`p0 isolation: PASS (${sources.length} modules sim-free/pixi-free; App.tsx does not own the low-level Pixi cache)`);
 }
 
-// 8. P1 rendering-only scaffold: production location, inactive, unbound.
+// 8. Production Pixi pure camera/layer/render contracts and authority boundary.
 {
   // Camera parity: same wrap/zoom primitives as the P0 contract...
   assert.equal(pwWrapDelta(10, 590), 20);
@@ -446,7 +446,7 @@ function traitsForAxes(mob: number, sen: number, met: number, spec: number) {
     "layer assembly builds fresh objects per call (no shared GPU state)");
   console.log("p1 layers: PASS (6 ordered labeled Containers, fresh per boot, order absorbed from P0)");
 
-  // Static guards over the production scaffold: unbound and inactive.
+  // Static guards over production Pixi modules: bounded and authority-safe.
   const pwDir = join(root, "apps/explorer/src/pixiWorld");
   const pwSources = readdirSync(pwDir).filter((f) => f.endsWith(".ts"));
   assert.ok(pwSources.length >= 3, `expect >=3 pixiWorld modules (got ${pwSources.length})`);
@@ -479,12 +479,17 @@ function traitsForAxes(mob: number, sen: number, met: number, spec: number) {
   assert.ok(bootSrc.includes("app.destroy()"), "production boot disposes GPU resources");
   assert.ok(!bootSrc.includes("RenderSnapshot"), "production boot takes no snapshot");
   const appSrc = readFileSync(join(root, "apps/explorer/src/App.tsx"), "utf8");
-  assert.ok(appSrc.includes('has("deeTest")'), "App.tsx gates Pixi substitution on the existing test-only deeTest seam");
-  assert.ok(/testPixiWorld\s*\?\s*<WorldPixi\s+\{\.\.\.pixiWorldProps\}/.test(appSrc)
-    &&/\s*:\s*<WorldCanvas/.test(appSrc),
-    "App.tsx substitutes Pixi only on deeTest and keeps Canvas2D as the default renderer");
-  assert.ok(appSrc.includes('canvas.getContext("2d")'), "production World stays Canvas2D");
-  console.log(`p1.5 route guard: PASS (${pwSources.length} renderer modules stay bounded; Pixi is deeTest-only and production remains Canvas2D)`);
+  const hostSrc = readFileSync(join(root, "apps/explorer/src/pixiWorld/WorldPixi.tsx"), "utf8");
+  assert.ok(/<WorldPixi\s+\{\.\.\.pixiWorldProps\}\s*\/>/.test(appSrc),
+    "App.tsx mounts Pixi as the production semantic World renderer");
+  assert.ok(!appSrc.includes("WorldCanvas") && !appSrc.includes("setRenderer"),
+    "App.tsx retires the semantic Canvas World and renderer-selection hook");
+  assert.ok(!appSrc.includes("function WorldCanvas") && !appSrc.includes("world-canvas"),
+    "App.tsx has no semantic Canvas2D World component or fallback (the minimap remains independent)");
+  assert.ok(hostSrc.includes('role="alert"') && hostSrc.includes("World display unavailable")
+    &&hostSrc.includes("deePixiFailure")&&hostSrc.includes("data-renderer-backend={backend}"),
+    "Pixi initialization failure has an accessible testable display-failure state");
+  console.log(`production Pixi route guard: PASS (${pwSources.length} renderer modules stay bounded; Pixi is the sole semantic World)`);
 }
 
 // P1.1 lifecycle and logical viewport math remain DPR-independent.

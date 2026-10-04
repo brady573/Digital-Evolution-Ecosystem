@@ -2,7 +2,7 @@
  * Living Evolution Explorer — phenotype presentation adapter (Lane 2 M4B).
  *
  * Bridges the pure phenotype engine (@digital-evolution/phenotype) and the
- * live WorldCanvas:
+ * production Pixi World:
  * - descendant-chained family resolution over a snapshot (generation order,
  *   orphan lineages fall back to founder resolution);
  * - per-organism memoization across snapshots, scoped to the displayed
@@ -16,17 +16,16 @@
  * - save/restore continuity via staged anchors: resolutions saved alongside
  *   a checkpoint preload into a restored world, so orphans whose parents
  *   are dead keep their pre-save family instead of founder-flipping;
- * - zoom-tier mapping and per-tier cell sizing for canvas drawing.
+ * - zoom-tier mapping and per-tier morphology footprint sizing for renderer use.
  *
- * Presentation only: positions, hit testing, lenses (except normal), minimap,
- * selection, and all simulation behavior are untouched. Non-normal lenses
- * keep the legacy voxel rendering path exactly, so analytical meaning always
- * outranks decorative morphology.
+ * Presentation only: positions, hit testing, lenses, minimap, selection, and
+ * all simulation behavior remain outside phenotype authority. Analytical
+ * lenses retain their exact encodings; phenotype geometry is resolved here and
+ * consumed by the production Pixi renderer.
  */
 import type { RenderOrganism, WorldId } from "@digital-evolution/contracts";
 import {
   FAMILY_ORDER,
-  drawGridToCanvas,
   lodTierForZoom,
   renderPhenotypeGrid,
   resolvePhenotype,
@@ -209,28 +208,3 @@ export class PhenotypeCache {
 
 /** Shared live-world cache (module lifetime = session lifetime). */
 export const phenotypeCache = new PhenotypeCache();
-
-/** Minimal Canvas2D surface; the caller owns fillStyle and alpha. */
-export interface PhenotypeSurface {
-  fillRect(x: number, y: number, w: number, h: number): void;
-}
-
-/**
- * Draw one organism's phenotype grid centered on (px, py). `unit` is the
- * legacy voxel unit for the current zoom; per-tier fractions keep footprints
- * comparable. Color and dormancy dimming stay caller-owned (lens behavior).
- */
-export function drawPhenotypeOrganism(
-  ctx: PhenotypeSurface,
-  o: RenderOrganism,
-  res: ResolvedPhenotype,
-  cache: PhenotypeCache,
-  tier: LodTier,
-  px: number,
-  py: number,
-  unit: number,
-): void {
-  const grid = cache.grid(o, res, tier);
-  const cu = unit * PHENOTYPE_CELL_FRACTION[tier];
-  drawGridToCanvas(ctx, grid, px - (grid.size * cu) / 2, py - (grid.size * cu) / 2, cu);
-}

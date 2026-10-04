@@ -4,9 +4,8 @@
  * Covers the explorer phenotype adapter (apps/explorer/src/phenotype.ts):
  * descendant-chained resolution over live snapshots, orphan fallback,
  * cross-snapshot memoization and pruning, grid caching per tier/activity,
- * tier cell fractions, and draw centering. The canvas draw path itself is
- * verified by counting rects on a mock surface; real paint is a browser
- * concern (see Phase 3 return notes on test:browser).
+ * tier cell fractions. Renderer painting is proved through production Pixi
+ * browser screenshots rather than a Canvas2D mock surface.
  *
  * Run: pnpm exec tsx tools/validation/phenotype-world.ts
  * (chained into pnpm test:phenotype)
@@ -16,7 +15,6 @@ import type { RenderOrganism, RenderSnapshot } from "../../packages/contracts/sr
 import {
   PHENOTYPE_CELL_FRACTION,
   PhenotypeCache,
-  drawPhenotypeOrganism,
   sanitizeAnchors,
   tierForZoom,
 } from "../../apps/explorer/src/phenotype.ts";
@@ -99,10 +97,7 @@ function testCap() {
   console.log("cache cap: PASS");
 }
 
-function testDrawMath() {
-  const cache = new PhenotypeCache();
-  const o = mkOrg({ id: 1 });
-  const res = cache.resolveSnapshot(snapOf([o])).get(1)!;
+function testPhenotypePresentationContract() {
   assert.deepEqual(
     PHENOTYPE_CELL_FRACTION,
     { ecosystem: 0.8, population: 0.5, inspection: 0.35 },
@@ -110,19 +105,7 @@ function testDrawMath() {
   );
   assert.equal(tierForZoom(1), "ecosystem", "zoom maps through the adapter");
   assert.equal(tierForZoom(3), "inspection", "zoom maps through the adapter");
-  const calls: Array<[number, number, number, number]> = [];
-  const grid = cache.grid(o, res, "ecosystem");
-  drawPhenotypeOrganism({ fillRect: (x, y, w, h) => calls.push([x, y, w, h]) }, o, res, cache, "ecosystem", 100, 100, 10);
-  const filled = grid.cells.filter(Boolean).length;
-  assert.equal(calls.length, filled, "one rect per filled cell");
-  const cu = 10 * 0.8;
-  const ox = 100 - (grid.size * cu) / 2;
-  for (const [x, y, w, h] of calls) {
-    assert.ok(x >= ox - 1e-9 && y >= ox - 1e-9, "draw centered on the organism");
-    assert.equal(w, cu, "uniform cell unit");
-    assert.equal(h, cu, "uniform cell unit");
-  }
-  console.log("draw math: PASS");
+  console.log("phenotype presentation contract: PASS");
 }
 
 
@@ -213,7 +196,7 @@ function testAnchorHygiene() {
 testChainingAndOrphans();
 testCacheLifecycle();
 testCap();
-testDrawMath();
+testPhenotypePresentationContract();
 testWorldIsolation();
 testSaveRestoreContinuity();
 testAnchorHygiene();

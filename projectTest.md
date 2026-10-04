@@ -17,9 +17,9 @@ unit/CI shard the manifest routes for the diff.
   checkpoint round-trips, worker settlement
 - API Tests: typed contract boundaries (`typecheck`, `test:validation-arch`);
   no network API exists (offline-first)
-- UI Tests: browser class — `test:browser` (smoke), `test:mobile-ui`
-  (phone/tablet/desktop viewports), and `test:pixi-world` (inactive production
-  scaffold lifecycle/correctness)
+- UI Tests: browser class — `test:browser` (production Pixi smoke), `test:mobile-ui`
+  (phone/tablet/desktop viewports), and `test:pixi-world` (blocking production
+  Pixi module lifecycle/resource proof)
 - End-to-End Tests: CI shards (`quick`, `sim-*`, `build`, `presentation`,
   `smoke`, `android/*`); `pixi-world-proof` is blocking browser evidence,
   while human-review captures such as `visual-capture` and `pixi-capture`
@@ -56,7 +56,7 @@ authoritative for what is actually evidenced.
 |---|---|---|---|
 | TC-UX-001 | Browser smoke (REQ-UX-001) | Worker, canvas, control surface function in a real browser | Covered by `test:browser` |
 | TC-UX-002 | Mobile layouts (REQ-UX-001) | Phone/tablet/desktop viewports usable | Covered by `test:mobile-ui` |
-| TC-GRAPH-001 | Inactive Pixi scaffold lifecycle (REQ-GRAPH-001) | WebGL2 scaffold boots, resizes, uploads nearest textures, retires resources, and tears down without production World activation | Covered by blocking `test:pixi-world` / `pixi-world-proof` |
+| TC-GRAPH-001 | Production Pixi lifecycle/resources (REQ-GRAPH-001) | Pixi WebGL2 modules boot and resize, upload nearest textures, retire texture/source and world resources, and tear down; integrated World semantics are covered separately | Covered by blocking `test:pixi-world` / `pixi-world-proof`, `test:browser`, and `test:mobile-ui` |
 
 ## Bugs / Failed Tests
 

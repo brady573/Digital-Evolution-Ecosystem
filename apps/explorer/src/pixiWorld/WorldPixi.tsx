@@ -17,13 +17,33 @@ export function WorldPixi(_props: PixiWorldProps): ReactElement {
     let current = true;
     let ownedHandle: PixiWorldHandle | null = null;
     let ownedRenderer: WorldRenderer | null = null;
-    void bootPixiWorld(host, () => current).then((next) => {
+    let removeContextListeners = () => {};
+    const params = new URLSearchParams(window.location.search);
+    const forceTestFailure = params.has("deeTest") && params.has("deePixiFailure");
+    const boot = forceTestFailure
+      ? Promise.reject(new Error("test-only Pixi initialization failure"))
+      : bootPixiWorld(host, () => current);
+    void boot.then((next) => {
       if (!current) {
         next?.destroy();
         return;
       }
       ownedHandle = next;
       if (next) {
+        const canvas = next.app.canvas;
+        const onContextLost = (event: Event) => {
+          event.preventDefault();
+          if (current) setBackend("failed");
+        };
+        const onContextRestored = () => {
+          if (current) setBackend(next.backend);
+        };
+        canvas.addEventListener("webglcontextlost", onContextLost);
+        canvas.addEventListener("webglcontextrestored", onContextRestored);
+        removeContextListeners = () => {
+          canvas.removeEventListener("webglcontextlost", onContextLost);
+          canvas.removeEventListener("webglcontextrestored", onContextRestored);
+        };
         ownedRenderer = createWorldRenderer(next);
         rendererRef.current = ownedRenderer;
         ownedRenderer.update(latestPropsRef.current);
@@ -31,6 +51,16 @@ export function WorldPixi(_props: PixiWorldProps): ReactElement {
       }
     }).catch((error: unknown) => {
       if (current) {
+        removeContextListeners();
+        try {
+          if (ownedRenderer) ownedRenderer.destroy();
+          else ownedHandle?.destroy();
+        } catch (cleanupError) {
+          console.error("Pixi World failed to release renderer resources", cleanupError);
+        }
+        ownedRenderer = null;
+        ownedHandle = null;
+        rendererRef.current = null;
         setBackend("failed");
         console.error("Pixi World failed to initialize", error);
       }
@@ -38,6 +68,7 @@ export function WorldPixi(_props: PixiWorldProps): ReactElement {
 
     return () => {
       current = false;
+      removeContextListeners();
       ownedRenderer?.destroy();
       if (!ownedRenderer) ownedHandle?.destroy();
       if (rendererRef.current === ownedRenderer) rendererRef.current = null;
@@ -50,5 +81,17 @@ export function WorldPixi(_props: PixiWorldProps): ReactElement {
     rendererRef.current?.update(_props);
   });
 
-  return <div ref={hostRef} className="world-pixi-host" role="img" aria-label="Evolution world" data-renderer-backend={backend} />;
+  const failed = backend === "failed";
+  return <div
+    ref={hostRef}
+    className={`world-pixi-host${failed ? " renderer-failed" : ""}`}
+    role={failed ? undefined : "img"}
+    aria-label={failed ? undefined : "Evolution world"}
+    data-renderer-backend={backend}
+  >
+    {failed && <div className="world-renderer-failure" role="alert">
+      <strong>World display unavailable</strong>
+      <span>Simulation data and state remain intact. You can continue to use the Explorer controls.</span>
+    </div>}
+  </div>;
 }

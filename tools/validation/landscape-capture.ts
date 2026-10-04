@@ -7,7 +7,7 @@ import { ENGINE_VERSION } from "../../packages/sim-core/src/index.ts";
  * ecological landscape and the analytical views, at representative zooms and
  * viewports, on a fixed seed.
  *
- * Statistical canvas checks (see tools/validation/browser-smoke.ts and
+ * Statistical presented-frame checks (see tools/validation/browser-smoke.ts and
  * tools/validation/landscape.ts) can prove the landscape is structured, that
  * lenses differ, and that organisms stay readable. They cannot answer
  * whether the ordinary view *reads as an ecological landscape*. These
@@ -30,9 +30,14 @@ async function main(){
   try{
     const context=await browser.newContext({viewport:{width:1280,height:900},deviceScaleFactor:1});
     const page=await context.newPage();
-    // URL-gated test hook, not a product control (AC21).
+    // deeTest provides the runtime fixture hook only; production Pixi remains
+    // the semantic World renderer on this URL as well.
     await page.goto(`${baseUrl}?deeTest=1`,{waitUntil:"networkidle"});
     await page.getByLabel("Evolution world").waitFor();
+    const productionWorld=page.locator(".world-pixi-host");
+    await productionWorld.locator("canvas").waitFor();
+    if(await productionWorld.count()!==1||await page.locator("canvas.world-canvas").count()!==0)
+      throw new Error("production visual capture requires one Pixi World and no semantic Canvas World");
 
     // A fixed Patchwork world (the Slice 2 calibration config) on a fixed
     // seed, advanced until Metabolic Waste is measurably present, so the
@@ -69,23 +74,17 @@ async function main(){
       await page.getByRole("button",{name:lens,exact:true}).click();
       await page.waitForTimeout(250);
     };
-    // Waste load measured from the canvas, so "waste-modified" is a verified
-    // claim rather than a hopeful label.
-    const wasteInk=async()=>{
-      await pickLens("Waste");
-      await page.waitForTimeout(120);
-      return await world.evaluate((el:HTMLCanvasElement)=>{
-        const ctx=el.getContext("2d");if(!ctx)return 0;
-        const d=ctx.getImageData(0,0,el.width,el.height).data;
-        let lit=0;
-        for(let i=0;i<d.length;i+=4){
-          // Waste overlay ramps a lifted dark base up to a bright load, so
-          // "lit" means meaningfully above the empty-cell floor.
-          if(d[i]!>96)lit++;
+    // The authoritative read model establishes actual waste load; the
+    // presented-frame screenshot independently proves that Waste and normal
+    // World render as distinct visible modes.
+    const wasteCapacityFraction=async()=>await page.evaluate(()=>{
+        const waste=(window as any).__DEE_TEST__.readWorldState().environment.waste;
+        let stock=0,capacity=0;
+        for(let i=0;i<waste.stock.length;i++){
+          stock+=waste.stock[i]??0;capacity+=waste.capacity[i]??0;
         }
-        return lit/(d.length/4);
+        return capacity>0?stock/capacity:0;
       });
-    };
 
     // Pending decisions hard-pause the simulation, so a capture run that
     // ignores them would stall at the first event. Resolve with the first
@@ -122,10 +121,43 @@ async function main(){
       if(await settleDecision())continue;
       await pressRun(false);
       await page.waitForTimeout(350);
-      load=await wasteInk();
+      await pickLens("Waste");
+      await page.waitForTimeout(120);
+      load=await wasteCapacityFraction();
       if(load<0.10)await pressRun(true);
     }
     console.log(`waste coverage ${(load*100).toFixed(1)}% at tick ${await readTick()}`);
+
+    const compareFrame=async()=>{
+      await pickLens("Landscape");
+      const landscape=(await world.screenshot()).toString("base64");
+      await pickLens("Waste");
+      const waste=(await world.screenshot()).toString("base64");
+      const signatures=await page.evaluate(async({landscape,waste})=>{
+        const decode=(encoded:string)=>new Promise<number[]>((resolve,reject)=>{
+          const image=new Image();image.onerror=()=>reject(new Error("Could not decode presented World"));
+          image.onload=()=>{
+            const canvas=document.createElement("canvas");canvas.width=image.naturalWidth;canvas.height=image.naturalHeight;
+            const ctx=canvas.getContext("2d");if(!ctx){reject(new Error("Screenshot analysis canvas unavailable"));return;}
+            ctx.drawImage(image,0,0);const {data}=ctx.getImageData(0,0,canvas.width,canvas.height);
+            const out:number[]=[],n=32;
+            for(let y=0;y<n;y++)for(let x=0;x<n;x++){
+              const i=(Math.floor((y+.5)*canvas.height/n)*canvas.width+Math.floor((x+.5)*canvas.width/n))*4;
+              out.push(data[i]!,data[i+1]!,data[i+2]!);
+            }
+            resolve(out);
+          };
+          image.src=`data:image/png;base64,${encoded}`;
+        });
+        return {normal:await decode(landscape),waste:await decode(waste)};
+      },{landscape,waste});
+      return signatures;
+    };
+    const presentedModes=await compareFrame();
+    const visibleWasteDifference=presentedModes.normal.reduce((n,value,i)=>n+(value!==presentedModes.waste[i]?1:0),0);
+    if(!(load>0))throw new Error("authoritative environment contains no measurable waste for the production capture");
+    if(visibleWasteDifference===0)
+      throw new Error("presented production Pixi Waste lens did not differ from Landscape");
 
     // No phase 2: deliberately NOT searching for a niche record. The
     // establishment point (~tick 63k on this calibration) sits outside a
@@ -349,12 +381,14 @@ async function main(){
     writeFileSync(`${OUT_DIR}/MANIFEST.json`,JSON.stringify({
       seed:SEED,engine:ENGINE_VERSION,preset:"Patchwork",
       captureTick:await readTick().catch(()=>null),
-      wasteCellCoverage:+(load*100).toFixed(2),
+      meanWasteCapacityFraction:+load.toFixed(4),
+      presentedWasteLandscapeDifferingChannels:visibleWasteDifference,
+      presentedPixelSource:"Playwright Chromium element screenshots of production WorldPixi host",
       captures:written,
       nicheHistoryCapture:"omitted by decision: establishment occurs around tick 63k, outside a bounded interactive run. Deterministic establishment evidence lives in the engine/analysis validation and testdata/niche-survey-0.22.json; the history surface's record fields and causal caveat are covered there, not by a screenshot.",
       aftermathDevelopmentCapture:"captures are labeled deeTest-only synthetic presentation fixtures, not production findings; current contracts expose no stable identity link from a later ecological History record to this Aftermath.",
       aftermathSettlementCapture:"capture is a labeled deeTest presentation fixture with a synthetic horizon projection, not evidence that a live simulation reached 25,000 ticks; the real boundary is covered by deterministic projection tests.",
-      note:"Deterministic captures of the Slice 2 ecological landscape and Aftermath impact/observation states. Regenerate with pnpm test:visual against a preview server. wasteCellCoverage is the measured share of world cells whose waste overlay is lit, so 'waste-modified' is a measured claim rather than a label.",
+      note:"Captures of the production Pixi World and Aftermath impact/observation states. Regenerate with pnpm test:visual against a preview server. meanWasteCapacityFraction is read from the authoritative environment frame; presentedWasteLandscapeDifferingChannels compares Chromium-presented World screenshots and is not a biological measurement.",
     },null,2)+"\n");
   }finally{
     await browser.close();
