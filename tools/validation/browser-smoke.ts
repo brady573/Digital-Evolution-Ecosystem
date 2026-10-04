@@ -250,6 +250,24 @@ async function main(){
   const lensBefore=await deltaPage.locator(".lens-active").innerText().catch(()=>"(default)");
   const pixelsBefore=await sampleWorld();
   const lumaBefore=await meanLuma();
+  const readAuthoritativeResources=async()=>await deltaPage.evaluate(()=>{
+    const state=(window as any).__DEE_TEST__.readWorldState();
+    const field=state.environment.resources;
+    let total=0,count=0;
+    for(let kind=0;kind<field.stock.length;kind++)for(let cell=0;cell<field.gridSize*field.gridSize;cell++){
+      const cap=field.capacity[kind]?.[cell]??0;
+      if(cap>1e-9){total+=(field.stock[kind]?.[cell]??0)/cap;count++;}
+    }
+    return {worldId:state.worldId,tick:state.tick,environmentTick:state.environment.tick,meanFraction:total/count};
+  });
+  const authoritativeBefore=await readAuthoritativeResources();
+  assert.equal(await deltaPage.locator(".world-pixi-host canvas").count(),1,"same-state comparison begins in Pixi");
+  await deltaPage.evaluate(()=>((window as any).__DEE_TEST__).setRenderer("canvas"));
+  await deltaPage.locator("canvas.world-canvas").waitFor();
+  assert.deepEqual(await readAuthoritativeResources(),authoritativeBefore,"renderer substitution preserves authoritative read-model state");
+  const canvasPixelsBefore=await sampleWorld();
+  await deltaPage.evaluate(()=>((window as any).__DEE_TEST__).setRenderer("pixi"));
+  await deltaPage.locator(".world-pixi-host canvas").waitFor();
   // A real intervention, so the retained baseline and "Now" genuinely differ.
   // Chosen by intent rather than index, so a catalog reordering cannot silently
   // turn this into a no-intervention resolution.
@@ -262,6 +280,11 @@ async function main(){
   // Still zero ticks: the world has not advanced past the resolution, so every
   // pixel difference below is the intervention and nothing else.
   assert.equal(await tick(deltaPage),decisionTick,"the world is still at the resolution tick while the sheet is open");
+  const authoritativeAfter=await readAuthoritativeResources();
+  assert.equal(authoritativeAfter.worldId,authoritativeBefore.worldId,"resource comparison remains in the same world");
+  assert.equal(authoritativeAfter.tick,authoritativeBefore.tick,"resource comparison remains at the same live tick");
+  assert.ok(authoritativeAfter.meanFraction<authoritativeBefore.meanFraction,
+    `authoritative resource fractions decrease at the intervention tick (${authoritativeBefore.meanFraction} -> ${authoritativeAfter.meanFraction}; env tick ${authoritativeBefore.environmentTick} -> ${authoritativeAfter.environmentTick})`);
   // Wait for the renderer to actually repaint before sampling. The substrate is
   // rebuilt into an offscreen buffer and blitted in an effect after the snapshot
   // lands, so the canvas can still be showing the previous field at this instant.
@@ -276,6 +299,28 @@ async function main(){
     pixelsAfter=await sampleWorld();
   }
   assert.ok(changed(),"the normal World repaints with the new field after the intervention");
+  const pixelsAfterPixi=pixelsAfter;
+  await deltaPage.evaluate(()=>((window as any).__DEE_TEST__).setRenderer("canvas"));
+  await deltaPage.locator("canvas.world-canvas").waitFor();
+  const pixelsAfterCanvas=await sampleWorld();
+  assert.equal(await tick(deltaPage),decisionTick,"Canvas2D comparison also remains at the resolution tick");
+  const depletionCounts=(before:number[],after:number[])=>{
+    let lost=0,gained=0;
+    for(let i=0;i<before.length;i+=3){
+      const db=Math.hypot(before[i]!-BARE_RGB[0],before[i+1]!-BARE_RGB[1],before[i+2]!-BARE_RGB[2]);
+      const da=Math.hypot(after[i]!-BARE_RGB[0],after[i+1]!-BARE_RGB[1],after[i+2]!-BARE_RGB[2]);
+      if(da<db-6)lost++;else if(da>db+6)gained++;
+    }
+    return {lost,gained};
+  };
+  const canvasDepletion=depletionCounts(canvasPixelsBefore,pixelsAfterCanvas);
+  const sampleCount=pixelsBefore.length/3;
+  assert.ok(canvasDepletion.lost>0,
+    `same-state Canvas2D shows resource material loss (${canvasDepletion.lost}/${sampleCount} toward bare, ${canvasDepletion.gained} away)`);
+  assert.ok(canvasDepletion.lost>canvasDepletion.gained*3
+    &&canvasDepletion.lost/sampleCount>0.25,
+    `same-state Canvas2D preserves the established predominant-loss assertion (${canvasDepletion.lost} lost vs ${canvasDepletion.gained} gained)`);
+  console.log(`same-state depletion samples: Canvas2D ${canvasDepletion.lost} toward bare / ${canvasDepletion.gained} away; Pixi pending`);
   const lumaAfter=await meanLuma();
   // Directional tally against the bare-substrate reference.
   // The bare reference comes from the module, never from a literal here. A stale
@@ -288,6 +333,8 @@ async function main(){
     if(da<db-6){lost++;totalShift+=db-da;}
     else if(da>db+6){gained++;totalShift-=da-db;}
   }
+  const pixiDepletion=depletionCounts(pixelsBefore,pixelsAfterPixi);
+  console.log(`same-state depletion samples: Pixi ${pixiDepletion.lost} toward bare / ${pixiDepletion.gained} away`);
   const samples=pixelsBefore.length/3;
   assert.ok(lost>0,
     `resource material visibly diminishes in the NORMAL World (${lost}/${samples} samples moved toward bare, ${gained} away)`);

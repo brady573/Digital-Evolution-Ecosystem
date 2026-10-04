@@ -532,6 +532,7 @@ export function App(){
   const [moreOpen,setMoreOpen]=useState(false);
   const [resourceView,setResourceView]=useState<ResourceView>("combined");
   const [traitView,setTraitView]=useState<TraitView>("speed");
+  const [testRenderer,setTestRenderer]=useState<"canvas"|"pixi">("pixi");
   const [selectedId,setSelectedId]=useState<OrganismId|null>(null);
   const [selectedStoryId,setSelectedStoryId]=useState<HistoryRecordId|null>(null);
   const [aftermathPresentation,setAftermathPresentation]=useState<AftermathPresentationState|null>(null);
@@ -710,10 +711,16 @@ export function App(){
       clearRetainedDetail:()=>setSnapshot(null),
       retainedAftermathPhase:()=>snapshotRef.current?.aftermath?.phase??null,
       killWorker:()=>instrumentedRef.current?.fail("error"),
+      setRenderer:(renderer:"canvas"|"pixi")=>setTestRenderer(renderer),
+      readWorldState:()=>({
+        tick:presentation.live?.tick??null,
+        worldId:presentation.identity?.worldId??null,
+        environment:presentation.environment??null,
+      }),
     };
     (window as any).__DEE_TEST__=hook;
     return()=>{delete (window as any).__DEE_TEST__};
-  },[runtime]);
+  },[runtime,presentation]);
 
   // Lane 3 Task 6: retained/detail path (handoff §5–§6). Analysis records and
   // the full decision history deliberately stay out of live-frame traffic,
@@ -892,7 +899,9 @@ export function App(){
   // P1.5 validation seam only: production remains on the maintained Canvas2D
   // World. The test route substitutes Pixi in the same slot and feeds it the
   // same React-owned read-model state; this is not a product renderer setting.
-  const testPixiWorld=typeof window!=="undefined"&&new URLSearchParams(window.location.search).has("deeTest");
+  const testPixiWorld=typeof window!=="undefined"
+    &&new URLSearchParams(window.location.search).has("deeTest")
+    &&testRenderer==="pixi";
   const pixiWorldProps:PixiWorldProps={
     worldId:ident.worldId,
     tick:live.tick,
