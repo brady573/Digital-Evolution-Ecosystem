@@ -19,3 +19,14 @@ export function sameNormalFieldInput(
 ): boolean {
   return previous !== null && previous.liveTick === liveTick && previous.fieldIdentity === fieldIdentity;
 }
+
+/** A changed authoritative field at the same environment tick is a discontinuity, not temporal evolution. */
+export function sameTickEnvironmentDiscontinuity(
+  previous: { readonly environmentTick: number; readonly fieldIdentity: string } | null,
+  nextEnvironmentTick: number,
+  nextFieldIdentity: string,
+): boolean {
+  return previous !== null
+    && previous.environmentTick === nextEnvironmentTick
+    && previous.fieldIdentity !== nextFieldIdentity;
+}

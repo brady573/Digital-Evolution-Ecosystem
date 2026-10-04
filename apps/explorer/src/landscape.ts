@@ -134,7 +134,7 @@ export class LandscapeSmoother {
     strength = 0.35,
   ): Float32Array {
     const rewind = this.#primed && tick < this.#tick;
-    if (this.#identity !== identity || rewind) {
+    if (!this.#primed || this.#identity !== identity || rewind) {
       this.#identity = identity;
       const v = this.#values;
       // The buffer is interleaved (four channels per cell), so priming must

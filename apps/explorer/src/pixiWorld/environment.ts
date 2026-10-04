@@ -1,7 +1,12 @@
 import type { WorldEnvironmentFrame } from "@digital-evolution/contracts";
 import { Container, Sprite, Texture } from "pixi.js";
 import { fillEnvironmentFractions, landscapeCell, LandscapeSmoother, microTexture, nutrientOverlayCell, wasteOverlayCell } from "../landscape";
-import { environmentIdentity, environmentMatchesWorld, sameNormalFieldInput } from "./environmentIdentity";
+import {
+  environmentIdentity,
+  environmentMatchesWorld,
+  sameNormalFieldInput,
+  sameTickEnvironmentDiscontinuity,
+} from "./environmentIdentity";
 import { WORLD_EXTENT } from "./layers";
 import { torusTilePositions, type WorldCamera } from "./camera";
 
@@ -40,7 +45,12 @@ interface EnvironmentState {
 
 const stateByLayer = new WeakMap<Container, EnvironmentState>();
 const normalSmootherByWorld = new Map<string, LandscapeSmoother>();
-const normalFieldByWorld = new Map<string, { liveTick: number; fieldIdentity: string; values: Float32Array }>();
+const normalFieldByWorld = new Map<string, {
+  liveTick: number;
+  environmentTick: number;
+  fieldIdentity: string;
+  values: Float32Array;
+}>();
 const wasteCueByLayer = new WeakMap<Container, { signature: string; sprites: Sprite[]; texture: Texture; creates: number }>();
 
 function reconcileTiles(
@@ -106,9 +116,16 @@ export function updateEnvironmentLayer(layer: Container, input: EnvironmentInput
       normalSmootherByWorld.set(worldKey, smoother);
     }
     let cached = normalFieldByWorld.get(worldKey);
+    if (sameTickEnvironmentDiscontinuity(cached ?? null, env.tick, fieldIdentity)) {
+      // Same authoritative tick means no simulation time elapsed between
+      // these materially different fields. Do not blend an intervention's
+      // direct effect through unrelated temporal smoothing history.
+      smoother.reset(worldKey);
+    }
     if (!sameNormalFieldInput(cached ?? null, input.tick, fieldIdentity)) {
       cached = {
         liveTick: input.tick,
+        environmentTick: env.tick,
         fieldIdentity,
         values: Float32Array.from(smoother.advance(`w${env.worldId}`, input.tick, a, b, c, waste, 0.35)),
       };

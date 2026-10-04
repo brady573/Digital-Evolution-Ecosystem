@@ -52,7 +52,13 @@ import {
 } from "../../apps/explorer/src/pixi/layers.ts";
 import { ASSET_REGISTRY, registryManifestIds } from "../../apps/explorer/src/pixi/assetRegistry.ts";
 import { toTextureRequests } from "../../apps/explorer/src/pixi/adapter.ts";
-import { environmentIdentity, environmentMatchesWorld, sameNormalFieldInput } from "../../apps/explorer/src/pixiWorld/environmentIdentity.ts";
+import {
+  environmentIdentity,
+  environmentMatchesWorld,
+  sameNormalFieldInput,
+  sameTickEnvironmentDiscontinuity,
+} from "../../apps/explorer/src/pixiWorld/environmentIdentity.ts";
+import { LandscapeSmoother } from "../../apps/explorer/src/landscape.ts";
 import { hitTestOrganism, selectAtScreenPoint } from "../../apps/explorer/src/pixiWorld/interaction.ts";
 import { dormantChannel, organismColor } from "../../apps/explorer/src/organismEncoding.ts";
 import { updateOrganismLayer, destroyOrganismLayer, type OrganismTextureFactory } from "../../apps/explorer/src/pixiWorld/organisms.ts";
@@ -76,6 +82,27 @@ const pixiDir = join(root, "apps/explorer/src/pixi");
     "camera/viewport-only changes must reuse the current normal smoothing result");
   assert.equal(sameNormalFieldInput({ liveTick: 12, fieldIdentity: "world-4/channel-10/raw-A" }, 13, "world-4/channel-10/raw-A"), false,
     "a new live tick may advance the normal smoothing result");
+  assert.equal(sameTickEnvironmentDiscontinuity(null, 10, "field-A"), false, "first observation is a prime, not a replacement");
+  assert.equal(sameTickEnvironmentDiscontinuity({ environmentTick: 10, fieldIdentity: "field-A" }, 10, "field-B"), true,
+    "material field replacement at the same authoritative tick is a discontinuity");
+  assert.equal(sameTickEnvironmentDiscontinuity({ environmentTick: 10, fieldIdentity: "field-A" }, 11, "field-B"), false,
+    "advancing authoritative ticks preserve ordinary temporal smoothing");
+  assert.equal(sameTickEnvironmentDiscontinuity({ environmentTick: 10, fieldIdentity: "field-A" }, 10, "field-A"), false,
+    "same-tick unchanged fields do not reset smoothing");
+
+  const smoother = new LandscapeSmoother(1);
+  const uniform = (value: number) => new Float32Array([value]);
+  const warm = uniform(0.9), depleted = uniform(0.1);
+  smoother.advance("world-4", 10, warm, warm, warm, warm);
+  const ordinaryAdvance = smoother.advance("world-4", 11, depleted, depleted, depleted, depleted);
+  assert.ok(ordinaryAdvance[0]! > 0.1 && ordinaryAdvance[0]! < 0.9,
+    "ordinary advancing-tick changes continue to smooth");
+  if (sameTickEnvironmentDiscontinuity({ environmentTick: 11, fieldIdentity: "field-A" }, 11, "field-B")) {
+    smoother.reset("world-4");
+  }
+  const discontinuity = smoother.advance("world-4", 11, depleted, depleted, depleted, depleted);
+  for (const channel of discontinuity) assert.ok(Math.abs(channel - 0.1) < 1e-6,
+    "same-tick replacement re-primes all normal environment channels exactly");
   console.log("p1 environment identity: PASS (environment channel tick/world/lens, not live cadence)");
 }
 
