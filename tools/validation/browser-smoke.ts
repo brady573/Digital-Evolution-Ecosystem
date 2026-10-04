@@ -493,30 +493,37 @@ async function main(){
     // Lane 2 M4B: the normal lens delegates morphology to the phenotype
     // engine while every other lens keeps the legacy voxel path. Both must
     // paint in-browser, render differently, and survive inspection zoom.
-    const worldInk=()=>page.evaluate(`(()=>{
-      const host=document.querySelector('.world-pixi-host');
-      const c=host?host.querySelector('canvas'):document.querySelector('canvas[aria-label="Evolution world"]');
-      const ctx=c.getContext('2d',{willReadFrequently:true});
-      let d;
-      if(ctx)d=ctx.getImageData(0,0,c.width,c.height).data;
-      else{
-        const gl=c.getContext('webgl2');if(!gl)throw new Error('World has neither 2D nor WebGL2 pixels');
-        d=new Uint8Array(c.width*c.height*4);gl.readPixels(0,0,c.width,c.height,gl.RGBA,gl.UNSIGNED_BYTE,d);
-      }
-      let bright=0;const sig=[];
-      const nx=32,ny=18;
-      for(let gy=0;gy<ny;gy++)for(let gx=0;gx<nx;gx++){
-        let sum=0,n=0;
-        const x0=Math.floor(gx*c.width/nx),x1=Math.floor((gx+1)*c.width/nx);
-        const y0=Math.floor(gy*c.height/ny),y1=Math.floor((gy+1)*c.height/ny);
-        for(let y=y0;y<y1;y+=3)for(let x=x0;x<x1;x+=3){
-          const i=(y*c.width+x)*4,l=(d[i]+d[i+1]+d[i+2])/3;
-          sum+=l;n++;if(l>90)bright++;
-        }
-        sig.push(Math.round(sum/Math.max(1,n)));
-      }
-      return{bright,sig};
-    })()`) as Promise<{bright:number;sig:number[]}>;
+    const worldInk=async()=>{
+      // Measure Chromium's presented World pixels for both renderers. Reading
+      // Pixi's WebGL default framebuffer directly is not reliable after its
+      // drawing buffer has been presented/discarded.
+      const screenshot=await page.getByLabel("Evolution world").screenshot();
+      return await page.evaluate(({encoded})=>new Promise<{bright:number;sig:number[]}>((resolve,reject)=>{
+        const image=new Image();
+        image.onerror=()=>reject(new Error("Could not decode browser-captured World"));
+        image.onload=()=>{
+          const canvas=document.createElement("canvas");canvas.width=image.naturalWidth;canvas.height=image.naturalHeight;
+          const context=canvas.getContext("2d",{willReadFrequently:true});
+          if(!context){reject(new Error("2D canvas unavailable for screenshot sampling"));return;}
+          context.drawImage(image,0,0);
+          const {data}=context.getImageData(0,0,canvas.width,canvas.height);
+          let bright=0;const sig=[];
+          const nx=32,ny=18;
+          for(let gy=0;gy<ny;gy++)for(let gx=0;gx<nx;gx++){
+            let sum=0,n=0;
+            const x0=Math.floor(gx*canvas.width/nx),x1=Math.floor((gx+1)*canvas.width/nx);
+            const y0=Math.floor(gy*canvas.height/ny),y1=Math.floor((gy+1)*canvas.height/ny);
+            for(let y=y0;y<y1;y+=3)for(let x=x0;x<x1;x+=3){
+              const i=(y*canvas.width+x)*4,l=(data[i]!+data[i+1]!+data[i+2]!)/3;
+              sum+=l;n++;if(l>90)bright++;
+            }
+            sig.push(Math.round(sum/Math.max(1,n)));
+          }
+          resolve({bright,sig});
+        };
+        image.src=`data:image/png;base64,${encoded}`;
+      }),{encoded:screenshot.toString("base64")});
+    };
     await page.getByRole("button",{name:"Landscape",exact:true}).click();
     await page.waitForTimeout(300);
     const normalInk=await worldInk();
