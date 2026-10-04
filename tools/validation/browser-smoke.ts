@@ -214,39 +214,39 @@ async function main(){
   // same interpolated cells. Zero ticks separate the two captures, so organisms
   // have not moved and any difference is the field itself.
   const GRID = 40;
-  const sampleWorld=async()=>await deltaPage.getByLabel("Evolution world").evaluate((el:HTMLElement,g:number)=>{
-    const canvas=el instanceof HTMLCanvasElement?el:el.querySelector("canvas")!;
-    const ctx=canvas.getContext("2d");
-    let d:Uint8ClampedArray|Uint8Array;
-    if(ctx)d=ctx.getImageData(0,0,canvas.width,canvas.height).data;
-    else{
-      const gl=canvas.getContext("webgl2");if(!gl)throw new Error("World has neither 2D nor WebGL2 pixels");
-      const pixels=new Uint8Array(canvas.width*canvas.height*4);
-      gl.readPixels(0,0,canvas.width,canvas.height,gl.RGBA,gl.UNSIGNED_BYTE,pixels);d=pixels;
-    }
-    const out:number[]=[];
-    for(let gy=0;gy<g;gy++){
-      for(let gx=0;gx<g;gx++){
-        const px=Math.floor((gx+0.5)*canvas.width/g),py=Math.floor((gy+0.5)*canvas.height/g);
-        const i=(py*canvas.width+px)*4;
-        out.push(d[i]!,d[i+1]!,d[i+2]!);
-      }
-    }
-    return out;
-  },GRID);
-  const meanLuma=async()=>await deltaPage.getByLabel("Evolution world").evaluate((el:HTMLElement)=>{
-    const canvas=el instanceof HTMLCanvasElement?el:el.querySelector("canvas")!;
-    const ctx=canvas.getContext("2d");
-    let d:Uint8ClampedArray|Uint8Array;
-    if(ctx)d=ctx.getImageData(0,0,canvas.width,canvas.height).data;
-    else{
-      const gl=canvas.getContext("webgl2");if(!gl)throw new Error("World has neither 2D nor WebGL2 pixels");
-      const pixels=new Uint8Array(canvas.width*canvas.height*4);
-      gl.readPixels(0,0,canvas.width,canvas.height,gl.RGBA,gl.UNSIGNED_BYTE,pixels);d=pixels;
-    }
-    let sum=0;for(let i=0;i<d.length;i+=4)sum+=0.2126*d[i]!+0.7152*d[i+1]!+0.0722*d[i+2]!;
-    return sum/(d.length/4);
-  });
+  // Use Chromium's captured output for both renderers. Direct WebGL
+  // readPixels observes the default drawing buffer, which may be discarded
+  // after presentation (and can therefore report stale/blank data even when
+  // the user-visible canvas changed).
+  const captureWorld=async(mode:"grid"|"mean")=>{
+    const screenshot=await deltaPage.getByLabel("Evolution world").screenshot();
+    const base64=screenshot.toString("base64");
+    return await deltaPage.evaluate(({encoded,g,mode})=>new Promise<number[]|number>((resolve,reject)=>{
+      const image=new Image();
+      image.onerror=()=>reject(new Error("Could not decode browser-captured World"));
+      image.onload=()=>{
+        const canvas=document.createElement("canvas");canvas.width=image.naturalWidth;canvas.height=image.naturalHeight;
+        const context=canvas.getContext("2d",{willReadFrequently:true});
+        if(!context){reject(new Error("2D canvas unavailable for screenshot sampling"));return;}
+        context.drawImage(image,0,0);
+        const {data}=context.getImageData(0,0,canvas.width,canvas.height);
+        if(mode==="mean"){
+          let sum=0;
+          for(let i=0;i<data.length;i+=4)sum+=0.2126*data[i]!+0.7152*data[i+1]!+0.0722*data[i+2]!;
+          resolve(sum/(data.length/4));return;
+        }
+        const out:number[]=[];
+        for(let gy=0;gy<g;gy++)for(let gx=0;gx<g;gx++){
+          const px=Math.floor((gx+0.5)*canvas.width/g),py=Math.floor((gy+0.5)*canvas.height/g);
+          const i=(py*canvas.width+px)*4;out.push(data[i]!,data[i+1]!,data[i+2]!);
+        }
+        resolve(out);
+      };
+      image.src=`data:image/png;base64,${encoded}`;
+    }),{encoded:base64,g:GRID,mode});
+  };
+  const sampleWorld=async()=>await captureWorld("grid") as number[];
+  const meanLuma=async()=>await captureWorld("mean") as number;
   const lensBefore=await deltaPage.locator(".lens-active").innerText().catch(()=>"(default)");
   const pixelsBefore=await sampleWorld();
   const lumaBefore=await meanLuma();
