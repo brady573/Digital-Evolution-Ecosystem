@@ -1134,6 +1134,34 @@ function testStaggeredEmissionCadence() {
   assert.equal(counts.identity, 0, "identity never resends mid-world");
 }
 
+function testManualInterventionReemitsEnvironmentAtSameTick() {
+  const session = liveSession();
+  session.handle({ type: "ADVANCE_TICKS", ticks: 1 });
+  const tick = session.snapshot().tick;
+  const before = buildEnvironment(session.snapshot());
+  const beforeStock = before.resources.stock.flat().reduce((sum, value) => sum + value, 0);
+  const store = createPresentationStore();
+  const initialFrames = buildPresentation(session.snapshot());
+  for (const frame of [initialFrames.identity, initialFrames.catalog, initialFrames.live, initialFrames.environment, initialFrames.interpretation]) {
+    store.apply(frame);
+  }
+  const quiet = session.handle({ type: "ADVANCE_TICKS", ticks: 0 });
+  assert.ok(!quiet.some((response) => response.type === "PRESENTATION" && "resources" in response.frame),
+    "unchanged zero-tick advance keeps environment cadence suppressed");
+
+  const changed = session.handle({ type: "APPLY_INTERVENTION", intervention: "global" });
+  const environment = changed.find((response) => response.type === "PRESENTATION" && "resources" in response.frame);
+  assert.ok(environment && environment.type === "PRESENTATION", "manual resource mutation republishes the environment frame");
+  assert.equal(environment.frame.tick, tick, "same-tick environment re-emission retains the authoritative tick");
+  store.apply(environment.frame);
+  assert.equal(store.getView().environment?.tick, tick, "presentation store accepts same-tick environment reapplication");
+  assert.notDeepEqual(store.getView().environment?.resources, before.resources,
+    "same-tick reapplication replaces the store's old environment payload");
+  const afterStock = environment.frame.resources.stock.flat().reduce((sum, value) => sum + value, 0);
+  assert.ok(afterStock < beforeStock, `manual nutrient crash reduces resource stock (${beforeStock} -> ${afterStock})`);
+  assert.equal(session.snapshot().tick, tick, "manual intervention does not advance simulation time");
+}
+
 /**
  * PR-review finding (fix-wave 2): the catalog change signature watched
  * organism membership only, but cladeId can change while the same organisms
@@ -1812,6 +1840,7 @@ async function main() {
   await testDetailRequestSettlesOnItsCorrelatedReply();
   testLiveDeliveryScalesWithLiveInformation();
   testStaggeredEmissionCadence();
+  testManualInterventionReemitsEnvironmentAtSameTick();
   testCladeEstablishmentReemitsCatalogWithConstantMembership();
   testFirstPaintConvergesAndStaysConverged();
   testIdentityArrivalResetsCoherenceToTheNewWorld();

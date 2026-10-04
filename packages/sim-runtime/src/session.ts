@@ -256,7 +256,8 @@ const canonicalizationContext = (): CanonicalizationContext => {
  *   differs from last emitted — so a lineage-establishment reassignment
  *   resends even with zero arrivals or removals;
  * - environment: when the snapshot tick has moved at least
- *   ENVIRONMENT_PERIOD_TICKS past the last emitted environment tick;
+ *   ENVIRONMENT_PERIOD_TICKS past the last emitted environment tick, or an
+ *   environment-mutating command has explicitly invalidated the channel;
  * - interpretation: when its bounded payload (envelope stripped) differs
  *   from last emitted, or identity changed;
  * - live: every advance — the per-advance heartbeat Explorer releases
@@ -274,6 +275,7 @@ function selectEmission(
   snapshot: RenderSnapshot,
   memory: EmissionMemory,
   isAdvance: boolean,
+  environmentChanged: boolean,
 ): RuntimeResponse[] {
   const frames = buildPresentation(snapshot);
   const worldChanged = memory.worldId !== snapshot.worldId;
@@ -308,7 +310,7 @@ function selectEmission(
   }
   // Live always: the heartbeat every advance carries, backpressure included.
   out.push({ type: "PRESENTATION", frame: frames.live });
-  if (memory.environmentTick === null || snapshot.tick - memory.environmentTick >= ENVIRONMENT_PERIOD_TICKS) {
+  if (environmentChanged || memory.environmentTick === null || snapshot.tick - memory.environmentTick >= ENVIRONMENT_PERIOD_TICKS) {
     out.push({ type: "PRESENTATION", frame: frames.environment });
     memory.environmentTick = snapshot.tick;
   }
@@ -365,10 +367,16 @@ export class UniverseSession {
     environmentTick: null,
     interpretationKey: null,
   };
+  /** Pending environment mutations bypass tick cadence once, then clear on emission. */
+  #environmentDirty = false;
 
   /** Emit this snapshot's read-model frames on the staggered cadence. */
   #emit(snapshot: RenderSnapshot, isAdvance: boolean): RuntimeResponse[] {
-    return selectEmission(snapshot, this.#emission, isAdvance);
+    const responses = selectEmission(snapshot, this.#emission, isAdvance, this.#environmentDirty);
+    if (responses.some((response) => response.type === "PRESENTATION" && "resources" in response.frame)) {
+      this.#environmentDirty = false;
+    }
+    return responses;
   }
 
   /** M3 aftermath under observation, entered at decision resolution.
@@ -404,6 +412,7 @@ export class UniverseSession {
     this.#pendingDecision=null;
     this.#decisionResolutions=[];
     this.#aftermath=null;
+    this.#environmentDirty=false;
     this.#policyVersion=DECISION_POLICY_VERSION;
     this.#catalystPolicyVersion=CATALYST_POLICY_VERSION;
     this.#lastDecisionTick=0;
@@ -634,6 +643,7 @@ export class UniverseSession {
     // the selected effect; a manual experiment leaves no invented outcome view.
     this.#aftermath=null;
     this.#experiment.catalyst(engineCatalystModeFor(spec),provenance);
+    this.#environmentDirty=true;
     return this.snapshot();
   }
 
@@ -896,6 +906,7 @@ export class UniverseSession {
     // record still reads from `decisions.resolutions`. Presenting the retained
     // baseline across a save is a later, separate contract.
     this.#aftermath=null;
+    this.#environmentDirty=false;
     this.#control=prepared.control;
     this.#controlAnalysis=prepared.controlAnalysis;
     this.#pendingDecision=prepared.decisions.pending;
