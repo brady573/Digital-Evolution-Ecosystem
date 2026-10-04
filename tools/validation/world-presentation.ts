@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import type { RenderSnapshot } from "../../packages/contracts/src/index.ts";
 import { projectWorldPresentation } from "../../apps/explorer/src/experience/worldProjection.ts";
 
@@ -60,7 +62,40 @@ function testQuietEnvironmentProjectsNoResourceOrWasteLoad() {
   assert.deepEqual([...projection.waste], [0, 0, 0, 0]);
 }
 
-testSnapshotProjectsNormalizedLocalFields();
-testProjectionTracksChangedWasteOnlyAtChangedCells();
-testQuietEnvironmentProjectsNoResourceOrWasteLoad();
-console.log("world presentation projection: PASS");
+async function testDeterministicWorldVisualFixtures() {
+  const fixturePath = new URL("./world-visual-fixtures.ts", import.meta.url);
+  assert.ok(existsSync(fileURLToPath(fixturePath)), "deterministic World visual fixture builder exists");
+  const { createWorldVisualFixtures, WORLD_VISUAL_CAPTURE_CASES } = await import("./world-visual-fixtures.ts");
+  const first = createWorldVisualFixtures();
+  const second = createWorldVisualFixtures();
+  assert.deepEqual(first, second, "fixture input is deterministic across calls");
+  assert.deepEqual([...new Set(first.families.map((fixture) => fixture.phenotype.family))].sort(),
+    ["blob", "branching", "paddled", "plated", "radial", "segmented"], "fixture set includes all six resolved families");
+  assert.ok(first.families.every((fixture) => fixture.family === fixture.phenotype.family),
+    "each named family fixture carries a resolved phenotype from that family");
+  assert.ok(first.activity.organisms.some((organism) => organism.activity === "active"));
+  assert.ok(first.activity.organisms.some((organism) => organism.activity === "dormant"));
+  assert.deepEqual(first.activity.organisms.map((organism) => first.activity.resolvedPhenotypes.get(Number(organism.id))?.family),
+    ["blob", "blob"], "active/dormant pair holds phenotype family constant");
+  assert.ok(first.sparse.organisms.length < first.dense.organisms.length, "sparse and dense scenes differ in count");
+  assert.equal(first.sparse.organisms.length, 24, "sparse fixture is a small colony");
+  assert.equal(first.dense.organisms.length, 900, "dense fixture is crowded enough to review overlap without a population cap");
+  assert.ok(first.rich.resources.stock[0]![0]! > first.depleted.resources.stock[0]![0]!,
+    "rich and depleted fields differ in authoritative-shaped stock");
+  assert.ok(Array.isArray(WORLD_VISUAL_CAPTURE_CASES), "deterministic capture case manifest is exported");
+  assert.deepEqual(WORLD_VISUAL_CAPTURE_CASES.map((item) => item.id), [
+    "phone-six-families-1x", "phone-active-dormant", "phone-sparse", "phone-dense",
+    "phone-rich", "phone-depleted", "desktop-sanity",
+  ], "capture manifest has every required deterministic renderer fixture");
+  console.log("deterministic World visual fixtures: PASS");
+}
+
+async function main() {
+  testSnapshotProjectsNormalizedLocalFields();
+  testProjectionTracksChangedWasteOnlyAtChangedCells();
+  testQuietEnvironmentProjectsNoResourceOrWasteLoad();
+  await testDeterministicWorldVisualFixtures();
+  console.log("world presentation projection: PASS");
+}
+
+void main();
