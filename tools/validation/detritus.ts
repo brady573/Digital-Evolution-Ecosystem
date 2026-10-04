@@ -445,7 +445,16 @@ function testScaleThroughput() {
   // generous shared-runner-safe ratio bound. 5k populations are not
   // reachable in calibration configs (worlds peak ~1.4k) — recorded as a
   // known limitation, not asserted.
-  const sim = new Simulation(config(111111111, { start: 0.62, prod: 0.86, patch: 0.9, pop: 34, div: 0.45 })) as any;
+  // Workload re-derivation (2B engine): the Slice 2 workload (prod 0.86,
+  // press 1.0875) reached 1211 @40k under the pre-2B engine but only 875
+  // under R1-threshold (worktree-verified, same seed 111111111) — the 2B
+  // biology suppresses this rich world's equilibrium ~30% (reported as a
+  // trajectory consequence in the return package, not hidden). K tests
+  // throughput, not biology, so the workload is restored with the same
+  // seed and modestly richer/easier terms (prod 1.1, press 0.95):
+  // 1235 @40k locally, matching the original workload size. Engine and
+  // cost bars unchanged.
+  const sim = new Simulation(config(111111111, { start: 0.62, prod: 1.1, patch: 0.9, pop: 34, div: 0.45, press: 0.95 })) as any;
   for (let t = 0; t < 40000; t++) sim.step();
   assert.ok(sim.o.length >= 1000, `thousands-scale workload (pop ${sim.o.length})`);
   const time = (s: any, n: number): number => { const t0 = Date.now(); for (let i = 0; i < n; i++) s.step(); return Date.now() - t0; };
