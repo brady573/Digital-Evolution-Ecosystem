@@ -1274,13 +1274,16 @@ async function main(){
 async function runLandscapeChecks(context:import("playwright").BrowserContext){
   const page=await context.newPage();
   await page.goto(baseUrl,{waitUntil:"networkidle"});
-  await page.getByLabel("Evolution world").waitFor();
+  const canvasWorld=page.locator("canvas.world-canvas");
+  await canvasWorld.waitFor();
+  assert.equal(await canvasWorld.count(),1,"Canvas landscape baseline mounts exactly one maintained World canvas");
+  assert.equal(await page.locator(".world-pixi-host").count(),0,"Canvas landscape baseline does not mount Pixi");
   // Waste exists and grows in this world; the landscape must reflect it.
   await page.getByRole("button",{name:"Play"}).click();
   await page.waitForTimeout(1200);
   await page.getByRole("button",{name:"Pause"}).click();
   await settlePaused(page);
-  const world=page.getByLabel("Evolution world");
+  const world=canvasWorld;
 
   // Ink statistics over the drawn canvas: a mean/contrast pair that would
   // catch a flat field, a black field, or a field that ignores waste.
@@ -1392,7 +1395,7 @@ async function runLandscapeChecks(context:import("playwright").BrowserContext){
     await p.getByRole("button",{name:"Create universe"}).click();
     await p.getByRole("button",{name:"Landscape"}).click();
     await p.waitForTimeout(500);
-    return p.getByLabel("Evolution world");
+    return p.locator("canvas.world-canvas");
   };
 
   // World A, with enough rendered history for the smoother to hold real
@@ -1407,8 +1410,11 @@ async function runLandscapeChecks(context:import("playwright").BrowserContext){
 
   // Path 2: a fresh page that has only ever seen B.
   const cleanPage=await context.newPage();
-  await cleanPage.goto(`${baseUrl}?deeTest=1`,{waitUntil:"networkidle"});
-  await cleanPage.getByLabel("Evolution world").waitFor();
+  await cleanPage.goto(baseUrl,{waitUntil:"networkidle"});
+  const cleanWorld=cleanPage.locator("canvas.world-canvas");
+  await cleanWorld.waitFor();
+  assert.equal(await cleanWorld.count(),1,"clean landscape comparison stays on one Canvas2D World");
+  assert.equal(await cleanPage.locator(".world-pixi-host").count(),0,"clean landscape comparison keeps Pixi absent");
   const cleanCanvas=await switchToSeed(cleanPage,SEED_B);
   const clean=await ink(cleanCanvas);
   await cleanPage.close();
@@ -1435,12 +1441,15 @@ async function runLandscapeChecks(context:import("playwright").BrowserContext){
   const mobile=await context.newPage();
   await mobile.setViewportSize({width:390,height:844});
   await mobile.goto(baseUrl,{waitUntil:"networkidle"});
-  await mobile.getByLabel("Evolution world").waitFor();
+  const mobileWorld=mobile.locator("canvas.world-canvas");
+  await mobileWorld.waitFor();
+  assert.equal(await mobileWorld.count(),1,"phone landscape baseline mounts one Canvas2D World");
+  assert.equal(await mobile.locator(".world-pixi-host").count(),0,"phone landscape baseline keeps Pixi absent");
   await mobile.getByRole("button",{name:"Play"}).click();
   await mobile.waitForTimeout(1000);
   await mobile.getByRole("button",{name:"Pause"}).click();
   await settlePaused(mobile);
-  const mWorld=mobile.getByLabel("Evolution world");
+  const mWorld=mobileWorld;
   const mBox=await mWorld.boundingBox();
   const mvp=mobile.viewportSize()??{width:390,height:844};
   assert.ok(mBox&&mBox.height>=mvp.height*0.5,"landscape dominates the phone viewport");
