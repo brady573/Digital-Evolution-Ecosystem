@@ -49,6 +49,9 @@ export const PHENOTYPE_CELL_FRACTION: Record<LodTier, number> = {
   inspection: 0.35,
 };
 
+/** Ecosystem's raster may gain detail without changing its 5-cell footprint. */
+export const PHENOTYPE_FOOTPRINT_REFERENCE_SIZE = 5;
+
 export function tierForZoom(zoom: number): LodTier {
   return lodTierForZoom(zoom);
 }

@@ -61,7 +61,7 @@ import {
 import { LandscapeSmoother } from "../../apps/explorer/src/landscape.ts";
 import { hitTestOrganism, selectAtScreenPoint } from "../../apps/explorer/src/pixiWorld/interaction.ts";
 import { dormantChannel, organismColor } from "../../apps/explorer/src/organismEncoding.ts";
-import { PHENOTYPE_CELL_FRACTION } from "../../apps/explorer/src/phenotype.ts";
+import { PHENOTYPE_CELL_FRACTION, PHENOTYPE_FOOTPRINT_REFERENCE_SIZE } from "../../apps/explorer/src/phenotype.ts";
 import { updateOrganismLayer, destroyOrganismLayer, type OrganismTextureFactory } from "../../apps/explorer/src/pixiWorld/organisms.ts";
 import { Container, Graphics, Sprite, Texture } from "pixi.js";
 
@@ -173,7 +173,7 @@ function traitsForAxes(mob: number, sen: number, met: number, spec: number) {
       assert.equal(gridBits(g), a.bits, `bits match renderer ${tier}/${act}`);
     }
   }
-  console.log("p0 determinism: PASS (3 tiers x active/dormant, key+bits identical, LOD sizes 5/9/13)");
+  console.log("p0 determinism: PASS (3 tiers x active/dormant, key+bits identical, LOD sizes 9/9/13)");
 }
 
 
@@ -320,9 +320,10 @@ function traitsForAxes(mob: number, sen: number, met: number, spec: number) {
   const ecosystem = updateOrganismLayer(layer, { ...baseInput, tier: "ecosystem" }, makeTestTexture);
   assert.ok(ecosystem.textureCreates > dormant.textureCreates, "LOD tier remaps texture identity");
   const ecosystemGrid = renderPhenotypeGrid(resolved, "ecosystem", "active");
-  const ecosystemDisplaySize = ecosystemGrid.size * 2.2 * PHENOTYPE_CELL_FRACTION.ecosystem;
+  assert.equal(ecosystemGrid.size, 9, "ecosystem morphology raster is upgraded independently of its display footprint");
+  const ecosystemDisplaySize = PHENOTYPE_FOOTPRINT_REFERENCE_SIZE * 2.2 * PHENOTYPE_CELL_FRACTION.ecosystem;
   assert.ok(Math.abs(sprite.width - ecosystemDisplaySize) < 1e-9,
-    "ecosystem phenotype display size consumes the pure footprint policy");
+    "higher-resolution ecosystem morphology keeps the existing 5-cell footprint at 1.08");
   assert.equal(sprite.height, sprite.width, "phenotype display remains square");
   const sameTier = updateOrganismLayer(layer, { ...baseInput, tier: "ecosystem" }, makeTestTexture);
   assert.equal(sameTier.textureCreates, ecosystem.textureCreates,

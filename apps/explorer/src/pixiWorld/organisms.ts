@@ -7,7 +7,7 @@ import { PhenotypeTextureCache } from "../pixi/textureCache";
 import type { Lens, TraitView } from "../worldViewTypes";
 import { organismColor, dormantChannel } from "../organismEncoding";
 import { destroyTexture, textureFromBits } from "./textures";
-import { PHENOTYPE_CELL_FRACTION } from "../phenotype";
+import { PHENOTYPE_CELL_FRACTION, PHENOTYPE_FOOTPRINT_REFERENCE_SIZE } from "../phenotype";
 
 export interface OrganismTextureResource {
   readonly texture: Texture;
@@ -212,7 +212,9 @@ export function updateOrganismLayer(
     display.sprite.position.set(organism.x, organism.y);
     if (request && resolved) {
       const grid = renderPhenotypeGrid(resolved, input.tier, request.activity);
-      const cell = Math.max(2, 2.2 * PHENOTYPE_CELL_FRACTION[input.tier]);
+      const cell = input.tier === "ecosystem"
+        ? (PHENOTYPE_FOOTPRINT_REFERENCE_SIZE * 2.2 * PHENOTYPE_CELL_FRACTION.ecosystem) / grid.size
+        : Math.max(2, 2.2 * PHENOTYPE_CELL_FRACTION[input.tier]);
       display.sprite.width = grid.size * cell;
       display.sprite.height = grid.size * cell;
     }

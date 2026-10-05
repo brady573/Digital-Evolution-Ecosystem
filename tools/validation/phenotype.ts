@@ -318,7 +318,8 @@ function testGrids() {
   for (const { family, res } of founders) {
     const eco = renderPhenotypeGrid(res, "ecosystem", "active");
     const ecoFilled = countFilled(eco);
-    assert.ok(ecoFilled >= 3 && ecoFilled <= 25, `${family} ecosystem mark is 3-25 cells (got ${ecoFilled})`);
+    assert.equal(eco.size, 9, `${family} ecosystem morphology uses the feature-preserving 9x9 raster`);
+    assert.ok(ecoFilled >= 3 && ecoFilled <= 50, `${family} ecosystem mark is 3-50 cells (got ${ecoFilled})`);
     // AC7: every family has a geometric dormant transformation at every tier.
     for (const tier of ["ecosystem", "population", "inspection"] as const) {
       const diff = gridDifference(
@@ -333,6 +334,18 @@ function testGrids() {
     const insp = countFilled(renderPhenotypeGrid(res, "inspection", "active"));
     assert.ok(pop >= ecoFilled, `${family} population >= ecosystem detail`);
     assert.ok(insp >= pop, `${family} inspection >= population detail`);
+  }
+  // At the same ecosystem display footprint, the more detailed raster must
+  // preserve coarse family signatures rather than collapsing to colored dots.
+  for (let i = 0; i < founders.length; i++) {
+    for (let j = i + 1; j < founders.length; j++) {
+      const diff = gridDifference(
+        renderPhenotypeGrid(founders[i]!.res, "ecosystem", "active"),
+        renderPhenotypeGrid(founders[j]!.res, "ecosystem", "active"),
+      );
+      assert.ok(diff >= 20,
+        `${founders[i]!.family} vs ${founders[j]!.family} retain coarse ecosystem structure (diff ${diff})`);
+    }
   }
   console.log("grids (legibility/dormancy/LOD): PASS");
   // Debug/evidence surface: six-family monochrome silhouette matrix.
