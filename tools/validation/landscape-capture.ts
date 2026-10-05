@@ -514,6 +514,7 @@ async function main(){
         ecosystemZoom:1,
         fixtures:WORLD_VISUAL_CAPTURE_CASES,
         familyFixtures:visualFixtures.families.map((fixture)=>fixture.family),
+        allActiveFamilyFixture:{capture:"18-lane2-phone-six-families-active-1x",families:visualFixtures.familiesActive.map((fixture)=>fixture.family),activity:"all-active"},
         activityFixture:{active:1,dormant:1},
         sceneCounts:{sparse:visualFixtures.sparse.organisms.length,dense:visualFixtures.dense.organisms.length},
         chromeCaptures:WORLD_VISUAL_CHROME_CAPTURE_CASES.map((captureCase)=>captureCase.id),

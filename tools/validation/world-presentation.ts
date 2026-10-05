@@ -79,6 +79,11 @@ async function testDeterministicWorldVisualFixtures() {
     ["blob", "branching", "paddled", "plated", "radial", "segmented"], "fixture set includes all six resolved families");
   assert.ok(first.families.every((fixture) => fixture.family === fixture.phenotype.family),
     "each named family fixture carries a resolved phenotype from that family");
+  assert.ok(first.familiesActive.every((fixture) => fixture.organism.activity === "active"),
+    "a dedicated six-family silhouette frame keeps all family morphologies active");
+  assert.deepEqual(first.familiesActive.map((fixture) => fixture.family),
+    ["blob", "segmented", "radial", "plated", "branching", "paddled"],
+    "the all-active silhouette frame includes every family in stable order");
   assert.ok(first.activity.organisms.some((organism) => organism.activity === "active"));
   assert.ok(first.activity.organisms.some((organism) => organism.activity === "dormant"));
   assert.deepEqual(first.activity.organisms.map((organism) => first.activity.resolvedPhenotypes.get(Number(organism.id))?.family),
@@ -90,7 +95,7 @@ async function testDeterministicWorldVisualFixtures() {
     "rich and depleted fields differ in authoritative-shaped stock");
   assert.ok(Array.isArray(WORLD_VISUAL_CAPTURE_CASES), "deterministic capture case manifest is exported");
   assert.deepEqual(WORLD_VISUAL_CAPTURE_CASES.map((item) => item.id), [
-    "phone-six-families-1x", "phone-active-dormant", "phone-sparse", "phone-dense",
+    "phone-six-families-1x", "phone-six-families-active-1x", "phone-active-dormant", "phone-sparse", "phone-dense",
     "phone-rich", "phone-depleted", "desktop-sanity",
   ], "capture manifest has every required deterministic renderer fixture");
   assert.deepEqual(WORLD_VISUAL_CHROME_CAPTURE_CASES.map((item) => item.id), [

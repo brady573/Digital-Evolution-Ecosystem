@@ -30,10 +30,11 @@ function WorldVisualProof() {
     dense: fixtures.dense,
   };
   const currentScene = useMemo(() => {
-    if (scene === "families") {
+    if (scene === "families" || scene === "families-active") {
+      const rows = scene === "families-active" ? fixtures.familiesActive : fixtures.families;
       return {
-        organisms: fixtures.families.map((fixture) => fixture.organism),
-        resolvedPhenotypes: new Map(fixtures.families.map((fixture) => [Number(fixture.organism.id), fixture.phenotype])),
+        organisms: rows.map((fixture) => fixture.organism),
+        resolvedPhenotypes: new Map(rows.map((fixture) => [Number(fixture.organism.id), fixture.phenotype])),
       };
     }
     return sceneFixtures[scene];

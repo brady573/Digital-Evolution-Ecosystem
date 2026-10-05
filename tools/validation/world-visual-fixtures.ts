@@ -27,6 +27,7 @@ export interface OrganismSceneFixture {
 
 export interface WorldVisualFixtures {
   readonly families: readonly FamilyFixture[];
+  readonly familiesActive: readonly FamilyFixture[];
   readonly activity: OrganismSceneFixture;
   readonly sparse: OrganismSceneFixture;
   readonly dense: OrganismSceneFixture;
@@ -36,6 +37,7 @@ export interface WorldVisualFixtures {
 
 export const WORLD_VISUAL_CAPTURE_CASES = [
   { id: "phone-six-families-1x", scene: "families", environment: "rich", viewport: "phone", zoom: 1 },
+  { id: "phone-six-families-active-1x", scene: "families-active", environment: "rich", viewport: "phone", zoom: 1 },
   { id: "phone-active-dormant", scene: "activity", environment: "rich", viewport: "phone", zoom: 1 },
   { id: "phone-sparse", scene: "sparse", environment: "rich", viewport: "phone", zoom: 1 },
   { id: "phone-dense", scene: "dense", environment: "rich", viewport: "phone", zoom: 1 },
@@ -45,7 +47,7 @@ export const WORLD_VISUAL_CAPTURE_CASES = [
 ] as const;
 
 export type WorldVisualCaptureCase = (typeof WORLD_VISUAL_CAPTURE_CASES)[number];
-export type WorldVisualScene = "families" | "activity" | "sparse" | "dense";
+export type WorldVisualScene = "families" | "families-active" | "activity" | "sparse" | "dense";
 
 export const WORLD_VISUAL_CHROME_CAPTURE_CASES = [
   { id: "19-lane2-phone-shell-collapsed", viewport: { width: 390, height: 844 }, lens: "collapsed" },
@@ -147,6 +149,10 @@ export function createWorldVisualFixtures(): WorldVisualFixtures {
     const row = organism(index + 1, 300 + (index - 2.5) * 18, 300, index % 2 ? "dormant" : "active", family);
     return { family, organism: row, phenotype: resolveFor(row, family) };
   });
+  const familiesActive = FAMILY_ORDER.map((family, index) => {
+    const row = organism(index + 201, 300 + (index - 2.5) * 18, 300, "active", family);
+    return { family, organism: row, phenotype: resolveFor(row, family) };
+  });
   const active = organism(101, 290, 300, "active", "blob");
   const dormant = organism(102, 310, 300, "dormant", "blob");
   const activity = {
@@ -158,6 +164,7 @@ export function createWorldVisualFixtures(): WorldVisualFixtures {
   };
   return {
     families,
+    familiesActive,
     activity,
     sparse: scene(24),
     dense: scene(900),
