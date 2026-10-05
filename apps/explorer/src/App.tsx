@@ -696,6 +696,7 @@ export function App(){
             only when asked. The five buttons stay in the DOM (so they remain
             reachable, labelled and keyboard-navigable) and are revealed by
             the expanded state; desktop shows them inline as before. */}
+        <div className="world-presentation-region">
         <div className={lensMenuOpen?"lensbar open":"lensbar"}>
           <button className="lens-active" aria-haspopup="true" aria-expanded={lensMenuOpen}
             aria-label={`Lens: ${LENS_LABELS[lens]}. Change lens`}
@@ -769,6 +770,7 @@ export function App(){
                   onReviewHistory={recordId=>reviewAftermathHistory(recordId)}
                 />}
           </section>}
+        </div>
         </div>
       </section>
       <aside className="investigation-rail" aria-label="Investigation">

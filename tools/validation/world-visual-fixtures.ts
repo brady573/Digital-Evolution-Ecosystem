@@ -47,6 +47,21 @@ export const WORLD_VISUAL_CAPTURE_CASES = [
 export type WorldVisualCaptureCase = (typeof WORLD_VISUAL_CAPTURE_CASES)[number];
 export type WorldVisualScene = "families" | "activity" | "sparse" | "dense";
 
+export const WORLD_VISUAL_CHROME_CAPTURE_CASES = [
+  { id: "19-lane2-phone-shell-collapsed", viewport: { width: 390, height: 844 }, lens: "collapsed" },
+  { id: "20-lane2-phone-shell-expanded", viewport: { width: 390, height: 844 }, lens: "expanded" },
+  { id: "21-lane2-desktop-shell", viewport: { width: 1280, height: 900 }, lens: "collapsed" },
+] as const;
+
+export const WORLD_VISUAL_NATURAL_CAPTURE_ID = "22-lane2-phone-natural-running-world" as const;
+
+export const WORLD_VISUAL_BASELINE = {
+  referenceSha: "fe90344464fd553d7cdef080da2cb53fdd620650",
+  captureSha: "5ece8229f5a2980d62078cbb2c35ff74e3ff8f81",
+  runId: 37250769500,
+  artifact: "landscape-visual-evidence",
+} as const;
+
 const FAMILY_TRAITS: Record<PhenotypeFamily, readonly [number, number, number, number, number, number]> = {
   blob: [0.35, 0.45, 0.4, 0.3, 0.45, 0],
   segmented: [0.7, 0.45, 0.5, 0.3, 0.3, 0],

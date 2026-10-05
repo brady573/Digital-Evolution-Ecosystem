@@ -65,7 +65,13 @@ function testQuietEnvironmentProjectsNoResourceOrWasteLoad() {
 async function testDeterministicWorldVisualFixtures() {
   const fixturePath = new URL("./world-visual-fixtures.ts", import.meta.url);
   assert.ok(existsSync(fileURLToPath(fixturePath)), "deterministic World visual fixture builder exists");
-  const { createWorldVisualFixtures, WORLD_VISUAL_CAPTURE_CASES } = await import("./world-visual-fixtures.ts");
+  const {
+    createWorldVisualFixtures,
+    WORLD_VISUAL_CAPTURE_CASES,
+    WORLD_VISUAL_CHROME_CAPTURE_CASES,
+    WORLD_VISUAL_NATURAL_CAPTURE_ID,
+    WORLD_VISUAL_BASELINE,
+  } = await import("./world-visual-fixtures.ts");
   const first = createWorldVisualFixtures();
   const second = createWorldVisualFixtures();
   assert.deepEqual(first, second, "fixture input is deterministic across calls");
@@ -87,6 +93,20 @@ async function testDeterministicWorldVisualFixtures() {
     "phone-six-families-1x", "phone-active-dormant", "phone-sparse", "phone-dense",
     "phone-rich", "phone-depleted", "desktop-sanity",
   ], "capture manifest has every required deterministic renderer fixture");
+  assert.deepEqual(WORLD_VISUAL_CHROME_CAPTURE_CASES.map((item) => item.id), [
+    "19-lane2-phone-shell-collapsed", "20-lane2-phone-shell-expanded", "21-lane2-desktop-shell",
+  ], "paired App shell captures retain collapsed/expanded lens, minimap/zoom, and desktop composition");
+  assert.ok(WORLD_VISUAL_CHROME_CAPTURE_CASES.every((item) =>
+    item.viewport.width === (item.id.includes("desktop") ? 1280 : 390) && item.viewport.height === (item.id.includes("desktop") ? 900 : 844)),
+    "App chrome captures retain the approved phone and desktop viewport dimensions");
+  assert.equal(WORLD_VISUAL_NATURAL_CAPTURE_ID, "22-lane2-phone-natural-running-world",
+    "capture set includes a separate natural running-world phone frame");
+  assert.deepEqual(WORLD_VISUAL_BASELINE, {
+    referenceSha: "fe90344464fd553d7cdef080da2cb53fdd620650",
+    captureSha: "5ece8229f5a2980d62078cbb2c35ff74e3ff8f81",
+    runId: 37250769500,
+    artifact: "landscape-visual-evidence",
+  }, "after-capture manifest explicitly identifies the exact approved baseline artifact");
   console.log("deterministic World visual fixtures: PASS");
 }
 

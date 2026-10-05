@@ -61,6 +61,7 @@ import {
 import { LandscapeSmoother } from "../../apps/explorer/src/landscape.ts";
 import { hitTestOrganism, selectAtScreenPoint } from "../../apps/explorer/src/pixiWorld/interaction.ts";
 import { dormantChannel, organismColor } from "../../apps/explorer/src/organismEncoding.ts";
+import { PHENOTYPE_CELL_FRACTION } from "../../apps/explorer/src/phenotype.ts";
 import { updateOrganismLayer, destroyOrganismLayer, type OrganismTextureFactory } from "../../apps/explorer/src/pixiWorld/organisms.ts";
 import { Container, Graphics, Sprite, Texture } from "pixi.js";
 
@@ -134,12 +135,12 @@ const pixiDir = join(root, "apps/explorer/src/pixi");
 
 // Analytical encoding remains visible for dormant organisms; dormancy is separate.
 {
-  const organism = { cladeId: 12, byproductUse: 0, diet: 0, energy: 90, activity: "dormant", speed: 2, sensing: 90 };
+  const organism = { cladeId: 12, byproductUse: 0, diet: 0, energy: 90, activity: "dormant", speed: 2, sensing: 90 } as const;
   const clade = organismColor(organism, "clades", "speed", [0.25, 4]);
   const trait = organismColor(organism, "traits", "speed", [0.25, 4]);
   assert.match(clade, /^hsl\(/);
   assert.match(trait, /^hsl\(/);
-  assert.equal(dormantChannel(organism).alpha, 0.55);
+  assert.equal(dormantChannel(organism).alpha, 0.65);
   assert.equal(dormantChannel(organism).hollow, true);
   console.log("p1 analytical organism encoding: PASS (dormant retains clade/trait with separate alpha/hollow channel)");
 }
@@ -308,7 +309,7 @@ function traitsForAxes(mob: number, sen: number, met: number, spec: number) {
     lens: "clades",
     organisms: makeRows(1, "dormant") as never,
   }, makeTestTexture);
-  assert.equal(voxel.alpha, 0.55, "dormancy alpha remains independent of analytical encoding");
+  assert.equal(voxel.alpha, 0.65, "dormancy alpha remains independent of analytical encoding");
   assert.equal(dormantAnalytical.textureCreates, activeAgain.textureCreates + 1, "dormancy remaps morphology independently of lens");
 
   const activeTexture = initialTexture;
@@ -318,6 +319,15 @@ function traitsForAxes(mob: number, sen: number, met: number, spec: number) {
   assert.equal(createdTextures.at(-1)!.source.scaleMode, "nearest", "phenotype mask factory configures nearest filtering");
   const ecosystem = updateOrganismLayer(layer, { ...baseInput, tier: "ecosystem" }, makeTestTexture);
   assert.ok(ecosystem.textureCreates > dormant.textureCreates, "LOD tier remaps texture identity");
+  const ecosystemGrid = renderPhenotypeGrid(resolved, "ecosystem", "active");
+  const ecosystemDisplaySize = ecosystemGrid.size * 2.2 * PHENOTYPE_CELL_FRACTION.ecosystem;
+  assert.ok(Math.abs(sprite.width - ecosystemDisplaySize) < 1e-9,
+    "ecosystem phenotype display size consumes the pure footprint policy");
+  assert.equal(sprite.height, sprite.width, "phenotype display remains square");
+  const sameTier = updateOrganismLayer(layer, { ...baseInput, tier: "ecosystem" }, makeTestTexture);
+  assert.equal(sameTier.textureCreates, ecosystem.textureCreates,
+    "applying display footprint does not create another texture");
+  assert.equal(sprite.texture, createdTextures.at(-1), "display footprint does not replace the cached morphology texture");
 
   const beforeWorld = layer.children[0];
   const beforeReplacementDestroyed = destroyedTextures.length;

@@ -47,6 +47,7 @@ button,input{outline:none}
 /* surface: persistent world hero + investigation rail */
 .surface{min-width:0;min-height:0;padding:18px;overflow:auto;display:grid;grid-template-columns:minmax(0,2fr) minmax(280px,1fr);gap:18px;align-items:start}
 .world-column{display:grid;gap:10px;min-width:0}
+.world-presentation-region{position:relative;display:grid;gap:10px;min-width:0}
 .lensbar{display:flex;gap:7px;flex-wrap:wrap;align-items:center}
 .lens-active{display:none}
 .lens-options{display:contents}
@@ -187,9 +188,9 @@ button,input{outline:none}
 /* World view overlay: minimap + zoom controls float on the world (reference
    style). The container is inert; only the controls take pointer input. */
 .world-overlay{position:absolute;top:8px;right:8px;z-index:6;display:grid;gap:8px;justify-items:end;pointer-events:none}
-.minimap-frame{pointer-events:none;border:1px solid var(--line2);border-radius:10px;padding:4px;background:rgba(6,13,20,.66);backdrop-filter:blur(8px);box-shadow:0 6px 20px rgba(0,0,0,.35)}
-.minimap-canvas{display:block;width:96px;height:96px;border-radius:6px}
-.zoom-controls{pointer-events:auto;display:flex;align-items:center;gap:2px;padding:3px;border:1px solid var(--line2);border-radius:9px;background:rgba(6,13,20,.72);backdrop-filter:blur(8px)}
+.minimap-frame{pointer-events:none;border:1px solid rgba(160,190,202,.28);border-radius:9px;padding:3px;background:rgba(6,13,20,.48);backdrop-filter:blur(6px);box-shadow:0 3px 12px rgba(0,0,0,.24)}
+.minimap-canvas{display:block;width:88px;height:88px;border-radius:6px}
+.zoom-controls{pointer-events:auto;display:flex;align-items:center;gap:2px;padding:3px;border:1px solid rgba(160,190,202,.3);border-radius:9px;background:rgba(6,13,20,.56);backdrop-filter:blur(6px)}
 .zoom-controls button{border:0;background:transparent;color:#cde0d7;border-radius:7px;min-width:30px;min-height:30px;padding:0 6px;font-size:1rem}
 .zoom-controls button:hover{background:#143041}
 .zoom-controls button:disabled{opacity:.4;cursor:default}
@@ -264,7 +265,9 @@ button,input{outline:none}
   /* Lens control: progressive disclosure. Collapsed, it is one short chip
      naming the active lens. It expands to the full set only when asked, and
      a secondary selector appears only for the lens that has one. */
-  .lensbar{position:absolute;top:8px;left:10px;right:10px;z-index:6;background:rgba(6,13,20,.72);backdrop-filter:blur(8px);border:1px solid var(--line);border-radius:10px;padding:4px}
+  .world-presentation-region{display:block}
+  .lensbar{position:absolute;top:8px;left:10px;right:auto;width:max-content;max-width:calc(100% - 20px);z-index:6;background:rgba(6,13,20,.72);backdrop-filter:blur(8px);border:1px solid var(--line);border-radius:10px;padding:4px}
+  .lensbar.open{width:min(340px,calc(100% - 20px))}
   .lens-active{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;min-height:30px;font-size:.76rem;border-radius:8px;background:transparent;border:1px solid var(--line2);color:#cde0d7}
   .lens-caret{font-size:.7rem;opacity:.75}
   .lens-options{display:none;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;margin-top:4px}
@@ -277,6 +280,7 @@ button,input{outline:none}
   /* Overlay offset reserves the expanded lens panel so the minimap and zoom
      controls can never sit under it, whichever lens is active. */
   .world-overlay{top:48px;right:8px}
+  .lensbar.open + .world-wrap .world-overlay{top:148px}
   .minimap-frame,.zoom-controls{transform:scale(.88);transform-origin:top right}
   .investigation-rail{position:relative;z-index:10}
   .inspector.sheet{border-radius:18px 18px 14px 14px;box-shadow:0 -12px 40px rgba(0,0,0,.45)}

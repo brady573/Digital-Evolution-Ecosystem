@@ -44,7 +44,7 @@ const CACHE_CAP = 20000;
  * Presentation tuning, not biology.
  */
 export const PHENOTYPE_CELL_FRACTION: Record<LodTier, number> = {
-  ecosystem: 0.8,
+  ecosystem: 1.08,
   population: 0.5,
   inspection: 0.35,
 };

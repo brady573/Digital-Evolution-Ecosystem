@@ -100,8 +100,8 @@ function testCap() {
 function testPhenotypePresentationContract() {
   assert.deepEqual(
     PHENOTYPE_CELL_FRACTION,
-    { ecosystem: 0.8, population: 0.5, inspection: 0.35 },
-    "tier cell fractions hold footprints comparable to legacy voxels",
+    { ecosystem: 1.08, population: 0.5, inspection: 0.35 },
+    "ecosystem tier gets the approved larger display footprint while other LOD tiers stay unchanged",
   );
   assert.equal(tierForZoom(1), "ecosystem", "zoom maps through the adapter");
   assert.equal(tierForZoom(3), "inspection", "zoom maps through the adapter");

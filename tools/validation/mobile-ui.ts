@@ -195,6 +195,10 @@ async function chooseLens(page: Page, lens: string) {
 
 async function checkLensBar(page: Page, width: number) {
   const viewport = page.viewportSize()!;
+  const presentationRegion = page.locator(".world-presentation-region");
+  assert.equal(await presentationRegion.count(), 1, "lens and World view controls share one presentation region");
+  assert.equal(await presentationRegion.locator(".world-overlay").count(), 1,
+    "minimap and zoom remain grouped with the lens under one World region");
   const bar = await page.locator(".lensbar").boundingBox();
   assert.ok(bar, `lens control present at ${width}px`);
   assert.ok(bar!.width <= viewport.width, `lens control fits the ${width}px viewport`);
@@ -208,6 +212,8 @@ async function checkLensBar(page: Page, width: number) {
   const collapsedBar = (await page.locator(".lensbar").boundingBox())!;
   assert.ok(collapsedBar.height <= 60,
     `the collapsed lens control stays compact at ${width}px (${collapsedBar.height.toFixed(0)}px)`);
+  assert.ok(collapsedBar.width <= chip!.width + 16,
+    `the collapsed lens bar hugs its chip instead of spanning ${width}px (${collapsedBar.width.toFixed(0)}px vs ${chip!.width.toFixed(0)}px)`);
   assert.equal(await page.locator(".lens-options button").first().isVisible().catch(() => false), false,
     `the full lens set is not permanently expanded at ${width}px`);
 

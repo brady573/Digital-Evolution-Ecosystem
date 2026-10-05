@@ -791,6 +791,10 @@ async function main(){
       await leftoverImpact.waitFor({state:"detached",timeout:15_000});
     }
     await page.getByLabel("World minimap").waitFor();
+    assert.equal(await page.locator(".world-presentation-region .lensbar").count(),1,
+      "React lens control is grouped with the World presentation region");
+    assert.equal(await page.locator(".world-presentation-region .world-overlay").count(),1,
+      "React minimap and zoom stay in the same presentation region");
     const minimap=page.getByTestId("world-minimap");
     const worldBox=await page.getByLabel("Evolution world").boundingBox();
     assert.ok(worldBox,"world canvas measurable");

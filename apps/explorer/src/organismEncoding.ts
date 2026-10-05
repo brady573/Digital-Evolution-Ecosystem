@@ -15,7 +15,7 @@
 export type OrganismLens = "normal" | "nutrients" | "waste" | "clades" | "traits";
 
 /** Opacity applied to dormant organisms. Below 1 so the channel is real. */
-export const DORMANT_ALPHA = 0.55;
+export const DORMANT_ALPHA = 0.65;
 
 /** True for lenses whose whole purpose is to encode an analytical quantity. */
 export const analyticalLens = (lens: OrganismLens): boolean => lens === "clades" || lens === "traits";

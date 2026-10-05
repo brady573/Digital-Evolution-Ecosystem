@@ -4,7 +4,13 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { ENGINE_VERSION } from "../../packages/sim-core/src/index.ts";
-import { WORLD_VISUAL_CAPTURE_CASES, createWorldVisualFixtures } from "./world-visual-fixtures.ts";
+import {
+  WORLD_VISUAL_CAPTURE_CASES,
+  WORLD_VISUAL_CHROME_CAPTURE_CASES,
+  WORLD_VISUAL_BASELINE,
+  WORLD_VISUAL_NATURAL_CAPTURE_ID,
+  createWorldVisualFixtures,
+} from "./world-visual-fixtures.ts";
 
 /**
  * Issue #30 Slice 2 visual evidence: deterministic captures of the ordinary
@@ -438,19 +444,52 @@ async function main(){
     await chromePage.getByLabel("Evolution world").waitFor();
     await chromePage.locator(".world-pixi-host canvas").waitFor();
     await chromePage.waitForTimeout(300);
-    for(const [name,expanded] of [["19-lane2-phone-shell-collapsed",false],["20-lane2-phone-shell-expanded",true]] as const){
+    for(const captureCase of WORLD_VISUAL_CHROME_CAPTURE_CASES.filter((item)=>item.viewport.width===390)){
+      await chromePage.setViewportSize(captureCase.viewport);
       const optionsVisible=await chromePage.locator(".lens-options button").first().isVisible().catch(()=>false);
-      if(expanded&&!optionsVisible)await chromePage.locator(".lens-active").click();
-      if(!expanded&&optionsVisible)await chromePage.locator(".lens-active").click();
+      if(captureCase.lens==="expanded"&&!optionsVisible)await chromePage.locator(".lens-active").click();
+      if(captureCase.lens==="collapsed"&&optionsVisible)await chromePage.locator(".lens-active").click();
       await chromePage.waitForTimeout(100);
-      await chromePage.screenshot({path:`${OUT_DIR}/${name}.png`});
-      written.push(name);
+      await chromePage.screenshot({path:`${OUT_DIR}/${captureCase.id}.png`});
+      written.push(captureCase.id);
     }
-    await chromePage.setViewportSize({width:1280,height:900});
+    // Return to the mobile breakpoint and collapse before the desktop sanity
+    // frame, where the active-lens chip itself is hidden by design.
+    await chromePage.locator(".lens-active").click();
+    const desktopShell=WORLD_VISUAL_CHROME_CAPTURE_CASES.find((item)=>item.viewport.width===1280)!;
+    await chromePage.setViewportSize(desktopShell.viewport);
     await chromePage.waitForTimeout(150);
-    await chromePage.screenshot({path:`${OUT_DIR}/21-lane2-desktop-shell.png`});
-    written.push("21-lane2-desktop-shell");
+    await chromePage.screenshot({path:`${OUT_DIR}/${desktopShell.id}.png`});
+    written.push(desktopShell.id);
     await chromePage.close();
+
+    // A supplementary natural-running frame is intentionally not fixture
+    // input: it shows the actual default-seed simulation evolving on a phone.
+    const naturalContext=await browser.newContext({viewport:{width:390,height:844},deviceScaleFactor:1});
+    const naturalPage=await naturalContext.newPage();
+    await naturalPage.goto(`${baseUrl}?deeTest=1`,{waitUntil:"networkidle"});
+    await naturalPage.getByLabel("Evolution world").waitFor();
+    await naturalPage.locator(".world-pixi-host canvas").waitFor();
+    await naturalPage.getByRole("button",{name:"Play"}).click();
+    await naturalPage.waitForFunction(()=>
+      Number(document.querySelector('[data-testid="tick"]')?.textContent?.replaceAll(",","")??0)>0,
+      undefined,{timeout:30_000});
+    const naturalTick=Number((await naturalPage.getByTestId("tick").innerText()).replaceAll(",",""));
+    if(await naturalPage.getByRole("button",{name:"Pause"}).count()!==1)
+      throw new Error("natural phone frame must show the real simulation running");
+    const naturalFramePath=`${OUT_DIR}/${WORLD_VISUAL_NATURAL_CAPTURE_ID}.png`;
+    await naturalPage.screenshot({path:naturalFramePath});
+    written.push(WORLD_VISUAL_NATURAL_CAPTURE_ID);
+    await naturalContext.close();
+
+    const requiredWorldFrames=[
+      ...WORLD_VISUAL_CAPTURE_CASES.map((captureCase)=>`18-lane2-${captureCase.id}`),
+      ...WORLD_VISUAL_CHROME_CAPTURE_CASES.map((captureCase)=>captureCase.id),
+      WORLD_VISUAL_NATURAL_CAPTURE_ID,
+    ];
+    const missingWorldFrames=requiredWorldFrames.filter((name)=>!written.includes(name));
+    if(missingWorldFrames.length>0)
+      throw new Error(`World visual review set is incomplete: ${missingWorldFrames.join(", ")}`);
 
     writeFileSync(`${OUT_DIR}/MANIFEST.json`,JSON.stringify({
       seed:SEED,engine:ENGINE_VERSION,preset:"Patchwork",
@@ -460,7 +499,11 @@ async function main(){
       presentedPixelSource:"Playwright Chromium element screenshots of production WorldPixi host",
       captures:written,
       visualReviewSet:{
-        baselineReferenceSha:"fe90344464fd553d7cdef080da2cb53fdd620650",
+        captureMode:"paired-deterministic-presented-frames",
+        baselineReferenceSha:WORLD_VISUAL_BASELINE.referenceSha,
+        baselineCaptureSha:WORLD_VISUAL_BASELINE.captureSha,
+        baselineRunId:WORLD_VISUAL_BASELINE.runId,
+        baselineArtifact:WORLD_VISUAL_BASELINE.artifact,
         captureCommit:execFileSync("git",["rev-parse","HEAD"],{cwd:REPO_ROOT,encoding:"utf8"}).trim(),
         browser:"Playwright Chromium",
         deviceScaleFactor:1,
@@ -469,7 +512,9 @@ async function main(){
         familyFixtures:visualFixtures.families.map((fixture)=>fixture.family),
         activityFixture:{active:1,dormant:1},
         sceneCounts:{sparse:visualFixtures.sparse.organisms.length,dense:visualFixtures.dense.organisms.length},
-        chromeCaptures:["19-lane2-phone-shell-collapsed","20-lane2-phone-shell-expanded","21-lane2-desktop-shell"],
+        chromeCaptures:WORLD_VISUAL_CHROME_CAPTURE_CASES.map((captureCase)=>captureCase.id),
+        chromeCaptureCases:WORLD_VISUAL_CHROME_CAPTURE_CASES,
+        naturalRunningWorld:{id:WORLD_VISUAL_NATURAL_CAPTURE_ID,seed:821947219,tick:naturalTick,viewport:{width:390,height:844},deviceScaleFactor:1,simulationState:"running",captureMode:"natural-live-world-not-synthetic-fixture"},
         syntheticFixtureNotice:"Renderer fixtures are deterministic presentation-only inputs, not simulation findings.",
       },
       nicheHistoryCapture:"omitted by decision: establishment occurs around tick 63k, outside a bounded interactive run. Deterministic establishment evidence lives in the engine/analysis validation and testdata/niche-survey-0.22.json; the history surface's record fields and causal caveat are covered there, not by a screenshot.",
