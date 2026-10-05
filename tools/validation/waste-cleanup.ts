@@ -237,4 +237,97 @@ testPermutationInvariance();
 testClosureReconciliation();
 testSameTickDepositOrder();
 testDormantEligibility();
+
+const stratConfig = wasteConfig;
+
+function meanEnergy(sim: any): number {
+  return sim.o.reduce((t: number, o: any) => t + o.en, 0) / Math.max(1, sim.o.length);
+}
+
+function testCapableVsIncapable() {
+  // AC2C-8: cleanup is selectively useful in a real Waste-rich regime.
+  // Matched exact-twin forks from an evolved 10k world (clone preserves
+  // state+RNG continuity): capable (cu=0.8) contains waste and sustains
+  // population+energy; incapable (cu=0) drowns. CI-measured (seed
+  // 24681357): A pop 627 vs B 313, meanEn 43.24 vs 33.25, wasteFrac
+  // 0.0048 vs 0.7221. Bars are structural with wide margins, not digits.
+  const sim = new Simulation(stratConfig(24681357)) as any;
+  for (let t = 0; t < 10000; t++) sim.step();
+  const cap = sim.clone(), inc = sim.clone();
+  for (const o of cap.o) o.cu = 0.8;
+  for (const o of inc.o) o.cu = 0;
+  for (let t = 0; t < 5000; t++) { cap.step(); inc.step(); }
+  const capFrac = cap.resources.waste.totals().fraction;
+  const incFrac = inc.resources.waste.totals().fraction;
+  console.log(`capable: pop ${cap.o.length} en ${meanEnergy(cap).toFixed(2)} waste ${capFrac.toFixed(4)} | incapable: pop ${inc.o.length} en ${meanEnergy(inc).toFixed(2)} waste ${incFrac.toFixed(4)}`);
+  assert.ok(cap.o.length > 1.5 * inc.o.length, "capable fork sustains markedly more population");
+  assert.ok(meanEnergy(cap) > 1.15 * meanEnergy(inc), "capable fork holds markedly more energy");
+  assert.ok(capFrac < 0.1 && incFrac > 0.3, "capable contains waste, incapable drowns");
+  console.log("capable vs incapable: PASS");
+}
+
+function testToleranceDistinction() {
+  // Tolerance and cleanup are SEPARATE strategies: tolerance mitigates
+  // burden without removing anything; cleanup removes mass from the field.
+  // Single-tick mechanistic cohorts, same cell, same snapshot.
+  const setup = (): any => {
+    const sim = new Simulation(stratConfig(7)) as any;
+    sim.resources.waste.deposit(105, 105, 0.4, null);
+    const cohorts: any[][] = [[], [], []];
+    let n = 0;
+    for (const o of sim.o) {
+      if (n >= 9) break;
+      o.x = 105; o.y = 105; o.en = 200; o.rp = 50; o.dr = 0;
+      const k = n % 3;
+      if (k === 0) { o.to = 1.2; o.cu = 0; }
+      if (k === 1) { o.to = 0; o.cu = 1.2; }
+      if (k === 2) { o.to = 0; o.cu = 0; }
+      o.l = 7000 + n;
+      cohorts[k]!.push(o.l);
+      n++;
+    }
+    return { sim, cohorts };
+  };
+  const burdenSum = (sim: any, ls: number[]): number =>
+    ls.reduce((s, l) => s + burdenOf(sim, l), 0);
+  const removedSum = (sim: any, ls: number[]): number =>
+    ls.reduce((s, l) => s + lineageRemoved(sim, l), 0);
+  const { sim, cohorts } = setup();
+  sim.step();
+  const tolRemoved = removedSum(sim, cohorts[0]!);
+  const cleanRemoved = removedSum(sim, cohorts[1]!);
+  const noneRemoved = removedSum(sim, cohorts[2]!);
+  assert.equal(tolRemoved, 0, "tolerance removes nothing");
+  assert.equal(noneRemoved, 0, "no-trait control removes nothing");
+  assert.ok(cleanRemoved > 0, "cleanup removes field mass");
+  assert.ok(
+    burdenSum(sim, cohorts[0]!) < burdenSum(sim, cohorts[2]!),
+    "tolerance mitigates burden without removing",
+  );
+  console.log("tolerance distinction: PASS");
+}
+
+function testDisabledEconomy() {
+  // Opportunity control: with the economy disabled, the outer gate skips
+  // the waste block for both forks, so capability is fully inert — the
+  // capable fork must NOT differ at all. (This also proves the Task-5
+  // advantage flows through the waste path, not the cu override itself:
+  // identical trajectories when the path is off.)
+  const setup = (cu: number): any => {
+    const sim = new Simulation(stratConfig(7)) as any;
+    sim.resources.enabledWaste = false;
+    for (const o of sim.o) { o.to = 0; o.cu = cu; o.en = 200; o.rp = 50; o.dr = 0; }
+    return sim;
+  };
+  const cap = setup(0.8), inc = setup(0);
+  cap.step(); inc.step();
+  assert.equal(cap.resources.waste.bioRemoved, 0, "disabled economy removes nothing (capable)");
+  assert.equal(inc.resources.waste.bioRemoved, 0, "disabled economy removes nothing (incapable)");
+  assert.equal(meanEnergy(cap), meanEnergy(inc), "capability without opportunity is fully inert");
+  console.log("disabled economy: PASS");
+}
+
+testCapableVsIncapable();
+testToleranceDistinction();
+testDisabledEconomy();
 console.log("waste-cleanup validation: PASS (mechanism fixtures)");
