@@ -741,6 +741,12 @@ class S{
  step(){
   this.t++;if(this.c.st===this.t)this.catalyst(this.c.cat,'scheduled');if(this.drought&&this.t>=this.drought.end){this.log(`Nutrient ${this.drought.kind?'B':'A'} drought ended`);this.drought=null}if(this.resources.cSink&&this.t>=this.resources.cSink.end){this.log('Metabolite C sink dissipated');this.resources.cSink=null}
   this.resources.step(this.t,this.drought,this.cur);let born:(Organism)[]=[],live:(Organism)[]=[],pendingBirths:{parent:Organism;baby:Organism}[]=[];
+  // 2C staging: pre-cleanup waste snapshot (post-environment, pre-loop).
+  // Burden and cleanup opportunity read this frozen state, so same-tick
+  // deposits and cleanups never reorder same-tick exposure. Intents below
+  // commit post-loop; every buffer here is tick-local, never checkpointed.
+  const wasteSnap=this.resources.enabledWaste?Float32Array.from(this.resources.waste.stock):null;
+  const cleanIntents:{o:Organism;cell:number;request:number}[]=[];
   // Seniority order: the array is id-sorted by construction (live preserves
   // order, newborns carry fresh larger ids), so this sort is a near-free
   // safety net. All same-tick contention below therefore resolves oldest-
@@ -782,18 +788,21 @@ class S{
    // final energy subtraction are organism physiology, not process execution,
    // so they stay here. Dormant organisms skip this block via the continue
    // above: shutdown means shutdown.
-   if(this.resources.enabledWaste){let wf=this.resources.waste.fractionAt(o.x,o.y),to=Q(o.to||0,0,1.5),cu=Q(o.cu||0,0,1.5);
+   if(this.resources.enabledWaste){let wi=this.resources.waste.idx(o.x,o.y),wcap=this.resources.waste.cap[wi]!,wf=wcap>1e-9?wasteSnap![wi]!/wcap:0,to=Q(o.to||0,0,1.5),cu=Q(o.cu||0,0,1.5);
    if(wf>0||to>0||cu>0){
     let exposure=wf/(wf+WASTE_HALF_SAT);
     let burden=WASTE_BURDEN_MAX*exposure*(1-WASTE_TOL_EFFICACY*(to/1.5))+WASTE_TOL_COST*to;
-    let ex=this.resources.execCleanup(o,this.cur),removed=ex.removed;
-    let cleanCost=CU_STANDING*cu+ex.activeCost;
-    let wcost=(burden+cleanCost)*this.c.press;
+    // Intent only: capability plus snapshot opportunity gate the request;
+    // the field is untouched until the post-loop commit, so the burden
+    // above and every same-cell cleaner read the identical pre-cleanup state.
+    let capability=cu/1.5;
+    if(capability>0&&wasteSnap![wi]!>1e-9)cleanIntents.push({o,cell:wi,request:CU_RATE*capability});
+    let standCost=CU_STANDING*cu;
+    let wcost=(burden+standCost)*this.c.press;
     o.en-=wcost;
     this.cur.burden_energy=(this.cur.burden_energy||0)+burden*this.c.press;
-    this.cur.cleanup_energy=(this.cur.cleanup_energy||0)+cleanCost*this.c.press;
-    if(removed>0){this.lineageCredit(o.l,{wasteRemoved:removed,burdenEnergy:burden*this.c.press,cleanupEnergy:cleanCost*this.c.press,cleanupExec:1})}
-    else this.lineageCredit(o.l,{burdenEnergy:burden*this.c.press,cleanupEnergy:cleanCost*this.c.press});
+    this.cur.cleanup_energy=(this.cur.cleanup_energy||0)+standCost*this.c.press;
+    this.lineageCredit(o.l,{burdenEnergy:burden*this.c.press,cleanupEnergy:standCost*this.c.press});
    }}
    // Foundation Slice 2B tradeoff: modest constitutive machinery cost for
    // holding du (neutrality-acceptable in rich worlds per §6) + execution
@@ -815,6 +824,24 @@ class S{
    // fallback meal per tick.
    if((!eat||eat.gain<DETRITUS_SHORTFALL)&&this.resources.detritusConsumptionEnabled){let du=this.resources.execDetritus(o,this.cur);if(du){o.en+=du.gain;o.md++;o.gd+=du.gain;o.en-=du.activeCost*this.c.press;this.cur.energy_detritus+=du.gain;this.lineageCredit(o.l,{detritusConsumed:du.amount,energyDetritus:du.gain,detritusExec:1})}}
    if(this.t>=(o.matureAt||0)&&this.t>=(o.readyAt||0)&&o.en>=o.rp){let support=this.reproSupport(o);this.totalReproSupport[support]!++;if(support===0)this.cur.repro_supported_a++;else if(support===1)this.cur.repro_supported_b++;else if(support===3)this.cur.repro_supported_c++;else this.cur.repro_supported_mixed++;this.cur.repro_eligible=(this.cur.repro_eligible as number||0)+1;let baby=this.child(o);pendingBirths.push({parent:o,baby});}if(o.en>0)live.push(o);else{this.recordDeath(o);occ.vacate(occ.cellOf(o.x,o.y))}
+  }
+  // 2C commit (fulfill-all; the saturating budget arrives next). Intents
+  // arrive in id order (loop is id-sorted): deterministic, lineage-blind.
+  // Each removal dispatches through the waste_cleanup process, so
+  // process/lineage/field accounting keep their §5.1 reconciliation.
+  // Active cost lands here — after per-organism repro checks — because
+  // allocation is inherently global; burden and standing cost stay
+  // pre-gains/pre-repro in-loop as before. Any mortality the active cost
+  // causes is handled by the next tick's loop (no sweep here).
+  if(cleanIntents.length){
+   for(const intent of cleanIntents){
+    let ex=this.resources.execCleanup(intent.o,this.cur);
+    if(ex.removed>0){
+     intent.o.en-=ex.activeCost*this.c.press;
+     this.cur.cleanup_energy=(this.cur.cleanup_energy||0)+ex.activeCost*this.c.press;
+     this.lineageCredit(intent.o.l,{wasteRemoved:ex.removed,cleanupEnergy:ex.activeCost*this.c.press,cleanupExec:1});
+    }
+   }
   }
     // Slice 1 birth placement (§9, phase 3): atomic commit in parent-id order
   // against settled post-mortality occupancy (movement + deaths committed
