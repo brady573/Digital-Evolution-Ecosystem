@@ -394,6 +394,20 @@ export const UNITS: readonly ValidationUnit[] = [
       "Death deposits deterministic local detritus available next tick; the inherited du capability pays a real tradeoff and advantages recyclers only with opportunity; mineralization returns mass into A/B with closed accounting on both ledgers; hotspots form and are consumed; the strategy is maintained iff opportunity persists; checkpoints and forks stay exact.",
   },
   {
+    id: "waste-cleanup",
+    title: "Staged cell-local waste cleanup (Slice 2C)",
+    script: "test:waste-cleanup",
+    cls: "deterministic",
+    enforcement: "blocking",
+    mergeGate: true,
+    domains: withApparatus("contracts", "sim-core", "sim-runtime"),
+    needs: [],
+    parallelSafe: true,
+    baselineSeconds: 1,
+    claim:
+      "Same-cell organisms share pre-cleanup Waste exposure regardless of execution order; cleanup requires inherited cu plus local Waste; isolated cleaners receive full requests while dense cleanup saturates to a finite cell-local bound under neutral deterministic allocation; allocated removal reconciles exactly across field, interval, and lineage with active cost paid only on actuals.",
+  },
+  {
     id: "aftermath",
     title: "Aftermath state and comparison",
     script: "test:aftermath",
@@ -927,7 +941,7 @@ export const GROUPS: readonly ValidationGroup[] = [
   {
     id: "ci-sim-c",
     title: "Deterministic suites C (niche, ecology, runtime boundary)",
-    unitIds: ["niche", "ecology", "runtime-boundary", "spatial-occupancy", "detritus"],
+    unitIds: ["niche", "ecology", "runtime-boundary", "spatial-occupancy", "waste-cleanup", "detritus"],
     ci: true,
   },
   {
