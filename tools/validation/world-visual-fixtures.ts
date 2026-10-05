@@ -35,13 +35,13 @@ export interface WorldVisualFixtures {
 }
 
 export const WORLD_VISUAL_CAPTURE_CASES = [
-  { id: "phone-six-families-1x", scene: "families", environment: "rich", viewport: "phone" },
-  { id: "phone-active-dormant", scene: "activity", environment: "rich", viewport: "phone" },
-  { id: "phone-sparse", scene: "sparse", environment: "rich", viewport: "phone" },
-  { id: "phone-dense", scene: "dense", environment: "rich", viewport: "phone" },
-  { id: "phone-rich", scene: "sparse", environment: "rich", viewport: "phone" },
-  { id: "phone-depleted", scene: "sparse", environment: "depleted", viewport: "phone" },
-  { id: "desktop-sanity", scene: "families", environment: "rich", viewport: "desktop" },
+  { id: "phone-six-families-1x", scene: "families", environment: "rich", viewport: "phone", zoom: 1 },
+  { id: "phone-active-dormant", scene: "activity", environment: "rich", viewport: "phone", zoom: 1 },
+  { id: "phone-sparse", scene: "sparse", environment: "rich", viewport: "phone", zoom: 1 },
+  { id: "phone-dense", scene: "dense", environment: "rich", viewport: "phone", zoom: 1 },
+  { id: "phone-rich", scene: "sparse", environment: "rich", viewport: "phone", zoom: 1 },
+  { id: "phone-depleted", scene: "sparse", environment: "depleted", viewport: "phone", zoom: 1 },
+  { id: "desktop-sanity", scene: "families", environment: "rich", viewport: "desktop", zoom: 1 },
 ] as const;
 
 export type WorldVisualCaptureCase = (typeof WORLD_VISUAL_CAPTURE_CASES)[number];

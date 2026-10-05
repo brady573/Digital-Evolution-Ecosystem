@@ -428,6 +428,10 @@ async function main(){
         const fixtureApi=(window as any).__DEE_WORLD_VISUAL__;
         fixtureApi.setScene(scene);fixtureApi.setEnvironment(environment);
       },{scene:captureCase.scene,environment:captureCase.environment});
+      await proofPage.evaluate((zoom)=>{
+        const world=(window as any).__DEE_WORLD_VISUAL__;
+        world.setZoom(zoom);
+      },captureCase.zoom);
       await proofPage.waitForTimeout(180);
       const name=`18-lane2-${captureCase.id}`;
       await proofWorld.screenshot({path:`${OUT_DIR}/${name}.png`});

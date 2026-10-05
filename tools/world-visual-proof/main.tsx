@@ -15,6 +15,7 @@ declare global {
     __DEE_WORLD_VISUAL__?: {
       setScene(scene: Scene): void;
       setEnvironment(environment: Environment): void;
+      setZoom(zoom: number): void;
     };
   }
 }
@@ -22,6 +23,7 @@ declare global {
 function WorldVisualProof() {
   const [scene, setScene] = useState<Scene>("families");
   const [environment, setEnvironment] = useState<Environment>("rich");
+  const [zoom, setZoom] = useState(1);
   const sceneFixtures = {
     activity: fixtures.activity,
     sparse: fixtures.sparse,
@@ -39,7 +41,7 @@ function WorldVisualProof() {
   const env = fixtures[environment];
 
   useEffect(() => {
-    window.__DEE_WORLD_VISUAL__ = { setScene, setEnvironment };
+    window.__DEE_WORLD_VISUAL__ = { setScene, setEnvironment, setZoom };
     return () => { delete window.__DEE_WORLD_VISUAL__; };
   }, []);
 
@@ -54,7 +56,7 @@ function WorldVisualProof() {
     traitView: "speed",
     selectedId: null as OrganismId | null,
     camera: { x: 300, y: 300 },
-    zoom: 1,
+    zoom,
     onSelect: () => {},
     onCamera: () => {},
     onView: () => {},

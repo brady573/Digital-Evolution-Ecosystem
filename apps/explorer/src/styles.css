@@ -280,7 +280,7 @@ button,input{outline:none}
   /* Overlay offset reserves the expanded lens panel so the minimap and zoom
      controls can never sit under it, whichever lens is active. */
   .world-overlay{top:48px;right:8px}
-  .lensbar.open + .world-wrap .world-overlay{top:148px}
+  .world-presentation-region:has(.lensbar.open) .world-overlay{top:148px}
   .minimap-frame,.zoom-controls{transform:scale(.88);transform-origin:top right}
   .investigation-rail{position:relative;z-index:10}
   .inspector.sheet{border-radius:18px 18px 14px 14px;box-shadow:0 -12px 40px rgba(0,0,0,.45)}
