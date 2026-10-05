@@ -329,6 +329,9 @@ function testForwardCompatPolicyVersion() {
     next = session.advance(200_000).pendingDecision as CatalystOpportunity;
   }
   assert.ok(next, "a fourth eligible post-horizon catalyst window is reached");
+  // WIP-TEMP MAP (revert before merge): 2C trajectory mapping.
+  console.log("MAP-2C-RES:" + JSON.stringify(session.decisionResolutions.map((r: any) => r.tick)));
+  console.log("MAP-2C-NEXT:" + JSON.stringify({ source: (next as any)?.source, opp: (next as any)?.opportunityId }));
   // Slice 2B re-pin: detritus wealth delays guild establishment (crossfeeding
   // @133030 rather than @78312), so the fourth advance lands on the
   // decision-eligible crossfeeding establishment, not a catalyst window.

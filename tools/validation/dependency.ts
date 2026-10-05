@@ -414,6 +414,8 @@ function testFixtureArc() {
   // attribution measured, not assumed). Trajectory, not capability loss:
   // the complete arc machinery fires on this run. Same seed, same
   // drought_b shock, same structure (horizon already 300k).
+  // WIP-TEMP MAP (revert before merge): 2C trajectory mapping.
+  console.log("MAP-2C-ARC:" + JSON.stringify(records.map((r: any) => ({ phase: r.phase, tick: r.tick }))));
   assert.equal(records.length, 3, "establishment, disruption, and recovery records");
   assert.deepEqual(records.map((r: any) => r.phase), ["established", "disrupted", "recovered"], "full guild cycle phases in order");
   assert.deepEqual(records.map((r: any) => r.tick), [140309, 176704, 249996], "cycle ticks deterministic under the current policy");
@@ -472,6 +474,8 @@ function testMultiSeedPossibility() {
     if (records.length > 0) established.push(`${seed}@${records[0].tick}`);
   }
   assert.ok(established.length >= 1, "dependency establishment must be realizable");
+  // WIP-TEMP MAP (revert before merge): 2C trajectory mapping.
+  console.log("MAP-2C-POSS:" + JSON.stringify(established));
   assert.ok(
     established.some((s) => s === "3543950664@141062"),
     "pinned establishment reproduces exactly",
