@@ -156,7 +156,8 @@ async function main(){
       const landscape=(await world.screenshot()).toString("base64");
       await pickLens("Waste");
       const waste=(await world.screenshot()).toString("base64");
-      const signatures=await page.evaluate<{normal:number[];waste:number[]}, {landscape:string;waste:string}>(`async ({landscape,waste})=>{
+      const signatures=await page.evaluate<{normal:number[];waste:number[]}>(`(async()=>{
+        const {landscape,waste}=${JSON.stringify({landscape,waste})};
         const decode=encoded=>new Promise((resolve,reject)=>{
           const image=new Image();image.onerror=()=>reject(new Error("Could not decode presented World"));
           image.onload=()=>{
@@ -173,7 +174,7 @@ async function main(){
           image.src="data:image/png;base64,"+encoded;
         });
         return {normal:await decode(landscape),waste:await decode(waste)};
-      }`,{landscape,waste});
+      })()`);
       return signatures;
     };
     const presentedModes=await compareFrame();
