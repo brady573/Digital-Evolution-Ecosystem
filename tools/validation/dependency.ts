@@ -404,7 +404,8 @@ function testFixtureArc() {
     "dependency validation",
   );
   // History: @91615 (0.22) -> @276100 single record (Slice 1 occupancy,
-  // horizon 120k -> 300k) -> full cycle below (Slice 2B detritus).
+  // horizon 120k -> 300k) -> full cycle 140309/176704/249996 (Slice 2B
+  // detritus) -> expanded double cycle below (Slice 2C staged cleanup).
   settle(session, 300000);
   const records = (session.analysis as any).records.filter((r: any) => r.kind === "cuse");
   // Slice 2B re-derivation (CI-measured run 37139141294): under detritus
@@ -415,10 +416,17 @@ function testFixtureArc() {
   // the complete arc machinery fires on this run. Same seed, same
   // drought_b shock, same structure (horizon already 300k).
   // WIP-TEMP MAP (revert before merge): 2C trajectory mapping.
-  console.log("MAP-2C-ARC:" + JSON.stringify(records.map((r: any) => ({ phase: r.phase, tick: r.tick }))));
-  assert.equal(records.length, 3, "establishment, disruption, and recovery records");
-  assert.deepEqual(records.map((r: any) => r.phase), ["established", "disrupted", "recovered"], "full guild cycle phases in order");
-  assert.deepEqual(records.map((r: any) => r.tick), [140309, 176704, 249996], "cycle ticks deterministic under the current policy");
+  console.log("MAP-2C-ARC:" + JSON.stringify(records.map((r: any) => ({ phase: r.phase, tick: r.tick, refs: r.entity_refs }))));
+  // Slice 2C re-derivation (CI-measured): the shocked guild runs an
+  // EXPANDED cycle — establish -> disrupt -> recover TWICE by 300k
+  // (@56224/@70280/@87850, then @227908/@268068), all with diffuse
+  // founding (refs [] throughout — attribution measured, not assumed).
+  // Trajectory expansion, not capability loss: the full arc machinery
+  // fires twice on this run. Same seed, same drought_b shock, same
+  // structure (horizon already 300k).
+  assert.equal(records.length, 5, "expanded establishment/disruption/recovery cycle records");
+  assert.deepEqual(records.map((r: any) => r.phase), ["established", "disrupted", "recovered", "disrupted", "recovered"], "double guild cycle phases in order");
+  assert.deepEqual(records.map((r: any) => r.tick), [56224, 70280, 87850, 227908, 268068], "cycle ticks deterministic under the current policy");
   assert.ok(records.every((r: any) => Array.isArray(r.entity_refs) && r.entity_refs.length === 0), "diffuse founding names nobody throughout");
   console.log("dependency fixture arc: PASS");
 }
@@ -476,8 +484,12 @@ function testMultiSeedPossibility() {
   assert.ok(established.length >= 1, "dependency establishment must be realizable");
   // WIP-TEMP MAP (revert before merge): 2C trajectory mapping.
   console.log("MAP-2C-POSS:" + JSON.stringify(established));
+  // Slice 2C re-pin (CI-measured): staged cleanup moves establishment
+  // earlier on several seeds (821947219@41415, 2088626459@75802,
+  // 2121676508@108181); the 2B pin 3543950664@141062 no longer establishes.
+  // Same claim (realizability + exact deterministic reproduction), new pin.
   assert.ok(
-    established.some((s) => s === "3543950664@141062"),
+    established.some((s) => s === "821947219@41415"),
     "pinned establishment reproduces exactly",
   );
   console.log(`dependency multi-seed possibility [${established.join(", ")}]: PASS`);

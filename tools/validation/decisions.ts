@@ -332,18 +332,15 @@ function testForwardCompatPolicyVersion() {
   // WIP-TEMP MAP (revert before merge): 2C trajectory mapping.
   console.log("MAP-2C-RES:" + JSON.stringify(session.decisionResolutions.map((r: any) => r.tick)));
   console.log("MAP-2C-NEXT:" + JSON.stringify({ source: (next as any)?.source, opp: (next as any)?.opportunityId }));
-  // Slice 2B re-pin: detritus wealth delays guild establishment (crossfeeding
-  // @133030 rather than @78312), so the fourth advance lands on the
-  // decision-eligible crossfeeding establishment, not a catalyst window.
-  // Same trajectory shape (three resumed catalyst windows prove resumption);
-  // the event is pinned exactly and resolved like the others.
-  assert.equal(next.source, "observed_event", "the fourth opportunity is the delayed guild establishment");
-  assert.equal(
-    (next as any).opportunityId,
-    "dop:eco-crossfeeding-1-established-133030",
-    "delayed establishment is deterministic",
-  );
-  assert.equal(next.policyVersion, DECISION_POLICY_VERSION, "the fourth opportunity carries the events catalog version");
+  // Slice 2C re-derivation (CI-measured): resolutions hold at
+  // [7530,32630,57730,82830,107930] and the fourth advance lands on a
+  // fourth catalyst window @133030 (world_catalyst), not the guild
+  // establishment — staged cleanup moves the establishment later, so the
+  // resumption rhythm continues one window further. Resolved like the rest;
+  // whatever eligible events the trajectory produces are audited
+  // generically below (prompt-or-consume), with no pinned event tick.
+  assert.equal(next.source, "world_catalyst", "the fourth opportunity remains a catalyst window");
+  assert.equal(next.policyVersion, CATALYST_POLICY_VERSION, "the fourth window is stamped current");
   session.resolveEventDecision(next.opportunityId, "keep-watching");
 
   const protectedSnapshot = session.advance(12_000);
@@ -352,17 +349,12 @@ function testForwardCompatPolicyVersion() {
   // (Protection-window history: Slice 1 pinned crossfeeding @78312 observed
   // inside Aftermath coverage; Slice 2B re-derivation above audits the
   // prompt-or-consume invariant over all eligible events instead.)
-  // Slice 2B re-derivation: detritus wealth delays guild establishment to
-  // @133030, which is PROMPTED (resolved) rather than landing inside a
-  // protection window — the 107930-resolution Aftermath covers to 132930
-  // and the event lands 100 ticks past it (deterministic near-miss,
-  // probe-verified). No decision-eligible event on this trajectory is
-  // observed during an active Aftermath, so the protected-observation
-  // claim is AUDITED, not storied: every eligible observed event is either
-  // prompted exactly once or consumed inside a resolved 25k Aftermath. A
-  // deferred or replayed prompt fails the audit. (The audit form also
-  // future-proofs the claim: any engine retune that moves an eligible
-  // event inside a window exercises the consumed branch automatically.)
+  // Slice 2C re-derivation: staged cleanup moves guild establishment past
+  // the 107930-resolution Aftermath coverage, so the resumption rhythm runs
+  // one window further and no decision-eligible event is pinned to a tick.
+  // The protected-observation claim is AUDITED, not storied: every eligible
+  // observed event is either prompted exactly once or consumed inside a
+  // resolved 25k Aftermath. A deferred or replayed prompt fails the audit.
   const eligible = session.analysis.observedEvents().filter(isDecisionEligible);
   assert.ok(eligible.length > 0, "eligible events exist to audit");
   for (const event of eligible) {
@@ -375,12 +367,17 @@ function testForwardCompatPolicyVersion() {
       `eligible event ${event.eventId} prompted once or consumed in protection`,
     );
   }
-  assert.ok(
-    eligible.every((event: any) =>
-      session.decisionResolutions.some((r: any) => r.sourceEventId === event.eventId),
-    ),
-    "on this trajectory every eligible event was prompted (consumed-set documented empty)",
-  );
+  // Slice 2C: no pinned event tick — the audit above is fully generic, so
+  // whatever eligible events staged cleanup produces are covered. The
+  // consumed set is reported (not forbidden): protection that consumes an
+  // event is the mechanism working, and the per-event check already proves
+  // each consumed event sits inside a real resolved Aftermath.
+  const consumedSet = eligible
+    .filter((event: any) =>
+      !session.decisionResolutions.some((r: any) => r.sourceEventId === event.eventId),
+    )
+    .map((event: any) => event.eventId);
+  console.log("MAP-2C-CONSUMED:" + JSON.stringify(consumedSet));
   assert.equal(protectedSnapshot.pendingDecision, null,
     "nothing is promoted or deferred at the observation point");
   const newHorizon = session.aftermath!.resolutionTick + 25_000;

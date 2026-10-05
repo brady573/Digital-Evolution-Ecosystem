@@ -153,6 +153,18 @@ assert.ok(
   "live branch must record the drought onset as a removal event",
 );
 assert.equal(controlRemovals.length,0,"matched control must record no removals");
+// WIP-TEMP MAP (revert before merge): 2C recycling-buffer mapping. The
+// buffer assert below is currently failing — these values decide whether
+// the premise moved (re-derive) or the mechanism broke (defect). Asserts
+// stay STRICT meanwhile: nothing is softened to let the shard continue.
+console.log("MAP-2C-ECO:" + JSON.stringify({
+  liveA: +liveMetrics.nutrient_field.a.toFixed(1),
+  ctrlA: +controlMetrics.nutrient_field.a.toFixed(1),
+  liveIn: +liveMetrics.nutrient_field.total_input[0].toFixed(1),
+  ctrlIn: +controlMetrics.nutrient_field.total_input[0].toFixed(1),
+  livePop: disturbed.population,
+  ctrlPop: disturbed.control!.population,
+}));
 // Slice 2B re-derivation: detritus mineralization backfills A on the live
 // branch (drought mortality → detritus → mineralized A), so net live
 // A-stock can meet or exceed the control's (probe: 478 vs 453) even as the
