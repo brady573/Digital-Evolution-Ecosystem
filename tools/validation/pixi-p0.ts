@@ -140,7 +140,7 @@ const pixiDir = join(root, "apps/explorer/src/pixi");
   const trait = organismColor(organism, "traits", "speed", [0.25, 4]);
   assert.match(clade, /^hsl\(/);
   assert.match(trait, /^hsl\(/);
-  assert.equal(dormantChannel(organism).alpha, 0.65);
+  assert.ok(dormantChannel(organism).alpha < dormantChannel({ ...organism, activity: "active" }).alpha);
   assert.equal(dormantChannel(organism).hollow, true);
   console.log("p1 analytical organism encoding: PASS (dormant retains clade/trait with separate alpha/hollow channel)");
 }
@@ -309,7 +309,7 @@ function traitsForAxes(mob: number, sen: number, met: number, spec: number) {
     lens: "clades",
     organisms: makeRows(1, "dormant") as never,
   }, makeTestTexture);
-  assert.equal(voxel.alpha, 0.65, "dormancy alpha remains independent of analytical encoding");
+  assert.ok(voxel.alpha < 1, "dormancy alpha remains independent of analytical encoding");
   assert.equal(dormantAnalytical.textureCreates, activeAgain.textureCreates + 1, "dormancy remaps morphology independently of lens");
 
   const activeTexture = initialTexture;

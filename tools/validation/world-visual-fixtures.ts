@@ -154,14 +154,15 @@ export function createWorldVisualFixtures(): WorldVisualFixtures {
     const row = organism(index + 201, 300 + (index - 2.5) * 18, 300, "active", family);
     return { family, organism: row, phenotype: resolveFor(row, family) };
   });
-  const active = organism(101, 290, 300, "active", "blob");
-  const dormant = organism(102, 310, 300, "dormant", "blob");
+  const activityOrganisms = FAMILY_ORDER.flatMap((family, index) => [
+    organism(101 + index * 2, 260 + index * 16, 300, "active", family),
+    organism(102 + index * 2, 268 + index * 16, 300, "dormant", family),
+  ]);
   const activity = {
-    organisms: [active, dormant],
-    resolvedPhenotypes: new Map([
-      [Number(active.id), resolveFor(active, "blob")],
-      [Number(dormant.id), resolveFor(dormant, "blob")],
-    ]),
+    organisms: activityOrganisms,
+    resolvedPhenotypes: new Map(activityOrganisms.map((row, index) => [
+      Number(row.id), resolveFor(row, FAMILY_ORDER[Math.floor(index / 2)]!),
+    ])),
   };
   return {
     families,

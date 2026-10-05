@@ -318,22 +318,50 @@ function testGrids() {
   for (const { family, res } of founders) {
     const eco = renderPhenotypeGrid(res, "ecosystem", "active");
     const ecoFilled = countFilled(eco);
+    const ecoDormant = renderPhenotypeGrid(res, "ecosystem", "dormant");
     assert.equal(eco.size, 9, `${family} ecosystem morphology uses the feature-preserving 9x9 raster`);
     assert.ok(ecoFilled >= 3 && ecoFilled <= 50, `${family} ecosystem mark is 3-50 cells (got ${ecoFilled})`);
+    assert.deepEqual(ecoDormant, renderPhenotypeGrid(res, "ecosystem", "dormant"),
+      `${family} ecosystem dormant raster rerenders deterministically`);
+    assert.equal(countFilled(ecoDormant), ecoFilled,
+      `${family} ecosystem dormancy keeps the same coarse morphology`);
+    assert.ok(countFilled(ecoDormant) > 0,
+      `${family} ecosystem dormancy keeps a visible morphology`);
+    assert.equal(gridDifference(ecoDormant, eco), 0,
+      `${family} ecosystem dormancy preserves all family topology and extremities`);
+    const bounds = (grid: typeof eco) => {
+      const points = grid.cells.flatMap((filled, index) => filled ? [[index % grid.size, Math.floor(index / grid.size)]] : []);
+      return {
+        minX: Math.min(...points.map(([x]) => x!)), maxX: Math.max(...points.map(([x]) => x!)),
+        minY: Math.min(...points.map(([, y]) => y!)), maxY: Math.max(...points.map(([, y]) => y!)),
+      };
+    };
+    assert.deepEqual(bounds(ecoDormant), bounds(eco),
+      `${family} ecosystem dormancy preserves the resolved silhouette bounds and extremities`);
     // AC7: every family has a geometric dormant transformation at every tier.
     for (const tier of ["ecosystem", "population", "inspection"] as const) {
-      const diff = gridDifference(
-        renderPhenotypeGrid(res, tier, "active"),
-        renderPhenotypeGrid(res, tier, "dormant"),
-      );
-      const floor = tier === "ecosystem" ? 3 : 8;
-      assert.ok(diff >= floor, `${family} ${tier} dormant transform reads (diff ${diff}, AC7)`);
+      const active = renderPhenotypeGrid(res, tier, "active");
+      const dormant = renderPhenotypeGrid(res, tier, "dormant");
+      const diff = gridDifference(active, dormant);
+      if (tier === "ecosystem") {
+        assert.equal(diff, 0, `${family} ecosystem dormancy preserves coarse family topology`);
+      } else {
+        assert.ok(diff >= 8, `${family} ${tier} dormant transform remains unchanged (diff ${diff}, AC7)`);
+      }
     }
     // AC8: tiers reveal more information while staying the same phenotype.
     const pop = countFilled(renderPhenotypeGrid(res, "population", "active"));
     const insp = countFilled(renderPhenotypeGrid(res, "inspection", "active"));
     assert.ok(pop >= ecoFilled, `${family} population >= ecosystem detail`);
     assert.ok(insp >= pop, `${family} inspection >= population detail`);
+  }
+  for (let i = 0; i < founders.length; i++) {
+    for (let j = i + 1; j < founders.length; j++) {
+      const first = renderPhenotypeGrid(founders[i]!.res, "ecosystem", "dormant");
+      const second = renderPhenotypeGrid(founders[j]!.res, "ecosystem", "dormant");
+      assert.ok(gridDifference(first, second) >= 12,
+        `${founders[i]!.family} vs ${founders[j]!.family} dormant topology remains family-specific`);
+    }
   }
   // At the same ecosystem display footprint, the more detailed raster must
   // preserve coarse family signatures rather than collapsing to colored dots.

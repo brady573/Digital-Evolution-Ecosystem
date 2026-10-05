@@ -84,10 +84,16 @@ async function testDeterministicWorldVisualFixtures() {
   assert.deepEqual(first.familiesActive.map((fixture) => fixture.family),
     ["blob", "segmented", "radial", "plated", "branching", "paddled"],
     "the all-active silhouette frame includes every family in stable order");
-  assert.ok(first.activity.organisms.some((organism) => organism.activity === "active"));
-  assert.ok(first.activity.organisms.some((organism) => organism.activity === "dormant"));
-  assert.deepEqual(first.activity.organisms.map((organism) => first.activity.resolvedPhenotypes.get(Number(organism.id))?.family),
-    ["blob", "blob"], "active/dormant pair holds phenotype family constant");
+  assert.equal(first.activity.organisms.length, 12, "active/dormant fixture pairs all six morphology families");
+  for (let index = 0; index < first.activity.organisms.length; index += 2) {
+    const active = first.activity.organisms[index]!;
+    const dormant = first.activity.organisms[index + 1]!;
+    assert.equal(active.activity, "active");
+    assert.equal(dormant.activity, "dormant");
+    assert.equal(first.activity.resolvedPhenotypes.get(Number(active.id))?.family,
+      first.activity.resolvedPhenotypes.get(Number(dormant.id))?.family,
+      "each active/dormant pair holds phenotype family constant");
+  }
   assert.ok(first.sparse.organisms.length < first.dense.organisms.length, "sparse and dense scenes differ in count");
   assert.equal(first.sparse.organisms.length, 24, "sparse fixture is a small colony");
   assert.equal(first.dense.organisms.length, 900, "dense fixture is crowded enough to review overlap without a population cap");

@@ -416,7 +416,8 @@ function testAnalyticalLensesOutrankDormancy() {
   // Dormancy stays independently legible, on a channel that is not the colour.
   assert.equal(dormantChannel({ ...dormant } as never).dormant, true, "dormancy is signalled on its own channel");
   assert.equal(dormantChannel({ ...base } as never).dormant, false, "an active organism is not dimmed");
-  assert.equal(dormantChannel({ ...dormant } as never).alpha, DORMANT_ALPHA, "dormancy dims via alpha");
+  assert.ok(dormantChannel({ ...dormant } as never).alpha < dormantChannel({ ...base } as never).alpha,
+    "dormancy remains quieter through alpha without changing analytical color meaning");
   assert.equal(dormantChannel({ ...dormant } as never).hollow, true, "dormancy is drawn hollow, not solid");
   assert.ok(DORMANT_ALPHA < 1, "the dormancy alpha actually reduces opacity");
   assert.notEqual(

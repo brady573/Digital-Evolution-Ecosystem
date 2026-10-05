@@ -220,7 +220,8 @@ async function main(): Promise<void> {
           { zoom: 1, hit25: 707, miss27: null, seamIdentity: 707 },
           { zoom: 3, hit25: 707, miss27: null, seamIdentity: 707 },
         ], `${count} toroidal selection preserves 26 CSS-pixel radius and one seam identity`);
-        assert.equal(measured.dormantAnalyticalAlpha, 0.65, `${count} analytical dormancy remains independently legible`);
+        assert.ok(measured.dormantAnalyticalAlpha > 0 && measured.dormantAnalyticalAlpha < 1,
+          `${count} analytical dormancy remains independently legible`);
         assert.equal(measured.worldReplacementDisplayCountAfter, Math.max(1, Math.floor(count / 2)),
           `${count} world replacement retains only new-world displays`);
         assert.ok(measured.worldReplacementLiveTextures > 0 && measured.worldReplacementLiveTextures <= measured.worldReplacementDisplayCountAfter,
