@@ -33,7 +33,7 @@ const C_BYPRODUCT_YIELD=.32,C_ENERGY_YIELD=9,C_DECAY_RATE=.00022,C_DIFFUSION_RAT
  * loss over time is WASTE_DECAY (per-tick exponential rate).
  */
 // impl: REQ-SLICE-002 (Slice 2 waste-field calibration)
-const WASTE_YIELD=.15,WASTE_CAP_FRACTION=.25,WASTE_DIFFUSION=.20,WASTE_DECAY=.0001,WASTE_HALF_SAT=.3,WASTE_BURDEN_MAX=.45,WASTE_TOL_EFFICACY=.75,WASTE_TOL_COST=.001,CU_STANDING=.0015,CU_ACTIVE=.6,CU_RATE=.09;
+const WASTE_YIELD=.15,WASTE_CAP_FRACTION=.25,WASTE_DIFFUSION=.20,WASTE_DECAY=.0001,WASTE_HALF_SAT=.3,WASTE_BURDEN_MAX=.45,WASTE_TOL_EFFICACY=.75,WASTE_TOL_COST=.001,CU_STANDING=.0015,CU_ACTIVE=.6,CU_RATE=.09,CLEANUP_FLUX_MAX=.25,CLEANUP_FLUX_HALF_SAT=.15;
 /**
  * Foundation Slice 2 (detritus): starting calibration. Detritus inflow is
  * an order below waste inflow (deaths, not meals), so the field cap is
@@ -113,8 +113,6 @@ type ProcessId='primary_a'|'primary_b'|'c_scavenge'|'waste_cleanup';
 const NUTRIENT_SUBSTANCES:readonly NutrientSubstance[]=[0,1,2];
 /** What a nutrient process execution transformed and produced. */
 interface NutrientExecution{substance:NutrientSubstance;amount:number;gain:number;produced:number;wasteProduced:number}
-/** What a waste process execution removed, and the active energy it cost. */
-interface WasteExecution{removed:number;activeCost:number}
 
 /**
  * Identity and capability, shared by every supported metabolism. Capability
@@ -167,10 +165,7 @@ interface WasteProcess extends ProcessIdentity{
  rate:number;
  /** Active execution energy per unit of waste removed. */
  activeCostPerUnit:number;
- available:(rs:RS,o:Organism)=>number;
- transform:(rs:RS,o:Organism,capability:number,interval:Interval|null)=>number;
  account:(interval:Interval|null,removed:number)=>void;
- execute:(rs:RS,o:Organism,interval:Interval|null)=>WasteExecution;
 }
 
 type BioProcess=NutrientProcess|WasteProcess;
@@ -184,8 +179,10 @@ const SUBSTANCE_PROCESS_ID:Record<NutrientSubstance,ProcessId>={0:'primary_a',1:
  * term, and deterministic accounting. The contract is a discriminated union
  * on `medium`, so the cleanup process cannot be indexed as a nutrient:
  * `processYield(defs, waste_cleanup)` was once a reachable no-op and is now
- * unrepresentable. consume() and execCleanup() are specialised dispatchers
- * that delegate semantics here instead of re-deriving them.
+ * unrepresentable. consume() is the specialised nutrient dispatcher that
+ * delegates semantics here instead of re-deriving them; cleanup resolves
+ * through the staged snapshot/intent/budget/commit path in S.step (2C),
+ * not through immediate per-organism execution.
  */
 const nutrientProcess=(substance:NutrientSubstance,access:(o:Organism)=>number,producesByproduct:boolean,account:(interval:Interval|null,amount:number)=>void):NutrientProcess=>{
  const p:NutrientProcess={
@@ -251,18 +248,7 @@ const WASTE_PROCESS:WasteProcess=(():WasteProcess=>{
   access:(o)=>Q(o.cu||0,0,1.5)/1.5,
   rate:CU_RATE,
   activeCostPerUnit:CU_ACTIVE,
-  available:(rs,o)=>rs.waste.amountAt(o.x,o.y),
-  transform:(rs,o,capability,interval)=>rs.waste.removeAt(o.x,o.y,p.rate*capability,interval),
   account:(interval,removed)=>{if(removed>0&&interval)interval.cleanup_exec=(interval.cleanup_exec||0)+1},
-  execute:(rs,o,interval)=>{
-   if(!rs.enabledWaste)return{removed:0,activeCost:0};
-   let capability=p.access(o);
-   if(capability<=0)return{removed:0,activeCost:0};
-   if(p.available(rs,o)<=1e-9)return{removed:0,activeCost:0};
-   let removed=p.transform(rs,o,capability,interval);
-   p.account(interval,removed);
-   return{removed,activeCost:p.activeCostPerUnit*removed};
-  },
  };
  return p;
 })();
@@ -382,16 +368,6 @@ class RS{
  fractionAt(kind:number,x:number,y:number):number{let i=this.idx(x,y),c=this.cap[kind]![i]!;return c>1e-9?this.stock[kind]![i]!/c:0}
  amountAt(kind:number,x:number,y:number):number{return this.stock[kind]![this.idx(x,y)]!}
  access(o:Organism,substance:NutrientSubstance):number{return NUTRIENT_PROCESSES[substance].access(o)}
- /**
-  * Slice 2 cleanup as an explicit opportunity-dependent biological process.
-  * Capability comes from the waste_cleanup process descriptor (inherited
-  * cleanup trait only); opportunity is local waste presence. No execution
-  * without both — the same capability/opportunity split as nutrient
-  * consume(). Field removal plus interval fact accounting happen here;
-  * energy application and lineage credit stay with the caller in S.step,
-  * mirroring how consume() returns gains for the caller to apply.
-  */
- execCleanup(o:Organism,interval:Interval|null):WasteExecution{return WASTE_PROCESS.execute(this,o,interval)}
   /**
    * Foundation Slice 2: detritus as an explicit local opportunity.
    * Capability is the inherited du trait (graded: higher du takes more per
@@ -483,6 +459,16 @@ class WasteField{
   this.stock[i]!-=take;this.bioRemoved+=take;
   if(interval)interval.removed_w=(interval.removed_w||0)+take;
   return take;
+ }
+ // 2C: cell-local saturating detox flux. Budget derives ONLY from local
+ // pre-cleanup waste state plus fixed process parameters — no cleaner
+ // headcount, lineage, role, niche, or target enters. Shape: zero with no
+ // waste, monotonic, bounded by CLEANUP_FLUX_MAX, never above available
+ // stock. Pure tick-local derived state, never checkpointed. Constants
+ // are calibration freedom (survey decides); the SHAPE is the claim.
+ cleanupBudget(stock:number):number{
+  if(stock<=1e-9)return 0;
+  return Math.min(stock,CLEANUP_FLUX_MAX*stock/(stock+CLEANUP_FLUX_HALF_SAT));
  }
  diffuseOne():void{
   let st=this.stock,cp=this.cap,d=this.delta,right=this.right,down=this.down,rate=this.diffusionRate,per=cp[0]!;
@@ -779,14 +765,15 @@ class S{
    // therefore read post-move positions exactly like pre-slice biology.
    let OX=o.x,OY=o.y;o.x=ITX;o.y=ITY;
    if(this.resources.idx(ITX,ITY)!==this.resources.idx(OX,OY)){this.cur.movement_intents=(this.cur.movement_intents as number||0)+1;settleMovementClaims(occ,[{o,ox:OX,oy:OY,tx:ITX,ty:ITY}],this.cur);}
-   // Waste economy (Slice 2): gated by the resource system's internal switch
+   // Waste economy (2C staged): gated by the resource system's internal switch
    // (validation assays may disable it on a fork; production always runs
-   // the full economy). Cleanup is the waste_cleanup process: inherited
-   // capability, local-waste opportunity, the transformation and its active
-   // execution cost all dispatch through that process. Exposure burden,
-   // tolerance, the standing cleanup-trait cost, pressure scaling and the
-   // final energy subtraction are organism physiology, not process execution,
-   // so they stay here. Dormant organisms skip this block via the continue
+   // the full economy). Cleanup resolves through snapshot/intent/budget/
+   // commit below and in the post-loop phase: inherited capability and the
+   // request curve still come from the waste_cleanup process descriptor,
+   // but nothing here mutates the field. Exposure burden, tolerance, the
+   // standing cleanup-trait cost, pressure scaling and the final energy
+   // subtraction are organism physiology, not process execution, so they
+   // stay here. Dormant organisms skip this block via the continue
    // above: shutdown means shutdown.
    if(this.resources.enabledWaste){let wi=this.resources.waste.idx(o.x,o.y),wcap=this.resources.waste.cap[wi]!,wf=wcap>1e-9?wasteSnap![wi]!/wcap:0,to=Q(o.to||0,0,1.5),cu=Q(o.cu||0,0,1.5);
    if(wf>0||to>0||cu>0){
@@ -795,8 +782,8 @@ class S{
     // Intent only: capability plus snapshot opportunity gate the request;
     // the field is untouched until the post-loop commit, so the burden
     // above and every same-cell cleaner read the identical pre-cleanup state.
-    let capability=cu/1.5;
-    if(capability>0&&wasteSnap![wi]!>1e-9)cleanIntents.push({o,cell:wi,request:CU_RATE*capability});
+    let capability=WASTE_PROCESS.access(o);
+    if(capability>0&&wasteSnap![wi]!>1e-9)cleanIntents.push({o,cell:wi,request:WASTE_PROCESS.rate*capability});
     let standCost=CU_STANDING*cu;
     let wcost=(burden+standCost)*this.c.press;
     o.en-=wcost;
@@ -825,21 +812,39 @@ class S{
    if((!eat||eat.gain<DETRITUS_SHORTFALL)&&this.resources.detritusConsumptionEnabled){let du=this.resources.execDetritus(o,this.cur);if(du){o.en+=du.gain;o.md++;o.gd+=du.gain;o.en-=du.activeCost*this.c.press;this.cur.energy_detritus+=du.gain;this.lineageCredit(o.l,{detritusConsumed:du.amount,energyDetritus:du.gain,detritusExec:1})}}
    if(this.t>=(o.matureAt||0)&&this.t>=(o.readyAt||0)&&o.en>=o.rp){let support=this.reproSupport(o);this.totalReproSupport[support]!++;if(support===0)this.cur.repro_supported_a++;else if(support===1)this.cur.repro_supported_b++;else if(support===3)this.cur.repro_supported_c++;else this.cur.repro_supported_mixed++;this.cur.repro_eligible=(this.cur.repro_eligible as number||0)+1;let baby=this.child(o);pendingBirths.push({parent:o,baby});}if(o.en>0)live.push(o);else{this.recordDeath(o);occ.vacate(occ.cellOf(o.x,o.y))}
   }
-  // 2C commit (fulfill-all; the saturating budget arrives next). Intents
-  // arrive in id order (loop is id-sorted): deterministic, lineage-blind.
-  // Each removal dispatches through the waste_cleanup process, so
-  // process/lineage/field accounting keep their §5.1 reconciliation.
+  // 2C commit: saturating cell-local budget with neutral deterministic
+  // allocation. Intents arrive in id order (loop is id-sorted); Map groups
+  // preserve first-seen order, so the whole phase is deterministic and
+  // lineage-blind. R<=B fulfills every request (low-contention parity);
+  // oversubscription allocates proportionally — pure float math, no RNG,
+  // no lineage/age input, no cleaner capped above its request. Each take is
+  // satisfiable (sum of actuals ≤ snapshot stock ≤ live stock), so actuals
+  // reconcile with the field delta by construction, not by tolerance.
   // Active cost lands here — after per-organism repro checks — because
   // allocation is inherently global; burden and standing cost stay
   // pre-gains/pre-repro in-loop as before. Any mortality the active cost
   // causes is handled by the next tick's loop (no sweep here).
   if(cleanIntents.length){
+   const byCell=new Map<number,{o:Organism;cell:number;request:number}[]>();
    for(const intent of cleanIntents){
-    let ex=this.resources.execCleanup(intent.o,this.cur);
-    if(ex.removed>0){
-     intent.o.en-=ex.activeCost*this.c.press;
-     this.cur.cleanup_energy=(this.cur.cleanup_energy||0)+ex.activeCost*this.c.press;
-     this.lineageCredit(intent.o.l,{wasteRemoved:ex.removed,cleanupEnergy:ex.activeCost*this.c.press,cleanupExec:1});
+    let g=byCell.get(intent.cell);
+    if(!g){g=[];byCell.set(intent.cell,g)}
+    g.push(intent);
+   }
+   for(const [cell,intents] of byCell){
+    const budget=this.resources.waste.cleanupBudget(wasteSnap![cell]!);
+    let total=0;
+    for(const intent of intents)total+=intent.request;
+    for(const intent of intents){
+     const actual=total>0?Math.min(intent.request,intent.request/total*budget):0;
+     const take=actual>0?this.resources.waste.removeAt(intent.o.x,intent.o.y,actual,this.cur):0;
+     if(take>0){
+      const activeCost=WASTE_PROCESS.activeCostPerUnit*take;
+      intent.o.en-=activeCost*this.c.press;
+      this.cur.cleanup_energy=(this.cur.cleanup_energy||0)+activeCost*this.c.press;
+      WASTE_PROCESS.account(this.cur,take);
+      this.lineageCredit(intent.o.l,{wasteRemoved:take,cleanupEnergy:activeCost*this.c.press,cleanupExec:1});
+     }
     }
    }
   }
