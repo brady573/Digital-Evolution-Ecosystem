@@ -422,8 +422,20 @@ async function main(){
     if(visualFixtures.families.length!==6||visualFixtures.sparse.organisms.length>=visualFixtures.dense.organisms.length)
       throw new Error("World visual fixture contract is incomplete");
     for(const captureCase of WORLD_VISUAL_CAPTURE_CASES){
-      const viewport=captureCase.viewport==="phone"?{width:390,height:844}:{width:1280,height:900};
+      const viewport=captureCase.viewport==="desktop"?{width:1280,height:900}:{width:390,height:844};
       await proofPage.setViewportSize(viewport);
+      const proofWorldElement=proofPage.locator(".proof-world");
+      if(captureCase.viewport==="phone-stage"){
+        await proofWorldElement.evaluate((element:HTMLElement)=>{
+          element.style.width="100vw";
+          element.style.height="calc(100dvh - 160px)";
+        });
+      }else{
+        await proofWorldElement.evaluate((element:HTMLElement)=>{
+          element.style.removeProperty("width");
+          element.style.removeProperty("height");
+        });
+      }
       await proofPage.evaluate(({scene,environment})=>{
         const fixtureApi=(window as any).__DEE_WORLD_VISUAL__;
         fixtureApi.setScene(scene);fixtureApi.setEnvironment(environment);
@@ -516,6 +528,7 @@ async function main(){
         familyFixtures:visualFixtures.families.map((fixture)=>fixture.family),
         allActiveFamilyFixture:{capture:"18-lane2-phone-six-families-active-1x",families:visualFixtures.familiesActive.map((fixture)=>fixture.family),activity:"all-active"},
         activityFixture:{active:1,dormant:1},
+        phoneStageCaptures:WORLD_VISUAL_CAPTURE_CASES.filter((captureCase)=>captureCase.viewport==="phone-stage").map((captureCase)=>({id:captureCase.id,host:{width:390,height:684},zoom:1,deviceScaleFactor:1})),
         sceneCounts:{sparse:visualFixtures.sparse.organisms.length,dense:visualFixtures.dense.organisms.length},
         chromeCaptures:WORLD_VISUAL_CHROME_CAPTURE_CASES.map((captureCase)=>captureCase.id),
         chromeCaptureCases:WORLD_VISUAL_CHROME_CAPTURE_CASES,

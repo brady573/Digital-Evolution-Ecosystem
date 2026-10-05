@@ -95,9 +95,11 @@ async function testDeterministicWorldVisualFixtures() {
     "rich and depleted fields differ in authoritative-shaped stock");
   assert.ok(Array.isArray(WORLD_VISUAL_CAPTURE_CASES), "deterministic capture case manifest is exported");
   assert.deepEqual(WORLD_VISUAL_CAPTURE_CASES.map((item) => item.id), [
-    "phone-six-families-1x", "phone-six-families-active-1x", "phone-active-dormant", "phone-sparse", "phone-dense",
+    "phone-six-families-1x", "phone-six-families-active-1x", "phone-active-dormant", "phone-active-dormant-stage-1x", "phone-sparse", "phone-dense",
     "phone-rich", "phone-depleted", "desktop-sanity",
   ], "capture manifest has every required deterministic renderer fixture");
+  assert.ok(WORLD_VISUAL_CAPTURE_CASES.filter((item) => item.viewport === "phone-stage")
+    .every((item) => item.zoom === 1), "portrait-stage phone captures retain the 1.0x camera zoom");
   assert.deepEqual(WORLD_VISUAL_CHROME_CAPTURE_CASES.map((item) => item.id), [
     "19-lane2-phone-shell-collapsed", "20-lane2-phone-shell-expanded", "21-lane2-desktop-shell",
   ], "paired App shell captures retain collapsed/expanded lens, minimap/zoom, and desktop composition");

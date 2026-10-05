@@ -37,8 +37,9 @@ export interface WorldVisualFixtures {
 
 export const WORLD_VISUAL_CAPTURE_CASES = [
   { id: "phone-six-families-1x", scene: "families", environment: "rich", viewport: "phone", zoom: 1 },
-  { id: "phone-six-families-active-1x", scene: "families-active", environment: "rich", viewport: "phone", zoom: 1 },
+  { id: "phone-six-families-active-1x", scene: "families-active", environment: "rich", viewport: "phone-stage", zoom: 1 },
   { id: "phone-active-dormant", scene: "activity", environment: "rich", viewport: "phone", zoom: 1 },
+  { id: "phone-active-dormant-stage-1x", scene: "activity", environment: "rich", viewport: "phone-stage", zoom: 1 },
   { id: "phone-sparse", scene: "sparse", environment: "rich", viewport: "phone", zoom: 1 },
   { id: "phone-dense", scene: "dense", environment: "rich", viewport: "phone", zoom: 1 },
   { id: "phone-rich", scene: "sparse", environment: "rich", viewport: "phone", zoom: 1 },
