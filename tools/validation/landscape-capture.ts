@@ -156,24 +156,24 @@ async function main(){
       const landscape=(await world.screenshot()).toString("base64");
       await pickLens("Waste");
       const waste=(await world.screenshot()).toString("base64");
-      const signatures=await page.evaluate(async({landscape,waste})=>{
-        const decode=(encoded:string)=>new Promise<number[]>((resolve,reject)=>{
+      const signatures=await page.evaluate<{normal:number[];waste:number[]}, {landscape:string;waste:string}>(`async ({landscape,waste})=>{
+        const decode=encoded=>new Promise((resolve,reject)=>{
           const image=new Image();image.onerror=()=>reject(new Error("Could not decode presented World"));
           image.onload=()=>{
             const canvas=document.createElement("canvas");canvas.width=image.naturalWidth;canvas.height=image.naturalHeight;
             const ctx=canvas.getContext("2d");if(!ctx){reject(new Error("Screenshot analysis canvas unavailable"));return;}
             ctx.drawImage(image,0,0);const {data}=ctx.getImageData(0,0,canvas.width,canvas.height);
-            const out:number[]=[],n=32;
+            const out=[],n=32;
             for(let y=0;y<n;y++)for(let x=0;x<n;x++){
               const i=(Math.floor((y+.5)*canvas.height/n)*canvas.width+Math.floor((x+.5)*canvas.width/n))*4;
-              out.push(data[i]!,data[i+1]!,data[i+2]!);
+              out.push(data[i],data[i+1],data[i+2]);
             }
             resolve(out);
           };
-          image.src=`data:image/png;base64,${encoded}`;
+          image.src="data:image/png;base64,"+encoded;
         });
         return {normal:await decode(landscape),waste:await decode(waste)};
-      },{landscape,waste});
+      }`,{landscape,waste});
       return signatures;
     };
     const presentedModes=await compareFrame();
