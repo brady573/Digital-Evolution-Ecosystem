@@ -861,6 +861,7 @@ export const GROUPS: readonly ValidationGroup[] = [
       "dependency-tradeoff",
       "dependency-washout",
       "spatial-occupancy",
+      "waste-cleanup",
       "detritus",
     ],
     ci: false,
