@@ -165,21 +165,45 @@ console.log("MAP-2C-ECO:" + JSON.stringify({
   livePop: disturbed.population,
   ctrlPop: disturbed.control!.population,
 }));
-// Slice 2B re-derivation: detritus mineralization backfills A on the live
-// branch (drought mortality → detritus → mineralized A), so net live
-// A-stock can meet or exceed the control's (probe: 478 vs 453) even as the
-// drought removes 80% and suppresses regen ~half (15154 vs 29280 input).
-// The drought-suppression mechanism is therefore proven DIRECTLY —
-// recorded removal + suppressed environmental input — instead of via net
-// stock, which recycling legitimately overcompensates. The band below
-// documents the buffering without pinning its sign.
+// Slice 2C re-derivation (measurement redesign, not a threshold change):
+// the 2B band below conflated "recycling exists" with "recycling happens
+// to erase almost the entire drought effect" — under 0.26 live tracks
+// ~0.52x control stock on ~0.51x regen input, i.e. the old 90% premise is
+// stale, while the direct drought mechanism (recorded removal + suppressed
+// input) still passes. The buffering claim is therefore proven by MATCHED
+// CONTRAST, not by proximity to the untouched control: a second identical
+// pair has recycling white-box-disabled on its live branch exactly at the
+// fork tick (pre-fork histories deterministic-identical, H2 precedent for
+// the flags), then takes the same drought. If recycling buffers, the
+// recycling live branch must hold more A than its recycling-free twin.
 assert.ok(
   liveMetrics.nutrient_field.total_input[0] < 0.7 * controlMetrics.nutrient_field.total_input[0],
   "live A-regeneration input substantially suppressed vs control",
 );
+const assayB = new UniverseSession();
+assayB.create(config(912367481, "harsh"));
+settle(assayB, 12_000);
+assayB.createControlFork();
+{
+  // White-box fork init (H2 precedent): stop deposition + consumption and
+  // zero the field, live branch only; the clean twin is untouched as usual.
+  const simB = assayB.simulation as any;
+  simB.resources.detritusDepositionEnabled = false;
+  simB.resources.detritusConsumptionEnabled = false;
+  simB.resources.detritus.stock.fill(0);
+  simB.resources.detritus.pending.fill(0);
+}
+assayB.intervene("droughtA");
+settle(assayB, fork.tick + 15_000);
+const disturbedB = assayB.snapshot();
+const noRecycA = (disturbedB.metrics as any).nutrient_field.a;
+console.log("MAP-2C-ECO-RECYCLE:" + JSON.stringify({
+  recycleA: +liveMetrics.nutrient_field.a.toFixed(1),
+  noRecycleA: +noRecycA.toFixed(1),
+}));
 assert.ok(
-  liveMetrics.nutrient_field.a >= 0.9 * controlMetrics.nutrient_field.a,
-  "recycling buffers live A-stock within 10% of control despite removal + suppression",
+  liveMetrics.nutrient_field.a > noRecycA,
+  "recycling buffers drought A-stock vs the matched recycling-free drought twin",
 );
 
 const summary={

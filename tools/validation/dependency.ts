@@ -531,6 +531,18 @@ function testWashoutReliance() {
   session.create(fixtureConfig(FIXTURE_SEED));
   settle(session, 135000);
   session.createControlFork();
+  // WIP-TEMP MAP (revert before merge): 2C washout mapping. The 2B comment
+  // assumes a ~20% established guild at the 135k fork; under 0.26 that
+  // premise may be false (cycle moved). All asserts below stay strict.
+  {
+    const fsnap = session.snapshot() as any;
+    const fm = fsnap.metrics as any, fc = fsnap.control!.metrics as any;
+    console.log("MAP-2C-WASHFORK:" + JSON.stringify({
+      forkTick: fsnap.tick,
+      forkLiveShare: +(((fm.metabolic_roles?.counts?.byproduct_scavenger || 0) / fm.population).toFixed(4)),
+      forkControlShare: +(((fc.metabolic_roles?.counts?.byproduct_scavenger || 0) / fc.population).toFixed(4)),
+    }));
+  }
   session.applyIntervention(
     { schemaVersion: 1, kind: "nutrient_disturbance", mode: "c_washout" },
     "reliance assay",
@@ -547,6 +559,16 @@ function testWashoutReliance() {
   const control = snap.control!.metrics as any;
   const liveShare = (live.metabolic_roles?.counts?.byproduct_scavenger || 0) / live.population;
   const controlShare = (control.metabolic_roles?.counts?.byproduct_scavenger || 0) / control.population;
+  // WIP-TEMP MAP (revert before merge): 2C washout mapping.
+  console.log("MAP-2C-WASH:" + JSON.stringify({
+    liveShare: +liveShare.toFixed(4),
+    controlShare: +controlShare.toFixed(4),
+    liveC: +(live.metabolite_c.stock.toFixed(1)),
+    ctrlC: +(control.metabolite_c.stock.toFixed(1)),
+    livePop: live.population,
+    ctrlPop: control.population,
+    washTick,
+  }));
   assert.ok(liveShare < 0.02, `washed guild collapses (live ${liveShare.toFixed(3)})`);
   assert.ok(controlShare > 0.03, `control guild exists (control ${controlShare.toFixed(3)})`);
   assert.ok(liveShare < controlShare, "washed guild underperforms its own twin");
