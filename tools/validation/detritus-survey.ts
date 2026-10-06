@@ -12,11 +12,13 @@ import { ENGINE_VERSION } from "../../packages/sim-core/src/index.ts";
  *
  * Manual run (NOT part of `pnpm verify` — too long for the gate):
  *   pnpm exec tsx tools/validation/detritus-survey.ts
- * Retains to testdata/detritus-survey-0.25.json (resume-safe). The
- * detritus gate checks the retained artifact in.
+ * Retains to testdata/detritus-survey-0.26.json (resume-safe). The
+ * detritus gate checks the retained artifact in. The 0.25 file stays as
+ * historical provenance; seeds, configs, horizon, response classes, and
+ * niche-sweep fields are unchanged between survey generations.
  */
 
-const OUT = "testdata/detritus-survey-0.25.json";
+const OUT = "testdata/detritus-survey-0.26.json";
 const SEEDS = [24681357, 821947219, 3543950664, 111111111, 222222222, 333333333];
 const HORIZON = 100000;
 
