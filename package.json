@@ -23,6 +23,7 @@
     "test:migration": "tsx tools/validation/parity.ts",
     "test:ecology": "tsx tools/validation/ecology.ts",
     "test:survey": "tsx tools/validation/ecology-survey.ts",
+    "test:phenotype-manifold": "tsx tools/phenotype-manifold.ts",
     "test:browser": "tsx tools/validation/browser-smoke.ts",
     "test:decisions": "tsx tools/validation/decisions.ts",
     "test:catalysts": "tsx tools/validation/catalysts.ts",

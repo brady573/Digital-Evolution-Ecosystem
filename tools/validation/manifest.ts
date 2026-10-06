@@ -676,6 +676,20 @@ export const UNITS: readonly ValidationUnit[] = [
       "Population trajectories characterised across many seeds and horizons. Characterisation, not proof of exactness.",
   },
   {
+    id: "phenotype-manifold",
+    title: "Phenotype-biology reachability review",
+    script: "test:phenotype-manifold",
+    cls: "scientific",
+    enforcement: "manual",
+    mergeGate: false,
+    domains: withApparatus("contracts", "sim-core", "phenotype"),
+    needs: [],
+    parallelSafe: true,
+    artifact: "testdata",
+    claim:
+      "Inherited trait/capability manifold, founder vs descendant family distributions, transitions, and hysteresis decomposition characterised across the predeclared world set. Measurement only, never a gate.",
+  },
+  {
     id: "niche-survey",
     title: "Niche survey",
     script: "test:niche-survey",
@@ -880,7 +894,7 @@ export const GROUPS: readonly ValidationGroup[] = [
   {
     id: "survey",
     title: "Scientific characterisation (manual, long)",
-    unitIds: ["ecology-survey", "niche-survey", "washout-reliance", "provenance", "broad-ecology-022"],
+    unitIds: ["ecology-survey", "niche-survey", "washout-reliance", "provenance", "broad-ecology-022", "phenotype-manifold"],
     ci: false,
   },
 
