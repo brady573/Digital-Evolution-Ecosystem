@@ -11,7 +11,7 @@
  */
 
 import type { LodTier, ResolvedPhenotype } from "@digital-evolution/phenotype";
-import { describeTexture, type ActivityState } from "./phenotypeTextures";
+import { describeRenderableTexture, type ActivityState } from "./phenotypeTextures";
 
 export interface TextureCacheEntry {
   readonly key: string;
@@ -19,6 +19,7 @@ export interface TextureCacheEntry {
   readonly activity: ActivityState;
   readonly size: number;
   readonly bits: string;
+  readonly rgba?: Uint8Array;
   users: number;
   /** Ever-created serial number (proves identity stability across steps). */
   readonly serial: number;
@@ -35,13 +36,15 @@ export class PhenotypeTextureCache {
 
   acquire(res: ResolvedPhenotype, tier: LodTier, activity: ActivityState): TextureCacheEntry {
     this.lookups++;
-    const desc = describeTexture(res, tier, activity);
+    const desc = describeRenderableTexture(res, tier, activity);
     const hit = this.entries.get(desc.key);
     if (hit) {
       // Collision guard: a hash hit must carry the identical bitmap, or two
       // phenotypes would share one texture. Fail loudly, never swap silently.
-      if (hit.bits !== desc.bits || hit.size !== desc.size) {
-        throw new Error(`render-key collision for ${desc.key}: same hash, different bitmaps`);
+      if (hit.size !== desc.size || hit.bits !== desc.bits
+        || (hit.rgba !== undefined) !== (desc.rgba !== undefined)
+        || (hit.rgba !== undefined && desc.rgba !== undefined && !sameBytes(hit.rgba, desc.rgba))) {
+        throw new Error(`render-key collision for ${desc.key}: same hash, different pixels`);
       }
       this.hits++;
       hit.users++;
@@ -53,6 +56,7 @@ export class PhenotypeTextureCache {
       activity: desc.activity,
       size: desc.size,
       bits: desc.bits,
+      ...(desc.rgba ? { rgba: desc.rgba } : {}),
       users: 1,
       serial: this.nextSerial++,
     };
@@ -93,4 +97,10 @@ export class PhenotypeTextureCache {
   entriesList(): TextureCacheEntry[] {
     return [...this.entries.values()];
   }
+}
+
+function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
 }

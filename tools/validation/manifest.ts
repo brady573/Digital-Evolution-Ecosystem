@@ -583,7 +583,7 @@ export const UNITS: readonly ValidationUnit[] = [
     parallelSafe: false,
     baselineSeconds: 41,
     claim:
-      "The built product actually works in a browser: the Web Worker, canvas, and control surface all function.",
+      "The built product actually works in a browser: the Web Worker, canvas, control surface, and authorized Plated production raster path function.",
   },
   {
     id: "mobile-ui",

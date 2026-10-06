@@ -6,15 +6,16 @@ import { toTextureRequests } from "../pixi/adapter";
 import { PhenotypeTextureCache } from "../pixi/textureCache";
 import type { Lens, TraitView } from "../worldViewTypes";
 import { organismColor, dormantChannel } from "../organismEncoding";
-import { destroyTexture, textureFromBits } from "./textures";
+import { destroyTexture, textureFromPixels } from "./textures";
 import { PHENOTYPE_CELL_FRACTION, PHENOTYPE_FOOTPRINT_REFERENCE_SIZE } from "../phenotype";
 
 export interface OrganismTextureResource {
   readonly texture: Texture;
+  readonly pixels: "rich-rgba" | "legacy-grid";
   destroy(): void;
 }
 
-export type OrganismTextureFactory = (bits: string, size: number) => OrganismTextureResource;
+export type OrganismTextureFactory = (bits: string, size: number, rgba?: Uint8Array) => OrganismTextureResource;
 
 export interface OrganismInput {
   readonly worldId: number;
@@ -36,6 +37,13 @@ export interface OrganismMetrics {
   readonly texturePrunes: number;
   readonly liveTextures: number;
   readonly displayCreates: number;
+}
+
+export interface OrganismRasterEvidence {
+  readonly family: string;
+  readonly tier: LodTier;
+  readonly key: string;
+  readonly pixels: "rich-rgba" | "legacy-grid";
 }
 
 interface DisplayRecord {
@@ -63,10 +71,15 @@ interface OrganismLayerState {
 }
 
 const states = new WeakMap<Container, OrganismLayerState>();
+const rasterEvidence = new WeakMap<Container, OrganismRasterEvidence[]>();
 
-function makeTexture(bits: string, size: number): OrganismTextureResource {
-  const texture = textureFromBits(bits, size, "#ffffff");
-  return { texture, destroy: () => destroyTexture(texture) };
+export function inspectOrganismRasters(layer: Container): readonly OrganismRasterEvidence[] {
+  return rasterEvidence.get(layer) ?? [];
+}
+
+function resourceFor(entry: { readonly bits: string; readonly rgba?: Uint8Array; readonly size: number }): OrganismTextureResource {
+  const texture = textureFromPixels(entry.bits, entry.rgba, entry.size);
+  return { texture, pixels: entry.rgba ? "rich-rgba" : "legacy-grid", destroy: () => destroyTexture(texture) };
 }
 
 function cssColorToTint(color: string): number {
@@ -132,8 +145,9 @@ function drawVoxel(
 export function updateOrganismLayer(
   layer: Container,
   input: OrganismInput,
-  createTexture: OrganismTextureFactory = makeTexture,
+  createTexture?: OrganismTextureFactory,
 ): OrganismMetrics {
+  const evidence: OrganismRasterEvidence[] = [];
   let state = states.get(layer);
   if (!state || state.worldId !== input.worldId) {
     if (state) destroyOrganismLayer(layer);
@@ -187,10 +201,14 @@ export function updateOrganismLayer(
       state.displayCreates++;
     }
     if (request && display.textureKey !== request.key) {
-      const cacheEntry = state.cache.acquire(input.resolvedPhenotypes.get(request.organismId)!, input.tier, request.activity);
+      const phenotype = input.resolvedPhenotypes.get(request.organismId)!;
+      const cacheEntry = state.cache.acquire(phenotype, input.tier, request.activity);
       let gpu = state.textures.get(cacheEntry.key);
       if (!gpu) {
-        gpu = { resource: createTexture(cacheEntry.bits, cacheEntry.size), users: 0 };
+        const textureResource = createTexture
+          ? createTexture(cacheEntry.bits, cacheEntry.size, cacheEntry.rgba)
+          : resourceFor(cacheEntry);
+        gpu = { resource: textureResource, users: 0 };
         state.textures.set(cacheEntry.key, gpu);
         state.textureCreates++;
       } else state.textureReuses++;
@@ -203,11 +221,19 @@ export function updateOrganismLayer(
         if (previousGpu) previousGpu.users--;
       }
       display.textureKey = cacheEntry.key;
+      evidence.push({
+        family: phenotype.family,
+        tier: input.tier,
+        key: cacheEntry.key,
+        pixels: cacheEntry.rgba ? "rich-rgba" : "legacy-grid",
+      });
     }
 
     const resolved = input.resolvedPhenotypes.get(id);
     const tint = organismColor(organism as never, input.lens, input.traitView, input.traitRange);
-    display.sprite.tint = cssColorToTint(tint);
+    display.sprite.tint = display.textureKey && state.textures.get(display.textureKey)?.resource.pixels === "rich-rgba"
+      ? 0xffffff
+      : cssColorToTint(tint);
     display.sprite.alpha = dormantChannel(organism as never).alpha;
     display.sprite.position.set(organism.x, organism.y);
     if (request && resolved) {
@@ -216,7 +242,13 @@ export function updateOrganismLayer(
         ? (PHENOTYPE_FOOTPRINT_REFERENCE_SIZE * 2.2 * PHENOTYPE_CELL_FRACTION.ecosystem) / grid.size
         : Math.max(2, 2.2 * PHENOTYPE_CELL_FRACTION[input.tier]);
       display.sprite.width = grid.size * cell;
-      display.sprite.height = grid.size * cell;
+      display.sprite.height = display.sprite.width;
+      evidence.push({
+        family: resolved.family,
+        tier: input.tier,
+        key: request.key,
+        pixels: input.tier !== "ecosystem" && resolved.family === "plated" ? "rich-rgba" : "legacy-grid",
+      });
     }
     display.sprite.visible = input.lens === "normal" && !!request && !!resolved;
     const voxelSignature = [
@@ -242,6 +274,7 @@ export function updateOrganismLayer(
       state.texturePrunes++;
     }
   }
+  rasterEvidence.set(layer, evidence);
 
   return {
     liveDisplayCount: state.displays.size,
@@ -269,4 +302,5 @@ export function destroyOrganismLayer(layer: Container): void {
   state.textures.clear();
   state.cache.prune();
   states.delete(layer);
+  rasterEvidence.delete(layer);
 }

@@ -512,15 +512,31 @@ async function main(){
       }),{encoded:screenshot.toString("base64")});
     };
     await page.getByRole("button",{name:"Landscape",exact:true}).click();
+    await page.getByRole("button",{name:"Reset view"}).click();
+    await page.waitForTimeout(300);
+    const readRasterEvidence = async () => page.evaluate(() => (window as Window & { __DEE_PIXI_RASTER_EVIDENCE__?: Array<{ family: string; tier: string; key: string; pixels: string }> }).__DEE_PIXI_RASTER_EVIDENCE__ ?? []);
+    const ecosystemEvidence = await readRasterEvidence();
+    assert.ok(ecosystemEvidence.some((item) => item.family === "plated" && item.tier === "ecosystem" && item.pixels === "legacy-grid"),
+      "deeTest fixture guarantees Plated stays on the coarse ecosystem renderer");
+    assert.ok(ecosystemEvidence.some((item) => item.family !== "plated" && item.pixels === "legacy-grid"),
+      "deeTest fixture guarantees non-Plated families stay on the legacy renderer");
+    for(let i=0;i<2;i++)await page.getByRole("button",{name:"Zoom in"}).click();
+    assert.equal(await page.getByTestId("zoom-level").innerText(),"2.0×","population tier zoom is deterministic");
     await page.waitForTimeout(300);
     const normalInk=await worldInk();
     console.log(`phenotype normal-lens ink: ${normalInk.bright} bright px`);
     assert.ok(normalInk.bright>50,`phenotype path paints organisms in normal lens (${normalInk.bright} bright px)`);
+    const platedLayers = await readRasterEvidence();
+    assert.ok(platedLayers.some((item) => item.family === "plated" && item.tier === "population" && item.pixels === "rich-rgba"),
+      "normal population zoom presents a rich procedural Plated raster in the production Pixi world");
+    console.log(`Plated production Pixi raster: ${JSON.stringify(platedLayers.filter((item) => item.family === "plated"))}`);
     await page.getByRole("button",{name:"Traits"}).click();
     await page.waitForTimeout(300);
     const traitsInk=await worldInk();
     console.log(`legacy traits-lens ink: ${traitsInk.bright} bright px`);
     assert.ok(traitsInk.bright>50,`legacy voxel path paints organisms in traits lens (${traitsInk.bright} bright px)`);
+    assert.ok((await readRasterEvidence()).some((item) => item.family === "plated" && item.tier === "population" && item.pixels === "rich-rgba"),
+      "analytical lenses preserve Plated texture identity while rendering the existing voxel encoding");
     let changedCells=0;
     for(let i=0;i<normalInk.sig.length;i++)if(Math.abs(normalInk.sig[i]-traitsInk.sig[i])>12)changedCells++;
     assert.ok(changedCells>20,`normal and traits lenses render differently (${changedCells}/576 cells)`);
@@ -531,6 +547,11 @@ async function main(){
     const inspInk=await worldInk();
     console.log(`inspection-lens ink at 3.0x: ${inspInk.bright} bright px`);
     assert.ok(inspInk.bright>50,"inspection LOD paints at 3.0x");
+    const inspectionRasterEvidence = await page.evaluate(() => (window as Window & { __DEE_PIXI_RASTER_EVIDENCE__?: Array<{ family: string; tier: string; key: string; pixels: string }> }).__DEE_PIXI_RASTER_EVIDENCE__ ?? []);
+    assert.ok(inspectionRasterEvidence.some((item) => item.family === "plated" && item.tier === "inspection" && item.pixels === "rich-rgba"),
+      "actual Explorer inspection zoom uses the rich Plated RGBA texture");
+    assert.ok(inspectionRasterEvidence.some((item) => item.family !== "plated" && item.pixels === "legacy-grid"),
+      "inspection zoom leaves non-Plated families on the existing renderer");
     await page.getByRole("button",{name:"Reset view"}).click();
     assert.equal(await page.getByTestId("zoom-level").innerText(),"1.0×","reset restores the view");
 

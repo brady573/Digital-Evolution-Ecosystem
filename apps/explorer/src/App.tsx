@@ -20,6 +20,7 @@ import { synchronizeAftermathPresentation, transitionAftermath } from "./experie
 import { AFTERMATH_OBSERVATION_TICKS, type AftermathLifecycleEvent, type AftermathPresentationState, type AftermathStage2Fixture, type DevelopmentEvidence } from "./experience/aftermath/model";
 import { projectLiveAftermath } from "./experience/aftermath/project";
 import { phenotypeCache } from "./phenotype";
+import { resolvePhenotype } from "@digital-evolution/phenotype";
 import { familyArtwork } from "./familyArt";
 import { TRAIT_DISPLAY_RANGES, type Lens, type PixiWorldProps, type ResourceView, type TraitView, type WorldCamera } from "./worldViewTypes";
 import { WorldPixi } from "./pixiWorld/WorldPixi";
@@ -47,6 +48,18 @@ function SelectedOrganismCard({ selected, onViewLineage, onClear }: {
 }
 
 type Surface="world"|"history"|"tree"|"experiments";
+
+function deeTestPhenotypeFixtures():{organisms:RenderOrganism[];resolved:Map<number,ReturnType<typeof resolvePhenotype>>}{
+  const organisms:RenderOrganism[]=[
+    {id:900000001 as OrganismId,parent:899999999 as OrganismId,generation:1,lineageId:900000001 as RenderOrganism["lineageId"],cladeId:900000001 as RenderOrganism["cladeId"],x:296,y:300,energy:90,activity:"active",speed:1.375,sensing:69.5,metabolism:0.339,reproduction:100,diet:0.675,habitat:0.675,byproductUse:0.675,dormancyResponse:1,tolerance:0,cleanup:0},
+    {id:900000002 as OrganismId,parent:899999999 as OrganismId,generation:1,lineageId:900000002 as RenderOrganism["lineageId"],cladeId:900000002 as RenderOrganism["cladeId"],x:304,y:300,energy:90,activity:"active",speed:1.5,sensing:70,metabolism:0.2,reproduction:100,diet:0,habitat:0,byproductUse:0,dormancyResponse:1,tolerance:0,cleanup:0},
+  ];
+  const plated=resolvePhenotype({speed:1.375,sensing:69.5,metabolism:0.339,reproduction:100,diet:0.675,habitat:0.675,byproductUse:0.675,dormancyResponse:1},{parentFamily:"plated",organismId:900000001,lineageId:900000001});
+  const other=resolvePhenotype({speed:1.5,sensing:70,metabolism:0.2,reproduction:100,diet:0,habitat:0,byproductUse:0,dormancyResponse:1},{organismId:900000002,lineageId:900000002});
+  if(plated.family!=="plated")throw new Error(`deeTest Plated fixture resolved to ${plated.family}`);
+  return {organisms,resolved:new Map([[900000001,plated],[900000002,other]])};
+}
+
 /** Display names for the lens set. The active-lens chip uses the same labels
  *  as the expanded buttons, so the two never disagree. */
 const LENS_LABELS:Record<Lens,string>={
@@ -640,12 +653,16 @@ export function App(){
   // gate: it arrives only with request-correlated replies now.
   const live=presentation.live,env=presentation.environment,interp=presentation.interpretation,ident=presentation.identity,catalog=presentation.catalog;
   if(!live||!env||!interp||!ident||!catalog)return <main className="loading">{status}</main>;
+  const normalOrganisms=presentation.organisms;
+  const normalResolved=phenotypeCache.resolveSnapshot({worldId:ident.worldId,organisms:normalOrganisms});
+  const deeTestMode=typeof window!=="undefined"&&new URLSearchParams(window.location.search).has("deeTest");
+  const fixture=deeTestMode?deeTestPhenotypeFixtures():null;
   const pixiWorldProps:PixiWorldProps={
     worldId:ident.worldId,
     tick:live.tick,
     environment:env,
-    organisms:presentation.organisms,
-    resolvedPhenotypes:phenotypeCache.resolveSnapshot({worldId:ident.worldId,organisms:presentation.organisms}),
+    organisms:fixture?[...normalOrganisms,...fixture.organisms]:normalOrganisms,
+    resolvedPhenotypes:fixture?new Map([...normalResolved,...fixture.resolved]):normalResolved,
     lens,resourceView,traitView,selectedId,camera:cam,zoom,
     onSelect:setSelectedId,onCamera:setCam,onView:reportView,
   };
