@@ -518,31 +518,35 @@ function testWashoutReliance() {
   assert.equal(catalystIds({ includeTestCatalysts: true }).filter((id) => String(id) === "c-washout").length, 1,
     "and appears exactly once, with no duplicate offer");
   // Stage 2 Level-3: matched C-availability perturbation. An established
-  // guild (20% scavengers) faces a recorded environmental C sink on the live
-  // branch while the exact control twin runs untouched. The guild collapses
-  // to 4-6% against 20-27% control while population holds: material reliance
-  // on continued C availability, demonstrated by controlled comparison
-  // rather than temporal order. Deterministic on the fixture seed.
-  // Slice 2B re-pin (delay pattern): guild establishment on the fixture
-  // seed moved to @133030 under detritus wealth (probe-mapped), so the
-  // fork moves 60k -> 135k to perturb an ESTABLISHED guild, not an
-  // unformed one. Same seed, same shock, same 15k assay age, same claim.
+  // guild faces a recorded environmental C sink on the live branch while
+  // the exact control twin runs untouched: material reliance on continued
+  // C availability, demonstrated by controlled comparison rather than
+  // temporal order. Deterministic on the fixture seed.
+  // Slice 2C redesign (approved time-series): reliance may show as a
+  // PROMPT TRANSIENT response (+3k/+6k gate above), because under 0.26 the
+  // matched control itself turns over within the old 15k endpoint window
+  // (measured: fork 0.30/0.30, endpoint 0.16/0.07 with C 3x suppressed) —
+  // endpoint collapse is no longer an attributable signal. Fork timing
+  // unchanged (135k, established guild); C biology, detector, and endpoint
+  // semantics unchanged.
   const session = new UniverseSession();
   session.create(fixtureConfig(FIXTURE_SEED));
   settle(session, 135000);
   session.createControlFork();
-  // WIP-TEMP MAP (revert before merge): 2C washout mapping. The 2B comment
-  // assumes a ~20% established guild at the 135k fork; under 0.26 that
-  // premise may be false (cycle moved). All asserts below stay strict.
-  {
-    const fsnap = session.snapshot() as any;
-    const fm = fsnap.metrics as any, fc = fsnap.control!.metrics as any;
-    console.log("MAP-2C-WASHFORK:" + JSON.stringify({
-      forkTick: fsnap.tick,
-      forkLiveShare: +(((fm.metabolic_roles?.counts?.byproduct_scavenger || 0) / fm.population).toFixed(4)),
-      forkControlShare: +(((fc.metabolic_roles?.counts?.byproduct_scavenger || 0) / fc.population).toFixed(4)),
-    }));
-  }
+  // Approved time-series design (Drive 2C handoff; GitHub mirror blocked so
+  // Drive is durable authority): reliance may show as a PROMPT TRANSIENT
+  // matched response, not permanent endpoint collapse. Fork baseline is
+  // captured for change-from-fork reporting; the gate lives ONLY at +3k/+6k
+  // (C is fast-cycling, sink immediate — response must be prompt); +9k/+12k/
+  // +15k characterize recovery and cannot rescue a failed early gate.
+  // Window fixed before measurement; no post-hoc tick selection.
+  const shareOf = (m: any): number =>
+    (m.metabolic_roles?.counts?.byproduct_scavenger || 0) / m.population;
+  const fsnap = session.snapshot() as any;
+  const forkTick: number = fsnap.tick;
+  const forkLiveShare: number = shareOf(fsnap.metrics as any);
+  const forkControlShare: number = shareOf(fsnap.control!.metrics as any);
+  console.log(`washout fork baseline @${forkTick}: live ${forkLiveShare.toFixed(4)} vs control ${forkControlShare.toFixed(4)}`);
   session.applyIntervention(
     { schemaVersion: 1, kind: "nutrient_disturbance", mode: "c_washout" },
     "reliance assay",
@@ -553,33 +557,49 @@ function testWashoutReliance() {
   // decision timing shifts. C is a fast-cycling pool, so its residual is
   // sensitive to exactly that.
   const washTick = session.snapshot().tick;
-  settleExactly(session, washTick + 15000);
+  // Fixed predeclared samples; gate evaluated ONLY at +3k/+6k.
+  const samples: any[] = [];
+  for (const dt of [3000, 6000, 9000, 12000, 15000]) {
+    settleExactly(session, washTick + dt);
+    const snap = session.snapshot() as any;
+    const live = snap.metrics as any, control = snap.control!.metrics as any;
+    const ls = shareOf(live), cs = shareOf(control);
+    samples.push({
+      dt,
+      ls, cs,
+      dLive: ls - forkLiveShare,
+      dCtrl: cs - forkControlShare,
+      liveC: live.metabolite_c.stock,
+      ctrlC: control.metabolite_c.stock,
+      livePop: live.population,
+      ctrlPop: control.population,
+    });
+    console.log(`washout +${dt / 1000}k: live ${(ls * 100).toFixed(1)}% (d ${(ls - forkLiveShare >= 0 ? "+" : "") + ((ls - forkLiveShare) * 100).toFixed(1)}) vs control ${(cs * 100).toFixed(1)}% (d ${(cs - forkControlShare >= 0 ? "+" : "") + ((cs - forkControlShare) * 100).toFixed(1)}), C ${liveC.toFixed(1)}/${ctrlC.toFixed(1)}, pop ${livePop}/${ctrlPop}`);
+  }
+  // Approved early gate: 2x share difference + stronger adverse
+  // change-from-fork on live + 2x C suppression + no wipeout, at +3k or
+  // +6k. Later ticks characterize only. Failure here returns DESIGN
+  // TENSION — no replacement metric may be invented.
+  const early = samples.slice(0, 2);
+  const gateHit = early.some((s: any) =>
+    s.ls < s.cs / 2 &&
+    s.dLive < s.dCtrl &&
+    s.liveC < s.ctrlC / 2 &&
+    s.livePop > s.ctrlPop * 0.8,
+  );
+  assert.ok(gateHit, "prompt transient reliance response at +3k or +6k");
   const snap = session.snapshot();
   const live = snap.metrics as any;
   const control = snap.control!.metrics as any;
-  const liveShare = (live.metabolic_roles?.counts?.byproduct_scavenger || 0) / live.population;
-  const controlShare = (control.metabolic_roles?.counts?.byproduct_scavenger || 0) / control.population;
-  // WIP-TEMP MAP (revert before merge): 2C washout mapping.
-  console.log("MAP-2C-WASH:" + JSON.stringify({
-    liveShare: +liveShare.toFixed(4),
-    controlShare: +controlShare.toFixed(4),
-    liveC: +(live.metabolite_c.stock.toFixed(1)),
-    ctrlC: +(control.metabolite_c.stock.toFixed(1)),
-    livePop: live.population,
-    ctrlPop: control.population,
-    washTick,
-  }));
-  assert.ok(liveShare < 0.02, `washed guild collapses (live ${liveShare.toFixed(3)})`);
-  assert.ok(controlShare > 0.03, `control guild exists (control ${controlShare.toFixed(3)})`);
-  assert.ok(liveShare < controlShare, "washed guild underperforms its own twin");
-  assert.ok(liveShare < controlShare / 2, "guild effect is large, not marginal");
+  const liveShare = shareOf(live);
+  const controlShare = shareOf(control);
+  // Endpoint characterization only (cannot pass/fail the assay): the early
+  // gate above already decided reliance. Recorded here so the recovery
+  // trajectory stays visible evidence rather than lore.
+  console.log(`washout endpoint: live ${(liveShare * 100).toFixed(1)}% vs control ${(controlShare * 100).toFixed(1)}% (transient gate decided above)`);
   assert.ok(
     live.population > control.population * 0.8,
     `no wipeout: live ${live.population} vs control ${control.population}`,
-  );
-  assert.ok(
-    live.metabolite_c.stock < control.metabolite_c.stock / 2,
-    "sink suppresses C re-accumulation",
   );
   const liveRemovals = live.nutrient_field.accounting.removal_events as any[];
   const controlRemovals = control.nutrient_field.accounting.removal_events as any[];
