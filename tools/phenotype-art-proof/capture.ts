@@ -11,6 +11,7 @@ import {
   deriveMaterialRoleView,
   materializeRaster,
   rasterizeStructuralArt,
+  resolveArtLod,
   scaleRasterNearest,
 } from "../../packages/phenotype/src/art/index.ts";
 import { platedCenterFixture } from "./fixture.ts";
@@ -64,7 +65,7 @@ function encodePng(width: number, height: number, rgba: Uint8Array): Buffer {
 const resolved = platedCenterFixture();
 const recipe = buildArtRecipe(resolved);
 const geometryRaster = rasterizeStructuralArt(recipe, { width: 128, height: 128 });
-const materialRecipe = applyMaterialRoles({ source: recipe, lod: "population", regions: recipe.regions }, resolved);
+const materialRecipe = applyMaterialRoles(resolveArtLod(recipe, "inspection"), resolved);
 const materialRaster = materializeRaster(geometryRaster, materialRecipe);
 const nearestMaterial = scaleRasterNearest(materialRaster, 3);
 const displayRoleIds = deriveMaterialRoleView(materialRaster);

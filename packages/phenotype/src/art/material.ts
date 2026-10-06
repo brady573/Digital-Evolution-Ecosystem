@@ -93,11 +93,11 @@ function buildAccents(recipe: ArtLodRecipe, seed: number): ArtMaterialAccent[] {
   const accents: ArtMaterialAccent[] = [];
   for (const [index, region] of sorted.entries()) {
     if (region.materialRole === "core") {
-      const point = region.geometry.kind === "polygon" ? null : region.geometry.center;
+      const point = recipe.lod === "inspection" && region.geometry.kind !== "polygon" ? region.geometry.center : null;
       if (point) accents.push({ regionId: region.id, x: point.x, y: point.y, role: "core", kind: "pearl" });
       continue;
     }
-    if (region.detail !== "structure" || region.materialRole === "interstitial") continue;
+    if (recipe.lod !== "inspection" || region.detail !== "structure" || region.materialRole === "interstitial") continue;
     const along = 0.22 + unit(seed, region.id, index * 2) * 0.32;
     const across = (unit(seed, region.id, index * 2 + 1) - 0.5) * 0.65;
     const point = localPoint(region, along, across);
@@ -180,7 +180,9 @@ export function materializeRaster(
     throw new Error("Material input raster and masks have inconsistent dimensions");
   }
   const sorted = [...material.regions].sort((a, b) => a.paintOrder - b.paintOrder);
-  if (sorted.length !== material.source.regions.length) throw new Error("Material recipe region set differs from its source geometry");
+  if (!material.regions.every((region) => material.source.regions.includes(region))) {
+    throw new Error("Material recipe contains a region outside its source geometry");
+  }
   const rgba = raster.rgba.slice();
   for (let pixel = 0; pixel < pixels; pixel++) {
     const owner = raster.masks.ownership[pixel]!;

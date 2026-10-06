@@ -15,6 +15,6 @@ export type {
   StructuralArtRecipe,
 } from "./types";
 export { PROCEDURAL_ART_VERSION } from "./version";
-export { buildArtRecipe } from "./recipe";
+export { buildArtRecipe, resolveArtLod } from "./recipe";
 export { rasterizeStructuralArt, scaleRasterNearest } from "./raster";
 export { applyMaterialRoles, deriveMaterialRoleView, materializeRaster, MATERIAL_ROLE_IDS, PLATED_MATERIAL_PALETTE } from "./material";

@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolvePhenotype, type ResolvedPhenotype } from "../../packages/phenotype/src/index.ts";
 import type { ProceduralPhenotypeRaster, StructuralArtRecipe } from "../../packages/phenotype/src/art/index.ts";
+import { platedCenterFixture } from "../phenotype-art-proof/fixture.ts";
 
 const packageJson = JSON.parse(readFileSync(new URL("../../packages/phenotype/package.json", import.meta.url), "utf8")) as {
   exports?: Record<string, string>;
@@ -209,7 +211,7 @@ async function testMaterialPassPreservesStructuralMasks(): Promise<void> {
   assert.equal(typeof art.materializeRaster, "function", "material pass can colorize a structural raster");
   const resolved = platedPhenotype();
   const recipe = art.buildArtRecipe(resolved);
-  const view = { source: recipe, lod: "population" as const, regions: recipe.regions };
+  const view = { source: recipe, lod: "inspection" as const, regions: recipe.regions };
   const materialRecipe = art.applyMaterialRoles(view, resolved);
   assert.equal(materialRecipe.rendererVersion, art.PROCEDURAL_ART_VERSION,
     "material accents record the renderer version used in their deterministic identity");
@@ -250,7 +252,7 @@ async function testMaterialPassPreservesStructuralMasks(): Promise<void> {
     "central pearls stay below highlight intensity");
   const nextSeedPhenotype = { ...resolved, cosmeticSeed: (resolved.cosmeticSeed + 1) >>> 0 };
   const nextSeedRecipe = art.buildArtRecipe(nextSeedPhenotype);
-  const nextSeedMaterial = art.applyMaterialRoles({ source: nextSeedRecipe, lod: "population", regions: nextSeedRecipe.regions }, nextSeedPhenotype);
+  const nextSeedMaterial = art.applyMaterialRoles(art.resolveArtLod(nextSeedRecipe, "inspection"), nextSeedPhenotype);
   assert.notDeepEqual(materialRecipe.accents, nextSeedMaterial.accents,
     "accent placement changes deterministically with presentation identity seed");
 }
@@ -259,7 +261,7 @@ async function testPaletteRoleCoverage(): Promise<void> {
   const art = await import("../../packages/phenotype/src/art/index.ts");
   const resolved = platedPhenotype();
   const recipe = art.buildArtRecipe(resolved);
-  const view = { source: recipe, lod: "population" as const, regions: recipe.regions };
+  const view = { source: recipe, lod: "inspection" as const, regions: recipe.regions };
   const material = art.applyMaterialRoles(view, resolved);
   const palette = material.palette;
   for (const role of ["deep-tissue", "shadow", "body", "light", "rim", "interstitial", "core", "accent"] as const) {
@@ -279,6 +281,64 @@ async function testPaletteRoleCoverage(): Promise<void> {
     "existing central inclusions stay in the recipe for subdued material treatment");
 }
 
+async function testLodResolutionPreservesOneSourceRecipe(): Promise<void> {
+  const art = await import("../../packages/phenotype/src/art/index.ts");
+  assert.equal(typeof art.resolveArtLod, "function", "rich LOD views resolve from a source recipe");
+  const source = art.buildArtRecipe(platedPhenotype());
+  const sourceBefore = structuredClone(source);
+  const population = art.resolveArtLod(source, "population");
+  const inspection = art.resolveArtLod(source, "inspection");
+
+  assert.strictEqual(population.source, source, "population view retains the same source recipe identity");
+  assert.strictEqual(inspection.source, source, "inspection view retains the same source recipe identity");
+  assert.deepEqual(inspection.regions, source.regions, "inspection preserves every full-detail source region");
+  assert.deepEqual(population.regions, source.regions.filter((region) => region.detail === "structure"),
+    "population retains exactly the original structural regions and their fields");
+  assert.ok(population.regions.every((region) => source.regions.includes(region)),
+    "population creates no region IDs or geometry outside the source");
+  assert.ok(population.regions.every((region) => region.detail === "structure"),
+    "population excludes secondary and micro detail");
+  assert.deepEqual(new Set(population.regions.map((region) => region.depth)), new Set([0, 1, 2]),
+    "population keeps all three rear/mid/front depth bands");
+  assert.ok(population.regions.some((region) => region.materialRole === "interstitial"),
+    "population retains explicitly owned structural interstitial regions");
+  assert.deepEqual(source, sourceBefore, "LOD resolution does not mutate its source recipe");
+  assert.deepEqual(art.resolveArtLod(source, "population"), population, "LOD views resolve deterministically");
+}
+
+async function testPopulationMaterialSuppressesFineAccents(): Promise<void> {
+  const art = await import("../../packages/phenotype/src/art/index.ts");
+  const resolved = platedCenterFixture();
+  const source = art.buildArtRecipe(resolved);
+  const population = art.applyMaterialRoles(art.resolveArtLod(source, "population"), resolved);
+  const inspection = art.applyMaterialRoles(art.resolveArtLod(source, "inspection"), resolved);
+  assert.ok(population.accents.every((accent) => accent.role !== "accent"),
+    "population material suppresses per-region highlight accents");
+  assert.deepEqual(inspection.accents,
+    art.applyMaterialRoles({ source, lod: "inspection", regions: source.regions }, resolved).accents,
+    "inspection retains accepted Checkpoint B accent behavior");
+  assert.ok(inspection.accents.some((accent) => accent.role === "accent"));
+  assert.ok(inspection.accents.some((accent) => accent.role === "core"));
+
+  const populationRaster = art.rasterizeStructuralArt({ ...source, regions: population.regions }, { width: 64, height: 64 });
+  const first = art.materializeRaster(populationRaster, population);
+  const second = art.materializeRaster(populationRaster, population);
+  assert.deepEqual(first, second, "population RGBA and structural masks are deterministic");
+  assert.equal(first.width, 64);
+  assert.equal(first.height, 64);
+
+  const inspectionRaster = art.rasterizeStructuralArt({ ...source, regions: inspection.regions }, { width: 128, height: 128 });
+  const inspectionMaterial = art.materializeRaster(inspectionRaster, inspection);
+  assert.equal(createHash("sha256").update(inspectionRaster.rgba).digest("hex"),
+    "3661778b6e472cb95da983cb509925cb7b7b0acf0fed516710276873123693db",
+    "inspection neutral raster remains the accepted Checkpoint A geometry continuity anchor");
+  const inspectionHash = createHash("sha256").update(inspectionMaterial.rgba).digest("hex");
+  assert.equal(inspectionHash, "465b2fa97aabd8e87464daed836946e3cfdf28b32fd209b808ebbe589798de44",
+    "inspection native material bytes remain the accepted Checkpoint B continuity anchor");
+  assert.equal(population.rendererVersion, inspection.rendererVersion,
+    "rich LOD material views share one renderer-version identity");
+}
+
 void testArtPackageBoundary().then(() => {
   testArtContracts();
   return testPlatedFamilyRequired();
@@ -287,6 +347,8 @@ void testArtPackageBoundary().then(() => {
   .then(() => testPackedDirectionalShellMound())
   .then(() => testCpuRasterAndNearestScale())
   .then(() => testMaterialPassPreservesStructuralMasks())
-  .then(() => testPaletteRoleCoverage()).then(() => {
+  .then(() => testPaletteRoleCoverage())
+  .then(() => testLodResolutionPreservesOneSourceRecipe())
+  .then(() => testPopulationMaterialSuppressesFineAccents()).then(() => {
   console.log("phenotype art package and contracts: PASS");
 });
