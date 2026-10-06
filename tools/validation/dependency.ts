@@ -564,7 +564,7 @@ function testWashoutReliance() {
     const snap = session.snapshot() as any;
     const live = snap.metrics as any, control = snap.control!.metrics as any;
     const ls = shareOf(live), cs = shareOf(control);
-    samples.push({
+    const s = {
       dt,
       ls, cs,
       dLive: ls - forkLiveShare,
@@ -573,8 +573,9 @@ function testWashoutReliance() {
       ctrlC: control.metabolite_c.stock,
       livePop: live.population,
       ctrlPop: control.population,
-    });
-    console.log(`washout +${dt / 1000}k: live ${(ls * 100).toFixed(1)}% (d ${(ls - forkLiveShare >= 0 ? "+" : "") + ((ls - forkLiveShare) * 100).toFixed(1)}) vs control ${(cs * 100).toFixed(1)}% (d ${(cs - forkControlShare >= 0 ? "+" : "") + ((cs - forkControlShare) * 100).toFixed(1)}), C ${liveC.toFixed(1)}/${ctrlC.toFixed(1)}, pop ${livePop}/${ctrlPop}`);
+    };
+    samples.push(s);
+    console.log(`washout +${s.dt / 1000}k: live ${(s.ls * 100).toFixed(1)}% (d ${(s.dLive >= 0 ? "+" : "") + (s.dLive * 100).toFixed(1)}) vs control ${(s.cs * 100).toFixed(1)}% (d ${(s.dCtrl >= 0 ? "+" : "") + (s.dCtrl * 100).toFixed(1)}), C ${s.liveC.toFixed(1)}/${s.ctrlC.toFixed(1)}, pop ${s.livePop}/${s.ctrlPop}`);
   }
   // Approved early gate: 2x share difference + stronger adverse
   // change-from-fork on live + 2x C suppression + no wipeout, at +3k or
