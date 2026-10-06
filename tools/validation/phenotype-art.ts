@@ -225,11 +225,19 @@ async function testMaterialPassPreservesStructuralMasks(): Promise<void> {
   assert.strictEqual(material.masks.depth, neutral.masks.depth);
   assert.strictEqual(material.masks.materialRole, neutral.masks.materialRole);
   assert.notDeepEqual(material.rgba, neutral.rgba, "material pass changes color bytes, not structural masks");
+  for (let pixel = 0; pixel < neutral.width * neutral.height; pixel++) {
+    if (neutral.masks.ownership[pixel] !== -1) continue;
+    assert.deepEqual(
+      [...material.rgba.slice(pixel * 4, pixel * 4 + 4)],
+      [...neutral.rgba.slice(pixel * 4, pixel * 4 + 4)],
+      "material pass never colors pixels outside accepted structural ownership",
+    );
+  }
   const displayRoles = art.deriveMaterialRoleView(neutral);
-  assert.ok(displayRoles.some((role) => role === art.MATERIAL_ROLE_IDS.interstitial),
-    "recessed inter-plate pixels use the interstitial palette without changing source masks");
+  assert.ok(displayRoles.every((role, pixel) => role === neutral.masks.materialRole[pixel]),
+    "diagnostic role view exactly reflects accepted structural roles");
   assert.strictEqual(material.masks.materialRole, neutral.masks.materialRole,
-    "derived interstitial display roles never rewrite the accepted semantic role mask");
+    "material pass never rewrites the accepted semantic role mask");
   assert.deepEqual(material, art.materializeRaster(neutral, materialRecipe), "material accents are deterministic");
   const centralPearls = materialRecipe.accents.filter((accent) => accent.role === "core");
   assert.equal(centralPearls.length, 2, "existing center details receive material-only pearl treatment");

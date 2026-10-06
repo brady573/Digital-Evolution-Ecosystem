@@ -529,6 +529,20 @@ export const UNITS: readonly ValidationUnit[] = [
     claim: "The plated organism geometry is internally consistent with its manifest.",
   },
   {
+    id: "phenotype-art",
+    title: "Procedural phenotype art contracts",
+    script: "test:phenotype-art",
+    cls: "presentation",
+    enforcement: "blocking",
+    mergeGate: true,
+    domains: withApparatus("phenotype"),
+    needs: [],
+    parallelSafe: true,
+    baselineSeconds: 3,
+    claim:
+      "Procedural Plated art materialization is deterministic, preserves accepted geometry and every structural mask, and colors only pixels owned by accepted structural regions using the finite palette roles.",
+  },
+  {
     id: "pixi-spike",
     title: "Pixi spike validation",
     script: "test:pixi-spike",
@@ -839,7 +853,7 @@ export const GROUPS: readonly ValidationGroup[] = [
   {
     id: "presentation",
     title: "Presentation and executable product",
-    unitIds: ["build", "phenotype", "art-review", "plated", "pixi-spike", "pixi-p0"],
+    unitIds: ["build", "phenotype", "art-review", "plated", "phenotype-art", "pixi-spike", "pixi-p0"],
     ci: false,
   },
   {
@@ -924,7 +938,7 @@ export const GROUPS: readonly ValidationGroup[] = [
   {
     id: "ci-presentation",
     title: "Presentation contracts",
-    unitIds: ["phenotype", "art-review", "plated", "pixi-spike", "pixi-p0"],
+    unitIds: ["phenotype", "art-review", "plated", "phenotype-art", "pixi-spike", "pixi-p0"],
     ci: true,
   },
   {

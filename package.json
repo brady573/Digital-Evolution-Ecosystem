@@ -48,6 +48,7 @@
     "test:validation-arch": "tsx tools/validation/validation-arch.ts",
     "test:runtime-boundary": "tsx tools/validation/runtime-boundary.ts",
     "test:plated": "tsx tools/plated-proof/validate.ts && tsx tools/plated-proof/geo-validate.ts",
+    "test:phenotype-art": "tsx tools/validation/phenotype-art.ts",
     "test:pixi-spike": "tsx tools/pixi-spike/validate.ts",
     "test:pixi-p0": "tsx tools/validation/pixi-p0.ts",
     "test:pixi-world": "tsx tools/pixi-world-proof/capture.ts",

@@ -125,35 +125,11 @@ export function applyMaterialRoles(recipe: ArtLodRecipe, resolved: ResolvedPheno
   };
 }
 
-/** Derived display-role view; unlike the frozen structural mask, it may label existing inter-plate negative space as recessed tissue. */
+/** Derived diagnostic role view. It never changes structural masks or materialized pixels. */
 export function deriveMaterialRoleView(raster: ProceduralPhenotypeRaster): Uint8Array {
   const width = raster.width;
   const height = raster.height;
   const displayRoles = raster.masks.materialRole.slice();
-  let minX = width;
-  let minY = height;
-  let maxX = -1;
-  let maxY = -1;
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      if (raster.masks.silhouette[y * width + x] === 0) continue;
-      minX = Math.min(minX, x);
-      minY = Math.min(minY, y);
-      maxX = Math.max(maxX, x);
-      maxY = Math.max(maxY, y);
-    }
-  }
-  for (let y = Math.max(1, minY + 1); y < Math.min(height - 1, maxY); y++) {
-    for (let x = Math.max(1, minX + 1); x < Math.min(width - 1, maxX); x++) {
-      const pixel = y * width + x;
-      if (raster.masks.silhouette[pixel] !== 0 || raster.masks.ownership[pixel]! >= 0) continue;
-      const neighbors = [pixel - width - 1, pixel - width, pixel - width + 1, pixel - 1,
-        pixel + 1, pixel + width - 1, pixel + width, pixel + width + 1];
-      if (neighbors.reduce((count, neighbor) => count + Number(raster.masks.silhouette[neighbor] === 1), 0) >= 4) {
-        displayRoles[pixel] = MATERIAL_ROLE_IDS.interstitial;
-      }
-    }
-  }
   return displayRoles;
 }
 
@@ -216,18 +192,11 @@ export function materializeRaster(
     setPixel(rgba, pixel * 4, pixelColor(raster, material, region, pixel, x, y));
   }
 
-  const displayRoles = deriveMaterialRoleView(raster);
-  for (let pixel = 0; pixel < pixels; pixel++) {
-    if (raster.masks.ownership[pixel]! < 0 && displayRoles[pixel] === MATERIAL_ROLE_IDS.interstitial) {
-      setPixel(rgba, pixel * 4, material.palette.interstitial);
-    }
-  }
-
   // Cyan seams/rims are color-only classification of existing ownership boundaries.
   for (let y = 0; y < raster.height; y++) {
     for (let x = 0; x < raster.width; x++) {
       const pixel = y * raster.width + x;
-      if (raster.masks.silhouette[pixel] === 0) continue;
+      if (raster.masks.silhouette[pixel] === 0 || raster.masks.ownership[pixel]! < 0) continue;
       const owner = raster.masks.ownership[pixel]!;
       const neighbors = [x > 0 ? pixel - 1 : -1, x + 1 < raster.width ? pixel + 1 : -1,
         y > 0 ? pixel - raster.width : -1, y + 1 < raster.height ? pixel + raster.width : -1];
