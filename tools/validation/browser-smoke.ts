@@ -541,7 +541,8 @@ async function main(){
     for(let i=0;i<normalInk.sig.length;i++)if(Math.abs(normalInk.sig[i]-traitsInk.sig[i])>12)changedCells++;
     assert.ok(changedCells>20,`normal and traits lenses render differently (${changedCells}/576 cells)`);
     await page.getByRole("button",{name:"Landscape",exact:true}).click();
-    for(let i=0;i<4;i++)await page.getByRole("button",{name:"Zoom in"}).click();
+    assert.equal(await page.getByTestId("zoom-level").innerText(),"2.0×","inspection transition starts at population zoom");
+    for(let i=0;i<2;i++)await page.getByRole("button",{name:"Zoom in"}).click();
     assert.equal(await page.getByTestId("zoom-level").innerText(),"3.0×","reached inspection zoom");
     await page.waitForTimeout(300);
     const inspInk=await worldInk();
