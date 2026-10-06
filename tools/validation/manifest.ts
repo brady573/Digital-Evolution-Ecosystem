@@ -535,7 +535,7 @@ export const UNITS: readonly ValidationUnit[] = [
     cls: "presentation",
     enforcement: "blocking",
     mergeGate: true,
-    domains: withApparatus("phenotype"),
+    domains: withApparatus("contracts", "phenotype"),
     needs: [],
     parallelSafe: true,
     baselineSeconds: 3,
