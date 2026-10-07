@@ -464,8 +464,6 @@ function testMultiSeedPossibility() {
     if (records.length > 0) established.push(`${seed}@${records[0].tick}`);
   }
   assert.ok(established.length >= 1, "dependency establishment must be realizable");
-  // WIP-TEMP MAP (revert before merge): record the bulk-era establishment tick.
-  console.log("MAP-BK-POSS:" + JSON.stringify(established));
   assert.ok(
     established.some((s) => s === "3543950664@70531"),
     "pinned establishment reproduces exactly",
