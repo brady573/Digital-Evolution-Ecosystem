@@ -22,7 +22,12 @@
 
 ## Review Focus
 
-- el=0 worlds must replay 0.24.0 trajectories exactly — pinned by Task 6 twin-replay test.
+- el=0 removes all mechanism effects (single-cell contact, unit reach/drag
+  factors — structurally pinned), but cross-version trajectory identity is
+  neither expected nor required: each birth consumes one extra mutation-stream
+  draw for the new trait, so post-first-birth mutation sequences shift by
+  design (precedent: every trait addition; the version bump exists for this).
+  Twin determinism within one engine is the pinned property.
 - Founder init must not disturb existing RNG streams (H01 hash, new salt) — pinned by Task 2 init-distribution test.
 - Elongation must not change sense() RNG draw count (scales distances only) — pinned by Task 3 draw-count test.
 - Max-el must not collapse trivially everywhere (compact wins uniform; elongated must survive to be measured) — pinned by Task 5 extinction guard.
