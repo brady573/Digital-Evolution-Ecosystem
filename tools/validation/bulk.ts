@@ -259,4 +259,90 @@ testThresholdBoundary();
 testBkDeterminism();
 testBkCheckpoint();
 
+const regimeBase = {
+  cap: 360, pop: 30, div: 0.35, mr: 0.03, ms: 0.12, press: 1.0875,
+  resource_b_fraction: 0.5, cat: "global", st: null,
+  resource_model: "definition_driven_substances", resource_grid: 60,
+  enable_byproduct: true, enable_dormancy: true, study: true,
+};
+
+function lineageShare(sim: any, marked: Set<number>): number {
+  if (!sim.o.length) return 0;
+  let n = 0;
+  for (const o of sim.o) {
+    if (marked.has(o.id)) n++;
+    else if (o.parent != null && marked.has(o.parent)) { marked.add(o.id); n++; }
+  }
+  return n / sim.o.length;
+}
+
+// Mixed-morph competition. share() enriches `marked` from live parents, so
+// it MUST be sampled periodically: one end-of-run call only counts direct
+// children of long-dead founders and reads a false zero.
+function compete(cfg: any, markedBk: number, stops: number[], every = 0): { traj: number[]; pop: number } {
+  const sim = new Simulation(cfg) as any;
+  const marked = new Set<number>();
+  sim.o.forEach((o: any, i: number) => {
+    o.bk = i % 2 === 0 ? 1.2 : 0.05;
+    if ((i % 2 === 0 ? 1.2 : 0.05) === markedBk) marked.add(o.id);
+  });
+  const traj = [lineageShare(sim, marked)];
+  for (const stop of stops) {
+    while (sim.t < stop) {
+      sim.step();
+      if (every > 0 && sim.t % every === 0) sim.catalyst("droughtB", "bulk validation");
+    }
+    traj.push(lineageShare(sim, marked));
+  }
+  return { traj, pop: sim.o.length };
+}
+
+const verdicts: Record<string, boolean> = {};
+
+function testSmallRegime() {
+  // Steady-rich world (start .75 / prod 1.0 / patch .25, no shocks): reserves
+  // add nothing while the reproductive threshold tax delays every birth, so
+  // the large lineage is excluded. Small wins.
+  // Probe-measured trajectory (seed 7, this engine):
+  // 0.500/0.245/0.036/0.000/0.000/0.000 @0-50k, pop 552.
+  const { traj, pop } = compete(
+    { ...regimeBase, seed: 7, start: 0.75, prod: 1.0, patch: 0.25 },
+    1.2, [10000, 20000, 30000, 40000, 50000],
+  );
+  console.log(`small regime (steady-rich, mark-large): ${traj.map((s) => s.toFixed(3)).join("/")} pop=${pop}`);
+  assert.ok(pop > 0, "world viable at assay end (no wipeout confound)");
+  assert.ok(traj[traj.length - 1]! < 0.05, "large-bulk lineage excluded by 50k in steady-rich");
+  verdicts.small = true;
+  console.log("small regime: PASS");
+}
+
+function testLargeRegime() {
+  // Pulsed-scarcity world (start .5 / prod .4 / patch .6, supported drought-B
+  // catalyst every 8000 ticks): each pulse strips the nutrient field, and
+  // only the bounded reserve buffers the gap. The large lineage holds share
+  // (0.185@10k, 0.391@20k, 0.192@30k, 0.183@40k) while the small lineage is
+  // excluded by 10k. Probe-measured, seed 7, this engine.
+  const stops = [10000, 20000, 30000, 40000, 50000];
+  const hi = compete({ ...regimeBase, seed: 7, start: 0.5, prod: 0.4, patch: 0.6 }, 1.2, stops, 8000);
+  console.log(`large regime (famine, mark-large): ${hi.traj.map((s) => s.toFixed(3)).join("/")} pop=${hi.pop}`);
+  const lo = compete({ ...regimeBase, seed: 7, start: 0.5, prod: 0.4, patch: 0.6 }, 0.05, stops, 8000);
+  console.log(`large regime (famine, mark-small): ${lo.traj.map((s) => s.toFixed(3)).join("/")} pop=${lo.pop}`);
+  assert.ok(hi.pop > 0 && lo.pop > 0, "both assays viable (no wipeout confound)");
+  assert.ok(lo.traj[lo.traj.length - 1]! < 0.05, "small-bulk lineage excluded by 50k in famine");
+  assert.ok(
+    hi.traj[hi.traj.length - 1]! > lo.traj[lo.traj.length - 1]! && hi.traj[1]! > 0.05,
+    "large lineage persists through the pulses that exclude the small one",
+  );
+  verdicts.large = true;
+  console.log("large regime: PASS");
+}
+
+function testNoUniversalOptimum() {
+  assert.ok(verdicts.small && verdicts.large, "both ends won a regime (see trajectories above)");
+  console.log("no universal optimum: PASS");
+}
+
+testSmallRegime();
+testLargeRegime();
+testNoUniversalOptimum();
 console.log("bulk validation: PASS (mechanism)");
