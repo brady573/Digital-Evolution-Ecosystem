@@ -48,6 +48,7 @@ function SelectedOrganismCard({ selected, onViewLineage, onClear }: {
 }
 
 type Surface="world"|"history"|"tree"|"experiments";
+type SaveDiagnostic={readonly stage:string;readonly at:number;readonly tick?:number;readonly detail?:string};
 
 function deeTestPhenotypeFixtures():{organisms:RenderOrganism[];resolved:Map<number,ReturnType<typeof resolvePhenotype>>}{
   const organisms:RenderOrganism[]=[
@@ -276,6 +277,9 @@ export function App(){
   wasPlayingRef.current=wasPlaying;
   const [speed,setSpeed]=useState(100);
   const [status,setStatus]=useState("Creating universe…");
+  const statusRef=useRef(status);
+  statusRef.current=status;
+  const saveDiagnosticsRef=useRef<SaveDiagnostic[]>([]);
   const [settings,setSettings]=useState(DEFAULT_SETTINGS);
   // Recipe of the running universe (set on create/load). Settings staged in
   // the modal stay pending until Create universe applies them.
@@ -378,7 +382,12 @@ export function App(){
   // reporting F3a exists to close, so a failure status is pinned until the player
   // does something next (toggles playback, saves, loads, or creates a universe).
   const stickyStatusRef=useRef(false);
-  const say=(text:string,sticky=false)=>{stickyStatusRef.current=sticky;setStatus(text)};
+  const saveDiagnostic=(stage:string,tick?:number,detail?:string)=>{
+    if(typeof window==="undefined"||!new URLSearchParams(window.location.search).has("deeTest"))return;
+    saveDiagnosticsRef.current.push({stage,at:performance.now(),...(tick===undefined?{}:{tick}),...(detail===undefined?{}:{detail})});
+    if(saveDiagnosticsRef.current.length>40)saveDiagnosticsRef.current.shift();
+  };
+  const say=(text:string,sticky=false)=>{stickyStatusRef.current=sticky;statusRef.current=text;setStatus(text)};
   useEffect(()=>{
     // Read-model delivery only. The live frame is the per-advance heartbeat —
     // it emits on every advance — so one advance releases backpressure exactly
@@ -395,7 +404,11 @@ export function App(){
       if(!("metrics" in frame))return;
       const transition=knownWorldRef.current!==null&&view.worldId!==knownWorldRef.current;
       knownWorldRef.current=view.worldId;
-      if(!transition&&!stickyStatusRef.current)setStatus("");
+      if(!transition&&!stickyStatusRef.current){
+        if(statusRef.current.startsWith("Saved tick "))saveDiagnostic("confirmation-cleared");
+        statusRef.current="";
+        setStatus("");
+      }
       const interp=view.interpretation;
       // A pending decision is a visible pause: the player must choose before
       // time moves again (A13). Runtime enforces the same gate independently.
@@ -474,6 +487,8 @@ export function App(){
         worldId:presentation.identity?.worldId??null,
         environment:presentation.environment??null,
       }),
+      saveDiagnostics:()=>[...saveDiagnosticsRef.current],
+      currentStatus:()=>statusRef.current,
     };
     (window as any).__DEE_TEST__=hook;
     return()=>{delete (window as any).__DEE_TEST__};
@@ -558,15 +573,27 @@ export function App(){
   };
   const save=async()=>{
     say("Saving exact checkpoint…");
+    saveDiagnostic("checkpoint-request-start");
     try{
-      const checkpoint=await runtime.requestCheckpoint();
+      let checkpoint;
+      try{
+        checkpoint=await runtime.requestCheckpoint();
+      }catch(error){
+        saveDiagnostic("checkpoint-request-failed",undefined,error instanceof Error?error.message:String(error));
+        throw error;
+      }
+      saveDiagnostic("checkpoint-request-resolved",checkpoint.createdTick);
       // Presentation-side family anchors travel with the save record (never in
       // biology) so a restored world reconstructs identical families.
+      saveDiagnostic("repository-save-start",checkpoint.createdTick);
       const summary=await repository.save("current",checkpoint,phenotypeCache.snapshotAnchors());
       // F3a: reached only after the storage transaction committed. A failed
       // write leaves the previously confirmed save intact and says so.
+      saveDiagnostic("indexeddb-transaction-committed",summary.tick);
       say(`Saved tick ${summary.tick.toLocaleString()}`);
+      saveDiagnostic("confirmation-set",summary.tick);
     }catch(error){
+      saveDiagnostic("save-failed",undefined,error instanceof Error?error.message:String(error));
       say(storageFailureMessage(error),true);
     }
   };

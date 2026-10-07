@@ -654,7 +654,40 @@ async function main(){
     assert.match(await page.locator(".family-portrait figcaption").first().innerText(),/family$/i,"portrait caption names the family");
 
     await page.getByRole("button",{name:"Save"}).click();
-    await page.getByText(/Saved tick/).waitFor();
+    try{
+      await page.getByText(/Saved tick/).waitFor();
+    }catch(error){
+      const diagnostics=await page.evaluate(()=>({
+        events:(window as any).__DEE_TEST__?.saveDiagnostics?.()??null,
+        runtimeStatus:(window as any).__DEE_TEST__?.currentStatus?.()??null,
+        renderedStatus:document.querySelector(".status")?.textContent??null,
+      }));
+      const persisted=await page.evaluate(()=>new Promise((resolve)=>{
+        const request=indexedDB.open("digital-evolution-ecosystem");
+        request.onerror=()=>resolve({error:request.error?.name??"open-failed"});
+        request.onsuccess=()=>{
+          const db=request.result;
+          if(!db.objectStoreNames.contains("universes")){db.close();resolve({error:"missing-store"});return}
+          const tx=db.transaction("universes","readonly");
+          const get=tx.objectStore("universes").get("current");
+          let record:unknown=null;
+          get.onsuccess=()=>{record=get.result??null};
+          tx.oncomplete=()=>{
+            db.close();
+            const value=record as {tick?:unknown;checkpoint?:{createdTick?:unknown}}|null;
+            resolve({tick:value?.tick??null,checkpointTick:value?.checkpoint?.createdTick??null});
+          };
+          tx.onerror=()=>{db.close();resolve({error:tx.error?.name??"read-failed"})};
+          tx.onabort=()=>{db.close();resolve({error:tx.error?.name??"read-aborted"})};
+        };
+      }));
+      console.log(`SAVE FLOW DIAGNOSTICS ${JSON.stringify({diagnostics,persisted})}`);
+      throw error;
+    }
+    const saveStages=await page.evaluate(()=>(window as any).__DEE_TEST__?.saveDiagnostics?.()??[]);
+    assert.ok(saveStages.some((event:any)=>event.stage==="checkpoint-request-resolved"),"worker checkpoint request resolved before storage");
+    assert.ok(saveStages.some((event:any)=>event.stage==="indexeddb-transaction-committed"),"save confirmation follows IndexedDB transaction completion");
+    assert.ok(saveStages.some((event:any)=>event.stage==="confirmation-set"),"post-commit save confirmation was emitted");
     // `let`, not `const`: the F3a block below advances the world while proving
     // playback intent survives a rejected load, so the exact-tick baseline is
     // re-taken at a known-paused moment once that block returns to pause.
