@@ -66,6 +66,10 @@ const MV=(s:number):number=>2.7*Math.tanh(s/2.7);
 // reach at locomotion-drag cost. Coefficients are implementation
 // calibration; the reach-vs-drag MEANING is the accepted design.
 const EL_REACH=1.0,EL_DRAG=.25;
+// Cell-shape spatial reach (bounded physical contact extent): an elongated
+// body spans more space, so feeding candidates extend to facing cells.
+// CONTACT_EXTRA_MAX bounds the extension (own cell + at most this many).
+const CONTACT_EXTRA_MAX=2;
 const ELN=(o:Organism):number=>Q(o.el||0,0,1.5)/1.5;
 const PC=(m:number):number=>.8*m+.0055/m;
 const SC=(e:number):number=>.000035*Math.max(0,e-100)**2;
@@ -134,6 +138,10 @@ interface NutrientProcess extends ProcessIdentity{
  /** Deterministic interval consumption/execution accounting, bound to this process identity. */
  account:(interval:Interval|null,amount:number)=>void;
  execute:(rs:RS,o:Organism,interval:Interval|null)=>NutrientExecution|null;
+ /** Cell-explicit execution for body-extent contact (2C cell-shape): the
+  * same single-take rule evaluated at a contacted cell. consume() is the
+  * only caller; selection across cells happens there, never here. */
+ executeAt:(rs:RS,o:Organism,cell:number,interval:Interval|null)=>NutrientExecution|null;
 }
 
 /**
@@ -194,8 +202,9 @@ const nutrientProcess=(substance:NutrientSubstance,access:(o:Organism)=>number,p
    return{gain:amount*p.yieldOf(rs.defs)*p.yieldFactor(o),produced:made,wasteProduced:wmade};
   },
   account,
-  execute:(rs,o,interval)=>{
-   let i=rs.idx(o.x,o.y),cap=rs.cap[substance]![i]!,conc=cap>1e-9?rs.stock[substance]![i]!/cap:0;
+  execute:(rs,o,interval)=>p.executeAt(rs,o,rs.idx(o.x,o.y),interval),
+  executeAt:(rs,o,i,interval)=>{
+   let cap=rs.cap[substance]![i]!,conc=cap>1e-9?rs.stock[substance]![i]!/cap:0;
    let take=Math.min(rs.stock[substance]![i]!,rs.uptake*(.55+.45*Q(conc,0,1)));
    if(take<=1e-6)return null;
    let before=rs.stock[substance]![i]!;
@@ -383,7 +392,28 @@ class RS{
  opportunity(o:Organism):number{let i=this.idx(o.x,o.y),best=0,limit=this.enabledByproduct?3:2;for(let ki=0;ki<limit;ki++){let k=NUTRIENT_SUBSTANCES[ki]!;let c=this.cap[k]![i]!,f=c>1e-9?this.stock[k]![i]!/c:0;best=Math.max(best,f*this.access(o,k))}return best}
  sense(o:Organism){let best={score:0,substance:0 as NutrientSubstance,angle:o.h},reach=1+EL_REACH*ELN(o),ds=[Q(o.se*.45*reach,15,75),Q(o.se*reach,25,150)];for(const d of ds)for(let j=0;j<8;j++){let a=o.h+j*Math.PI/4,x=(o.x+Math.cos(a)*d+600)%600,y=(o.y+Math.sin(a)*d+600)%600,q=this.scoreIndex(o,this.idx(x,y));if(q.score>best.score){best={...q,angle:a}}}let local=this.scoreIndex(o,this.idx(o.x,o.y));if(local.score>best.score*1.12)best={...local,angle:o.h};return best}
  deposit(kind:number,x:number,y:number,amount:number,cause:string|null=null,interval:Interval|null=null):number{if(amount<=0||kind<0||kind>=this.stock.length)return 0;let i=this.idx(x,y),st=this.stock[kind]!,cp=this.cap[kind]!,room=Math.max(0,cp[i]!-st[i]!),add=Math.min(room,amount);if(add<=0)return 0;st[i]!+=add;this.totalStock[kind]!+=add;this.biologicalProduction[kind]!+=add;if(interval&&kind===2)interval.produced_c+=add;return add}
- consume(o:Organism,interval:Interval):NutrientExecution|null{let i=this.idx(o.x,o.y),best=-1,sub:NutrientSubstance=0,limit=this.enabledByproduct?3:2;for(let ki=0;ki<limit;ki++){let k=NUTRIENT_SUBSTANCES[ki]!;let amt=this.stock[k]![i]!;if(amt<=1e-9)continue;let score=amt*this.access(o,k);if(score>best){best=score;sub=k}}if(best<=0)return null;return NUTRIENT_PROCESSES[sub].execute(this,o,interval)}
+ consume(o:Organism,interval:Interval):NutrientExecution|null{
+  // Cell-shape spatial reach: feeding candidates span the contacted cells
+  // (own cell first, so ties stay home), but exactly one standard take
+  // executes per tick: local physical reach, never faster exploitation.
+  let best=-1,sub:NutrientSubstance=0,cell=-1,limit=this.enabledByproduct?3:2;
+  for(const i of this.contactCells(o))for(let ki=0;ki<limit;ki++){let k=NUTRIENT_SUBSTANCES[ki]!;let amt=this.stock[k]![i]!;if(amt<=1e-9)continue;let score=amt*this.access(o,k);if(score>best){best=score;sub=k;cell=i}}
+  if(best<=0||cell<0)return null;
+  return NUTRIENT_PROCESSES[sub].executeAt(this,o,cell,interval);
+ }
+ contactCells(o:Organism):number[]{
+  // Body-extent contact set: own cell plus up to CONTACT_EXTRA_MAX facing
+  // cells along the heading. Bounded, deterministic, toroidal-correct.
+  const own=this.idx(o.x,o.y);
+  const extra=Math.floor(ELN(o)*CONTACT_EXTRA_MAX);
+  if(extra<=0)return[own];
+  const cells=[own];
+  for(let k=1;k<=extra;k++){
+   const c=this.idx((o.x+Math.cos(o.h)*this.cell*k+600)%600,(o.y+Math.sin(o.h)*this.cell*k+600)%600);
+   if(c!==own&&!cells.includes(c))cells.push(c);
+  }
+  return cells;
+ }
  diffuse(k:number):void{let st=this.stock[k]!,cp=this.cap[k]!,d=this.delta[k]!,right=this.right,down=this.down,mr=this.minCapRight[k]!,md=this.minCapDown[k]!,rate=this.diffusionRate[k]!;d.fill(0);for(let i=0;i<this.size;i++){let ci=cp[i]!>1e-9?st[i]!/cp[i]!:0,j=right[i]!,cj=cp[j]!>1e-9?st[j]!/cp[j]!:0,flux=rate*(ci-cj)*mr[i]!;d[i]!-=flux;d[j]!+=flux;j=down[i]!;cj=cp[j]!>1e-9?st[j]!/cp[j]!:0;flux=rate*(ci-cj)*md[i]!;d[i]!-=flux;d[j]!+=flux}let adj=0;for(let i=0;i<this.size;i++){let before=st[i]!,raw=before+d[i]!,next=Q(raw,0,cp[i]!);st[i]=next;adj+=next-before}this.totalStock[k]!+=adj;this.diffusionAdjustment[k]!+=adj}
  step(t:number,drought:DroughtState|null,interval:Interval):void{let added=[0,0,0],phase=t%this.updateStride,bucket=this.regenBuckets[phase]!,elapsed=new Int32Array(bucket.length);for(let j=0;j<bucket.length;j++){let i=bucket[j]!;elapsed[j]=Math.max(1,t-this.regenLast[i]!)}for(let k=0;k<2;k++){let factor=drought&&t<drought.end&&k===drought.kind?(1-drought.suppression):1,st=this.stock[k]!,cp=this.cap[k]!,boost=this.sourceBoost[k]!;for(let j=0;j<bucket.length;j++){let i=bucket[j]!,gap=cp[i]!-st[i]!;if(gap<=1e-9)continue;let inc=gap*(1-Math.exp(-this.regenRate*boost[i]!*factor*elapsed[j]!));if(inc>0){let before=st[i]!;st[i]!+=inc;this.totalStock[k]!+=st[i]!-before;added[k]!+=inc}}this.input[k]!+=added[k]!}
   if(this.enabledByproduct){let st=this.stock[2]!,dec=0,decayRate=(this.cSink&&t<this.cSink.end)?C_DECAY_RATE*this.cSink.factor:C_DECAY_RATE;for(let j=0;j<bucket.length;j++){let i=bucket[j]!,e=elapsed[j]!,before=st[i]!,next=before*Math.exp(-decayRate*e),loss=before-next;if(loss>0){st[i]=next;dec+=loss}}this.totalStock[2]!-=dec;this.decayed[2]!+=dec;if(interval)interval.decayed_c+=dec}
