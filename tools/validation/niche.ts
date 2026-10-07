@@ -428,6 +428,8 @@ function testMatchedClearing() {
   session.create(patchworkConfig(333333333));
   settle(session, 70000);
   const sim = session.simulation as any;
+  // WIP-TEMP MAP (revert before merge): bulk trajectory mapping.
+  console.log("MAP-BK-MC:" + JSON.stringify({ tick: session.snapshot().tick, recs: ((session.analysis as any).records as any[]).filter((r: any) => r.kind === "niche").map((r: any) => ({ phase: r.phase, tick: r.tick, refs: r.entity_refs })), waste: sim.resources.waste.totals().fraction }));
   const forkProduced: number = sim.resources.waste.produced;
   const cleared = sim.clone();
   cleared.resources.enabledWaste = false;
