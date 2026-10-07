@@ -108,11 +108,14 @@ export const DORMANCY_STRONG_THRESHOLD = 0.5;
 export type LodTier = "ecosystem" | "population" | "inspection";
 
 /**
- * Logical-pixel grid sizes per geometry tier. Zoom reveals more phenotype
- * information, never just a larger copy of one fixed sprite (AC8).
+ * Logical-pixel grid sizes per geometry tier. Ecosystem uses a finer 9x9 mask
+ * while the Explorer keeps its established 5-cell display-footprint reference;
+ * the extra samples preserve family structure at the same screen size.
+ * Zoom reveals more phenotype information, never just a larger copy of one
+ * fixed sprite (AC8).
  */
 export const LOD_GRID_SIZE: Record<LodTier, number> = {
-  ecosystem: 5,
+  ecosystem: 9,
   population: 9,
   inspection: 13,
 };

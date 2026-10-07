@@ -45,6 +45,32 @@ async function openWorld(page: Page, width: number, height = 844) {
   // hook is not a UI affordance and is inert without the flag.
   await page.goto(`${baseUrl}?deeTest=1`, { waitUntil: "networkidle" });
   await page.getByLabel("Evolution world").waitFor();
+  const host=page.locator(".world-pixi-host");
+  await host.locator("canvas").waitFor();
+  assert.equal(await host.getAttribute("role"),"img","Pixi World host exposes a named visual surface to assistive technology");
+  assert.equal(await host.getAttribute("aria-label"),"Evolution world","Pixi World keeps the existing accessible World name");
+  await page.waitForFunction(()=>{
+    const host=document.querySelector(".world-pixi-host");const canvas=host?.querySelector("canvas");
+    if(!host||!canvas)return false;
+    const hostBox=host.getBoundingClientRect();const canvasBox=canvas.getBoundingClientRect();
+    return hostBox.width>0&&hostBox.height>0&&Math.abs(hostBox.width-canvasBox.width)<=1&&Math.abs(hostBox.height-canvasBox.height)<=1;
+  });
+  const geometry=await host.evaluate((el)=>{
+    const box=el.getBoundingClientRect();
+    const canvas=el.querySelector("canvas")!;
+    const canvasBox=canvas.getBoundingClientRect();
+    return {
+      host:{x:box.x,y:box.y,width:box.width,height:box.height},
+      canvasCss:{x:canvasBox.x,y:canvasBox.y,width:canvasBox.width,height:canvasBox.height},
+      backing:{width:canvas.width,height:canvas.height},
+      touchAction:getComputedStyle(canvas).touchAction,
+    };
+  });
+  assert.ok(geometry.host.width>0&&geometry.host.height>0,`Pixi host has measurable phone/desktop geometry at ${width}px`);
+  assert.ok(Math.abs(geometry.host.width-geometry.canvasCss.width)<=1
+    &&Math.abs(geometry.host.height-geometry.canvasCss.height)<=1,
+    `Pixi canvas fills its CSS host at ${width}px (${JSON.stringify(geometry)})`);
+  assert.equal(geometry.touchAction,"none","Pixi canvas preserves World touch/pan boundary");
 }
 
 /**
@@ -169,6 +195,10 @@ async function chooseLens(page: Page, lens: string) {
 
 async function checkLensBar(page: Page, width: number) {
   const viewport = page.viewportSize()!;
+  const presentationRegion = page.locator(".world-presentation-region");
+  assert.equal(await presentationRegion.count(), 1, "lens and World view controls share one presentation region");
+  assert.equal(await presentationRegion.locator(".world-overlay").count(), 1,
+    "minimap and zoom remain grouped with the lens under one World region");
   const bar = await page.locator(".lensbar").boundingBox();
   assert.ok(bar, `lens control present at ${width}px`);
   assert.ok(bar!.width <= viewport.width, `lens control fits the ${width}px viewport`);
@@ -182,6 +212,8 @@ async function checkLensBar(page: Page, width: number) {
   const collapsedBar = (await page.locator(".lensbar").boundingBox())!;
   assert.ok(collapsedBar.height <= 60,
     `the collapsed lens control stays compact at ${width}px (${collapsedBar.height.toFixed(0)}px)`);
+  assert.ok(collapsedBar.width <= chip!.width + 16,
+    `the collapsed lens bar hugs its chip instead of spanning ${width}px (${collapsedBar.width.toFixed(0)}px vs ${chip!.width.toFixed(0)}px)`);
   assert.equal(await page.locator(".lens-options button").first().isVisible().catch(() => false), false,
     `the full lens set is not permanently expanded at ${width}px`);
 
@@ -382,11 +414,16 @@ async function main() {
   const browser = await chromium.launch({ headless: true });
   try {
     const context = await browser.newContext({ viewport: { width: DESKTOP, height: 900 } });
+    let phoneLogicalWindow1x:number|null=null;
 
     // Phone widths: full action/lens/secondary/isolation sweep.
     for (const [label, width] of Object.entries(PHONE)) {
       const page = await context.newPage();
       await openWorld(page, width);
+      if(width===PHONE.phone){
+        await page.waitForFunction(()=>!!document.querySelector('[data-testid="world-minimap"]')?.getAttribute("data-window-w"));
+        phoneLogicalWindow1x=Number(await page.getByTestId("world-minimap").getAttribute("data-window-w"));
+      }
       const dominance = await checkWorldDominance(page, width);
       console.log(`  world ${(dominance.worldShare * 100).toFixed(0)}% / chrome ${(dominance.chromeShare * 100).toFixed(0)}% (hud ${dominance.chrome.hud.toFixed(0)}px, lens ${dominance.chrome.lens.toFixed(0)}px, controls ${dominance.chrome.controls.toFixed(0)}px, nav ${dominance.chrome.nav.toFixed(0)}px)`);
       await checkCoreActions(page, width);
@@ -398,6 +435,40 @@ async function main() {
       await page.close();
     }
 
+    // Controlled emulated DPR: backing pixels follow device scale while React's
+    // minimap continues to report the same logical visible-world width.
+    const dprContext=await browser.newContext({viewport:{width:PHONE.phone,height:844},deviceScaleFactor:2});
+    const dprPage=await dprContext.newPage();
+    await openWorld(dprPage,PHONE.phone);
+    await dprPage.waitForFunction(()=>{
+      const host=document.querySelector(".world-pixi-host");const canvas=host?.querySelector("canvas");
+      if(!host||!canvas)return false;
+      const box=host.getBoundingClientRect();
+      return Math.abs(canvas.width-box.width*window.devicePixelRatio)<=2
+        &&Math.abs(canvas.height-box.height*window.devicePixelRatio)<=2;
+    });
+    const dprState=await dprPage.locator(".world-pixi-host").evaluate((el)=>{
+      const box=el.getBoundingClientRect();const canvas=el.querySelector("canvas")!;
+      return {cssWidth:box.width,cssHeight:box.height,backingWidth:canvas.width,backingHeight:canvas.height,dpr:window.devicePixelRatio};
+    });
+    assert.equal(dprState.dpr,2,"the controlled browser context reports device scale factor 2");
+    assert.ok(Math.abs(dprState.backingWidth-dprState.cssWidth*2)<=2
+      &&Math.abs(dprState.backingHeight-dprState.cssHeight*2)<=2,
+      `Pixi backing dimensions track the tested 2x DPR (${JSON.stringify(dprState)})`);
+    await dprPage.waitForFunction(()=>!!document.querySelector('[data-testid="world-minimap"]')?.getAttribute("data-window-w"));
+    const logicalWindow2x=Number(await dprPage.getByTestId("world-minimap").getAttribute("data-window-w"));
+    assert.ok(phoneLogicalWindow1x!==null&&Math.abs(logicalWindow2x-phoneLogicalWindow1x)<0.5,
+      `logical minimap width is DPR-independent at this viewport (${phoneLogicalWindow1x} vs ${logicalWindow2x})`);
+    await dprPage.setViewportSize({width:PHONE.large,height:844});
+    await dprPage.waitForFunction(()=>{
+      const host=document.querySelector(".world-pixi-host");const canvas=host?.querySelector("canvas");
+      if(!host||!canvas)return false;
+      const box=host.getBoundingClientRect();
+      return Math.abs(canvas.width-box.width*window.devicePixelRatio)<=2;
+    });
+    await dprContext.close();
+    console.log(`Pixi resize/DPR: CSS ${Math.round(dprState.cssWidth)}x${Math.round(dprState.cssHeight)}, backing ${dprState.backingWidth}x${dprState.backingHeight}, scale ${dprState.dpr}x`);
+
     // Decision priority and usability on a phone width.
     const decisionPage = await context.newPage();
     await openWorld(decisionPage, PHONE.phone);
@@ -405,6 +476,9 @@ async function main() {
     await decisionPage.getByLabel("World seed").fill("24681357");
     await decisionPage.getByRole("button", { name: "Create universe" }).click();
     await decisionPage.getByRole("dialog", { name: "World settings" }).waitFor({ state: "detached" });
+    await decisionPage.locator(".world-pixi-host canvas").waitFor();
+    assert.equal(await decisionPage.locator(".world-pixi-host canvas").count(),1,
+      "normal React world creation replaces displays without duplicating the Pixi canvas");
     await checkDecisionPriority(decisionPage, PHONE.phone);
     await checkDecisionUsability(decisionPage, PHONE.phone);
     const pausedTick = await readTick(decisionPage);
@@ -413,6 +487,23 @@ async function main() {
     await decisionPage.waitForTimeout(600);
     assert.equal(await readTick(decisionPage), pausedTick,
       "a pending decision still hard-pauses the simulation after the layout change");
+    // Resolve the real runtime-created opportunity through its ordinary React UI
+    // and check the real impact state; do not use the synthetic Aftermath fixture
+    // for P1.5 integration evidence.
+    const decisionSheet=decisionPage.getByTestId("decision-sheet");
+    await decisionSheet.getByText("Keep watching").click();
+    await decisionSheet.waitFor({state:"detached",timeout:15_000});
+    const impact=decisionPage.getByTestId("aftermath-impact");
+    await impact.waitFor({timeout:15_000});
+    assert.equal(await decisionPage.getByTestId("sheet-slot").getAttribute("data-mode"),"aftermath",
+      "the real decision resolution occupies the same single React sheet slot with Aftermath");
+    assert.equal(await decisionPage.getByTestId("decision-sheet").count(),0,
+      "decision content is replaced rather than stacked beside real Aftermath");
+    assert.ok(await decisionPage.getByLabel("Evolution world").isVisible(),
+      "the Pixi World remains visible beneath real phone Aftermath");
+    await decisionPage.getByTestId("aftermath-acknowledge").click();
+    await impact.waitFor({state:"detached",timeout:15_000});
+    console.log(`real decision → Aftermath impact (${PHONE.phone}px): one React sheet slot and Pixi World context OK`);
     console.log(`decision sheet (${PHONE.phone}px): priority, first-choice visibility, world context, pause contract OK`);
     await decisionPage.close();
 

@@ -1,13 +1,23 @@
 import { mkdirSync, writeFileSync } from "node:fs";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { ENGINE_VERSION } from "../../packages/sim-core/src/index.ts";
+import {
+  WORLD_VISUAL_CAPTURE_CASES,
+  WORLD_VISUAL_CHROME_CAPTURE_CASES,
+  WORLD_VISUAL_BASELINE,
+  WORLD_VISUAL_NATURAL_CAPTURE_ID,
+  createWorldVisualFixtures,
+} from "./world-visual-fixtures.ts";
 
 /**
  * Issue #30 Slice 2 visual evidence: deterministic captures of the ordinary
  * ecological landscape and the analytical views, at representative zooms and
  * viewports, on a fixed seed.
  *
- * Statistical canvas checks (see tools/validation/browser-smoke.ts and
+ * Statistical presented-frame checks (see tools/validation/browser-smoke.ts and
  * tools/validation/landscape.ts) can prove the landscape is structured, that
  * lenses differ, and that organisms stay readable. They cannot answer
  * whether the ordinary view *reads as an ecological landscape*. These
@@ -22,17 +32,41 @@ import { ENGINE_VERSION } from "../../packages/sim-core/src/index.ts";
 const baseUrl=process.env.DEE_BASE_URL||"http://127.0.0.1:4173";
 const OUT_DIR="testdata/visual";
 const SEED=24681357; // a world that accumulates Metabolic Waste
+const REPO_ROOT=resolve(dirname(fileURLToPath(import.meta.url)),"../..");
+const VISUAL_PROOF_URL="http://127.0.0.1:5196/";
+
+async function startVisualProofServer():Promise<ChildProcess>{
+  const server=spawn("pnpm",[
+    "--filter","@digital-evolution/explorer","exec","vite","--config","../../tools/world-visual-proof/vite.config.mjs",
+    "--host","127.0.0.1","--port","5196","--strictPort",
+  ],{cwd:REPO_ROOT,stdio:"ignore"});
+  const deadline=Date.now()+30_000;
+  while(Date.now()<deadline){
+    if(server.exitCode!==null)throw new Error(`World visual fixture server exited with ${server.exitCode}`);
+    try{const response=await fetch(VISUAL_PROOF_URL);if(response.ok)return server;}catch{}
+    await new Promise(resolve=>setTimeout(resolve,200));
+  }
+  server.kill("SIGTERM");
+  throw new Error("World visual fixture server did not become ready within 30 seconds");
+}
 
 async function main(){
   mkdirSync(OUT_DIR,{recursive:true});
   const browser=await chromium.launch({headless:true});
+  let proofServer:ChildProcess|null=null;
   const written:string[]=[];
   try{
+    proofServer=await startVisualProofServer();
     const context=await browser.newContext({viewport:{width:1280,height:900},deviceScaleFactor:1});
     const page=await context.newPage();
-    // URL-gated test hook, not a product control (AC21).
+    // deeTest provides the runtime fixture hook only; production Pixi remains
+    // the semantic World renderer on this URL as well.
     await page.goto(`${baseUrl}?deeTest=1`,{waitUntil:"networkidle"});
     await page.getByLabel("Evolution world").waitFor();
+    const productionWorld=page.locator(".world-pixi-host");
+    await productionWorld.locator("canvas").waitFor();
+    if(await productionWorld.count()!==1||await page.locator("canvas.world-canvas").count()!==0)
+      throw new Error("production visual capture requires one Pixi World and no semantic Canvas World");
 
     // A fixed Patchwork world (the Slice 2 calibration config) on a fixed
     // seed, advanced until Metabolic Waste is measurably present, so the
@@ -69,23 +103,17 @@ async function main(){
       await page.getByRole("button",{name:lens,exact:true}).click();
       await page.waitForTimeout(250);
     };
-    // Waste load measured from the canvas, so "waste-modified" is a verified
-    // claim rather than a hopeful label.
-    const wasteInk=async()=>{
-      await pickLens("Waste");
-      await page.waitForTimeout(120);
-      return await world.evaluate((el:HTMLCanvasElement)=>{
-        const ctx=el.getContext("2d");if(!ctx)return 0;
-        const d=ctx.getImageData(0,0,el.width,el.height).data;
-        let lit=0;
-        for(let i=0;i<d.length;i+=4){
-          // Waste overlay ramps a lifted dark base up to a bright load, so
-          // "lit" means meaningfully above the empty-cell floor.
-          if(d[i]!>96)lit++;
+    // The authoritative read model establishes actual waste load; the
+    // presented-frame screenshot independently proves that Waste and normal
+    // World render as distinct visible modes.
+    const wasteCapacityFraction=async()=>await page.evaluate(()=>{
+        const waste=(window as any).__DEE_TEST__.readWorldState().environment.waste;
+        let stock=0,capacity=0;
+        for(let i=0;i<waste.stock.length;i++){
+          stock+=waste.stock[i]??0;capacity+=waste.capacity[i]??0;
         }
-        return lit/(d.length/4);
+        return capacity>0?stock/capacity:0;
       });
-    };
 
     // Pending decisions hard-pause the simulation, so a capture run that
     // ignores them would stall at the first event. Resolve with the first
@@ -122,10 +150,44 @@ async function main(){
       if(await settleDecision())continue;
       await pressRun(false);
       await page.waitForTimeout(350);
-      load=await wasteInk();
+      await pickLens("Waste");
+      await page.waitForTimeout(120);
+      load=await wasteCapacityFraction();
       if(load<0.10)await pressRun(true);
     }
     console.log(`waste coverage ${(load*100).toFixed(1)}% at tick ${await readTick()}`);
+
+    const compareFrame=async()=>{
+      await pickLens("Landscape");
+      const landscape=(await world.screenshot()).toString("base64");
+      await pickLens("Waste");
+      const waste=(await world.screenshot()).toString("base64");
+      const signatures=await page.evaluate<{normal:number[];waste:number[]}>(`(async()=>{
+        const {landscape,waste}=${JSON.stringify({landscape,waste})};
+        const decode=encoded=>new Promise((resolve,reject)=>{
+          const image=new Image();image.onerror=()=>reject(new Error("Could not decode presented World"));
+          image.onload=()=>{
+            const canvas=document.createElement("canvas");canvas.width=image.naturalWidth;canvas.height=image.naturalHeight;
+            const ctx=canvas.getContext("2d");if(!ctx){reject(new Error("Screenshot analysis canvas unavailable"));return;}
+            ctx.drawImage(image,0,0);const {data}=ctx.getImageData(0,0,canvas.width,canvas.height);
+            const out=[],n=32;
+            for(let y=0;y<n;y++)for(let x=0;x<n;x++){
+              const i=(Math.floor((y+.5)*canvas.height/n)*canvas.width+Math.floor((x+.5)*canvas.width/n))*4;
+              out.push(data[i],data[i+1],data[i+2]);
+            }
+            resolve(out);
+          };
+          image.src="data:image/png;base64,"+encoded;
+        });
+        return {normal:await decode(landscape),waste:await decode(waste)};
+      })()`);
+      return signatures;
+    };
+    const presentedModes=await compareFrame();
+    const visibleWasteDifference=presentedModes.normal.reduce((n,value,i)=>n+(value!==presentedModes.waste[i]?1:0),0);
+    if(!(load>0))throw new Error("authoritative environment contains no measurable waste for the production capture");
+    if(visibleWasteDifference===0)
+      throw new Error("presented production Pixi Waste lens did not differ from Landscape");
 
     // No phase 2: deliberately NOT searching for a niche record. The
     // establishment point (~tick 63k on this calibration) sits outside a
@@ -346,18 +408,141 @@ async function main(){
     }
     await decisionShell.close();
 
+    // Deterministic renderer fixtures: same presentation-only props at each
+    // capture head, rendered by the production WorldPixi component.
+    const proofContext=await browser.newContext({viewport:{width:390,height:844},deviceScaleFactor:1});
+    const proofPage=await proofContext.newPage();
+    await proofPage.goto(VISUAL_PROOF_URL,{waitUntil:"networkidle"});
+    const proofWorld=proofPage.locator(".world-pixi-host");
+    await proofWorld.locator("canvas").waitFor({timeout:30_000});
+    await proofPage.waitForFunction(()=>
+      (document.querySelector(".world-pixi-host")?.getAttribute("data-renderer-backend")??"").startsWith("WebGLRenderer/"),
+      undefined,{timeout:30_000});
+    const visualFixtures=createWorldVisualFixtures();
+    if(visualFixtures.families.length!==6||visualFixtures.sparse.organisms.length>=visualFixtures.dense.organisms.length)
+      throw new Error("World visual fixture contract is incomplete");
+    for(const captureCase of WORLD_VISUAL_CAPTURE_CASES){
+      const viewport=captureCase.viewport==="desktop"?{width:1280,height:900}:{width:390,height:844};
+      await proofPage.setViewportSize(viewport);
+      const proofWorldElement=proofPage.locator(".proof-world");
+      if(captureCase.viewport==="phone-stage"){
+        await proofWorldElement.evaluate((element:HTMLElement)=>{
+          element.style.width="100vw";
+          element.style.height="calc(100dvh - 160px)";
+        });
+      }else{
+        await proofWorldElement.evaluate((element:HTMLElement)=>{
+          element.style.removeProperty("width");
+          element.style.removeProperty("height");
+        });
+      }
+      await proofPage.evaluate(({scene,environment})=>{
+        const fixtureApi=(window as any).__DEE_WORLD_VISUAL__;
+        fixtureApi.setScene(scene);fixtureApi.setEnvironment(environment);
+      },{scene:captureCase.scene,environment:captureCase.environment});
+      await proofPage.evaluate((zoom)=>{
+        const world=(window as any).__DEE_WORLD_VISUAL__;
+        world.setZoom(zoom);
+      },captureCase.zoom);
+      await proofPage.waitForTimeout(180);
+      const name=`18-lane2-${captureCase.id}`;
+      await proofWorld.screenshot({path:`${OUT_DIR}/${name}.png`});
+      written.push(name);
+      console.log(`captured deterministic Pixi fixture ${captureCase.id}`);
+    }
+    await proofContext.close();
+
+    // Actual App screenshots establish phone DOM chrome composition. The
+    // simulation is paused at its deterministic initial seed/state.
+    const chromePage=await context.newPage();
+    await chromePage.setViewportSize({width:390,height:844});
+    await chromePage.goto(`${baseUrl}?deeTest=1`,{waitUntil:"networkidle"});
+    await chromePage.getByLabel("Evolution world").waitFor();
+    await chromePage.locator(".world-pixi-host canvas").waitFor();
+    await chromePage.waitForTimeout(300);
+    for(const captureCase of WORLD_VISUAL_CHROME_CAPTURE_CASES.filter((item)=>item.viewport.width===390)){
+      await chromePage.setViewportSize(captureCase.viewport);
+      const optionsVisible=await chromePage.locator(".lens-options button").first().isVisible().catch(()=>false);
+      if(captureCase.lens==="expanded"&&!optionsVisible)await chromePage.locator(".lens-active").click();
+      if(captureCase.lens==="collapsed"&&optionsVisible)await chromePage.locator(".lens-active").click();
+      await chromePage.waitForTimeout(100);
+      await chromePage.screenshot({path:`${OUT_DIR}/${captureCase.id}.png`});
+      written.push(captureCase.id);
+    }
+    // Return to the mobile breakpoint and collapse before the desktop sanity
+    // frame, where the active-lens chip itself is hidden by design.
+    await chromePage.locator(".lens-active").click();
+    const desktopShell=WORLD_VISUAL_CHROME_CAPTURE_CASES.find((item)=>item.viewport.width===1280)!;
+    await chromePage.setViewportSize(desktopShell.viewport);
+    await chromePage.waitForTimeout(150);
+    await chromePage.screenshot({path:`${OUT_DIR}/${desktopShell.id}.png`});
+    written.push(desktopShell.id);
+    await chromePage.close();
+
+    // A supplementary natural-running frame is intentionally not fixture
+    // input: it shows the actual default-seed simulation evolving on a phone.
+    const naturalContext=await browser.newContext({viewport:{width:390,height:844},deviceScaleFactor:1});
+    const naturalPage=await naturalContext.newPage();
+    await naturalPage.goto(`${baseUrl}?deeTest=1`,{waitUntil:"networkidle"});
+    await naturalPage.getByLabel("Evolution world").waitFor();
+    await naturalPage.locator(".world-pixi-host canvas").waitFor();
+    await naturalPage.getByRole("button",{name:"Play"}).click();
+    await naturalPage.waitForFunction(()=>
+      Number(document.querySelector('[data-testid="tick"]')?.textContent?.replaceAll(",","")??0)>0,
+      undefined,{timeout:30_000});
+    const naturalTick=Number((await naturalPage.getByTestId("tick").innerText()).replaceAll(",",""));
+    if(await naturalPage.getByRole("button",{name:"Pause"}).count()!==1)
+      throw new Error("natural phone frame must show the real simulation running");
+    const naturalFramePath=`${OUT_DIR}/${WORLD_VISUAL_NATURAL_CAPTURE_ID}.png`;
+    await naturalPage.screenshot({path:naturalFramePath});
+    written.push(WORLD_VISUAL_NATURAL_CAPTURE_ID);
+    await naturalContext.close();
+
+    const requiredWorldFrames=[
+      ...WORLD_VISUAL_CAPTURE_CASES.map((captureCase)=>`18-lane2-${captureCase.id}`),
+      ...WORLD_VISUAL_CHROME_CAPTURE_CASES.map((captureCase)=>captureCase.id),
+      WORLD_VISUAL_NATURAL_CAPTURE_ID,
+    ];
+    const missingWorldFrames=requiredWorldFrames.filter((name)=>!written.includes(name));
+    if(missingWorldFrames.length>0)
+      throw new Error(`World visual review set is incomplete: ${missingWorldFrames.join(", ")}`);
+
     writeFileSync(`${OUT_DIR}/MANIFEST.json`,JSON.stringify({
       seed:SEED,engine:ENGINE_VERSION,preset:"Patchwork",
       captureTick:await readTick().catch(()=>null),
-      wasteCellCoverage:+(load*100).toFixed(2),
+      meanWasteCapacityFraction:+load.toFixed(4),
+      presentedWasteLandscapeDifferingChannels:visibleWasteDifference,
+      presentedPixelSource:"Playwright Chromium element screenshots of production WorldPixi host",
       captures:written,
+      visualReviewSet:{
+        captureMode:"paired-deterministic-presented-frames",
+        baselineReferenceSha:WORLD_VISUAL_BASELINE.referenceSha,
+        baselineCaptureSha:WORLD_VISUAL_BASELINE.captureSha,
+        baselineRunId:WORLD_VISUAL_BASELINE.runId,
+        baselineArtifact:WORLD_VISUAL_BASELINE.artifact,
+        captureCommit:execFileSync("git",["rev-parse","HEAD"],{cwd:REPO_ROOT,encoding:"utf8"}).trim(),
+        browser:"Playwright Chromium",
+        deviceScaleFactor:1,
+        ecosystemZoom:1,
+        fixtures:WORLD_VISUAL_CAPTURE_CASES,
+        familyFixtures:visualFixtures.families.map((fixture)=>fixture.family),
+        allActiveFamilyFixture:{capture:"18-lane2-phone-six-families-active-1x",families:visualFixtures.familiesActive.map((fixture)=>fixture.family),activity:"all-active"},
+        activityFixture:{families:visualFixtures.activity.organisms.length/2,active:visualFixtures.activity.organisms.filter((row)=>row.activity==="active").length,dormant:visualFixtures.activity.organisms.filter((row)=>row.activity==="dormant").length,pairing:"same resolved family per adjacent active/dormant rows"},
+        phoneStageCaptures:WORLD_VISUAL_CAPTURE_CASES.filter((captureCase)=>captureCase.viewport==="phone-stage").map((captureCase)=>({id:captureCase.id,host:{width:390,height:684},zoom:1,deviceScaleFactor:1})),
+        sceneCounts:{sparse:visualFixtures.sparse.organisms.length,dense:visualFixtures.dense.organisms.length},
+        chromeCaptures:WORLD_VISUAL_CHROME_CAPTURE_CASES.map((captureCase)=>captureCase.id),
+        chromeCaptureCases:WORLD_VISUAL_CHROME_CAPTURE_CASES,
+        naturalRunningWorld:{id:WORLD_VISUAL_NATURAL_CAPTURE_ID,seed:821947219,tick:naturalTick,viewport:{width:390,height:844},deviceScaleFactor:1,simulationState:"running",captureMode:"natural-live-world-not-synthetic-fixture"},
+        syntheticFixtureNotice:"Renderer fixtures are deterministic presentation-only inputs, not simulation findings.",
+      },
       nicheHistoryCapture:"omitted by decision: establishment occurs around tick 63k, outside a bounded interactive run. Deterministic establishment evidence lives in the engine/analysis validation and testdata/niche-survey-0.22.json; the history surface's record fields and causal caveat are covered there, not by a screenshot.",
       aftermathDevelopmentCapture:"captures are labeled deeTest-only synthetic presentation fixtures, not production findings; current contracts expose no stable identity link from a later ecological History record to this Aftermath.",
       aftermathSettlementCapture:"capture is a labeled deeTest presentation fixture with a synthetic horizon projection, not evidence that a live simulation reached 25,000 ticks; the real boundary is covered by deterministic projection tests.",
-      note:"Deterministic captures of the Slice 2 ecological landscape and Aftermath impact/observation states. Regenerate with pnpm test:visual against a preview server. wasteCellCoverage is the measured share of world cells whose waste overlay is lit, so 'waste-modified' is a measured claim rather than a label.",
+      note:"Captures of the production Pixi World and Aftermath impact/observation states. Regenerate with pnpm test:visual against a preview server. meanWasteCapacityFraction is read from the authoritative environment frame; presentedWasteLandscapeDifferingChannels compares Chromium-presented World screenshots and is not a biological measurement.",
     },null,2)+"\n");
   }finally{
     await browser.close();
+    proofServer?.kill("SIGTERM");
   }
   console.log(`visual captures: ${written.length} written to ${OUT_DIR}`);
 }

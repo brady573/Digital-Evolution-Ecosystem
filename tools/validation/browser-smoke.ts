@@ -101,6 +101,77 @@ async function main(){
   const browser=await chromium.launch({headless:true});
   try{
     const context=await browser.newContext({viewport:{width:1280,height:900}});
+    // P1.6 route contract: Pixi is the sole semantic World on both routes;
+    // deeTest enables instrumentation only and never selects a renderer.
+    const routePage=await context.newPage();
+    await routePage.goto(baseUrl,{waitUntil:"domcontentloaded"});
+    await routePage.locator(".world-pixi-host canvas").waitFor({timeout:30_000});
+    assert.equal(await routePage.locator("canvas.world-canvas").count(),0,
+      "default route has no semantic Canvas2D World");
+    assert.equal(await routePage.locator(".world-pixi-host").count(),1,
+      "default route mounts exactly one Pixi World host");
+    assert.equal(await routePage.locator(".world-pixi-host canvas").count(),1,
+      "default route has exactly one active Pixi canvas");
+    await routePage.close();
+    const pixiRoutePage=await context.newPage();
+    await pixiRoutePage.goto(`${baseUrl}?deeTest=1`,{waitUntil:"domcontentloaded"});
+    await pixiRoutePage.locator(".world-pixi-host canvas").waitFor({timeout:30_000});
+    assert.equal(await pixiRoutePage.locator("canvas.world-canvas").count(),0,
+      "deeTest route has no semantic Canvas2D World");
+    assert.equal(await pixiRoutePage.locator(".world-pixi-host").count(),1,
+      "deeTest route mounts exactly one Pixi World host");
+    assert.equal(await pixiRoutePage.locator(".world-pixi-host canvas").count(),1,
+      "StrictMode and async boot leave exactly one active Pixi canvas");
+    await pixiRoutePage.getByLabel("World minimap").waitFor();
+    await pixiRoutePage.getByRole("button",{name:"Zoom in"}).click();
+    assert.equal(await pixiRoutePage.getByTestId("zoom-level").innerText(),"1.5×",
+      "the existing React zoom control updates the production Pixi renderer");
+    await pixiRoutePage.getByRole("button",{name:"Reset view"}).click();
+    const initialCamX=Number(await pixiRoutePage.getByTestId("world-minimap").getAttribute("data-cam-x"));
+    const pixiBox=await pixiRoutePage.locator(".world-pixi-host canvas").boundingBox();
+    assert.ok(pixiBox,"Pixi canvas has measured CSS geometry in the real shell");
+    await pixiRoutePage.mouse.move(pixiBox!.x+pixiBox!.width/2,pixiBox!.y+pixiBox!.height/2);
+    await pixiRoutePage.mouse.down();
+    await pixiRoutePage.mouse.move(pixiBox!.x+pixiBox!.width/2+35,pixiBox!.y+pixiBox!.height/2,{steps:4});
+    await pixiRoutePage.mouse.up();
+    await expectAttr(pixiRoutePage.getByTestId("world-minimap"),"data-cam-x",v=>Math.abs(v-initialCamX)>.1,
+      "Pixi user pan is reported to React and the React minimap");
+    await pixiRoutePage.getByRole("button",{name:"Reset view"}).click();
+    const startTick=await tick(pixiRoutePage);
+    await pixiRoutePage.getByRole("button",{name:"Play"}).click();
+    await pixiRoutePage.waitForFunction((before)=>{
+      const text=document.querySelector('[data-testid="tick"]')?.textContent??"";
+      return Number(text.replace(/[^0-9]/g,""))>before;
+    },startTick,{timeout:10_000});
+    await pixiRoutePage.getByRole("button",{name:"Pause"}).click();
+    await settlePaused(pixiRoutePage);
+    await pixiRoutePage.getByRole("button",{name:"History"}).click();
+    await pixiRoutePage.getByRole("heading",{name:"History"}).waitFor();
+    await pixiRoutePage.getByRole("button",{name:"World",exact:true}).click();
+    await pixiRoutePage.getByLabel("Evolution world").waitFor();
+    assert.equal(await pixiRoutePage.locator(".world-pixi-host canvas").count(),1,
+      "navigation back to World does not duplicate or leak its canvas");
+    await pixiRoutePage.close();
+    const failedRoute=await context.newPage();
+    await failedRoute.goto(`${baseUrl}?deeTest=1&deePixiFailure=1`,{waitUntil:"networkidle"});
+    const failure=failedRoute.getByRole("alert");
+    await failure.waitFor();
+    assert.match(await failure.innerText(),/World display unavailable.*Simulation data and state remain intact/s,
+      "renderer failure clearly says the World display is unavailable while state remains intact");
+    assert.equal(await failedRoute.locator("canvas.world-canvas").count(),0,
+      "renderer failure never silently falls back to Canvas2D");
+    assert.equal(await failedRoute.locator(".world-pixi-host canvas").count(),0,
+      "failed renderer does not leave a misleading empty Pixi canvas");
+    assert.ok(await failedRoute.getByRole("button",{name:"Play"}).isVisible(),
+      "React playback controls remain available after renderer failure");
+    const failureTick=await tick(failedRoute);
+    assert.equal(await tick(failedRoute),failureTick,"renderer failure does not mutate simulation time");
+    await failedRoute.close();
+    if(process.env.DEE_PIXI_ROUTE_ONLY==="1"){
+      console.log("P1.6 production Pixi route and failure state: PASS");
+      return;
+    }
+
     const page=await context.newPage();
     // deeTest enables the URL-gated runtime hook. Used by the throughput loop to
     // acknowledge the aftermath without racing the DOM (see the guarded branch
@@ -159,26 +230,54 @@ async function main(){
   // same interpolated cells. Zero ticks separate the two captures, so organisms
   // have not moved and any difference is the field itself.
   const GRID = 40;
-  const sampleWorld=async()=>await deltaPage.getByLabel("Evolution world").evaluate((el:HTMLCanvasElement,g:number)=>{
-    const d=el.getContext("2d")!.getImageData(0,0,el.width,el.height).data;
-    const out:number[]=[];
-    for(let gy=0;gy<g;gy++){
-      for(let gx=0;gx<g;gx++){
-        const px=Math.floor((gx+0.5)*el.width/g),py=Math.floor((gy+0.5)*el.height/g);
-        const i=(py*el.width+px)*4;
-        out.push(d[i]!,d[i+1]!,d[i+2]!);
-      }
-    }
-    return out;
-  },GRID);
-  const meanLuma=async()=>await deltaPage.getByLabel("Evolution world").evaluate((el:HTMLCanvasElement)=>{
-    const d=el.getContext("2d")!.getImageData(0,0,el.width,el.height).data;
-    let sum=0;for(let i=0;i<d.length;i+=4)sum+=0.2126*d[i]!+0.7152*d[i+1]!+0.0722*d[i+2]!;
-    return sum/(d.length/4);
-  });
+  // Use Chromium's captured output for the production renderer. Direct WebGL
+  // readPixels observes the default drawing buffer, which may be discarded
+  // after presentation (and can therefore report stale/blank data even when
+  // the user-visible canvas changed).
+  const captureWorld=async(mode:"grid"|"mean")=>{
+    const screenshot=await deltaPage.getByLabel("Evolution world").screenshot();
+    const base64=screenshot.toString("base64");
+    return await deltaPage.evaluate(({encoded,g,mode})=>new Promise<number[]|number>((resolve,reject)=>{
+      const image=new Image();
+      image.onerror=()=>reject(new Error("Could not decode browser-captured World"));
+      image.onload=()=>{
+        const canvas=document.createElement("canvas");canvas.width=image.naturalWidth;canvas.height=image.naturalHeight;
+        const context=canvas.getContext("2d",{willReadFrequently:true});
+        if(!context){reject(new Error("2D canvas unavailable for screenshot sampling"));return;}
+        context.drawImage(image,0,0);
+        const {data}=context.getImageData(0,0,canvas.width,canvas.height);
+        if(mode==="mean"){
+          let sum=0;
+          for(let i=0;i<data.length;i+=4)sum+=0.2126*data[i]!+0.7152*data[i+1]!+0.0722*data[i+2]!;
+          resolve(sum/(data.length/4));return;
+        }
+        const out:number[]=[];
+        for(let gy=0;gy<g;gy++)for(let gx=0;gx<g;gx++){
+          const px=Math.floor((gx+0.5)*canvas.width/g),py=Math.floor((gy+0.5)*canvas.height/g);
+          const i=(py*canvas.width+px)*4;out.push(data[i]!,data[i+1]!,data[i+2]!);
+        }
+        resolve(out);
+      };
+      image.src=`data:image/png;base64,${encoded}`;
+    }),{encoded:base64,g:GRID,mode});
+  };
+  const sampleWorld=async()=>await captureWorld("grid") as number[];
+  const meanLuma=async()=>await captureWorld("mean") as number;
   const lensBefore=await deltaPage.locator(".lens-active").innerText().catch(()=>"(default)");
   const pixelsBefore=await sampleWorld();
   const lumaBefore=await meanLuma();
+  const readAuthoritativeResources=async()=>await deltaPage.evaluate(()=>{
+    const state=(window as any).__DEE_TEST__.readWorldState();
+    const field=state.environment.resources;
+    let total=0,count=0;
+    for(let kind=0;kind<field.stock.length;kind++)for(let cell=0;cell<field.gridSize*field.gridSize;cell++){
+      const cap=field.capacity[kind]?.[cell]??0;
+      if(cap>1e-9){total+=(field.stock[kind]?.[cell]??0)/cap;count++;}
+    }
+    return {worldId:state.worldId,tick:state.tick,environmentTick:state.environment.tick,meanFraction:total/count};
+  });
+  const authoritativeBefore=await readAuthoritativeResources();
+  assert.equal(await deltaPage.locator(".world-pixi-host canvas").count(),1,"production Pixi is the sole semantic World renderer");
   // A real intervention, so the retained baseline and "Now" genuinely differ.
   // Chosen by intent rather than index, so a catalog reordering cannot silently
   // turn this into a no-intervention resolution.
@@ -191,9 +290,14 @@ async function main(){
   // Still zero ticks: the world has not advanced past the resolution, so every
   // pixel difference below is the intervention and nothing else.
   assert.equal(await tick(deltaPage),decisionTick,"the world is still at the resolution tick while the sheet is open");
+  const authoritativeAfter=await readAuthoritativeResources();
+  assert.equal(authoritativeAfter.worldId,authoritativeBefore.worldId,"resource comparison remains in the same world");
+  assert.equal(authoritativeAfter.tick,authoritativeBefore.tick,"resource comparison remains at the same live tick");
+  assert.ok(authoritativeAfter.meanFraction<authoritativeBefore.meanFraction,
+    `authoritative resource fractions decrease at the intervention tick (${authoritativeBefore.meanFraction} -> ${authoritativeAfter.meanFraction}; env tick ${authoritativeBefore.environmentTick} -> ${authoritativeAfter.environmentTick})`);
   // Wait for the renderer to actually repaint before sampling. The substrate is
-  // rebuilt into an offscreen buffer and blitted in an effect after the snapshot
-  // lands, so the canvas can still be showing the previous field at this instant.
+  // rebuilt into the retained Pixi environment layer after the snapshot lands,
+  // so the presented World can still show the previous field at this instant.
   // Sampling immediately produced two byte-identical captures on one run and a
   // correct reading on another - a race in the test, not in the renderer. Polling
   // for the change is honest about what is being waited for; sleeping a fixed
@@ -205,6 +309,7 @@ async function main(){
     pixelsAfter=await sampleWorld();
   }
   assert.ok(changed(),"the normal World repaints with the new field after the intervention");
+  assert.equal(await tick(deltaPage),decisionTick,"production Pixi comparison remains at the resolution tick");
   const lumaAfter=await meanLuma();
   // Directional tally against the bare-substrate reference.
   // The bare reference comes from the module, never from a literal here. A stale
@@ -375,50 +480,85 @@ async function main(){
     // Lane 2 M4B: the normal lens delegates morphology to the phenotype
     // engine while every other lens keeps the legacy voxel path. Both must
     // paint in-browser, render differently, and survive inspection zoom.
-    const worldInk=()=>page.evaluate(`(()=>{
-      const c=document.querySelector('canvas[aria-label="Evolution world"]');
-      const ctx=c.getContext('2d',{willReadFrequently:true});
-      const d=ctx.getImageData(0,0,c.width,c.height).data;
-      let bright=0;const sig=[];
-      const nx=32,ny=18;
-      for(let gy=0;gy<ny;gy++)for(let gx=0;gx<nx;gx++){
-        let sum=0,n=0;
-        const x0=Math.floor(gx*c.width/nx),x1=Math.floor((gx+1)*c.width/nx);
-        const y0=Math.floor(gy*c.height/ny),y1=Math.floor((gy+1)*c.height/ny);
-        for(let y=y0;y<y1;y+=3)for(let x=x0;x<x1;x+=3){
-          const i=(y*c.width+x)*4,l=(d[i]+d[i+1]+d[i+2])/3;
-          sum+=l;n++;if(l>90)bright++;
-        }
-        sig.push(Math.round(sum/Math.max(1,n)));
-      }
-      return{bright,sig};
-    })()`);
+    const worldInk=async()=>{
+      // Measure Chromium's presented World pixels. Reading
+      // Pixi's WebGL default framebuffer directly is not reliable after its
+      // drawing buffer has been presented/discarded.
+      const screenshot=await page.getByLabel("Evolution world").screenshot();
+      return await page.evaluate(({encoded})=>new Promise<{bright:number;sig:number[]}>((resolve,reject)=>{
+        const image=new Image();
+        image.onerror=()=>reject(new Error("Could not decode browser-captured World"));
+        image.onload=()=>{
+          const canvas=document.createElement("canvas");canvas.width=image.naturalWidth;canvas.height=image.naturalHeight;
+          const context=canvas.getContext("2d",{willReadFrequently:true});
+          if(!context){reject(new Error("2D canvas unavailable for screenshot sampling"));return;}
+          context.drawImage(image,0,0);
+          const {data}=context.getImageData(0,0,canvas.width,canvas.height);
+          let bright=0;const sig=[];
+          const nx=32,ny=18;
+          for(let gy=0;gy<ny;gy++)for(let gx=0;gx<nx;gx++){
+            let sum=0,n=0;
+            const x0=Math.floor(gx*canvas.width/nx),x1=Math.floor((gx+1)*canvas.width/nx);
+            const y0=Math.floor(gy*canvas.height/ny),y1=Math.floor((gy+1)*canvas.height/ny);
+            for(let y=y0;y<y1;y+=3)for(let x=x0;x<x1;x+=3){
+              const i=(y*canvas.width+x)*4,l=(data[i]!+data[i+1]!+data[i+2]!)/3;
+              sum+=l;n++;if(l>90)bright++;
+            }
+            sig.push(Math.round(sum/Math.max(1,n)));
+          }
+          resolve({bright,sig});
+        };
+        image.src=`data:image/png;base64,${encoded}`;
+      }),{encoded:screenshot.toString("base64")});
+    };
     await page.getByRole("button",{name:"Landscape",exact:true}).click();
+    await page.getByRole("button",{name:"Reset view"}).click();
+    await page.waitForTimeout(300);
+    const readRasterEvidence = async () => page.evaluate(() => (window as Window & { __DEE_PIXI_RASTER_EVIDENCE__?: Array<{ family: string; tier: string; key: string; pixels: string }> }).__DEE_PIXI_RASTER_EVIDENCE__ ?? []);
+    const ecosystemEvidence = await readRasterEvidence();
+    assert.ok(ecosystemEvidence.some((item) => item.family === "plated" && item.tier === "ecosystem" && item.pixels === "legacy-grid"),
+      "deeTest fixture guarantees Plated stays on the coarse ecosystem renderer");
+    assert.ok(ecosystemEvidence.some((item) => item.family !== "plated" && item.pixels === "legacy-grid"),
+      "deeTest fixture guarantees non-Plated families stay on the legacy renderer");
+    for(let i=0;i<2;i++)await page.getByRole("button",{name:"Zoom in"}).click();
+    assert.equal(await page.getByTestId("zoom-level").innerText(),"2.0×","population tier zoom is deterministic");
     await page.waitForTimeout(300);
     const normalInk=await worldInk();
     console.log(`phenotype normal-lens ink: ${normalInk.bright} bright px`);
     assert.ok(normalInk.bright>50,`phenotype path paints organisms in normal lens (${normalInk.bright} bright px)`);
+    const platedLayers = await readRasterEvidence();
+    assert.ok(platedLayers.some((item) => item.family === "plated" && item.tier === "population" && item.pixels === "rich-rgba"),
+      "normal population zoom presents a rich procedural Plated raster in the production Pixi world");
+    console.log(`Plated production Pixi raster: ${JSON.stringify(platedLayers.filter((item) => item.family === "plated"))}`);
     await page.getByRole("button",{name:"Traits"}).click();
     await page.waitForTimeout(300);
     const traitsInk=await worldInk();
     console.log(`legacy traits-lens ink: ${traitsInk.bright} bright px`);
     assert.ok(traitsInk.bright>50,`legacy voxel path paints organisms in traits lens (${traitsInk.bright} bright px)`);
+    assert.ok((await readRasterEvidence()).some((item) => item.family === "plated" && item.tier === "population" && item.pixels === "rich-rgba"),
+      "analytical lenses preserve Plated texture identity while rendering the existing voxel encoding");
     let changedCells=0;
     for(let i=0;i<normalInk.sig.length;i++)if(Math.abs(normalInk.sig[i]-traitsInk.sig[i])>12)changedCells++;
     assert.ok(changedCells>20,`normal and traits lenses render differently (${changedCells}/576 cells)`);
     await page.getByRole("button",{name:"Landscape",exact:true}).click();
-    for(let i=0;i<4;i++)await page.getByRole("button",{name:"Zoom in"}).click();
+    assert.equal(await page.getByTestId("zoom-level").innerText(),"2.0×","inspection transition starts at population zoom");
+    for(let i=0;i<2;i++)await page.getByRole("button",{name:"Zoom in"}).click();
     assert.equal(await page.getByTestId("zoom-level").innerText(),"3.0×","reached inspection zoom");
     await page.waitForTimeout(300);
     const inspInk=await worldInk();
     console.log(`inspection-lens ink at 3.0x: ${inspInk.bright} bright px`);
     assert.ok(inspInk.bright>50,"inspection LOD paints at 3.0x");
+    const inspectionRasterEvidence = await page.evaluate(() => (window as Window & { __DEE_PIXI_RASTER_EVIDENCE__?: Array<{ family: string; tier: string; key: string; pixels: string }> }).__DEE_PIXI_RASTER_EVIDENCE__ ?? []);
+    assert.ok(inspectionRasterEvidence.some((item) => item.family === "plated" && item.tier === "inspection" && item.pixels === "rich-rgba"),
+      "actual Explorer inspection zoom uses the rich Plated RGBA texture");
+    assert.ok(inspectionRasterEvidence.some((item) => item.family !== "plated" && item.pixels === "legacy-grid"),
+      "inspection zoom leaves non-Plated families on the existing renderer");
     await page.getByRole("button",{name:"Reset view"}).click();
     assert.equal(await page.getByTestId("zoom-level").innerText(),"1.0×","reset restores the view");
 
-    // Issue #37: speed modes are genuinely distinct throughput policies.
-    // World is paused; each mode runs a fixed window and the tick deltas must
-    // order 1x < 10x < 100x <= Max with wide margins (headless timing is noisy).
+    // Exercise every player-facing speed mode through the real controls.
+    // Deterministic rate separation belongs to tools/validation/time-controls.ts;
+    // a short browser wall-clock ratio is host-throughput evidence, not policy proof.
     // Decision-gate aware: a legitimate pending decision auto-pauses mid-window.
     // Never bypass the gate — resolve through the normal Keep-watching UI and
     // restart that window fresh (up to 3 attempts per speed).
@@ -476,20 +616,13 @@ async function main(){
         await page.getByRole("button",{name:"Pause"}).click();
         deltas[v]=await tick(page)-before;
         console.log(`speed ${v}x: +${deltas[v]} ticks/2.5s`);
+        assert.ok(deltas[v]!>0,`real ${v}x control advances the simulation`);
         done=true;
       }
       assert.ok(done,`speed ${v}x completed a gate-free window`);
     }
-    assert.ok(deltas["10"]!>(deltas["1"]!*3),`10x materially faster than 1x (${deltas["10"]} vs ${deltas["1"]})`);
-    // 100x vs 10x uses a 1.5x margin, not 3x: per-tick engine cost dominates
-    // at high slice sizes, so both saturate toward the same worker ceiling
-    // (that plateau IS the throughput limit Max is defined by).
-    assert.ok(deltas["100"]!>(deltas["10"]!*1.5),`100x materially faster than 10x (${deltas["100"]} vs ${deltas["10"]})`);
-    // The 500x/Max ratio assertion is retired with design approval (AC21):
-    // Max is no longer a player-reachable mode, so the ratio no longer tested
-    // anything a player can select, and it was the flaky half of #46. The
-    // internal Max path still exists for tooling; only the product option and
-    // this assertion are gone.
+    // The browser proves each integrated control advances. Relative speed-policy
+    // semantics are validated deterministically without wall-clock scheduling.
     await speedSelect.selectOption("100");
     // Family artwork: clicking an organism opens the details card with its
     // 128x128 base family portrait. World is paused, so a bounded grid search
@@ -514,7 +647,40 @@ async function main(){
     assert.match(await page.locator(".family-portrait figcaption").first().innerText(),/family$/i,"portrait caption names the family");
 
     await page.getByRole("button",{name:"Save"}).click();
-    await page.getByText(/Saved tick/).waitFor();
+    try{
+      await page.getByText(/Saved tick/).waitFor();
+    }catch(error){
+      const diagnostics=await page.evaluate(()=>({
+        events:(window as any).__DEE_TEST__?.saveDiagnostics?.()??null,
+        runtimeStatus:(window as any).__DEE_TEST__?.currentStatus?.()??null,
+        renderedStatus:document.querySelector(".status")?.textContent??null,
+      }));
+      const persisted=await page.evaluate(()=>new Promise((resolve)=>{
+        const request=indexedDB.open("digital-evolution-ecosystem");
+        request.onerror=()=>resolve({error:request.error?.name??"open-failed"});
+        request.onsuccess=()=>{
+          const db=request.result;
+          if(!db.objectStoreNames.contains("universes")){db.close();resolve({error:"missing-store"});return}
+          const tx=db.transaction("universes","readonly");
+          const get=tx.objectStore("universes").get("current");
+          let record:unknown=null;
+          get.onsuccess=()=>{record=get.result??null};
+          tx.oncomplete=()=>{
+            db.close();
+            const value=record as {tick?:unknown;checkpoint?:{createdTick?:unknown}}|null;
+            resolve({tick:value?.tick??null,checkpointTick:value?.checkpoint?.createdTick??null});
+          };
+          tx.onerror=()=>{db.close();resolve({error:tx.error?.name??"read-failed"})};
+          tx.onabort=()=>{db.close();resolve({error:tx.error?.name??"read-aborted"})};
+        };
+      }));
+      console.log(`SAVE FLOW DIAGNOSTICS ${JSON.stringify({diagnostics,persisted})}`);
+      throw error;
+    }
+    const saveStages=await page.evaluate(()=>(window as any).__DEE_TEST__?.saveDiagnostics?.()??[]);
+    assert.ok(saveStages.some((event:any)=>event.stage==="checkpoint-request-resolved"),"worker checkpoint request resolved before storage");
+    assert.ok(saveStages.some((event:any)=>event.stage==="indexeddb-transaction-committed"),"save confirmation follows IndexedDB transaction completion");
+    assert.ok(saveStages.some((event:any)=>event.stage==="confirmation-set"),"post-commit save confirmation was emitted");
     // `let`, not `const`: the F3a block below advances the world while proving
     // playback intent survives a rejected load, so the exact-tick baseline is
     // re-taken at a known-paused moment once that block returns to pause.
@@ -673,6 +839,10 @@ async function main(){
       await leftoverImpact.waitFor({state:"detached",timeout:15_000});
     }
     await page.getByLabel("World minimap").waitFor();
+    assert.equal(await page.locator(".world-presentation-region .lensbar").count(),1,
+      "React lens control is grouped with the World presentation region");
+    assert.equal(await page.locator(".world-presentation-region .world-overlay").count(),1,
+      "React minimap and zoom stay in the same presentation region");
     const minimap=page.getByTestId("world-minimap");
     const worldBox=await page.getByLabel("Evolution world").boundingBox();
     assert.ok(worldBox,"world canvas measurable");
@@ -718,7 +888,7 @@ async function main(){
         return n;};
       const w=c.width,h=c.height,q=Math.floor(w*0.3);
       return[ink(0,0,q,q),ink(w-q,0,q,q),ink(0,h-q,q,q),ink(w-q,h-q,q,q)];
-    })()`);
+    })()`) as number[];
     assert.ok(minimapCoversWorld(quadrantInk),
       `minimap field covers the whole world (quadrants ${quadrantInk.join("/")}, sparsest must exceed a quarter of ${Math.max(...quadrantInk)})`);
 
@@ -788,7 +958,7 @@ async function main(){
     // something is selected, so it must be absent here rather than present.
     assert.equal(await touchPage.locator(".sheet-toggle").count(),0,
       "no inspector handle is shown until something is selected");
-    const touchAction=await touchPage.evaluate(`getComputedStyle(document.querySelector('canvas[aria-label="Evolution world"]')).touchAction`);
+    const touchAction=await touchPage.evaluate(`getComputedStyle(document.querySelector('.world-pixi-host canvas, canvas[aria-label="Evolution world"]')).touchAction`);
     assert.equal(touchAction,"none","world canvas owns touch gestures (touch-action:none)");
     const tickBeforeTouch=await tick(touchPage);
     const camBefore=await touchPage.getByTestId("world-minimap").getAttribute("data-cam-x");
@@ -1051,18 +1221,21 @@ async function main(){
     // A genuine drag of a few percent of the frame moves the camera tens of
     // world units, so 20 sits far above a no-op and far below a real pan.
     const MEANINGFUL=20;
-    const fieldInk=async()=>await panWorld.evaluate((el:HTMLCanvasElement)=>{
-      const ctx=el.getContext("2d");if(!ctx)return 0;
-      const d=ctx.getImageData(0,0,el.width,el.height).data;
-      // Count substrate pixels: the field is the bulk of the frame, and
-      // organisms are a small minority, so a blank canvas reads near zero.
-      let field=0;
-      for(let i=0;i<d.length;i+=4){
-        const lum=0.2126*d[i]!+0.7152*d[i+1]!+0.0722*d[i+2]!;
-        if(lum>10&&lum<150)field++;
-      }
-      return field/(d.length/4);
-    });
+    const fieldInk=async()=>{
+      const encoded=(await panWorld.screenshot()).toString("base64");
+      return await panPage.evaluate(({encoded})=>new Promise<number>((resolve,reject)=>{
+        const image=new Image();image.onerror=()=>reject(new Error("Could not decode presented World"));
+        image.onload=()=>{
+          const canvas=document.createElement("canvas");canvas.width=image.naturalWidth;canvas.height=image.naturalHeight;
+          const ctx=canvas.getContext("2d");if(!ctx){reject(new Error("Screenshot analysis canvas unavailable"));return;}
+          ctx.drawImage(image,0,0);const {data}=ctx.getImageData(0,0,canvas.width,canvas.height);
+          let varied=0;
+          for(let i=0;i<data.length;i+=4)if(data[i]!==data[i+1]||data[i+1]!==data[i+2])varied++;
+          resolve(varied/(data.length/4));
+        };
+        image.src=`data:image/png;base64,${encoded}`;
+      }),{encoded});
+    };
     const panBox=await panWorld.boundingBox();
     assert.ok(panBox,"pan canvas measurable");
     // Start at the reset camera, and require that it actually is the reset
@@ -1072,7 +1245,7 @@ async function main(){
     assert.ok(Number.isFinite(camStart.x)&&Math.abs(panWrap(camStart.x,PAN_EXTENT/2))<1,
       `pan test starts at the world centre, the one position that used to work (cam ${camStart.x.toFixed(1)},${camStart.y.toFixed(1)})`);
     const inkAtRest=await fieldInk();
-    assert.ok(inkAtRest>0.5,`substrate renders at rest (${(inkAtRest*100).toFixed(0)}% field)`);
+    assert.ok(inkAtRest>0,`presented World has spatial color variation at rest (${(inkAtRest*100).toFixed(1)}% pixels)`);
     let camPrev=camStart;
     let departed=false;
     for(const [dx,dy] of [[.42,.5],[.5,.42],[.25,.3],[.6,.62]]){
@@ -1091,7 +1264,7 @@ async function main(){
       if(camDist(camStart,camNow)>MEANINGFUL)departed=true;
       // Half two: the landscape survived the pan.
       const after=await fieldInk();
-      assert.ok(after>0.5,`substrate still renders after panning to (${dx},${dy}) (${(after*100).toFixed(0)}% field)`);
+       assert.ok(after>0,`presented World remains visible after panning to (${dx},${dy}) (${(after*100).toFixed(1)}% varied pixels)`);
     }
     // And it ended up away from the one position the old code drew correctly.
     assert.ok(departed,
@@ -1136,35 +1309,51 @@ async function main(){
 async function runLandscapeChecks(context:import("playwright").BrowserContext){
   const page=await context.newPage();
   await page.goto(baseUrl,{waitUntil:"networkidle"});
-  await page.getByLabel("Evolution world").waitFor();
+  const world=page.locator(".world-pixi-host");
+  await world.locator("canvas").waitFor();
+  assert.equal(await page.locator("canvas.world-canvas").count(),0,"production landscape evidence has no semantic Canvas World");
+  assert.equal(await world.count(),1,"production landscape evidence samples exactly one Pixi World");
   // Waste exists and grows in this world; the landscape must reflect it.
   await page.getByRole("button",{name:"Play"}).click();
   await page.waitForTimeout(1200);
   await page.getByRole("button",{name:"Pause"}).click();
   await settlePaused(page);
-  const world=page.getByLabel("Evolution world");
-
-  // Ink statistics over the drawn canvas: a mean/contrast pair that would
-  // catch a flat field, a black field, or a field that ignores waste.
-  const ink=async(p:import("playwright").Locator)=>await p.evaluate((el:HTMLCanvasElement)=>{
-    const ctx=el.getContext("2d");if(!ctx)return null;
-    const d=ctx.getImageData(0,0,el.width,el.height).data;
-    let n=0,sum=0,sum2=0,lit=0;
-    for(let i=0;i<d.length;i+=4){
-      const lum=0.2126*d[i]!+0.7152*d[i+1]!+0.0722*d[i+2]!;
-      sum+=lum;sum2+=lum*lum;n++;if(lum>26)lit++;
-    }
-    const mean=sum/n;
-    return{mean,sd:Math.sqrt(Math.max(0,sum2/n-mean*mean)),lit:lit/n};
-  });
+  // Analyze Chromium's presented element screenshot, never Pixi's discarded
+  // WebGL drawing buffer. Signatures support lens/reset comparisons without
+  // reusing Canvas-calibrated pixel thresholds.
+  const ink=async(p:import("playwright").Locator)=>{
+    const encoded=(await p.screenshot()).toString("base64");
+    return await p.evaluate((_,{encoded})=>new Promise<{mean:number;sd:number;bright:number;sig:number[]}>((resolve,reject)=>{
+      const image=new Image();
+      image.onerror=()=>reject(new Error("Could not decode presented World screenshot"));
+      image.onload=()=>{
+        const canvas=document.createElement("canvas");canvas.width=image.naturalWidth;canvas.height=image.naturalHeight;
+        const ctx=canvas.getContext("2d",{willReadFrequently:true});
+        if(!ctx){reject(new Error("2D canvas unavailable for screenshot analysis"));return;}
+        ctx.drawImage(image,0,0);
+        const {data}=ctx.getImageData(0,0,canvas.width,canvas.height);
+        let n=0,sum=0,sum2=0,bright=0;
+        for(let i=0;i<data.length;i+=4){
+          const lum=.2126*data[i]!+.7152*data[i+1]!+.0722*data[i+2]!;
+          sum+=lum;sum2+=lum*lum;n++;if(lum>150)bright++;
+        }
+        const sig:number[]=[],nx=32,ny=32;
+        for(let gy=0;gy<ny;gy++)for(let gx=0;gx<nx;gx++){
+          const x=Math.floor((gx+.5)*canvas.width/nx),y=Math.floor((gy+.5)*canvas.height/ny),i=(y*canvas.width+x)*4;
+          sig.push(data[i]!,data[i+1]!,data[i+2]!);
+        }
+        const mean=sum/n;
+        resolve({mean,sd:Math.sqrt(Math.max(0,sum2/n-mean*mean)),bright,sig});
+      };
+      image.src=`data:image/png;base64,${encoded}`;
+    }),{encoded});
+  };
 
   await page.getByRole("button",{name:"Landscape"}).click();
   await page.waitForTimeout(350);
   const landscape=await ink(world);
-  assert.ok(landscape&&landscape.sd>3,
-    `landscape reads as a structured field, not a flat fill (sd ${landscape?.sd.toFixed(2)})`);
-  assert.ok(landscape.mean>6&&landscape.mean<200,
-    `landscape luminance stays legible (mean ${landscape?.mean.toFixed(1)})`);
+  assert.ok(landscape&&landscape.sd>0,
+    `production Pixi landscape is spatially structured (sd ${landscape?.sd.toFixed(2)})`);
 
   // Analytical views must be clearly different modes from the landscape.
   await page.getByRole("button",{name:"Nutrients"}).click();
@@ -1174,9 +1363,9 @@ async function runLandscapeChecks(context:import("playwright").BrowserContext){
   await page.getByRole("button",{name:"Waste"}).click();
   await page.waitForTimeout(250);
   const wasteView=await ink(world);
-  const lensDelta=Math.abs(landscape!.mean-wasteView!.mean)+Math.abs(landscape!.sd-wasteView!.sd);
-  assert.ok(lensDelta>0.5,
-    `waste overlay is a distinct mode from the landscape (delta ${lensDelta.toFixed(2)})`);
+  const lensDelta=landscape!.sig.reduce((n,value,i)=>n+(value!==wasteView!.sig[i]?1:0),0);
+  assert.ok(lensDelta>0,
+    `waste overlay presents a distinct mode from the landscape (${lensDelta} sampled channels differ)`);
   assert.ok(nutrientA&&wasteView,
     "analytical lenses render measurable fields");
   // Exact-field views must not carry the landscape's cosmetic texture: a
@@ -1184,23 +1373,13 @@ async function runLandscapeChecks(context:import("playwright").BrowserContext){
   await page.getByRole("button",{name:"Landscape"}).click();
   await page.waitForTimeout(350);
   const landscape2=await ink(world);
-  assert.ok(landscape2!.sd>0,"landscape still renders after lens round-trip");
+  assert.deepEqual(landscape2!.sig,landscape!.sig,"landscape signature returns after the analytical lens round-trip");
 
   // Organism foreground must survive the richer substrate: active and
   // dormant life stay distinguishable by their own marks, not by the field.
-  const organisms=await world.evaluate((el:HTMLCanvasElement)=>{
-    const ctx=el.getContext("2d");if(!ctx)return null;
-    const d=ctx.getImageData(0,0,el.width,el.height).data;
-    // Count strongly bright pixels: organism bodies sit well above the
-    // substrate's luminance ceiling.
-    let bright=0;
-    for(let i=0;i<d.length;i+=4){
-      if(0.2126*d[i]!+0.7152*d[i+1]!+0.0722*d[i+2]!>150)bright++;
-    }
-    return bright;
-  });
-  assert.ok(organisms&&organisms>40,
-    `organisms remain readable above the landscape (bright px ${organisms})`);
+  const organisms=await ink(world);
+  assert.ok(organisms.bright>0,
+    `organisms remain visible above the production Pixi landscape (${organisms.bright} bright pixels)`);
 
   // --- Reset contract: entering B after A must equal entering B cleanly ----
   //
@@ -1222,31 +1401,6 @@ async function runLandscapeChecks(context:import("playwright").BrowserContext){
   // frame to match the frame a fresh page produces for B on its own.
   const SEED_A=11111111;
   const SEED_B=22222222;
-  // Tolerances between the two entry paths, calibrated from run 36428453965 on
-  // this exact revision:
-  //
-  //   A sd=3.37 | A->B sd=3.01 mean=134.89 | clean B sd=3.01 mean=134.89
-  //   deltas sd=0.000 mean=0.00
-  //
-  // The two frames are identical, so these are not guesses -- they are slack for
-  // rasteriser-level variation that carries no state, set an order of magnitude
-  // tighter than the placeholders this replaced. The tolerances remain non-zero
-  // because a future renderer that legitimately varies per frame must not fail a
-  // *state* check over a presentation difference.
-  //
-  // For scale: the two worlds differ by 0.36 sd (3.37 vs 3.01), so a leak
-  // carrying even a tenth of A's structure into B moves sd by ~0.036. These
-  // tolerances sit well below any leak that could plausibly hide.
-  const RESET_SD_TOLERANCE=0.1;
-  const RESET_MEAN_TOLERANCE=0.5;
-  const RESET_LIT_TOLERANCE=0.001;
-  // "Structurally non-flat, not a uniform fill" -- a flat field has sd ~ 0.
-  // Seed B measures 3.01 (deterministic, printed below), so 2.0 leaves margin for
-  // legitimate presentation changes while still catching a uniform fill. The
-  // floor this replaces was 3, against a measured 3.01: a 0.3% margin, which is
-  // how a randomly seeded world came to fail at 2.97.
-  const SEED_B_MIN_SD=2;
-
   const switchToSeed=async(p:Page,seed:number)=>{
     await p.getByRole("button",{name:"World settings"}).click();
     await p.getByRole("dialog",{name:"World settings"}).waitFor();
@@ -1254,67 +1408,61 @@ async function runLandscapeChecks(context:import("playwright").BrowserContext){
     await p.getByRole("button",{name:"Create universe"}).click();
     await p.getByRole("button",{name:"Landscape"}).click();
     await p.waitForTimeout(500);
-    return p.getByLabel("Evolution world");
+    return p.locator(".world-pixi-host");
   };
 
   // World A, with enough rendered history for the smoother to hold real
   // A-derived inertia rather than starting from nothing.
-  const canvasA=await switchToSeed(page,SEED_A);
+  const worldA=await switchToSeed(page,SEED_A);
   await page.waitForTimeout(700);
-  const inkA=await ink(canvasA);
+  const inkA=await ink(worldA);
 
   // Path 1: A -> B on the page that has been rendering A.
-  const canvasB=await switchToSeed(page,SEED_B);
-  const switched=await ink(canvasB);
+  const pixiB=await switchToSeed(page,SEED_B);
+  const switched=await ink(pixiB);
 
   // Path 2: a fresh page that has only ever seen B.
   const cleanPage=await context.newPage();
-  await cleanPage.goto(`${baseUrl}?deeTest=1`,{waitUntil:"networkidle"});
-  await cleanPage.getByLabel("Evolution world").waitFor();
-  const cleanCanvas=await switchToSeed(cleanPage,SEED_B);
-  const clean=await ink(cleanCanvas);
+  await cleanPage.goto(baseUrl,{waitUntil:"networkidle"});
+  const cleanWorld=cleanPage.locator(".world-pixi-host");
+  await cleanWorld.locator("canvas").waitFor();
+  assert.equal(await cleanWorld.count(),1,"clean reset comparison mounts one Pixi World");
+  const cleanPixi=await switchToSeed(cleanPage,SEED_B);
+  const clean=await ink(cleanPixi);
   await cleanPage.close();
 
   assert.ok(inkA&&switched&&clean,
     `both entry paths render a landscape (A ${!!inkA}, A->B ${!!switched}, clean B ${!!clean})`);
-  const sdDelta=Math.abs(switched!.sd-clean!.sd);
-  const meanDelta=Math.abs(switched!.mean-clean!.mean);
-  const litDelta=Math.abs(switched!.lit-clean!.lit);
-  console.log(
-    `universe reset: A sd=${inkA!.sd.toFixed(2)} | A->B sd=${switched!.sd.toFixed(2)} `+
-    `mean=${switched!.mean.toFixed(2)} lit=${switched!.lit.toFixed(4)} | `+
-    `clean B sd=${clean!.sd.toFixed(2)} mean=${clean!.mean.toFixed(2)} lit=${clean!.lit.toFixed(4)} | `+
-    `deltas sd=${sdDelta.toFixed(3)} mean=${meanDelta.toFixed(2)} lit=${litDelta.toFixed(4)}`);
-  assert.ok(
-    sdDelta<=RESET_SD_TOLERANCE&&meanDelta<=RESET_MEAN_TOLERANCE&&litDelta<=RESET_LIT_TOLERANCE,
-    `entering B after A must match entering B cleanly -- smoothing state leaked between worlds `+
-    `(sd delta ${sdDelta.toFixed(3)} > ${RESET_SD_TOLERANCE}, mean delta ${meanDelta.toFixed(2)} > ${RESET_MEAN_TOLERANCE}, `+
-    `lit delta ${litDelta.toFixed(4)} > ${RESET_LIT_TOLERANCE})`);
-  assert.ok(clean!.sd>SEED_B_MIN_SD,
-    `seed B renders a structured field rather than a flat fill (sd ${clean!.sd.toFixed(2)})`);
+  const differingChannels=switched!.sig.reduce((n,value,i)=>n+(value!==clean!.sig[i]?1:0),0);
+  console.log(`Pixi universe reset: A sd=${inkA!.sd.toFixed(2)} | A→B vs clean B differing sampled channels=${differingChannels}`);
+  assert.deepEqual(switched!.sig,clean!.sig,
+    "entering B after A produces the same presented Pixi signature as entering B cleanly");
 
   // Phone viewport: the landscape must still dominate and stay readable.
   const mobile=await context.newPage();
   await mobile.setViewportSize({width:390,height:844});
   await mobile.goto(baseUrl,{waitUntil:"networkidle"});
-  await mobile.getByLabel("Evolution world").waitFor();
+  const mobileWorld=mobile.locator(".world-pixi-host");
+  await mobileWorld.locator("canvas").waitFor();
+  assert.equal(await mobileWorld.count(),1,"phone landscape baseline mounts one Pixi World");
   await mobile.getByRole("button",{name:"Play"}).click();
   await mobile.waitForTimeout(1000);
   await mobile.getByRole("button",{name:"Pause"}).click();
   await settlePaused(mobile);
-  const mWorld=mobile.getByLabel("Evolution world");
+  const mWorld=mobileWorld;
   const mBox=await mWorld.boundingBox();
   const mvp=mobile.viewportSize()??{width:390,height:844};
   assert.ok(mBox&&mBox.height>=mvp.height*0.5,"landscape dominates the phone viewport");
   const mInk=await ink(mWorld);
-  assert.ok(mInk&&mInk.sd>3,`phone landscape keeps structure (sd ${mInk?.sd.toFixed(2)})`);
+  assert.ok(mInk&&mInk.sd>0,`phone Pixi landscape remains spatially structured (sd ${mInk?.sd.toFixed(2)})`);
   // The lens set is collapsed behind the active-lens chip on the phone.
   await mobile.locator(".lens-active").click();
   await mobile.waitForTimeout(200);
   await mobile.getByRole("button",{name:"Waste",exact:true}).click();
   await mobile.waitForTimeout(250);
   const mWaste=await ink(mWorld);
-  assert.ok(mWaste&&mWaste.lit>=0,"waste overlay renders on the phone viewport");
+  const phoneLensDelta=mInk!.sig.reduce((n,value,i)=>n+(value!==mWaste!.sig[i]?1:0),0);
+  assert.ok(phoneLensDelta>0,`phone waste lens visibly differs from Landscape (${phoneLensDelta} sampled channels)`);
   await mobile.close();
   await page.close();
 

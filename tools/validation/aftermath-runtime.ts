@@ -23,6 +23,7 @@ import type {
 } from "../../packages/contracts/src/index.ts";
 import { AFTERMATH_COMPARABLES } from "../../packages/contracts/src/index.ts";
 import { UniverseSession } from "../../packages/sim-runtime/src/session.ts";
+import { buildEnvironment } from "../../packages/sim-runtime/src/presentation.ts";
 import { isDecisionEligible } from "../../packages/sim-decisions/src/index.ts";
 import { fieldDelta } from "../../apps/explorer/src/aftermath.ts";
 
@@ -480,6 +481,34 @@ function testResumeReplySettlesTheAwaitingCaller() {
   assert.ok(!plain.some(r=>r.type==="AFTERMATH_ACKNOWLEDGED"),"an unrelated command never emits an aftermath reply");
 }
 
+function testInterventionDecisionReemitsSameTickEnvironment() {
+  const session = new UniverseSession();
+  session.handle({ type: "CREATE_UNIVERSE", config: config(FIXTURE_SEED) });
+  session.handle({ type: "LOAD_CHECKPOINT", checkpoint: fixture(), requestId: "same-tick-env-fixture" });
+  // Consume the restore's armed first-advance full so the resolution below is
+  // inside the ordinary environment cadence window.
+  session.handle({ type: "ADVANCE_TICKS", ticks: 0 });
+  const before = session.snapshot();
+  const pending = before.pendingDecision;
+  assert.ok(pending, "the deterministic fixture restores its pending decision");
+  const choice = pending.choices.find((candidate) => candidate.intervention !== null);
+  assert.ok(choice?.intervention, "the fixture offers an intervention-bearing decision");
+  const beforeEnvironment = buildEnvironment(before);
+  const beforeStock = beforeEnvironment.resources.stock.flat().reduce((sum, value) => sum + value, 0);
+  const responses = session.handle({
+    type: "RESOLVE_EVENT_DECISION",
+    opportunityId: pending.opportunityId,
+    choiceId: choice.choiceId,
+    requestId: "same-tick-env-resolution",
+  });
+  const emitted = responses.find((response) => response.type === "PRESENTATION" && "resources" in response.frame);
+  assert.ok(emitted && emitted.type === "PRESENTATION", "intervention-bearing decision republishes its environment read model");
+  assert.equal(emitted.frame.tick, before.tick, "decision environment publication keeps the resolution tick");
+  const afterStock = emitted.frame.resources.stock.flat().reduce((sum, value) => sum + value, 0);
+  assert.ok(afterStock < beforeStock, `decision intervention publishes reduced resource stock (${beforeStock} -> ${afterStock})`);
+  assert.equal(session.snapshot().tick, before.tick, "decision resolution and read-model refresh advance no ticks");
+}
+
 function main() {
   testResolutionAdvancesZeroTicks();
   testNothingBiologicalMovedAcrossTheEffect();
@@ -499,6 +528,7 @@ function main() {
   testProtectedDecisionEventsAreConsumedWithoutReplay();
   testExplicitExperimentRemainsAvailableDuringProtection();
   testResumeReplySettlesTheAwaitingCaller();
+  testInterventionDecisionReemitsSameTickEnvironment();
   console.log("aftermath runtime validation: PASS");
 }
 

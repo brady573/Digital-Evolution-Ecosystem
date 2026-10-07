@@ -73,8 +73,9 @@ satisfied: A3.4 merged as PR #76.
   restore. Restored state cannot bypass the validator, and that boundary is
   compiler-enforced.
 - PR #73 merged the inactive/unbound Pixi production scaffold and made its
-  browser correctness proof blocking/merge-gating. This is preparation, not
-  production World cutover.
+  browser correctness proof blocking/merge-gating. That was preparation; P1.5
+  integration is now accepted and P1.6 production cutover is separately
+  authorized on the active feature branch.
 - PR #70 merged the strict 0.4 checkpoint boundary.
 - A7 closed the runtime trust boundary at the worker transport, and recorded
   what it establishes: a malformed command is refused before any simulation
@@ -86,14 +87,13 @@ satisfied: A3.4 merged as PR #76.
   transport safety reused from existing constants (MAX_SLICE_TICKS 2000 and the
   100_000 event-scan default), not simulation or population limits.
 
-## Next Recommended Task
+## Current Focus
 
-Accept A7 (PR #84), then stop. Issue #54 items 6-12 are Tranche B work and
-require a fresh bounded handoff against then-current main — do not roll forward
-into them, and do not begin the Tranche B bounded live-snapshot redesign. Do not
-treat repository slice labels for Pixi preparation as release of the production
-cutover gate.
+P1.6 production Pixi cutover is implemented in the active feature worktree;
+exact-head browser/mobile and blocking Pixi lifecycle evidence remain pending.
+Commit/push require separate authorization. P1.7, Android Pixi/WebGL2 runtime
+evidence, and final Stage P1 acceptance remain out of scope.
 
 ## Last Updated
 
-2026-09-30
+2026-10-04

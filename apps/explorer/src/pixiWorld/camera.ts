@@ -1,11 +1,11 @@
 /**
  * pixiWorld camera — toroidal camera contract (pure, no Pixi import).
  *
- * Behavioral parity with the Canvas2D World (`App.tsx` WorldCanvas) is the
+ * Behavioral parity with the retired Canvas2D World (`App.tsx`, pre-P1.6) is the
  * point: same 600x600 extent, uniform zoom only (1.0-3.0), wrapped pan with a
  * normalized camera center, constant on-screen hit feel. The wrap primitives
  * are absorbed from the P0 preparation (`../pixi/layers`) so the two cannot
- * drift; the projection helpers mirror the WorldCanvas transform line by
+ * drift; the projection helpers preserve the former WorldCanvas transform by
  * line. P1 must keep them aligned, not merely similarly named.
  */
 
@@ -25,8 +25,36 @@ export interface ViewRect {
   readonly height: number;
 }
 
+export interface TorusTilePosition {
+  readonly x: number;
+  readonly y: number;
+}
+
+/** Tile origins in world space for a viewport rendered beneath the camera root. */
+export function torusTilePositions(
+  camera: WorldCamera,
+  viewWidth: number,
+  viewHeight: number,
+  scale: number,
+): TorusTilePosition[] {
+  if (!(scale > 0) || !(viewWidth > 0) || !(viewHeight > 0)) return [];
+  const halfWidth = viewWidth / scale / 2;
+  const halfHeight = viewHeight / scale / 2;
+  const iStart = Math.floor((camera.x - halfWidth) / WORLD_EXTENT);
+  const iEnd = Math.ceil((camera.x + halfWidth) / WORLD_EXTENT) - 1;
+  const jStart = Math.floor((camera.y - halfHeight) / WORLD_EXTENT);
+  const jEnd = Math.ceil((camera.y + halfHeight) / WORLD_EXTENT) - 1;
+  const positions: TorusTilePosition[] = [];
+  for (let i = iStart; i <= iEnd; i++) {
+    for (let j = jStart; j <= jEnd; j++) {
+      positions.push({ x: i * WORLD_EXTENT, y: j * WORLD_EXTENT });
+    }
+  }
+  return positions;
+}
+
 /**
- * Uniform scale for a stage, never a stretch. Mirrors WorldCanvas: portrait
+ * Uniform scale for a stage, never a stretch. Preserves the former WorldCanvas portrait
  * stages fit by height so the world fills the frame; wide stages fit the
  * smaller dimension so the whole 600x600 field shows at the baseline.
  */
@@ -35,7 +63,7 @@ export function viewScale(viewW: number, viewH: number, zoom: number): number {
   return fit * clampZoom(zoom);
 }
 
-/** World units -> screen pixels. Mirrors WorldCanvas toX/toY. */
+/** World units -> screen pixels. Preserves the former WorldCanvas toX/toY mapping. */
 export function worldToScreen(
   wx: number,
   wy: number,
@@ -48,7 +76,7 @@ export function worldToScreen(
 }
 
 /**
- * Screen pixels -> world units. Mirrors WorldCanvas selectAt/viewOf:
+ * Screen pixels -> world units. Preserves the former WorldCanvas selectAt/viewOf mapping:
  * constant on-screen geometry, so zoom never changes hit feel. Distance
  * checks against organisms stay toroidal at the call site.
  */

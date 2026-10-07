@@ -8,7 +8,7 @@
  * - collision guard (hash hit with different bitmap throws);
  * - layer order + toroidal camera parity with the Canvas2D World contract;
  * - asset registry completeness against assets/asset-manifest.json;
- * - renderer isolation (no sim-core/sim-runtime imports; App.tsx has no pixi/ import);
+ * - renderer isolation (no sim-core/sim-runtime imports; App.tsx keeps Pixi behind the test-only route);
  * - no new contracts types in the P0 adapter;
  * - 50/250/1000/3000 organism cache measurements (spike fixtures, exact keys).
  *
@@ -26,17 +26,19 @@ import {
 } from "../../packages/phenotype/src/index.ts";
 import { lodTierForZoom } from "../../packages/phenotype/src/model.ts";
 import { churnState, designFixture, engineLikeFixture, evolveFixture } from "../pixi-spike/cache.ts";
-import { describeTexture, exactTextureKey, gridBits } from "../../apps/explorer/src/pixi/phenotypeTextures.ts";
+import { describeRenderableTexture, describeTexture, exactTextureKey, gridBits, richArtTexture, richRasterToBits, richTextureKey } from "../../apps/explorer/src/pixi/phenotypeTextures.ts";
 import { createWorldLayers } from "../../apps/explorer/src/pixiWorld/layers.ts";
 import { LAYER_ORDER as P0_LAYER_ORDER } from "../../apps/explorer/src/pixi/layers.ts";
 import { LAYER_ORDER as PW_LAYER_ORDER } from "../../apps/explorer/src/pixiWorld/layers.ts";
 import {
+  clampZoom as pwClampZoom,
   screenToWorld,
   viewScale,
   visibleWindow,
   worldToScreen,
   wrapCoord as pwWrapCoord,
   wrapDelta as pwWrapDelta,
+  torusTilePositions,
 } from "../../apps/explorer/src/pixiWorld/camera.ts";
 import { PhenotypeTextureCache } from "../../apps/explorer/src/pixi/textureCache.ts";
 import {
@@ -50,10 +52,111 @@ import {
 } from "../../apps/explorer/src/pixi/layers.ts";
 import { ASSET_REGISTRY, registryManifestIds } from "../../apps/explorer/src/pixi/assetRegistry.ts";
 import { toTextureRequests } from "../../apps/explorer/src/pixi/adapter.ts";
+import {
+  environmentIdentity,
+  environmentMatchesWorld,
+  sameNormalFieldInput,
+  sameTickEnvironmentDiscontinuity,
+} from "../../apps/explorer/src/pixiWorld/environmentIdentity.ts";
+import { LandscapeSmoother } from "../../apps/explorer/src/landscape.ts";
+import { hitTestOrganism, selectAtScreenPoint } from "../../apps/explorer/src/pixiWorld/interaction.ts";
+import { dormantChannel, organismColor } from "../../apps/explorer/src/organismEncoding.ts";
+import { PHENOTYPE_CELL_FRACTION, PHENOTYPE_FOOTPRINT_REFERENCE_SIZE } from "../../apps/explorer/src/phenotype.ts";
+import { updateOrganismLayer, destroyOrganismLayer, type OrganismTextureFactory } from "../../apps/explorer/src/pixiWorld/organisms.ts";
+import { Container, Graphics, Sprite, Texture } from "pixi.js";
+import { buildArtRecipe, resolveArtLod, applyMaterialRoles, rasterizeStructuralArt, materializeRaster } from "../../packages/phenotype/src/art/index.ts";
+import { platedCenterFixture } from "../phenotype-art-proof/fixture.ts";
+
+function expectedPlatedRichTexture(res: ReturnType<typeof resolvePhenotype>, lod: "population" | "inspection") {
+  const source = buildArtRecipe(res);
+  const view = resolveArtLod(source, lod);
+  const width = lod === "population" ? 64 : 128;
+  const neutral = rasterizeStructuralArt({ ...source, regions: view.regions }, { width, height: width });
+  const material = materializeRaster(neutral, applyMaterialRoles(view, res));
+  let bits = "";
+  for (let i = 0; i < width * width; i++) bits += material.rgba[i * 4 + 3] ? "1" : "0";
+  return { width, rgba: material.rgba, bits };
+}
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "../..");
 const pixiDir = join(root, "apps/explorer/src/pixi");
+
+// Independently-cadenced environment identity ignores live tick changes.
+{
+  const frame = { worldId: 4, tick: 10 } as never;
+  const identityAtLive12 = environmentIdentity(frame, "normal", "combined");
+  const identityAtLive15 = environmentIdentity(frame, "normal", "combined");
+  assert.equal(identityAtLive12, identityAtLive15);
+  assert.notEqual(identityAtLive15, environmentIdentity({ worldId: 4, tick: 15 } as never, "normal", "combined"));
+  assert.notEqual(identityAtLive15, environmentIdentity(frame, "nutrients", "combined"));
+  assert.equal(environmentMatchesWorld("4", 4), true);
+  assert.equal(environmentMatchesWorld("5", 4), false, "new identity must never be paired with an old world's environment channel");
+  assert.equal(sameNormalFieldInput({ liveTick: 12, fieldIdentity: "world-4/channel-10/raw-A" }, 12, "world-4/channel-10/raw-A"), true,
+    "camera/viewport-only changes must reuse the current normal smoothing result");
+  assert.equal(sameNormalFieldInput({ liveTick: 12, fieldIdentity: "world-4/channel-10/raw-A" }, 13, "world-4/channel-10/raw-A"), false,
+    "a new live tick may advance the normal smoothing result");
+  assert.equal(sameTickEnvironmentDiscontinuity(null, 10, "field-A"), false, "first observation is a prime, not a replacement");
+  assert.equal(sameTickEnvironmentDiscontinuity({ environmentTick: 10, fieldIdentity: "field-A" }, 10, "field-B"), true,
+    "material field replacement at the same authoritative tick is a discontinuity");
+  assert.equal(sameTickEnvironmentDiscontinuity({ environmentTick: 10, fieldIdentity: "field-A" }, 11, "field-B"), false,
+    "advancing authoritative ticks preserve ordinary temporal smoothing");
+  assert.equal(sameTickEnvironmentDiscontinuity({ environmentTick: 10, fieldIdentity: "field-A" }, 10, "field-A"), false,
+    "same-tick unchanged fields do not reset smoothing");
+
+  const smoother = new LandscapeSmoother(1);
+  const uniform = (value: number) => new Float32Array([value]);
+  const warm = uniform(0.9), depleted = uniform(0.1);
+  smoother.advance("world-4", 10, warm, warm, warm, warm);
+  const ordinaryAdvance = smoother.advance("world-4", 11, depleted, depleted, depleted, depleted);
+  assert.ok(ordinaryAdvance[0]! > 0.1 && ordinaryAdvance[0]! < 0.9,
+    "ordinary advancing-tick changes continue to smooth");
+  if (sameTickEnvironmentDiscontinuity({ environmentTick: 11, fieldIdentity: "field-A" }, 11, "field-B")) {
+    smoother.reset("world-4");
+  }
+  const discontinuity = smoother.advance("world-4", 11, depleted, depleted, depleted, depleted);
+  for (const channel of discontinuity) assert.ok(Math.abs(channel - 0.1) < 1e-6,
+    "same-tick replacement re-primes all normal environment channels exactly");
+  console.log("p1 environment identity: PASS (environment channel tick/world/lens, not live cadence)");
+}
+
+// Toroidal hit testing keeps nearest identity across both world seams.
+{
+  const organisms = [
+    { id: 1, x: 2, y: 300 },
+    { id: 2, x: 598, y: 300 },
+    { id: 3, x: 300, y: 4 },
+    { id: 4, x: 300, y: 596 },
+  ] as never;
+  assert.equal(hitTestOrganism({ x: 599, y: 300 }, organisms, 26), 2);
+  assert.equal(hitTestOrganism({ x: 1, y: 300 }, organisms, 26), 1);
+  assert.equal(hitTestOrganism({ x: 300, y: 599 }, organisms, 26), 4);
+  assert.equal(hitTestOrganism({ x: 300, y: 1 }, organisms, 26), 3);
+  assert.equal(hitTestOrganism({ x: 300, y: 300 }, organisms, 26), null);
+  const rect = { left: 20, top: 40, width: 600, height: 600 };
+  for (const zoom of [1, 3]) {
+    const scale = zoom;
+    const center = { x: 300, y: 300 };
+    const target = [{ id: 99, x: 300, y: 300 }];
+    assert.equal(selectAtScreenPoint(rect.left + 300 + 25, rect.top + 300, rect, center, scale, target), 99,
+      `25 CSS px hit at zoom ${zoom}`);
+    assert.equal(selectAtScreenPoint(rect.left + 300 + 27, rect.top + 300, rect, center, scale, target), null,
+      `27 CSS px miss at zoom ${zoom}`);
+  }
+  console.log("p1 hit test: PASS (nearest toroidal identity across both seams)");
+}
+
+// Analytical encoding remains visible for dormant organisms; dormancy is separate.
+{
+  const organism = { cladeId: 12, byproductUse: 0, diet: 0, energy: 90, activity: "dormant", speed: 2, sensing: 90 } as const;
+  const clade = organismColor(organism, "clades", "speed", [0.25, 4]);
+  const trait = organismColor(organism, "traits", "speed", [0.25, 4]);
+  assert.match(clade, /^hsl\(/);
+  assert.match(trait, /^hsl\(/);
+  assert.ok(dormantChannel(organism).alpha < dormantChannel({ ...organism, activity: "active" }).alpha);
+  assert.equal(dormantChannel(organism).hollow, true);
+  console.log("p1 analytical organism encoding: PASS (dormant retains clade/trait with separate alpha/hollow channel)");
+}
 
 function traitsForAxes(mob: number, sen: number, met: number, spec: number) {
   return {
@@ -83,8 +186,9 @@ function traitsForAxes(mob: number, sen: number, met: number, spec: number) {
       assert.equal(gridBits(g), a.bits, `bits match renderer ${tier}/${act}`);
     }
   }
-  console.log("p0 determinism: PASS (3 tiers x active/dormant, key+bits identical, LOD sizes 5/9/13)");
+  console.log("p0 determinism: PASS (3 tiers x active/dormant, key+bits identical, LOD sizes 9/9/13)");
 }
+
 
 // 1b. Collision guard.
 {
@@ -109,8 +213,8 @@ function traitsForAxes(mob: number, sen: number, met: number, spec: number) {
     })),
   });
   for (const tier of ["ecosystem", "population", "inspection"] as const) {
-    const before = new Map(toTextureRequests(fake(0, 0) as never, resolved, tier).map((r) => [r.organismId, r.key]));
-    const after = toTextureRequests(fake(37, -53) as never, resolved, tier);
+    const before = new Map(toTextureRequests(fake(0, 0).organisms as never, resolved, tier).map((r) => [r.organismId, r.key]));
+    const after = toTextureRequests(fake(37, -53).organisms as never, resolved, tier);
     for (const r of after) assert.equal(r.key, before.get(r.organismId), `movement-stable ${tier}#${r.organismId}`);
   }
   console.log("p0 movement isolation: PASS (250 organisms x 3 tiers, displaced positions change zero keys)");
@@ -149,6 +253,187 @@ function traitsForAxes(mob: number, sen: number, met: number, spec: number) {
   assert.equal(cache.size, cache.live(), "prune must drop all zero-user entries");
   assert.ok(cache.live() <= cache.cumulative, "live cannot exceed cumulative");
   console.log(`p0 lifecycle: PASS (remap-neutral users=${u0}; churn replaced=${replaced} pruned=${dead.length} live=${cache.live()} cum=${cache.cumulative})`);
+}
+
+// 3b. Production organism reconciliation contract (headless Pixi containers).
+{
+  const resolved = resolvePhenotype(traitsForAxes(0.6, 0.7, 0.5, 0.5), { organismId: 1, lineageId: 1 });
+  const makeRows = (worldId: number, activity: "active" | "dormant" = "active") => [{
+    id: 1, parent: null, generation: 0, lineageId: 1, cladeId: 1,
+    x: 100, y: 120, energy: 80, activity, speed: 1.5, sensing: 70,
+    metabolism: 0.2, reproduction: 100, diet: 0, habitat: 0,
+    byproductUse: 0, dormancyResponse: 1, tolerance: 0, cleanup: 0,
+    worldId,
+  }];
+  const layer = new Container();
+  const destroyedTextures: Texture[] = [];
+  const createdTextures: Texture[] = [];
+  const fakeTexture = (size: number): Texture => ({
+    source: { scaleMode: "nearest" },
+    orig: { width: size, height: size },
+    frame: { width: size, height: size },
+    destroy: () => undefined,
+  } as unknown as Texture);
+  const makeTestTexture: OrganismTextureFactory = (bits, size) => {
+    void bits;
+    const texture = fakeTexture(size);
+    createdTextures.push(texture);
+    return { texture, pixels: "legacy-grid", destroy: () => { destroyedTextures.push(texture); } };
+  };
+  const makeRichTestTexture: OrganismTextureFactory = (bits, size, rgba) => {
+    assert.equal(rgba?.length, size * size * 4, "Pixi factory receives exact rich RGBA pixels");
+    const texture = fakeTexture(size);
+    createdTextures.push(texture);
+    return { texture, pixels: "rich-rgba", destroy: () => { destroyedTextures.push(texture); } };
+  };
+  const baseInput = {
+    worldId: 1,
+    organisms: makeRows(1) as never,
+    resolvedPhenotypes: new Map([[1, resolved]]),
+    tier: "population" as const,
+    lens: "normal" as const,
+    traitView: "speed" as const,
+    traitRange: [0.25, 4] as [number, number],
+    selectedId: null,
+    scale: 1,
+  };
+  const initial = updateOrganismLayer(layer, baseInput, makeTestTexture);
+  assert.equal(initial.liveDisplayCount, 1);
+  destroyOrganismLayer(layer);
+
+  // Rich procedural art is available only for Plated at the two fine tiers.
+  // This checks the actual production descriptor/cache path, not proof output.
+  const plated = { ...platedCenterFixture(), family: "plated" as const };
+  const platedRows = [{ ...makeRows(1)[0]!, id: 1, parent: 999, generation: 1 }];
+  const platedInput = { ...baseInput, organisms: platedRows as never, resolvedPhenotypes: new Map([[1, plated]]) };
+  const platedPopulation = updateOrganismLayer(layer, platedInput, makeRichTestTexture);
+  const sprite = layer.children[0] as Sprite;
+  const initialTexture = sprite.texture;
+  const moved = updateOrganismLayer(layer, { ...platedInput, organisms: [{ ...platedRows[0]!, x: 230, y: 310 }] as never, selectedId: 1 }, makeRichTestTexture);
+  assert.equal(layer.children[0], sprite, "movement and selection retain the display object");
+  assert.equal(sprite.texture, initialTexture, "movement and selection retain the morphology texture");
+  assert.equal(moved.displayCreates, 1);
+  assert.equal(moved.textureCreates, platedPopulation.textureCreates, "movement creates no morphology texture");
+  assert.equal(sprite.position.x, 230);
+  const populationTexture = sprite.texture;
+  const legacyPopulationGrid = renderPhenotypeGrid(plated, "population", "active");
+  const expectedPopulationFootprint = legacyPopulationGrid.size * Math.max(2, 2.2 * PHENOTYPE_CELL_FRACTION.population);
+  assert.equal(sprite.width, expectedPopulationFootprint, "rich population pixels preserve the accepted legacy organism footprint");
+  const populationRich = expectedPlatedRichTexture(plated, "population");
+  const populationDesc = describeTexture(plated, "population", "active");
+  assert.equal(populationRich.width, 64, "Plated population texture uses the accepted native art resolution");
+  assert.equal(populationRich.rgba.length, 64 * 64 * 4, "rich descriptor carries exact population raster identity");
+  const legacyDescriptor = describeTexture(resolved, "population", "active");
+  const legacyCache = new PhenotypeTextureCache();
+  assert.equal(legacyCache.acquire(resolved, "population", "active").bits, legacyDescriptor.bits,
+    "non-Plated families retain the legacy monochrome descriptor");
+  const ecosystemDescriptor = describeRenderableTexture(plated, "ecosystem", "active");
+  assert.equal(ecosystemDescriptor.size, 9, "Plated ecosystem still uses the exact accepted coarse grid");
+  assert.equal(ecosystemDescriptor.rgba, undefined, "coarse ecosystem keeps its existing mask-only texture path");
+  const richPopulationDescriptor = describeRenderableTexture(plated, "population", "active");
+  const richInspectionDescriptor = describeRenderableTexture(plated, "inspection", "active");
+  assert.equal(richPopulationDescriptor.size, 64);
+  assert.equal(richInspectionDescriptor.size, 128);
+  assert.equal(richInspectionDescriptor.rgba?.length, 128 * 128 * 4);
+  assert.equal(richPopulationDescriptor.rgba?.length, 64 * 64 * 4);
+  assert.notEqual(richPopulationDescriptor.key, richInspectionDescriptor.key,
+    "LOD, version, seed, and exact rich pixels participate in cache identity");
+  const richCache = new PhenotypeTextureCache();
+  const richCacheEntryA = richCache.acquire(plated, "population", "active");
+  const richCacheEntryB = richCache.acquire(plated, "population", "active");
+  assert.equal(richCacheEntryA.key, richCacheEntryB.key, "identical rich Plated rasters share exact cache identity");
+  assert.equal(richCacheEntryA.rgba?.length, 64 * 64 * 4, "cache retains the exact native RGBA resource bytes");
+  assert.equal(richCacheEntryA.users, 2, "rich texture cache preserves reference accounting");
+  richCache.release(richCacheEntryA.key);
+  richCache.release(richCacheEntryB.key);
+  assert.deepEqual(richCache.prune(), [richCacheEntryA.key], "rich GPU resource is retired only after its last user releases it");
+  assert.equal(richRasterToBits(richPopulationDescriptor.rgba!, 64).length, 4096,
+    "GPU upload mask has one bit per rich raster pixel");
+  const changedPixels = richPopulationDescriptor.rgba!.slice();
+  changedPixels[0] = changedPixels[0] === 0 ? 1 : changedPixels[0]! - 1;
+  assert.notEqual(richTextureKey(changedPixels, 64, "population", richPopulationDescriptor.key.split("/")[1]!, "plated-grammar-v1", plated.cosmeticSeed),
+    richPopulationDescriptor.key, "one changed RGBA channel changes exact raster cache identity");
+  assert.equal(platedPopulation.liveDisplayCount, 1);
+  const platedInspection = updateOrganismLayer(layer, { ...platedInput, tier: "inspection" }, makeRichTestTexture);
+  const inspectionSprite = sprite;
+  const legacyInspectionGrid = renderPhenotypeGrid(plated, "inspection", "active");
+  const expectedInspectionFootprint = legacyInspectionGrid.size * Math.max(2, 2.2 * PHENOTYPE_CELL_FRACTION.inspection);
+  assert.equal(sprite.width, expectedInspectionFootprint, "rich inspection pixels preserve the accepted legacy organism footprint");
+  assert.notEqual(inspectionSprite.texture, populationTexture, "inspection uses its distinct rich raster resource");
+  assert.equal(expectedPlatedRichTexture(plated, "inspection").width, 128,
+    "Plated inspection texture uses the accepted native art resolution");
+  assert.ok(platedInspection.textureCreates > platedPopulation.textureCreates);
+  const richNeutralBytes = createdTextures.length;
+  const analyticalRich = updateOrganismLayer(layer, { ...platedInput, tier: "inspection", lens: "traits" }, makeRichTestTexture);
+  assert.equal(inspectionSprite.visible, false, "analytical lenses do not show rich Plated material sprites");
+  assert.ok(layer.children.some((child) => child instanceof Graphics && child.visible),
+    "analytical lens retains its existing voxel encoding");
+  assert.equal(createdTextures.length, richNeutralBytes, "lens changes do not create a different rich raster resource");
+  assert.ok(analyticalRich.liveTextures > 0, "hidden normal-lens rich texture remains under the existing cache lifecycle");
+  const ecosystemAfterRich = updateOrganismLayer(layer, { ...platedInput, tier: "ecosystem" }, makeTestTexture);
+  assert.ok(createdTextures.length > richNeutralBytes, "ecosystem coarse grid remains on its separate legacy texture path");
+  assert.equal(describeTexture(plated, "ecosystem", "active").size, 9,
+    "Plated ecosystem tier remains on the existing coarse renderer");
+  assert.equal(renderPhenotypeGrid(plated, "ecosystem", "active").size, 9,
+    "rich integration does not replace the coarse ecosystem authority");
+  assert.ok(ecosystemAfterRich.textureCreates >= analyticalRich.textureCreates,
+    "tier transition returns through the existing exact texture cache");
+
+  const voxel = layer.children.find((child) => child instanceof Graphics) as Graphics | undefined;
+  assert.ok(voxel, "each organism owns a persistent analytical voxel display");
+  const beforeLensTextures = createdTextures.length;
+  let priorLensTextures = beforeLensTextures;
+  for (const lens of ["nutrients", "waste", "clades", "traits"] as const) {
+    const analytical = updateOrganismLayer(layer, { ...platedInput, lens, selectedId: 1 }, makeRichTestTexture);
+    assert.equal(layer.children.find((child) => child instanceof Sprite), inspectionSprite,
+      "lens treatment retains the rich Plated display");
+    assert.ok(createdTextures.length <= priorLensTextures + 1, `${lens} does not create a separate morphology texture`);
+    priorLensTextures = createdTextures.length;
+    assert.ok(analytical.liveTextures > 0, "rich morphology remains in the shared exact cache while voxel view is shown");
+    assert.equal(inspectionSprite.visible, false, "analytical lens presents the accepted voxel view, not the phenotype mask");
+    assert.ok(voxel.visible, "analytical voxel presentation is visible");
+    assert.equal(voxel.alpha, 1, "active analytical organism remains fully opaque");
+  }
+  const activeAgain = updateOrganismLayer(layer, platedInput, makeRichTestTexture);
+  assert.equal(inspectionSprite.visible, true, "normal lens restores the resolved Plated morphology");
+  assert.equal(inspectionSprite.texture, createdTextures.at(-1), "returning to normal reuses the rich morphology texture");
+  const dormantPlatedRows = [{ ...platedRows[0]!, activity: "dormant" }];
+  const dormantPlatedInput = { ...platedInput, organisms: dormantPlatedRows as never };
+  const dormantAnalytical = updateOrganismLayer(layer, {
+    ...platedInput,
+    lens: "clades",
+    organisms: dormantPlatedRows as never,
+  }, makeRichTestTexture);
+  assert.ok(voxel.alpha < 1, "dormancy alpha remains independent of analytical encoding");
+  assert.ok(dormantAnalytical.textureCreates >= activeAgain.textureCreates, "dormancy reuses or remaps cached morphology independently of lens");
+
+  const activeTexture = initialTexture;
+  const dormant = updateOrganismLayer(layer, dormantPlatedInput, makeRichTestTexture);
+  assert.notEqual(sprite.texture, activeTexture, "activity has distinct phenotype mask identity");
+  assert.ok(dormant.textureCreates >= activeAgain.textureCreates, "active/dormant cache entries remain valid through remapping");
+  assert.equal(createdTextures.at(-1)!.source.scaleMode, "nearest", "phenotype factory configures nearest filtering");
+  const ecosystem = updateOrganismLayer(layer, { ...dormantPlatedInput, tier: "ecosystem" }, makeTestTexture);
+  assert.ok(ecosystem.textureCreates >= dormant.textureCreates, "LOD tier remaps or reuses texture identity");
+  const ecosystemGrid = renderPhenotypeGrid(resolved, "ecosystem", "active");
+  assert.equal(ecosystemGrid.size, 9, "ecosystem morphology raster is upgraded independently of its display footprint");
+  const ecosystemDisplaySize = PHENOTYPE_FOOTPRINT_REFERENCE_SIZE * 2.2 * PHENOTYPE_CELL_FRACTION.ecosystem;
+  assert.ok(sprite.width > 0, "Plated ecosystem retains its existing coarse display footprint");
+  assert.equal(sprite.height, sprite.width, "Plated display remains square");
+  const sameTier = updateOrganismLayer(layer, { ...platedInput, tier: "ecosystem" }, makeTestTexture);
+  assert.ok(sameTier.textureCreates >= ecosystem.textureCreates,
+    "applying display footprint does not invalidate the texture identity");
+  assert.equal(sprite.texture, createdTextures.at(-1), "display footprint does not replace the cached morphology texture");
+
+  const beforeWorld = layer.children[0];
+  const beforeReplacementDestroyed = destroyedTextures.length;
+  const replaced = updateOrganismLayer(layer, { ...platedInput, worldId: 2, organisms: [{ ...platedRows[0]!, worldId: 2 }] as never }, makeRichTestTexture);
+  assert.equal(replaced.liveDisplayCount, 1);
+  assert.notEqual(layer.children[0], beforeWorld, "world replacement retires obsolete display object");
+  assert.equal(replaced.liveTextures, 1, "world replacement retains only the new world's texture");
+  assert.ok(destroyedTextures.length > beforeReplacementDestroyed, "world replacement destroys prior GPU resources");
+  destroyOrganismLayer(layer);
+  assert.equal(layer.children.length, 0, "destroy releases all organism displays");
+  console.log("p1 organisms: PASS (movement/lens identity, activity+LOD remap, world replacement cleanup)");
 }
 
 // 4. Layer order + camera parity.
@@ -206,15 +491,16 @@ function traitsForAxes(mob: number, sen: number, met: number, spec: number) {
     assert.ok(!/from\s+["']pixi\.js["']/.test(src), `${f} must not import pixi.js in P0 (P1 adds the production dependency)`);
   }
   const appSrc = readFileSync(join(root, "apps/explorer/src/App.tsx"), "utf8");
-  assert.ok(!appSrc.includes("src/pixi") && !appSrc.includes("./pixi") && !appSrc.includes("phenotypeTextures") && !appSrc.includes("PhenotypeTextureCache"),
-    "production WorldCanvas must not import the P0 pixi/ boundary (cutover is P1-gated)");
-  assert.ok(appSrc.includes('canvas.getContext("2d")'), "production World must still be Canvas2D in P0");
+  // P1 cutover is now authorized: the maintained App may mount the PixiWorld
+  // component, but it may not directly own the low-level P0 cache/adapter.
+  assert.ok(!appSrc.includes("phenotypeTextures") && !appSrc.includes("PhenotypeTextureCache"),
+    "App.tsx leaves low-level phenotype GPU cache ownership to pixiWorld");
   const adapterSrc = readFileSync(join(pixiDir, "adapter.ts"), "utf8");
   assert.ok(!/interface\s+\w*(Checkpoint|Command|EngineConfig|Universe)\w*/.test(adapterSrc), "adapter must not declare new contracts types");
-  console.log(`p0 isolation: PASS (${sources.length} modules sim-free/pixi-free; App.tsx has no pixi/ import and stays Canvas2D)`);
+  console.log(`p0 isolation: PASS (${sources.length} modules sim-free/pixi-free; App.tsx does not own the low-level Pixi cache)`);
 }
 
-// 8. P1 rendering-only scaffold: production location, inactive, unbound.
+// 8. Production Pixi pure camera/layer/render contracts and authority boundary.
 {
   // Camera parity: same wrap/zoom primitives as the P0 contract...
   assert.equal(pwWrapDelta(10, 590), 20);
@@ -251,6 +537,26 @@ function traitsForAxes(mob: number, sen: number, met: number, spec: number) {
   assert.equal(viewScale(720, 720, 2), 2 * viewScale(720, 720, 1), "zoom scales the view");
   console.log("p1 camera: PASS (wrap parity, exact projection round-trip, App fit rule, zoom clamp + scale)");
 
+  // Under the Pixi-transformed world root, field copies must be in world
+  // coordinates and cover the entire visible logical viewport across seams.
+  for (const scenario of [
+    { camera: { x: 300, y: 300 }, width: 800, height: 500, scale: 1, expected: 3 },
+    { camera: { x: 599, y: 599 }, width: 800, height: 700, scale: 1, expected: 4 },
+    { camera: { x: 2, y: 598 }, width: 390, height: 844, scale: 844 / 600, expected: 4 },
+  ]) {
+    const tiles = torusTilePositions(scenario.camera, scenario.width, scenario.height, scenario.scale);
+    assert.equal(tiles.length, scenario.expected, "only tiles intersecting visible viewport are planned");
+    const left = scenario.camera.x - scenario.width / scenario.scale / 2;
+    const right = scenario.camera.x + scenario.width / scenario.scale / 2;
+    const top = scenario.camera.y - scenario.height / scenario.scale / 2;
+    const bottom = scenario.camera.y + scenario.height / scenario.scale / 2;
+    for (const [x, y] of [[left + 1e-6, top + 1e-6], [right - 1e-6, top + 1e-6], [left + 1e-6, bottom - 1e-6], [right - 1e-6, bottom - 1e-6]]) {
+      assert.ok(tiles.some((tile) => x >= tile.x && x < tile.x + WORLD_EXTENT && y >= tile.y && y < tile.y + WORLD_EXTENT),
+        `visible viewport corner (${x},${y}) has a torus field tile`);
+    }
+  }
+  console.log("p1 torus field plan: PASS (world-space tiles cover viewport at center, both seams, phone zoom)");
+
   // Layer assembly absorbs the P0 order: same constant, Containers in order.
   // The expected order is pinned as a literal here (not re-imported), so a
   // P0 order change cannot propagate silently to both sides of the check.
@@ -272,7 +578,7 @@ function traitsForAxes(mob: number, sen: number, met: number, spec: number) {
     "layer assembly builds fresh objects per call (no shared GPU state)");
   console.log("p1 layers: PASS (6 ordered labeled Containers, fresh per boot, order absorbed from P0)");
 
-  // Static guards over the production scaffold: unbound and inactive.
+  // Static guards over production Pixi modules: bounded and authority-safe.
   const pwDir = join(root, "apps/explorer/src/pixiWorld");
   const pwSources = readdirSync(pwDir).filter((f) => f.endsWith(".ts"));
   assert.ok(pwSources.length >= 3, `expect >=3 pixiWorld modules (got ${pwSources.length})`);
@@ -280,9 +586,22 @@ function traitsForAxes(mob: number, sen: number, met: number, spec: number) {
     const src = readFileSync(join(pwDir, f), "utf8");
     assert.ok(!/from\s+["'][^"']*sim-core|from\s+["'][^"']*sim-runtime/.test(src),
       `pixiWorld/${f} must not import simulation packages`);
-    assert.ok(!src.includes("RenderSnapshot") && !/from\s+["']@digital-evolution\/contracts["']/.test(src),
-      `pixiWorld/${f} must not bind the read-model contract (gated on Tranche B)`);
+    assert.ok(!src.includes("RenderSnapshot"),
+      `pixiWorld/${f} must not bind a legacy detail snapshot`);
+    if (!new Set(["environment.ts", "organisms.ts", "renderer.ts"]).has(f)) {
+      assert.ok(!/from\s+["']@digital-evolution\/contracts["']/.test(src),
+        `pixiWorld/${f} must remain independent from read-model contracts unless explicitly approved`);
+    } else {
+      assert.ok(!/\b(?:RenderSnapshot|WorkerRuntimeClient|UniverseCheckpoint|HistoryRecord)\b/.test(src),
+        `pixiWorld/${f} may consume only bounded live presentation rows, not detail/runtime/persistence contracts`);
+    }
   }
+  const environmentSrc = readFileSync(join(pwDir, "environment.ts"), "utf8");
+  assert.ok(environmentSrc.includes("LandscapeSmoother"), "normal landscape preserves accepted temporal smoothing");
+  assert.ok(environmentSrc.includes('if (input.lens === "nutrients")') && environmentSrc.includes('if (input.lens === "waste")'),
+    "nutrient and waste lenses remain explicit raw analytical encodings");
+  assert.ok(environmentSrc.includes('input.lens === "normal"') && environmentSrc.includes('"waste-cue"'),
+    "normal landscape retains a separate waste cue layer");
   const texSrc = readFileSync(join(pwDir, "textures.ts"), "utf8");
   assert.ok(texSrc.includes('scaleMode = "nearest"'), "phenotype uploads stay nearest-filtered");
   assert.ok(texSrc.includes("destroy(true)"), "retirement must destroy the texture source too (AC-P7)");
@@ -292,9 +611,38 @@ function traitsForAxes(mob: number, sen: number, met: number, spec: number) {
   assert.ok(bootSrc.includes("app.destroy()"), "production boot disposes GPU resources");
   assert.ok(!bootSrc.includes("RenderSnapshot"), "production boot takes no snapshot");
   const appSrc = readFileSync(join(root, "apps/explorer/src/App.tsx"), "utf8");
-  assert.ok(!appSrc.includes("pixiWorld"), "App.tsx must not import pixiWorld (no cutover)");
-  assert.ok(appSrc.includes('canvas.getContext("2d")'), "production World stays Canvas2D");
-  console.log(`p1 scaffold: PASS (${pwSources.length} modules sim-free, read-model-unbound, inactive)`);
+  const hostSrc = readFileSync(join(root, "apps/explorer/src/pixiWorld/WorldPixi.tsx"), "utf8");
+  assert.ok(/<WorldPixi\s+\{\.\.\.pixiWorldProps\}\s*\/>/.test(appSrc),
+    "App.tsx mounts Pixi as the production semantic World renderer");
+  assert.ok(!appSrc.includes("WorldCanvas") && !appSrc.includes("setRenderer"),
+    "App.tsx retires the semantic Canvas World and renderer-selection hook");
+  assert.ok(!appSrc.includes("function WorldCanvas") && !appSrc.includes("world-canvas"),
+    "App.tsx has no semantic Canvas2D World component or fallback (the minimap remains independent)");
+  assert.ok(hostSrc.includes('role="alert"') && hostSrc.includes("World display unavailable")
+    &&hostSrc.includes("deePixiFailure")&&hostSrc.includes("data-renderer-backend={backend}"),
+    "Pixi initialization failure has an accessible testable display-failure state");
+  console.log(`production Pixi route guard: PASS (${pwSources.length} renderer modules stay bounded; Pixi is the sole semantic World)`);
+}
+
+// P1.1 lifecycle and logical viewport math remain DPR-independent.
+{
+  const rect = { left: 20, top: 30, width: 390, height: 844 };
+  const camera = { x: 5, y: 595 };
+  for (const zoom of [pwClampZoom(1), pwClampZoom(3)]) {
+    const scale = viewScale(rect.width, rect.height, zoom);
+    const atOneDpr = screenToWorld(215, 452, rect, camera, scale);
+    // Renderer backing dimensions multiply by DPR, but event coordinates and
+    // logical viewport remain CSS pixels, so camera projection is identical.
+    for (const dpr of [1, 2, 3]) {
+      const logicalW = rect.width * dpr / dpr;
+      const logicalH = rect.height * dpr / dpr;
+      const sameScale = viewScale(logicalW, logicalH, zoom);
+      const projected = screenToWorld(215, 452, rect, camera, sameScale);
+      assert.deepEqual(projected, atOneDpr, `CSS-space camera projection stable at DPR ${dpr}`);
+      assert.deepEqual(visibleWindow(logicalW, logicalH, sameScale), visibleWindow(rect.width, rect.height, scale));
+    }
+  }
+  console.log("p1 viewport: PASS (logical camera coordinates independent of backing DPR at zoom limits)");
 }
 
 // 7. Scale measurements: exact-key cache over 50/250/1000/3000 (+ engine-like 1000).

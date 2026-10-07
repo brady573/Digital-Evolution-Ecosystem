@@ -11,18 +11,19 @@ import { IndexedDbWorldRepository } from "./persistence";
 import { restoreFailureMessage, storageFailureMessage } from "./persistenceMessages";
 import { formatTickAge, formatYear, glossOutcome } from "./language";
 import {
-  LandscapeSmoother, fillEnvironmentFractions, landscapeCell, landscapeTileLayout,
-  microTexture, nutrientOverlayCell, wasteOverlayCell,
 } from "./landscape";
-import { cladeColor, dormantChannel, organismColor, type OrganismLens } from "./organismEncoding";
+import { cladeColor } from "./organismEncoding";
 import { AftermathPanel } from "./AftermathPanel";
 import { createPresentationStore, type PresentationView } from "./presentationStore";
 import { AftermathStage2Panel } from "./AftermathStage2Panel";
 import { synchronizeAftermathPresentation, transitionAftermath } from "./experience/aftermath/lifecycle";
 import { AFTERMATH_OBSERVATION_TICKS, type AftermathLifecycleEvent, type AftermathPresentationState, type AftermathStage2Fixture, type DevelopmentEvidence } from "./experience/aftermath/model";
 import { projectLiveAftermath } from "./experience/aftermath/project";
-import { drawPhenotypeOrganism, phenotypeCache, tierForZoom } from "./phenotype";
+import { phenotypeCache } from "./phenotype";
+import { resolvePhenotype } from "@digital-evolution/phenotype";
 import { familyArtwork } from "./familyArt";
+import { TRAIT_DISPLAY_RANGES, type Lens, type PixiWorldProps, type ResourceView, type TraitView, type WorldCamera } from "./worldViewTypes";
+import { WorldPixi } from "./pixiWorld/WorldPixi";
 
 /** Details card for a selected organism, incl. its base family portrait. */
 function SelectedOrganismCard({ selected, onViewLineage, onClear }: {
@@ -47,9 +48,19 @@ function SelectedOrganismCard({ selected, onViewLineage, onClear }: {
 }
 
 type Surface="world"|"history"|"tree"|"experiments";
-type Lens="normal"|"nutrients"|"waste"|"clades"|"traits";
-type ResourceView="combined"|"a"|"b"|"c";
-type TraitView="speed"|"sensing"|"metabolism"|"reproduction"|"diet"|"habitat"|"byproductUse"|"dormancyResponse";
+type SaveDiagnostic={readonly stage:string;readonly at:number;readonly tick?:number;readonly detail?:string};
+
+function deeTestPhenotypeFixtures():{organisms:RenderOrganism[];resolved:Map<number,ReturnType<typeof resolvePhenotype>>}{
+  const organisms:RenderOrganism[]=[
+    {id:900000001 as OrganismId,parent:899999999 as OrganismId,generation:1,lineageId:900000001 as RenderOrganism["lineageId"],cladeId:900000001 as RenderOrganism["cladeId"],x:296,y:300,energy:90,activity:"active",speed:1.375,sensing:69.5,metabolism:0.339,reproduction:100,diet:0.675,habitat:0.675,byproductUse:0.675,dormancyResponse:1,tolerance:0,cleanup:0},
+    {id:900000002 as OrganismId,parent:899999999 as OrganismId,generation:1,lineageId:900000002 as RenderOrganism["lineageId"],cladeId:900000002 as RenderOrganism["cladeId"],x:304,y:300,energy:90,activity:"active",speed:1.5,sensing:70,metabolism:0.2,reproduction:100,diet:0,habitat:0,byproductUse:0,dormancyResponse:1,tolerance:0,cleanup:0},
+  ];
+  const plated=resolvePhenotype({speed:1.375,sensing:69.5,metabolism:0.339,reproduction:100,diet:0.675,habitat:0.675,byproductUse:0.675,dormancyResponse:1},{parentFamily:"plated",organismId:900000001,lineageId:900000001});
+  const other=resolvePhenotype({speed:1.5,sensing:70,metabolism:0.2,reproduction:100,diet:0,habitat:0,byproductUse:0,dormancyResponse:1},{organismId:900000002,lineageId:900000002});
+  if(plated.family!=="plated")throw new Error(`deeTest Plated fixture resolved to ${plated.family}`);
+  return {organisms,resolved:new Map([[900000001,plated],[900000002,other]])};
+}
+
 /** Display names for the lens set. The active-lens chip uses the same labels
  *  as the expanded buttons, so the two never disagree. */
 const LENS_LABELS:Record<Lens,string>={
@@ -88,16 +99,7 @@ const PRESETS:Record<string,{settings:Omit<WorldSettings,"seed">,note:string}>={
   Abundant:{settings:{richness:3.2,separation:.6,variety:1,population:30,variation:.35,mutation:.03,pressure:.45},note:"Abundant turns nutrient production far beyond balanced levels to sustain thousands of living organisms; built for large populations and deep-time runs."},
 };
 
-const TRAIT_RANGES:Record<TraitView,[number,number,string]>={
-  speed:[.25,4,"Movement"],
-  sensing:[10,180,"Nutrient sensing"],
-  metabolism:[.04,.5,"Energy use"],
-  reproduction:[55,220,"Reproduction energy"],
-  diet:[-1.5,1.5,"Nutrient tendency"],
-  habitat:[-1.5,1.5,"Home-zone preference"],
-  byproductUse:[0,1.5,"Byproduct use"],
-  dormancyResponse:[0,1.5,"Dormancy response"],
-};
+const TRAIT_RANGES=TRAIT_DISPLAY_RANGES;
 
 function configFromSettings(s:WorldSettings):EngineConfig{
   return{
@@ -161,7 +163,7 @@ function settingsFromConfig(c:EngineConfig|undefined|null):WorldSettings{
 // minimap of the whole field. Presentation only; the simulation is untouched.
 const WORLD_EXTENT=600;
 const ZOOM_MIN=1,ZOOM_MAX=3;
-type Camera={x:number;y:number};
+type Camera=WorldCamera;
 // Shortest toroidal delta from a to b. Correct for any separation, not just
 // one period: normalizing the camera during pan keeps this well-conditioned,
 // and the modulo keeps it correct regardless.
@@ -171,256 +173,6 @@ const wrapCoord=(v:number)=>((v%WORLD_EXTENT)+WORLD_EXTENT)%WORLD_EXTENT;
 // Organism colour and the dormancy channel live in ./organismEncoding, which
 // tools/validation/landscape.ts asserts directly (§21.2). Keeping them out of
 // the component is what makes the analytical-lens guarantee testable.
-
-/** Presentation-only landscape smoothing state. Lives for the canvas's
- * lifetime, holds no simulation meaning, and re-primes from the current
- * fields whenever the displayed universe identity changes. */
-const landscapeSmoother=new LandscapeSmoother();
-
-function WorldCanvas({
-  worldId,tick,env,organisms,lens,resourceView,traitView,selectedId,onSelect,cam,zoom,onCamera,onView,
-}:{
-  // Lane 3 F2b read-model inputs: identity (worldId/tick for smoother
-  // scoping), the environment frame, and the store's joined organism rows.
-  // Same RenderOrganism-shaped entries selection and phenotype read.
-  worldId:WorldId;tick:number;env:WorldEnvironmentFrame;organisms:readonly RenderOrganism[];
-  lens:Lens;resourceView:ResourceView;traitView:TraitView;
-  selectedId:OrganismId|null;onSelect:(id:OrganismId|null)=>void;
-  cam:Camera;zoom:number;onCamera:(c:Camera)=>void;onView:(u:{w:number;h:number})=>void;
-}){
-  const ref=useRef<HTMLCanvasElement>(null);
-  // Backing store follows the displayed size so the world fills its stage on
-  // any viewport. The sim mapping stays resolution-independent; only the
-  // presentation transform changes.
-  const [size,setSize]=useState<[number,number]>([720,720]);
-  useEffect(()=>{
-    const canvas=ref.current,host=canvas?.parentElement;if(!canvas||!host)return;
-    const ro=new ResizeObserver(entries=>{
-      const r=entries[0]?.contentRect;if(!r)return;
-      const w=Math.max(160,Math.min(1400,Math.round(r.width)));
-      const h=Math.max(160,Math.min(1400,Math.round(r.height)));
-      setSize(([pw,ph])=>pw===w&&ph===h?[pw,ph]:[w,h]);
-    });
-    ro.observe(host);
-    return()=>ro.disconnect();
-  },[]);
-
-  useEffect(()=>{
-    const canvas=ref.current;if(!canvas)return;
-    const ctx=canvas.getContext("2d");if(!ctx)return;
-    const w=canvas.width,h=canvas.height,n=env.resources.gridSize;
-    // Uniform scale, never a stretch. Portrait stages fit by height so the
-    // world fills the frame; the zoomed-out baseline on wide stages still
-    // shows the whole 600x600 field.
-    const fit=h>w?h/WORLD_EXTENT:Math.min(w,h)/WORLD_EXTENT;
-    const s=fit*zoom;
-    const toX=(wx:number)=>w/2+wrapDelta(wx,cam.x)*s;
-    const toY=(wy:number)=>h/2+wrapDelta(wy,cam.y)*s;
-    const cell=(WORLD_EXTENT/n)*s;
-    ctx.clearRect(0,0,w,h);
-    // Report the visible window (in world units) so the minimap can mark it.
-    onView({w:w/s,h:h/s});
-
-    const drawEnvironment=lens==="normal"||lens==="nutrients"||lens==="waste";
-    if(drawEnvironment){
-      // Analytical lenses read exact fields: no smoothing, no texture, flat
-      // per-cell values, because measurement is the task. The ecological
-      // default reads smoothed fields, composes them by role, and is drawn
-      // as a continuous field: 3600 hard rectangles read as a grid, so the
-      // composited field goes into a grid-sized buffer and is scaled up with
-      // the browser's own interpolation. Large-scale structure is therefore
-      // real simulation structure with smooth transitions, not cells.
-      const analytical=lens!=="normal";
-      const a=new Float32Array(n*n),b=new Float32Array(n*n),c=new Float32Array(n*n),wf=new Float32Array(n*n);
-      fillEnvironmentFractions(env,a,b,c,wf);
-      let av=a,bv=b,cv=c,wv=wf;
-      if(lens==="normal"){
-        // Presentation-only inertia, scoped by the universe's presentation
-        // identity (unique per create/restore; seed and config are NOT
-        // sufficient because two universes can share both). The smoother
-        // primes from the current fields on a new identity, so a created or
-        // restored world shows its real environment on the first frame
-        // instead of a fictitious depleted one.
-        const id=`w${worldId}`;
-        const sm=landscapeSmoother.advance(id,tick,a,b,c,wf,0.35);
-        av=new Float32Array(n*n);bv=new Float32Array(n*n);cv=new Float32Array(n*n);wv=new Float32Array(n*n);
-        for(let i=0;i<n*n;i++){const j=i*4;av[i]=sm[j]!;bv[i]=sm[j+1]!;cv[i]=sm[j+2]!;wv[i]=sm[j+3]!}
-      }
-      const kind=resourceView==="a"?0:resourceView==="b"?1:resourceView==="c"?2:-1;
-      if(!analytical){
-        const buffer=document.createElement("canvas");
-        buffer.width=n;buffer.height=n;
-        const bctx=buffer.getContext("2d");
-        if(bctx){
-          const img=bctx.createImageData(n,n);
-          for(let i=0;i<n*n;i++){
-            const rgb=landscapeCell(av[i]!,bv[i]!,cv[i]!,wv[i]!,microTexture(i));
-            const o=i*4;
-            img.data[o]=rgb[0];img.data[o+1]=rgb[1];img.data[o+2]=rgb[2];img.data[o+3]=255;
-          }
-          bctx.putImageData(img,0,0);
-          // Repeat one world period across the whole canvas. Deriving this
-          // from the wrapped toX/toY mapping collapsed the rect to zero width
-          // for every camera except the exact world centre, so the substrate
-          // disappeared as soon as the world was panned.
-          const tiles=landscapeTileLayout(cam.x,cam.y,s,w,h,WORLD_EXTENT);
-          const prevSmooth=ctx.imageSmoothingEnabled;
-          ctx.imageSmoothingEnabled=true;
-          for(let ti=tiles.iStart;ti<=tiles.iEnd;ti++){
-            for(let tj=tiles.jStart;tj<=tiles.jEnd;tj++){
-              ctx.drawImage(buffer,tiles.baseX+ti*tiles.periodX,tiles.baseY+tj*tiles.periodY,tiles.periodX,tiles.periodY);
-            }
-          }
-          ctx.imageSmoothingEnabled=prevSmooth;
-        }
-        // Detail on loaded ground: a deterministic stipple whose density rises
-        // with the measured waste. It is a second, non-colour channel and
-        // cosmetic only, so it is drawn at every zoom, not just close ones.
-        for(let i=0;i<n*n;i++){
-          const load=wv[i]!;
-          if(load<0.18)continue;
-          const px=toX((i%n+.5)*(WORLD_EXTENT/n)),py=toY((Math.floor(i/n)+.5)*(WORLD_EXTENT/n));
-          if(px<-cell||py<-cell||px>w+cell||py>h+cell)continue;
-          const dots=1+Math.min(3,Math.floor((load-0.18)*4));
-          ctx.fillStyle=`rgba(58,48,40,${0.06+0.035*dots})`;
-          for(let k=0;k<dots;k++){
-            const t=microTexture(i*8+k);
-            ctx.fillRect(px+((t-.5)*cell),py+((microTexture(i*13+k)-.5)*cell),1.5,1.5);
-          }
-        }
-      }else{
-        for(let i=0;i<n*n;i++){
-          const px=toX((i%n+.5)*(WORLD_EXTENT/n)),py=toY((Math.floor(i/n)+.5)*(WORLD_EXTENT/n));
-          if(px<-cell||py<-cell||px>w+cell||py>h+cell)continue;
-          let rgb:readonly [number,number,number];
-          if(lens==="waste")rgb=wasteOverlayCell(wv[i]!);
-          else if(kind>=0)rgb=nutrientOverlayCell(kind,av[i]!);
-          else rgb=nutrientOverlayCell(-1,(av[i]!+bv[i]!+cv[i]!)/3);
-          ctx.fillStyle=`rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
-          ctx.fillRect(px-cell/2,py-cell/2,cell+1,cell+1);
-        }
-      }
-    }
-
-    // Lane 2 M4B: normal-lens morphology delegates to the phenotype engine.
-    // Every other lens keeps the legacy voxel path exactly, so analytical
-    // meaning always outranks decorative morphology. Phenotype resolutions
-    // are memoized per organism across snapshots (traits/ancestry are fixed
-    // at birth); only the visible tier renders each frame.
-    const phenoTier=tierForZoom(zoom);
-    const pheno=lens==="normal"?phenotypeCache.resolveSnapshot({worldId,organisms}):null;
-    const unit=Math.max(2,s*2.2);
-    const traitRange=TRAIT_RANGES[traitView];
-    for(const o of organisms){
-      const px=toX(o.x),py=toY(o.y);
-      if(px<-24||py<-24||px>w+24||py>h+24)continue;
-      // §21.2: the lens encoding wins, including for dormant organisms, so
-      // Clades and Traits always encode what they claim. Dormancy rides the
-      // separate alpha/hollow channel below and never replaces the encoding.
-      const color=organismColor(o as never,lens as OrganismLens,traitView,[traitRange[0],traitRange[1]]);
-      const chan=dormantChannel(o as never);
-      const dormant=chan.dormant;
-      if(lens==="normal"&&pheno){
-        // Phenotype morphology: grid shape encodes family/traits/dormancy,
-        // lens color and dormancy dimming stay exactly as before.
-        const res=pheno.get(o.id);
-        ctx.fillStyle=color;
-        ctx.globalAlpha=chan.alpha;
-        if(res)drawPhenotypeOrganism(ctx,o,res,phenotypeCache,phenoTier,px,py,unit);
-        ctx.globalAlpha=1;
-      }else{
-      // Voxel sprite: chunky pixel cluster whose size follows stored energy,
-      // texture is a deterministic function of organism id (stable per frame),
-      // and density follows diet family. Positions are untouched, so
-      // click-selection mapping is unchanged.
-      const energyClass=dormant?0:(o.energy>120?2:o.energy>60?1:0);
-      const span=2+energyClass;
-      let hsh=Math.imul(o.id,2654435761)^0x9e3779b9;hsh^=hsh>>>15;hsh=Math.imul(hsh,0x85ebca6b)>>>0;
-      ctx.fillStyle=color;ctx.strokeStyle=color;ctx.lineWidth=1;
-      ctx.globalAlpha=chan.alpha;
-      for(let gy=0;gy<span;gy++)for(let gx=0;gx<span;gx++){
-        const edge=gx===0||gy===0||gx===span-1||gy===span-1;
-        let solid=true;
-        if(edge){
-          if(o.diet<-.25)solid=((hsh>>((gy*span+gx)%24))&1)===1;
-          else if(o.diet>.25)solid=true;
-          else solid=((gx*7+gy*13+(hsh&3))&3)!==0;
-        }
-        if(!solid)continue;
-        const bx=px+(gx-span/2)*unit,by=py+(gy-span/2)*unit;
-        if(dormant)ctx.strokeRect(bx,by,unit,unit);else ctx.fillRect(bx,by,unit,unit);
-      }
-      ctx.globalAlpha=1;
-      }
-
-      if(o.id===selectedId){
-        // Luminous focus marker: soft halo + double ring + diagonal ticks.
-        // The surrounding ecosystem stays fully visible (A6).
-        const halo=ctx.createRadialGradient(px,py,2,px,py,15);
-        halo.addColorStop(0,"rgba(235,255,255,.55)");
-        halo.addColorStop(.4,"rgba(120,240,255,.22)");
-        halo.addColorStop(1,"rgba(120,240,255,0)");
-        ctx.fillStyle=halo;ctx.beginPath();ctx.arc(px,py,15,0,Math.PI*2);ctx.fill();
-        ctx.strokeStyle="#eaffff";ctx.lineWidth=1.6;ctx.beginPath();ctx.arc(px,py,7,0,Math.PI*2);ctx.stroke();
-        ctx.strokeStyle="#7fe9ff";ctx.lineWidth=1;ctx.beginPath();ctx.arc(px,py,9.5,0,Math.PI*2);ctx.stroke();
-        ctx.strokeStyle="rgba(170,245,255,.95)";ctx.lineWidth=1.2;
-        for(let k=0;k<4;k++){const ang=k*Math.PI/2+Math.PI/4;
-          ctx.beginPath();
-          ctx.moveTo(px+Math.cos(ang)*11.5,py+Math.sin(ang)*11.5);
-          ctx.lineTo(px+Math.cos(ang)*14,py+Math.sin(ang)*14);
-          ctx.stroke();
-        }
-        ctx.lineWidth=1;
-      }
-    }
-  },[worldId,tick,env,organisms,lens,resourceView,traitView,selectedId,size,cam,zoom,onView]);
-
-  // Screen-space helpers for pointer input (CSS pixels, not backing store).
-  const viewOf=(canvas:HTMLCanvasElement)=>{
-    const rect=canvas.getBoundingClientRect();
-    const fit=rect.height>rect.width?rect.height/WORLD_EXTENT:Math.min(rect.width,rect.height)/WORLD_EXTENT;
-    return{rect,s:fit*zoom};
-  };
-  const selectAt=(clientX:number,clientY:number,canvas:HTMLCanvasElement)=>{
-    const {rect,s}=viewOf(canvas);
-    const x=wrapCoord(cam.x+(clientX-rect.left-rect.width/2)/s);
-    const y=wrapCoord(cam.y+(clientY-rect.top-rect.height/2)/s);
-    // Constant on-screen hit radius, so zooming never changes feel. Distance is
-    // toroidal: an organism across the seam is one tap away, not across the map.
-    let best:RenderOrganism|null=null,bestD=26/s;
-    for(const o of organisms){
-      const d=Math.hypot(wrapDelta(o.x,x),wrapDelta(o.y,y));
-      if(d<bestD){bestD=d;best=o}
-    }
-    onSelect(best?.id??null);
-  };
-
-  // Drag pans (wrapping freely across the torus); a tap without movement
-  // selects, so one pointer does both.
-  const drag=useRef<{x:number;y:number;cx:number;cy:number;moved:boolean}|null>(null);
-  const onPointerDown=(event:React.PointerEvent<HTMLCanvasElement>)=>{
-    event.currentTarget.setPointerCapture(event.pointerId);
-    drag.current={x:event.clientX,y:event.clientY,cx:cam.x,cy:cam.y,moved:false};
-  };
-  const onPointerMove=(event:React.PointerEvent<HTMLCanvasElement>)=>{
-    const d=drag.current;if(!d)return;
-    const dx=event.clientX-d.x,dy=event.clientY-d.y;
-    if(!d.moved&&Math.hypot(dx,dy)<6)return;
-    d.moved=true;
-    const {s}=viewOf(event.currentTarget);
-    // Normalize while panning: the camera center can then never drift more
-    // than one period from the field, so wrapDelta stays exact.
-    onCamera({x:wrapCoord(d.cx-dx/s),y:wrapCoord(d.cy-dy/s)});
-  };
-  const onPointerUp=(event:React.PointerEvent<HTMLCanvasElement>)=>{
-    const d=drag.current;drag.current=null;
-    if(!d||d.moved)return;
-    selectAt(event.clientX,event.clientY,event.currentTarget);
-  };
-
-  return <canvas aria-label="Evolution world" className="world-canvas" ref={ref} width={size[0]} height={size[1]}
-    onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={()=>{drag.current=null}}/>;
-}
 
 function WorldMinimap({resources,organisms,cam,view}:{
   // Lane 3 F2b read-model inputs: the environment frame's resource field plus
@@ -457,7 +209,7 @@ function WorldMinimap({resources,organisms,cam,view}:{
       const o=organisms[i];if(!o)continue;
       ctx.fillRect(o.x*k,o.y*k,1,1);
     }
-    // Visible window marker. WorldCanvas already reports the visible size in
+    // Visible window marker. WorldPixi reports the visible size in
     // world units (w/s), so it must not be divided by zoom again. Panning is
     // normalized, but draw the wrapped copies defensively.
     if(rect){
@@ -525,6 +277,9 @@ export function App(){
   wasPlayingRef.current=wasPlaying;
   const [speed,setSpeed]=useState(100);
   const [status,setStatus]=useState("Creating universe…");
+  const statusRef=useRef(status);
+  statusRef.current=status;
+  const saveDiagnosticsRef=useRef<SaveDiagnostic[]>([]);
   const [settings,setSettings]=useState(DEFAULT_SETTINGS);
   // Recipe of the running universe (set on create/load). Settings staged in
   // the modal stay pending until Create universe applies them.
@@ -627,7 +382,12 @@ export function App(){
   // reporting F3a exists to close, so a failure status is pinned until the player
   // does something next (toggles playback, saves, loads, or creates a universe).
   const stickyStatusRef=useRef(false);
-  const say=(text:string,sticky=false)=>{stickyStatusRef.current=sticky;setStatus(text)};
+  const saveDiagnostic=(stage:string,tick?:number,detail?:string)=>{
+    if(typeof window==="undefined"||!new URLSearchParams(window.location.search).has("deeTest"))return;
+    saveDiagnosticsRef.current.push({stage,at:performance.now(),...(tick===undefined?{}:{tick}),...(detail===undefined?{}:{detail})});
+    if(saveDiagnosticsRef.current.length>40)saveDiagnosticsRef.current.shift();
+  };
+  const say=(text:string,sticky=false)=>{stickyStatusRef.current=sticky;statusRef.current=text;setStatus(text)};
   useEffect(()=>{
     // Read-model delivery only. The live frame is the per-advance heartbeat —
     // it emits on every advance — so one advance releases backpressure exactly
@@ -644,7 +404,11 @@ export function App(){
       if(!("metrics" in frame))return;
       const transition=knownWorldRef.current!==null&&view.worldId!==knownWorldRef.current;
       knownWorldRef.current=view.worldId;
-      if(!transition&&!stickyStatusRef.current)setStatus("");
+      if(!transition&&!stickyStatusRef.current){
+        if(statusRef.current.startsWith("Saved tick "))saveDiagnostic("confirmation-cleared");
+        statusRef.current="";
+        setStatus("");
+      }
       const interp=view.interpretation;
       // A pending decision is a visible pause: the player must choose before
       // time moves again (A13). Runtime enforces the same gate independently.
@@ -718,10 +482,17 @@ export function App(){
       clearRetainedDetail:()=>setSnapshot(null),
       retainedAftermathPhase:()=>snapshotRef.current?.aftermath?.phase??null,
       killWorker:()=>instrumentedRef.current?.fail("error"),
+      readWorldState:()=>({
+        tick:presentation.live?.tick??null,
+        worldId:presentation.identity?.worldId??null,
+        environment:presentation.environment??null,
+      }),
+      saveDiagnostics:()=>[...saveDiagnosticsRef.current],
+      currentStatus:()=>statusRef.current,
     };
     (window as any).__DEE_TEST__=hook;
     return()=>{delete (window as any).__DEE_TEST__};
-  },[runtime]);
+  },[runtime,presentation]);
 
   // Lane 3 Task 6: retained/detail path (handoff §5–§6). Analysis records and
   // the full decision history deliberately stay out of live-frame traffic,
@@ -802,15 +573,27 @@ export function App(){
   };
   const save=async()=>{
     say("Saving exact checkpoint…");
+    saveDiagnostic("checkpoint-request-start");
     try{
-      const checkpoint=await runtime.requestCheckpoint();
+      let checkpoint;
+      try{
+        checkpoint=await runtime.requestCheckpoint();
+      }catch(error){
+        saveDiagnostic("checkpoint-request-failed",undefined,error instanceof Error?error.message:String(error));
+        throw error;
+      }
+      saveDiagnostic("checkpoint-request-resolved",checkpoint.createdTick);
       // Presentation-side family anchors travel with the save record (never in
       // biology) so a restored world reconstructs identical families.
+      saveDiagnostic("repository-save-start",checkpoint.createdTick);
       const summary=await repository.save("current",checkpoint,phenotypeCache.snapshotAnchors());
       // F3a: reached only after the storage transaction committed. A failed
       // write leaves the previously confirmed save intact and says so.
+      saveDiagnostic("indexeddb-transaction-committed",summary.tick);
       say(`Saved tick ${summary.tick.toLocaleString()}`);
+      saveDiagnostic("confirmation-set",summary.tick);
     }catch(error){
+      saveDiagnostic("save-failed",undefined,error instanceof Error?error.message:String(error));
       say(storageFailureMessage(error),true);
     }
   };
@@ -897,6 +680,19 @@ export function App(){
   // gate: it arrives only with request-correlated replies now.
   const live=presentation.live,env=presentation.environment,interp=presentation.interpretation,ident=presentation.identity,catalog=presentation.catalog;
   if(!live||!env||!interp||!ident||!catalog)return <main className="loading">{status}</main>;
+  const normalOrganisms=presentation.organisms;
+  const normalResolved=phenotypeCache.resolveSnapshot({worldId:ident.worldId,organisms:normalOrganisms});
+  const deeTestMode=typeof window!=="undefined"&&new URLSearchParams(window.location.search).has("deeTest");
+  const fixture=deeTestMode?deeTestPhenotypeFixtures():null;
+  const pixiWorldProps:PixiWorldProps={
+    worldId:ident.worldId,
+    tick:live.tick,
+    environment:env,
+    organisms:fixture?[...normalOrganisms,...fixture.organisms]:normalOrganisms,
+    resolvedPhenotypes:fixture?new Map([...normalResolved,...fixture.resolved]):normalResolved,
+    lens,resourceView,traitView,selectedId,camera:cam,zoom,
+    onSelect:setSelectedId,onCamera:setCam,onView:reportView,
+  };
   const m=interp.metrics;
   const pending=interp.pendingDecision;
   const aftermathPresentationForRender=synchronizeAftermathPresentation(aftermathPresentation,interp.aftermath,!!pending);
@@ -944,6 +740,7 @@ export function App(){
             only when asked. The five buttons stay in the DOM (so they remain
             reachable, labelled and keyboard-navigable) and are revealed by
             the expanded state; desktop shows them inline as before. */}
+        <div className="world-presentation-region">
         <div className={lensMenuOpen?"lensbar open":"lensbar"}>
           <button className="lens-active" aria-haspopup="true" aria-expanded={lensMenuOpen}
             aria-label={`Lens: ${LENS_LABELS[lens]}. Change lens`}
@@ -959,7 +756,7 @@ export function App(){
         </div>
         <div className="world-wrap">
           <div className="world-scene" aria-hidden="true"><div className="glow g-a"/><div className="glow g-b"/><div className="glow g-c"/><div className="ambient"/></div>
-          <WorldCanvas worldId={ident.worldId} tick={live.tick} env={env} organisms={presentation.organisms} lens={lens} resourceView={resourceView} traitView={traitView} selectedId={selectedId} onSelect={setSelectedId} cam={cam} zoom={zoom} onCamera={setCam} onView={reportView}/>
+          <WorldPixi {...pixiWorldProps}/>
           {showCompactAftermath&&aftermathProjection&&aftermathPresentationForRender&&<AftermathStage2Panel
             projection={aftermathProjection}
             presentation={aftermathPresentationForRender}
@@ -1017,6 +814,7 @@ export function App(){
                   onReviewHistory={recordId=>reviewAftermathHistory(recordId)}
                 />}
           </section>}
+        </div>
         </div>
       </section>
       <aside className="investigation-rail" aria-label="Investigation">

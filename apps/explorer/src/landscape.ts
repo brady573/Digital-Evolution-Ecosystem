@@ -134,7 +134,7 @@ export class LandscapeSmoother {
     strength = 0.35,
   ): Float32Array {
     const rewind = this.#primed && tick < this.#tick;
-    if (this.#identity !== identity || rewind) {
+    if (!this.#primed || this.#identity !== identity || rewind) {
       this.#identity = identity;
       const v = this.#values;
       // The buffer is interleaved (four channels per cell), so priming must
@@ -302,6 +302,13 @@ export const BARE_RGB: Rgb = [BARE_R, BARE_G, BARE_B];
  */
 const PRESENCE_FLOOR = 0.05;
 
+/** Normal-world material lifts per full authoritative nutrient presence. */
+const NORMAL_MATERIAL_DELTAS = {
+  nutrientA: [-72, -6, -60],
+  nutrientB: [-14, -18, -70],
+} as const;
+const NORMAL_GRAIN_AMPLITUDE = 11;
+
 /**
  * Stock fraction that reads as FULL resource presence.
  *
@@ -389,9 +396,9 @@ export function landscapeCell(
   // swing is large where the luminance swing is small, which is what keeps a
   // depleted region legible while satisfying the neutral-absence rule.
   // Fertile A: verdant green. Fertile B: olive, warmer and drier.
-  r += -60 * fertileA - 12 * fertileB;
-  g += -5 * fertileA - 15 * fertileB;
-  bl += -50 * fertileA - 58 * fertileB;
+  r += NORMAL_MATERIAL_DELTAS.nutrientA[0] * fertileA + NORMAL_MATERIAL_DELTAS.nutrientB[0] * fertileB;
+  g += NORMAL_MATERIAL_DELTAS.nutrientA[1] * fertileA + NORMAL_MATERIAL_DELTAS.nutrientB[1] * fertileB;
+  bl += NORMAL_MATERIAL_DELTAS.nutrientA[2] * fertileA + NORMAL_MATERIAL_DELTAS.nutrientB[2] * fertileB;
 
   // Altered substrate: biologically produced metabolite, warm violet-pink.
   r += 18 * altered;
@@ -410,7 +417,7 @@ export function landscapeCell(
 
   // Deterministic microvariation, subordinate to the simulated structure and
   // stronger on fertile ground (where texture is plausible) than on ash.
-  const grain = (texture - 0.5) * 9 * (1 - 0.4 * degraded);
+  const grain = (texture - 0.5) * NORMAL_GRAIN_AMPLITUDE * (1 - 0.4 * degraded);
   return [clamp255(r + grain), clamp255(g + grain * 0.85), clamp255(bl + grain * 0.7)];
 }
 

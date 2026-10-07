@@ -161,6 +161,20 @@ function testMicroTextureIsDeterministic() {
   console.log("landscape microtexture determinism: PASS");
 }
 
+function testApprovedNormalMaterialCalibration() {
+  const bare = landscapeCell(0, 0, 0, 0, 0.5);
+  const richA = landscapeCell(1, 0, 0, 0, 0.5);
+  const richB = landscapeCell(0, 1, 0, 0, 0.5);
+  assert.deepEqual(richA.map((channel, i) => channel - bare[i]!), [-72, -6, -60],
+    "rich nutrient A uses the approved normal-material delta");
+  assert.deepEqual(richB.map((channel, i) => channel - bare[i]!), [-14, -18, -70],
+    "rich nutrient B uses the approved normal-material delta");
+  const grainLow = landscapeCell(0, 0, 0, 0, 0);
+  const grainHigh = landscapeCell(0, 0, 0, 0, 1);
+  assert.equal(grainHigh[0] - grainLow[0], 11, "normal-material grain amplitude is 11 RGB units");
+  console.log("approved normal material calibration: PASS");
+}
+
 async function testCellInspection() {
   const n = 4;
   const resources: RenderResourceField = {
@@ -402,7 +416,8 @@ function testAnalyticalLensesOutrankDormancy() {
   // Dormancy stays independently legible, on a channel that is not the colour.
   assert.equal(dormantChannel({ ...dormant } as never).dormant, true, "dormancy is signalled on its own channel");
   assert.equal(dormantChannel({ ...base } as never).dormant, false, "an active organism is not dimmed");
-  assert.equal(dormantChannel({ ...dormant } as never).alpha, DORMANT_ALPHA, "dormancy dims via alpha");
+  assert.ok(dormantChannel({ ...dormant } as never).alpha < dormantChannel({ ...base } as never).alpha,
+    "dormancy remains quieter through alpha without changing analytical color meaning");
   assert.equal(dormantChannel({ ...dormant } as never).hollow, true, "dormancy is drawn hollow, not solid");
   assert.ok(DORMANT_ALPHA < 1, "the dormancy alpha actually reduces opacity");
   assert.notEqual(
@@ -437,6 +452,7 @@ async function main(){
   testBoundedAndMonotonic();
   testLensEncodingsAreHonest();
   testMicroTextureIsDeterministic();
+  testApprovedNormalMaterialCalibration();
   testWrappedSubstrateTiles();
   testScarcityReadsAsAbsenceNotDamage();
   testRichnessIsUnmistakable();

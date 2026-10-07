@@ -47,6 +47,7 @@ button,input{outline:none}
 /* surface: persistent world hero + investigation rail */
 .surface{min-width:0;min-height:0;padding:18px;overflow:auto;display:grid;grid-template-columns:minmax(0,2fr) minmax(280px,1fr);gap:18px;align-items:start}
 .world-column{display:grid;gap:10px;min-width:0}
+.world-presentation-region{position:relative;display:grid;gap:10px;min-width:0}
 .lensbar{display:flex;gap:7px;flex-wrap:wrap;align-items:center}
 .lens-active{display:none}
 .lens-options{display:contents}
@@ -76,12 +77,12 @@ button,input{outline:none}
 .ambient{position:absolute;inset:0;opacity:.4;background:
   radial-gradient(ellipse at 17% 35%,rgba(89,255,192,.10),transparent 20%),
   radial-gradient(ellipse at 79% 33%,rgba(255,177,67,.09),transparent 19%)}
-/* touch-action:none hands this canvas's drag/zoom to the camera instead of the
-   WebView's scroll/pinch gestures; without it Android may claim the gesture and
-   emit pointercancel mid-pan. Scoped to the canvas so the rest of the page
-   still scrolls normally. */
-.world-canvas{position:relative;z-index:1;display:block;width:min(100%,960px);aspect-ratio:1;border-radius:14px;border:1px solid var(--line);background:transparent;touch-action:none;user-select:none;-webkit-user-select:none;cursor:grab}
-.world-canvas:active{cursor:grabbing}
+.world-pixi-host{position:relative;z-index:1;display:block;width:min(100%,960px);aspect-ratio:1;border-radius:14px;touch-action:none;user-select:none;-webkit-user-select:none;cursor:grab}
+.world-pixi-host>canvas{position:absolute;inset:0;display:block;width:100%;height:100%;border:1px solid var(--line);border-radius:14px;touch-action:none;user-select:none;-webkit-user-select:none}
+.world-pixi-host>canvas:active{cursor:grabbing}
+.world-renderer-failure{position:absolute;inset:0;z-index:2;display:grid;align-content:center;justify-items:center;gap:12px;padding:24px;text-align:center;color:#f1f7f5;background:linear-gradient(145deg,#101d27,#17232c);border:1px solid var(--line);border-radius:14px}
+.world-renderer-failure strong{font-size:1.15rem}
+.world-renderer-failure span{max-width:38rem;color:#c2d1d8;line-height:1.55}
 .inspector,.panel{background:linear-gradient(180deg,#09131d,#0a131c);border:1px solid var(--line);border-radius:14px;padding:18px}
 .inspector h2,.panel h2,.modal h2{margin:4px 0 10px;letter-spacing:-.01em}
 .inspector p{color:var(--green);font-weight:700}
@@ -187,9 +188,9 @@ button,input{outline:none}
 /* World view overlay: minimap + zoom controls float on the world (reference
    style). The container is inert; only the controls take pointer input. */
 .world-overlay{position:absolute;top:8px;right:8px;z-index:6;display:grid;gap:8px;justify-items:end;pointer-events:none}
-.minimap-frame{pointer-events:none;border:1px solid var(--line2);border-radius:10px;padding:4px;background:rgba(6,13,20,.66);backdrop-filter:blur(8px);box-shadow:0 6px 20px rgba(0,0,0,.35)}
-.minimap-canvas{display:block;width:96px;height:96px;border-radius:6px}
-.zoom-controls{pointer-events:auto;display:flex;align-items:center;gap:2px;padding:3px;border:1px solid var(--line2);border-radius:9px;background:rgba(6,13,20,.72);backdrop-filter:blur(8px)}
+.minimap-frame{pointer-events:none;border:1px solid rgba(160,190,202,.28);border-radius:9px;padding:3px;background:rgba(6,13,20,.48);backdrop-filter:blur(6px);box-shadow:0 3px 12px rgba(0,0,0,.24)}
+.minimap-canvas{display:block;width:88px;height:88px;border-radius:6px}
+.zoom-controls{pointer-events:auto;display:flex;align-items:center;gap:2px;padding:3px;border:1px solid rgba(160,190,202,.3);border-radius:9px;background:rgba(6,13,20,.56);backdrop-filter:blur(6px)}
 .zoom-controls button{border:0;background:transparent;color:#cde0d7;border-radius:7px;min-width:30px;min-height:30px;padding:0 6px;font-size:1rem}
 .zoom-controls button:hover{background:#143041}
 .zoom-controls button:disabled{opacity:.4;cursor:default}
@@ -260,10 +261,13 @@ button,input{outline:none}
   .surface{padding:10px 10px 0;grid-template-columns:minmax(0,1fr)}
   .world-column{position:sticky;top:0;z-index:1;background:var(--bg);padding-bottom:10px}
   .world-wrap{position:relative;z-index:auto;background:transparent}
+  .world-pixi-host{width:100%}
   /* Lens control: progressive disclosure. Collapsed, it is one short chip
      naming the active lens. It expands to the full set only when asked, and
      a secondary selector appears only for the lens that has one. */
-  .lensbar{position:absolute;top:8px;left:10px;right:10px;z-index:6;background:rgba(6,13,20,.72);backdrop-filter:blur(8px);border:1px solid var(--line);border-radius:10px;padding:4px}
+  .world-presentation-region{display:block}
+  .lensbar{position:absolute;top:8px;left:10px;right:auto;width:max-content;max-width:calc(100% - 20px);z-index:6;background:rgba(6,13,20,.72);backdrop-filter:blur(8px);border:1px solid var(--line);border-radius:10px;padding:4px}
+  .lensbar.open{width:min(340px,calc(100% - 20px))}
   .lens-active{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;min-height:30px;font-size:.76rem;border-radius:8px;background:transparent;border:1px solid var(--line2);color:#cde0d7}
   .lens-caret{font-size:.7rem;opacity:.75}
   .lens-options{display:none;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;margin-top:4px}
@@ -276,12 +280,11 @@ button,input{outline:none}
   /* Overlay offset reserves the expanded lens panel so the minimap and zoom
      controls can never sit under it, whichever lens is active. */
   .world-overlay{top:48px;right:8px}
+  .world-presentation-region:has(.lensbar.open) .world-overlay{top:148px}
   .minimap-frame,.zoom-controls{transform:scale(.88);transform-origin:top right}
-  .world-canvas{width:100%}
   .investigation-rail{position:relative;z-index:10}
   .inspector.sheet{border-radius:18px 18px 14px 14px;box-shadow:0 -12px 40px rgba(0,0,0,.45)}
   .sheet-toggle{width:100%;margin-bottom:6px}
-  .world-canvas{width:100%}
   .inspector{display:block}
   /* Two explicit rows instead of one scrolling strip: every core action is
      reachable without an unindicated horizontal scroll (AC1/AC2), and nothing
@@ -335,7 +338,8 @@ button,input{outline:none}
   .surface-world{position:relative;overflow:hidden;padding:0;height:100%}
   .surface-world .world-column{position:absolute;inset:0;z-index:1;background:transparent;padding:0}
   .surface-world .world-wrap{position:absolute;inset:0}
-  .surface-world .world-canvas{width:100%;height:100%;aspect-ratio:auto;border:0;border-radius:0}
+  .surface-world .world-pixi-host{position:absolute;inset:0;width:100%;height:100%;aspect-ratio:auto;border:0;border-radius:0}
+  .surface-world .world-pixi-host>canvas{border:0;border-radius:0}
   .surface-world .investigation-rail{position:absolute;left:10px;right:auto;bottom:10px;z-index:10;max-width:min(64vw,320px)}
   .surface-world .inspector.sheet{background:rgba(8,17,25,.86);backdrop-filter:blur(14px);max-height:38dvh;overflow:auto}
   /* Collapsed state is a small contextual chip, never a full-width bar. (A

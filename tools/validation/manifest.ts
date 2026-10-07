@@ -529,6 +529,20 @@ export const UNITS: readonly ValidationUnit[] = [
     claim: "The plated organism geometry is internally consistent with its manifest.",
   },
   {
+    id: "phenotype-art",
+    title: "Procedural phenotype art contracts",
+    script: "test:phenotype-art",
+    cls: "presentation",
+    enforcement: "blocking",
+    mergeGate: true,
+    domains: withApparatus("contracts", "phenotype"),
+    needs: [],
+    parallelSafe: true,
+    baselineSeconds: 3,
+    claim:
+      "Procedural Plated art materialization is deterministic, preserves accepted geometry and every structural mask, and colors only pixels owned by accepted structural regions using the finite palette roles.",
+  },
+  {
     id: "pixi-spike",
     title: "Pixi spike validation",
     script: "test:pixi-spike",
@@ -553,7 +567,7 @@ export const UNITS: readonly ValidationUnit[] = [
     parallelSafe: true,
     baselineSeconds: 2,
     claim:
-      "The P0 Pixi texture/cache/layer preparation is deterministic, movement-isolated, ref-count sound, camera-aligned with the Canvas2D World, and covered by the asset manifest — while the production World stays Canvas2D.",
+      "Pixi texture/cache/layer preparation is deterministic, movement-isolated, ref-count sound, aligned with the accepted camera contract, and covered by the asset manifest; production integration is validated by browser and mobile units.",
   },
 
   // --- Class D: browser / runtime ------------------------------------------
@@ -569,7 +583,7 @@ export const UNITS: readonly ValidationUnit[] = [
     parallelSafe: false,
     baselineSeconds: 41,
     claim:
-      "The built product actually works in a browser: the Web Worker, canvas, and control surface all function.",
+      "The built product actually works in a browser: the Web Worker, canvas, control surface, and authorized Plated production raster path function.",
   },
   {
     id: "mobile-ui",
@@ -763,7 +777,7 @@ export const UNITS: readonly ValidationUnit[] = [
   },
   {
     id: "pixi-world-proof",
-    title: "pixiWorld scaffold browser proof",
+    title: "Production Pixi renderer lifecycle proof",
     script: "test:pixi-world",
     cls: "browser",
     enforcement: "blocking",
@@ -774,7 +788,7 @@ export const UNITS: readonly ValidationUnit[] = [
     artifact: "pixi-world-proof-evidence",
     baselineSeconds: 5,
     claim:
-      "The inactive production scaffold boots WebGL2, follows resize, mints nearest-filtered textures, retires texture and source, and tears down. State-based and timing/pixel independent, so software-GL execution proves the lifecycle.",
+      "Production Pixi modules boot WebGL2, follow resize, mint nearest-filtered textures, retire texture/source and organism resources across replacement, and tear down. The lifecycle proof must run in browser contexts with available WebGL; integrated App semantics are separately covered by browser-smoke and mobile-ui.",
   },
 ];
 
@@ -839,7 +853,7 @@ export const GROUPS: readonly ValidationGroup[] = [
   {
     id: "presentation",
     title: "Presentation and executable product",
-    unitIds: ["build", "phenotype", "art-review", "plated", "pixi-spike", "pixi-p0"],
+    unitIds: ["build", "phenotype", "art-review", "plated", "phenotype-art", "pixi-spike", "pixi-p0"],
     ci: false,
   },
   {
@@ -924,7 +938,7 @@ export const GROUPS: readonly ValidationGroup[] = [
   {
     id: "ci-presentation",
     title: "Presentation contracts",
-    unitIds: ["phenotype", "art-review", "plated", "pixi-spike", "pixi-p0"],
+    unitIds: ["phenotype", "art-review", "plated", "phenotype-art", "pixi-spike", "pixi-p0"],
     ci: true,
   },
   {

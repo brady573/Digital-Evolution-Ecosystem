@@ -240,7 +240,7 @@ full pre-M7 gate closes with explicit activation.
 - Status: Implemented
 - Description: World-first layout, bounded speeds, immersive presentation
 - Dependencies: Feature 2
-- Implementation Notes: PixiJS v8/WebGL2 approved for production World migration (Tranche D). PRs #71 and #73 provide preparation/scaffold evidence; maintained Canvas2D World cutover still waits on accepted pre-M7 A/B/C and read-model/runtime stabilization
+- Implementation Notes: P1.5 test-gated integration is accepted; P1.6 production Pixi cutover is authorized and implemented in the active feature worktree, with exact-head browser/mobile validation pending. Canvas2D is retained only for the subordinate minimap. P1.7 and Android Pixi/WebGL2 runtime evidence remain separate.
 
 ### Feature 4 — Events, clades, and population story
 

@@ -13,8 +13,8 @@
  *   stay with WorldCanvas (Phase 3 integration).
  * - no simulation mutation, no simulation RNG consumption.
  *
- * Dormancy has two strengths, gated by normalized dormancy response
- * (DORMANCY_STRONG_THRESHOLD): strong dormancy applies the full
+ * Population and inspection dormancy have two strengths, gated by normalized
+ * dormancy response (DORMANCY_STRONG_THRESHOLD): strong dormancy applies the full
  * family-specific transformation (contract / curl / retract / consolidate /
  * withdraw / fold); weak dormancy hollows the active silhouette and withdraws
  * secondary structures. Both are geometric — never just opacity.
@@ -105,6 +105,7 @@ function outlineInto(dst: MutableGrid, src: MutableGrid): void {
   }
 }
 
+/**
 /** Blob: compact generalist disc. Speed stretches; dormancy contracts. */
 function blobCore(g: MutableGrid, res: ResolvedPhenotype): void {
   const n = g.size;
@@ -451,7 +452,12 @@ export function renderPhenotypeGrid(
 ): PhenotypeGrid {
   const size = LOD_GRID_SIZE[tier];
   const g = makeGrid(size);
-  if (activity === "dormant" && res.dormancyNorm < DORMANCY_STRONG_THRESHOLD) {
+  if (activity === "dormant" && tier === "ecosystem") {
+    // Keep the accepted coarse family topology intact at 1x. The Explorer's
+    // independent alpha channel supplies the quiet cue for this thin raster.
+    CORES[res.family](g, res);
+    EXTRAS[res.family](g, res);
+  } else if (activity === "dormant" && res.dormancyNorm < DORMANCY_STRONG_THRESHOLD) {
     // Weak dormant transform: hollow the active core, withdraw secondaries.
     const core = makeGrid(size);
     CORES[res.family](core, res);

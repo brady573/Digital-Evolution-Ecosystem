@@ -1,0 +1,41 @@
+name: pixi-world diagnostic
+
+on:
+  push:
+    branches: [feat/lane2-pixi-production-world]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pixi-world-diagnostic-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pixi-world-proof:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 1
+      - uses: ./.github/actions/setup-project
+      - name: Verify exact requested head
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          actual="$(git rev-parse HEAD)"
+          echo "expected_sha=$EXPECTED_SHA"
+          echo "actual_sha=$actual"
+          test "$actual" = "$EXPECTED_SHA"
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Run manifest-backed Pixi world proof
+        run: pnpm test:pixi-world
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: pixi-world-diagnostic-${{ github.run_id }}
+          path: testdata/pixi-world-proof
+          if-no-files-found: warn
+          retention-days: 14
