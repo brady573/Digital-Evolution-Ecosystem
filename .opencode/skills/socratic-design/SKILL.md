@@ -35,7 +35,7 @@ from code.
 7. Tradeoffs
 8. Decision
 9. Validation (narrowest check from `tools/validation/manifest.ts`)
-10. Exec gate (who implements: `architect`, with read-only specialists for analysis)
+10. Exec gate (who implements: `architect`, delegating bounded read-only analysis to specialists when useful)
 
 ## Question Gate
 

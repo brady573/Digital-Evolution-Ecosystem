@@ -313,7 +313,9 @@ legacy/prototype/
 
 These files are historical regression evidence.
 
-This is enforced by the runtime, not only by this prose: ".opencode/opencode.json" sets the default agent and adds a project-level edit deny for "legacy/prototype/**", so the refusal happens before anything is written.
+This is enforced by the runtime, not only by this prose: ".opencode/opencode.json" adds a project-level edit deny for "legacy/prototype/**", so the refusal happens before anything is written.
+
+That file also names the default OpenCode agent, but no agent definition is versioned here; the agent team is a local prerequisite described in ".opencode/ADOPTED-SETTINGS.md". A session that cannot see that agent falls back to a different one silently, so confirm it with "opencode debug agents" rather than assuming it.
 
 If a task appears to require modifying them, stop and surface the conflict.
 

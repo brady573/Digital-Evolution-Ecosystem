@@ -58,8 +58,9 @@ back. State facts, cite evidence, present tradeoffs.
 1. Summarize the agreed path in 2–3 sentences.
 2. Wait — do NOT auto-implement or auto-plan.
 3. Say: "Ready when you are. Say 'go ahead' and I'll [produce plan | implement]."
-4. On "go ahead": `architect` implements, using read-only specialists for
-   analysis. Always end with a `Source/s:` section.
+4. On "go ahead": `architect` implements, delegating bounded read-only
+   analysis to specialists when that materially reduces uncertainty. Always
+   end with a `Source/s:` section.
 
 ## What NOT To Do
 

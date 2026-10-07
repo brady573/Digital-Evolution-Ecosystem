@@ -8,6 +8,33 @@ Mode: **project-local selective import**. Nothing global was touched
 **not** run — it would symlink `~/.config/opencode` to the upstream repo and
 replace the global agent team this project now relies on.
 
+## Required local prerequisite: the global `architect` team
+
+`.opencode/opencode.json` sets `default_agent` to `architect`, but **no agent
+definition is committed to this repository**. The `architect`, `explore`,
+`implement`, `review`, and `test` definitions live in
+`~/.config/opencode/agents/`, so a clone without them does not get this topology.
+
+The failure is silent. If the named default agent is not visible, OpenCode falls
+back to a built-in primary rather than erroring, and the session then runs on a
+different agent than the one intended — the launched agent's own self-report is
+not reliable evidence of which one actually started.
+
+To reproduce the fallback: point `default_agent` at a nonexistent name in a
+scratch directory and start a session; it runs as `build`.
+
+Verify the topology after cloning:
+
+```sh
+opencode debug config   # default_agent should read "architect"
+opencode debug agents   # architect must be present as a primary
+```
+
+If `architect` is absent, populate `~/.config/opencode/agents/` before relying on
+this repository's OpenCode configuration. The `legacy/prototype/**` edit deny in
+`.opencode/opencode.json` is independent of this prerequisite and applies
+regardless.
+
 ## Vendored (adapted, offline-safe)
 
 | File | Upstream source | Adaptation |

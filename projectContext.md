@@ -118,6 +118,11 @@ runtime evidence, and final Stage P1 acceptance remain out of scope.
 
 ## Things AI Should Know
 
+- The OpenCode `architect` team is a **local prerequisite**, not a committed
+  artifact: no agent definition is versioned in this repo. If `architect` is not
+  visible, OpenCode silently falls back to a different agent. Verify with
+  `opencode debug agents` before relying on the configured topology; see
+  `.opencode/ADOPTED-SETTINGS.md`.
 - Read `project.md` before implementing requirements.
 - Follow the existing project architecture.
 - Do not introduce unnecessary technologies.
@@ -132,3 +137,8 @@ runtime evidence, and final Stage P1 acceptance remain out of scope.
 ## Last Context Update
 
 2026-09-30 — reconciled against current main after PRs #70–#76.
+
+2026-10-07 — agent-topology note only (PR #121): recorded the retired
+`project-manager`/lane topology and the local-prerequisite caveat. The
+2026-09-30 reconciliation above still describes project status; this entry
+does not supersede it.
