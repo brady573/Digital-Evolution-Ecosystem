@@ -59,17 +59,36 @@ export function richTextureKey(
   return `plated/${rendererVersion}/${structuralVersion}/${tier}/${size}/${(seed >>> 0).toString(16)}/${hash.toString(16).padStart(8, "0")}`;
 }
 
-/** Rich Plated-only RGB texture; identity includes the exact authored RGBA bytes. */
-export function richArtTexture(res: ResolvedPhenotype, tier: "population" | "inspection"): RichArtTextureDescriptor {
-  if (res.family !== "plated") throw new Error("Rich procedural art is currently supported only for Plated");
-  const inputKey = `${tier}/${JSON.stringify(res)}`;
+/** Families with an authored procedural grammar that can back a rich raster. */
+export const RICH_ART_FAMILIES: ReadonlySet<string> = new Set(["plated", "branching"]);
+
+export function hasRichArt(res: ResolvedPhenotype): boolean {
+  return RICH_ART_FAMILIES.has(res.family);
+}
+
+/**
+ * Rich RGB texture; identity includes the exact authored RGBA bytes.
+ *
+ * Branching geometry is activity-dependent (dormancy withdraws branches), so
+ * the activity state is part of its cache identity. Plated geometry is not
+ * activity-dependent, so its key is unchanged by this.
+ */
+export function richArtTexture(
+  res: ResolvedPhenotype,
+  tier: "population" | "inspection",
+  activity: ActivityState = "active",
+): RichArtTextureDescriptor {
+  if (!hasRichArt(res)) {
+    throw new Error(`Rich procedural art is not supported for ${res.family}`);
+  }
+  const inputKey = `${tier}/${activity}/${JSON.stringify(res)}`;
   const inputHit = richRasterCache.get(inputKey);
   if (inputHit) {
     richRasterCache.delete(inputKey);
     richRasterCache.set(inputKey, inputHit);
     return inputHit;
   }
-  const source = buildArtRecipe(res);
+  const source = buildArtRecipe(res, activity);
   const view = resolveArtLod(source, tier);
   const size = tier === "population" ? 64 : 128;
   const neutral = rasterizeStructuralArt({ ...source, regions: view.regions }, { width: size, height: size });
@@ -98,8 +117,11 @@ export function describeRenderableTexture(
   tier: LodTier,
   activity: ActivityState,
 ): PhenotypeTextureDescriptor {
-  if (res.family === "plated" && tier !== "ecosystem") {
-    const rich = richArtTexture(res, tier);
+  // The accepted coarse ecosystem path is unchanged for every family. Rich art
+  // applies only to the families with an authored grammar, and only at the two
+  // rich LODs.
+  if (hasRichArt(res) && tier !== "ecosystem") {
+    const rich = richArtTexture(res, tier, activity);
     return { key: rich.key, tier, activity, size: rich.size, bits: rich.bits, rgba: rich.rgba };
   }
   return describeTexture(res, tier, activity);

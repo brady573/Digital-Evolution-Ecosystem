@@ -58,10 +58,26 @@ function deeTestPhenotypeFixtures():{organisms:RenderOrganism[];resolved:Map<num
   const plated=resolvePhenotype({speed:1.375,sensing:69.5,metabolism:0.339,reproduction:100,diet:0.675,habitat:0.675,byproductUse:0.675,dormancyResponse:1},{parentFamily:"plated",organismId:900000001,lineageId:900000001});
   const other=resolvePhenotype({speed:1.5,sensing:70,metabolism:0.2,reproduction:100,diet:0,habitat:0,byproductUse:0,dormancyResponse:1},{organismId:900000002,lineageId:900000002});
   if(plated.family!=="plated")throw new Error(`deeTest Plated fixture resolved to ${plated.family}`);
-  const projectionOverride=new URLSearchParams(window.location.search).get("deeProjection");
+  const params=new URLSearchParams(window.location.search);
+  const projectionOverride=params.get("deeProjection");
   if(projectionOverride!==null&&projectionOverride!=="0"&&projectionOverride!=="1")throw new Error("deeTest projection fixture accepts only 0 or 1");
   const platedFixture=projectionOverride===null?plated:{...plated,quantized:{...plated.quantized,projection:Number(projectionOverride)}};
-  return {organisms,resolved:new Map([[900000001,platedFixture],[900000002,other]])};
+  const organismsWithBranching=[...organisms];
+  const resolved=new Map<number,ReturnType<typeof resolvePhenotype>>([[900000001,platedFixture],[900000002,other]]);
+  // Optional deterministic Branching pair: one active, one dormant, so browser
+  // evidence can assert the real production rich path and the geometric
+  // dormancy withdrawal without depending on simulation timing.
+  if(params.get("deeBranching")==="1"){
+    const branching=resolvePhenotype({speed:1,sensing:139.2,metabolism:0.247,reproduction:100,diet:1.4,habitat:1.4,byproductUse:1.4,dormancyResponse:0.8},{parentFamily:"branching",organismId:900000003,lineageId:900000003});
+    if(branching.family!=="branching")throw new Error(`deeTest Branching fixture resolved to ${branching.family}`);
+    organismsWithBranching.push(
+      {...organisms[0]!,id:900000003 as OrganismId,lineageId:900000003 as RenderOrganism["lineageId"],cladeId:900000003 as RenderOrganism["cladeId"],x:290,y:312,activity:"active"},
+      {...organisms[0]!,id:900000004 as OrganismId,lineageId:900000004 as RenderOrganism["lineageId"],cladeId:900000004 as RenderOrganism["cladeId"],x:312,y:312,activity:"dormant"},
+    );
+    resolved.set(900000003,branching);
+    resolved.set(900000004,branching);
+  }
+  return {organisms:organismsWithBranching,resolved};
 }
 
 /** Display names for the lens set. The active-lens chip uses the same labels

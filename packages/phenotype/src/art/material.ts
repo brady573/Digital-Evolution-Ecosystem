@@ -20,6 +20,23 @@ export const PLATED_MATERIAL_PALETTE: Readonly<Record<ArtMaterialRole, RGBColor>
   accent: { r: 190, g: 235, b: 242 },
 };
 
+/**
+ * Branching reads as rooted plant tissue rather than plated shell: a warmer
+ * low-saturation base, lit bark at the crown, and ochre nodules that stay
+ * distinct from the surrounding tissue. Same eight finite roles as Plated, so
+ * the material pass, mask ownership, and LOD reduction stay unchanged.
+ */
+export const BRANCHING_MATERIAL_PALETTE: Readonly<Record<ArtMaterialRole, RGBColor>> = {
+  "deep-tissue": { r: 18, g: 14, b: 10 },
+  shadow: { r: 46, g: 36, b: 26 },
+  body: { r: 104, g: 82, b: 54 },
+  light: { r: 158, g: 132, b: 92 },
+  rim: { r: 214, g: 198, b: 158 },
+  interstitial: { r: 22, g: 18, b: 13 },
+  core: { r: 198, g: 142, b: 62 },
+  accent: { r: 236, g: 216, b: 168 },
+};
+
 export const MATERIAL_ROLE_IDS: Readonly<Record<ArtMaterialRole, number>> = {
   "deep-tissue": 1,
   shadow: 2,
@@ -108,17 +125,23 @@ function buildAccents(recipe: ArtLodRecipe, seed: number): ArtMaterialAccent[] {
   return accents;
 }
 
+const PALETTES: Readonly<Record<string, Readonly<Record<ArtMaterialRole, RGBColor>>>> = {
+  plated: PLATED_MATERIAL_PALETTE,
+  branching: BRANCHING_MATERIAL_PALETTE,
+};
+
 /** Assign finite material roles and seed/version-bound color-only accent positions. */
 export function applyMaterialRoles(recipe: ArtLodRecipe, resolved: ResolvedPhenotype): MaterialRecipe {
-  if (recipe.source.family !== "plated" || resolved.family !== "plated") {
-    throw new Error("Plated material pass only supports Plated recipes and phenotypes");
+  const palette = PALETTES[recipe.source.family];
+  if (!palette || resolved.family !== recipe.source.family) {
+    throw new Error(`Material pass does not support ${recipe.source.family} recipes and ${resolved.family} phenotypes`);
   }
   if (recipe.source.cosmeticSeed !== (resolved.cosmeticSeed >>> 0)) {
     throw new Error("Material input seed must match the resolved structural recipe seed");
   }
   return {
     ...recipe,
-    palette: PLATED_MATERIAL_PALETTE,
+    palette,
     cosmeticSeed: resolved.cosmeticSeed >>> 0,
     rendererVersion: PROCEDURAL_ART_VERSION,
     accents: buildAccents(recipe, resolved.cosmeticSeed >>> 0),
