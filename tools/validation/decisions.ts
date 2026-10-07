@@ -191,6 +191,9 @@ function testVerticalSliceAndGate() {
   // placement shift energy/trajectories slightly; the first durable
   // formation lands @6777 rather than @7279. Counts/structure unchanged:
   // still the earliest formation.
+  // WIP-TEMP MAP (revert before merge): bulk trajectory mapping.
+  console.log("MAP-BK-RES:" + JSON.stringify((session as any).decisionResolutions.map((r: any) => r.tick)));
+  console.log("MAP-BK-EVTS:" + JSON.stringify(session.analysis.observedEvents().map((e: any) => e.eventId)));
   assert.equal(
     pending.sourceEventId,
     "eco-seedbank-1-established-6777",
@@ -342,9 +345,6 @@ function testForwardCompatPolicyVersion() {
   // 78312 falls inside it — observed during protection, never prompted
   // (the flow resolves only catalyst windows afterwards). Same claim:
   // protected observation stays durable evidence, not a prompt.
-  // WIP-TEMP MAP (revert before merge): bulk trajectory mapping.
-  console.log("MAP-BK-RES:" + JSON.stringify((session as any).decisionResolutions.map((r: any) => r.tick)));
-  console.log("MAP-BK-EVTS:" + JSON.stringify(session.analysis.observedEvents().map((e: any) => e.eventId)));
   const protectedEra = session.analysis.observedEvents().find(
     event => event.eventId === "eco-crossfeeding-1-established-78312",
   );

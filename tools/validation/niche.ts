@@ -353,6 +353,8 @@ function testNicheIntegration() {
   session.create(patchworkConfig(PATCHWORK_SEED));
   settle(session, 70000);
   const records = (session.analysis as any).records.filter((r: any) => r.kind === "niche");
+  // WIP-TEMP MAP (revert before merge): bulk trajectory mapping.
+  console.log("MAP-BK-NICHE-INT:" + JSON.stringify({ n: records.length, state: (session.analysis as any).niche.state, waste: (session.snapshot().metrics as any).waste.fraction }));
   assert.equal(records.length, 0, "no establishment record by 70k under occupancy");
   assert.equal((session.analysis as any).niche.state, "forming", "the world is mid-formation, not durably shifted");
   console.log("niche fixture arc: PASS");
