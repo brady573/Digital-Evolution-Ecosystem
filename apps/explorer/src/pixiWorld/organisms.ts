@@ -40,6 +40,7 @@ export interface OrganismMetrics {
 }
 
 export interface OrganismRasterEvidence {
+  readonly organismId: number;
   readonly family: string;
   readonly tier: LodTier;
   readonly key: string;
@@ -222,6 +223,7 @@ export function updateOrganismLayer(
       }
       display.textureKey = cacheEntry.key;
       evidence.push({
+        organismId: request.organismId,
         family: phenotype.family,
         tier: input.tier,
         key: cacheEntry.key,
@@ -244,6 +246,7 @@ export function updateOrganismLayer(
       display.sprite.width = grid.size * cell;
       display.sprite.height = display.sprite.width;
       evidence.push({
+        organismId: id,
         family: resolved.family,
         tier: input.tier,
         key: request.key,

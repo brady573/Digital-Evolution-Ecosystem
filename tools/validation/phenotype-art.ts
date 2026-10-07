@@ -157,6 +157,108 @@ async function testRecipeUsesResolvedDeformationInputs(): Promise<void> {
   }
 }
 
+async function testProjectionOnlyAddsBoundedOutwardReach(): Promise<void> {
+  const art = await import("../../packages/phenotype/src/art/index.ts");
+  const base = platedPhenotype();
+  const phenotypeAtProjection = (projection: number) => ({
+    ...base,
+    quantized: { ...base.quantized, projection },
+  });
+  const lowInput = phenotypeAtProjection(0);
+  const nextInput = phenotypeAtProjection(0.25);
+  const highInput = phenotypeAtProjection(1);
+  assert.deepEqual({ ...highInput, quantized: { ...highInput.quantized, projection: lowInput.quantized.projection } }, lowInput,
+    "one-trait evidence holds cosmetic seed and every non-projection phenotype input fixed");
+  const low = art.buildArtRecipe(lowInput);
+  const next = art.buildArtRecipe(nextInput);
+  const high = art.buildArtRecipe(highInput);
+
+  assert.equal(low.structuralVersion, "plated-grammar-v2",
+    "the projection deformation uses a new structural-art identity");
+  const plates = low.regions.filter((region) => region.geometry.kind === "teardrop");
+  assert.equal(plates.length, 12, "projection preserves all twelve primary plate sites");
+  assert.deepEqual(high.regions.map(({ id, depth, paintOrder, detail, materialRole, geometry }) =>
+    [id, depth, paintOrder, detail, materialRole, geometry.kind]),
+  low.regions.map(({ id, depth, paintOrder, detail, materialRole, geometry }) =>
+    [id, depth, paintOrder, detail, materialRole, geometry.kind]),
+  "projection preserves plate IDs, count, depth bands, paint order, and all region roles");
+
+  const nextById = new Map(next.regions.map((region) => [region.id, region]));
+  const highById = new Map(high.regions.map((region) => [region.id, region]));
+  const alternateDirection = { ...base, dietSigned: base.dietSigned + 0.15, habitatSigned: base.habitatSigned - 0.15 };
+  const alternateLow = art.buildArtRecipe({ ...alternateDirection, quantized: { ...alternateDirection.quantized, projection: 0 } });
+  const alternateHigh = art.buildArtRecipe({ ...alternateDirection, quantized: { ...alternateDirection.quantized, projection: 1 } });
+  const alternateLowById = new Map(alternateLow.regions.map((region) => [region.id, region]));
+  const alternateHighById = new Map(alternateHigh.regions.map((region) => [region.id, region]));
+  let maximumStepMovement = 0;
+  let maximumStepLengthChange = 0;
+  for (const plate of plates) {
+    const lowGeometry = plate.geometry;
+    const nextGeometry = nextById.get(plate.id)!.geometry;
+    const highGeometry = highById.get(plate.id)!.geometry;
+    assert.equal(lowGeometry.kind, "teardrop");
+    assert.equal(nextGeometry.kind, "teardrop");
+    assert.equal(highGeometry.kind, "teardrop");
+    if (lowGeometry.kind !== "teardrop" || nextGeometry.kind !== "teardrop" || highGeometry.kind !== "teardrop") continue;
+
+    const dx = highGeometry.center.x - lowGeometry.center.x;
+    const dy = highGeometry.center.y - lowGeometry.center.y;
+    const radial = (lowGeometry.center.x - 0.5) * dx + (lowGeometry.center.y - 0.5) * dy;
+    assert.ok(radial > 0, `${plate.id} moves outward as projection increases`);
+    assert.equal(highGeometry.axisRadians, lowGeometry.axisRadians,
+      `${plate.id} orientation remains controlled by its existing non-projection inputs`);
+    assert.equal(highGeometry.width, lowGeometry.width, `${plate.id} width is not repurposed as projection morphology`);
+    assert.equal(highGeometry.taper, lowGeometry.taper, `${plate.id} taper is not repurposed as projection morphology`);
+    if (plate.id.startsWith("mid-left") || plate.id.startsWith("mid-right")) {
+      assert.ok(highGeometry.length > lowGeometry.length, `${plate.id} outward reach increases with projection`);
+    } else {
+      assert.equal(highGeometry.length, lowGeometry.length, `${plate.id} non-reach length remains unchanged`);
+    }
+    const altLow = alternateLowById.get(plate.id)!.geometry;
+    const altHigh = alternateHighById.get(plate.id)!.geometry;
+    assert.equal(altLow.kind, "teardrop");
+    assert.equal(altHigh.kind, "teardrop");
+    if (altLow.kind === "teardrop" && altHigh.kind === "teardrop") {
+      assert.ok(Math.abs((altHigh.center.x - altLow.center.x) - dx) < 1e-12,
+        `${plate.id} projection does not amplify diet-direction offsets`);
+      assert.ok(Math.abs((altHigh.center.y - altLow.center.y) - dy) < 1e-12,
+        `${plate.id} projection does not amplify habitat-direction offsets`);
+    }
+    maximumStepMovement = Math.max(maximumStepMovement,
+      Math.hypot(nextGeometry.center.x - lowGeometry.center.x, nextGeometry.center.y - lowGeometry.center.y));
+    maximumStepLengthChange = Math.max(maximumStepLengthChange, Math.abs(nextGeometry.length - lowGeometry.length));
+    assert.ok(Math.abs(highGeometry.length - lowGeometry.length) < 0.1,
+      `${plate.id} reach change stays locally bounded`);
+  }
+  assert.ok(maximumStepMovement > 0 && maximumStepMovement < 0.02,
+    "one adjacent projection step creates a nonzero, locally bounded center displacement");
+  assert.ok(maximumStepLengthChange > 0 && maximumStepLengthChange < 0.03,
+    "one adjacent projection step creates a nonzero, locally bounded reach change");
+
+  for (const region of low.regions.filter((candidate) => candidate.geometry.kind !== "teardrop")) {
+    assert.deepEqual(highById.get(region.id), region,
+      `${region.id} non-plate geometry is independent of projection`);
+  }
+
+  const population = art.resolveArtLod(next, "population");
+  const inspection = art.resolveArtLod(next, "inspection");
+  const highPopulation = art.resolveArtLod(high, "population");
+  const highInspection = art.resolveArtLod(high, "inspection");
+  assert.strictEqual(population.source, next, "population uses the deformed source recipe");
+  assert.strictEqual(inspection.source, next, "inspection uses the same deformed source recipe");
+  assert.strictEqual(highPopulation.source, high, "high-projection population retains its deformed source");
+  assert.strictEqual(highInspection.source, high, "high-projection inspection retains that same source");
+  for (const [lod, size] of [["population", 64], ["inspection", 128]] as const) {
+    const view = art.resolveArtLod(high, lod);
+    const raster = art.rasterizeStructuralArt({ ...high, regions: view.regions }, { width: size, height: size });
+    const repeat = art.rasterizeStructuralArt({ ...high, regions: view.regions }, { width: size, height: size });
+    assert.deepEqual(raster.rgba, repeat.rgba, `${lod} structural pixels rerender byte-identically`);
+    const lowView = art.resolveArtLod(low, lod);
+    const lowRaster = art.rasterizeStructuralArt({ ...low, regions: lowView.regions }, { width: size, height: size });
+    assert.notDeepEqual(raster.rgba, lowRaster.rgba, `${lod} pixels visibly encode projection deformation`);
+  }
+}
+
 async function testPackedDirectionalShellMound(): Promise<void> {
   const { buildArtRecipe } = await import("../../packages/phenotype/src/art/index.ts");
   const recipe = buildArtRecipe(platedPhenotype());
@@ -330,11 +432,11 @@ async function testPopulationMaterialSuppressesFineAccents(): Promise<void> {
   const inspectionRaster = art.rasterizeStructuralArt({ ...source, regions: inspection.regions }, { width: 128, height: 128 });
   const inspectionMaterial = art.materializeRaster(inspectionRaster, inspection);
   assert.equal(createHash("sha256").update(inspectionRaster.rgba).digest("hex"),
-    "3661778b6e472cb95da983cb509925cb7b7b0acf0fed516710276873123693db",
-    "inspection neutral raster remains the accepted Checkpoint A geometry continuity anchor");
+    "9c03edffbf2feb365042f7a63534e27d77a08bf6a60d0bf2ee3781bfac1d1b0f",
+    "inspection neutral raster pins the Checkpoint D projection geometry baseline");
   const inspectionHash = createHash("sha256").update(inspectionMaterial.rgba).digest("hex");
-  assert.equal(inspectionHash, "465b2fa97aabd8e87464daed836946e3cfdf28b32fd209b808ebbe589798de44",
-    "inspection native material bytes remain the accepted Checkpoint B continuity anchor");
+  assert.equal(inspectionHash, "15518bbcda7d5d313f510af5ac3ccd2d1ce5f052ad1585a25b61073a2f8e6e2c",
+    "inspection native material bytes pin the Checkpoint D projection baseline");
   assert.equal(population.rendererVersion, inspection.rendererVersion,
     "rich LOD material views share one renderer-version identity");
 }
@@ -344,6 +446,7 @@ void testArtPackageBoundary().then(() => {
   return testPlatedFamilyRequired();
 }).then(() => testRecipeDeterminism()).then(() => testCosmeticSeedVariationIsBounded())
   .then(() => testRecipeUsesResolvedDeformationInputs())
+  .then(() => testProjectionOnlyAddsBoundedOutwardReach())
   .then(() => testPackedDirectionalShellMound())
   .then(() => testCpuRasterAndNearestScale())
   .then(() => testMaterialPassPreservesStructuralMasks())

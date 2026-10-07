@@ -54,13 +54,16 @@ function plateRegion(site: PlateSite, res: ResolvedPhenotype, slot: number): Art
   const packing = 1.03 - res.quantized.density * 0.07;
   const specialization = res.quantized.asymmetry;
   const directional = site.x > 0.5 ? 1 : -1;
+  const projectionReach = 1 + res.quantized.projection * 0.12;
   const center: NormalizedPoint = {
-    x: clamp(0.5 + (site.x - 0.5) * mass * packing * (0.95 + res.axes.mobility * 0.1) + directional * res.dietSigned * specialization * 0.012 + jitter(seed, slot, 0, 0.009), 0.08, 0.92),
-    y: clamp(0.5 + (site.y - 0.5) * mass * packing + res.habitatSigned * 0.009 + jitter(seed, slot, 1, 0.008), 0.08, 0.92),
+    x: clamp(0.5 + (site.x - 0.5) * mass * packing * (0.95 + res.axes.mobility * 0.1) * projectionReach
+      + directional * res.dietSigned * specialization * 0.012 + jitter(seed, slot, 0, 0.009), 0.08, 0.92),
+    y: clamp(0.5 + (site.y - 0.5) * mass * packing * projectionReach
+      + res.habitatSigned * 0.009 + jitter(seed, slot, 1, 0.008), 0.08, 0.92),
   };
   const orientationBias = res.dietSigned * specialization * 0.09 + res.habitatSigned * 0.035;
   const reach = site.id.startsWith("mid-left") || site.id.startsWith("mid-right") ? 1 : 0;
-  const length = site.length * (0.94 + res.quantized.projection * 0.1 * reach) * mass * elongationScale
+  const length = site.length * (0.94 + res.quantized.projection * 0.3 * reach) * mass * elongationScale
     + jitter(seed, slot, 3, 0.006);
   return {
     id: site.id,
@@ -120,7 +123,7 @@ export function buildPlatedRecipe(res: ResolvedPhenotype): StructuralArtRecipe {
   return {
     family: "plated",
     cosmeticSeed: res.cosmeticSeed >>> 0,
-    structuralVersion: "plated-grammar-v1",
+    structuralVersion: "plated-grammar-v2",
     regions: [...interstitialRegions(res), ...plates, ...secondary],
   };
 }
