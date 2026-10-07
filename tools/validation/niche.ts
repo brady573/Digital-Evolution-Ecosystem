@@ -373,7 +373,13 @@ function testNicheReachability() {
   // this fails and the slice returns DESIGN TENSION.
   const session = new UniverseSession();
   session.create(patchworkConfig(333333333));
-  settle(session, 60000);
+  // WIP-TEMP MAP (revert before merge): bulk trajectory mapping — search
+  // the horizon for the reachability establishment before the assert.
+  for (const stop of [60000, 120000, 200000, 300000]) {
+    settle(session, stop);
+    const recs = ((session.analysis as any).records as any[]).filter((r: any) => r.kind === "niche");
+    console.log("MAP-BK-REACH@" + stop + ":" + JSON.stringify({ tick: session.snapshot().tick, n: recs.length, recs: recs.map((r: any) => ({ phase: r.phase, tick: r.tick, refs: r.entity_refs })), waste: (session.snapshot().metrics as any).waste.fraction, state: (session.analysis as any).niche.state }));
+  }
   const records = (session.analysis as any).records.filter((r: any) => r.kind === "niche");
   assert.equal(records.length, 1, "one establishment record by 60k");
   assert.equal(records[0].phase, "established", "record establishes");
