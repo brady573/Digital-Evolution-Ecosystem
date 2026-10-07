@@ -62,6 +62,13 @@ const SCI={disclaimer:'Sources inform experimental design and interpretation; th
 ]};
 const MC=(s:number):number=>.01*s*s+.004*s*s*s*s;
 const RRN=(o:{rr?:unknown}):number=>Q(typeof o.rr==="number"?o.rr:0,0,1.5)/1.5;
+// Recovery Readiness (growth vs adaptation): higher readiness shortens
+// post-wake reproductive recovery delay and lengthens steady-state
+// post-birth cooldown. dr remains sole dormancy authority; me/rp unchanged.
+const WAKE_RECOVERY_BASE=300,WAKE_RECOVERY_SCALE=600;
+const STEADY_COOLDOWN_SCALE=1.5;
+const WAKE_DELAY=(rr:number):number=>WAKE_RECOVERY_BASE-WAKE_RECOVERY_SCALE*RRN({rr});
+const STEADY_COOLDOWN=(rr:number):number=>REPRO_COOLDOWN*(1+STEADY_COOLDOWN_SCALE*RRN({rr}));
 const MV=(s:number):number=>2.7*Math.tanh(s/2.7);
 const PC=(m:number):number=>.8*m+.0055/m;
 const SC=(e:number):number=>.000035*Math.max(0,e-100)**2;
@@ -628,7 +635,7 @@ class S{
   let occ=SpatialIndex.build(this.resources,this.o);
   for(const o of this.o){
    if(o.activity==='dormant'){
-    if(((this.t+o.id)%DORMANCY_CHECK)===0&&this.dormancyWake(o)){o.activity='active';o.lastWakeTick=this.t;o.wakeCount=(o.wakeCount||0)+1;o.dormantSince=null;this.cur.wakes++;let cid=this.cladeRoot(o.l);this.cur.wake_clades[cid]=(this.cur.wake_clades[cid]||0)+1}
+    if(((this.t+o.id)%DORMANCY_CHECK)===0&&this.dormancyWake(o)){o.activity='active';o.lastWakeTick=this.t;o.wakeCount=(o.wakeCount||0)+1;o.dormantSince=null;this.cur.wakes++;let cid=this.cladeRoot(o.l);this.cur.wake_clades[cid]=(this.cur.wake_clades[cid]||0)+1;o.readyAt=Math.max(o.readyAt,this.t+WAKE_DELAY(o.rr))}
     if(o.activity==='dormant'){o.en-=(PC(o.me)*DORMANT_MAINTENANCE+SC(o.en)*.08)*this.c.press;if(o.en>0)live.push(o);else{this.cur.deaths++;this.lineageCredit(o.l,{deaths:1})}continue}
    }
    if(((this.t+o.id)%DORMANCY_CHECK)===0&&this.dormancyEntry(o)){o.activity='dormant';o.dormantSince=this.t;this.cur.dormancy_entries++;o.en-=(PC(o.me)*DORMANT_MAINTENANCE)*this.c.press;if(o.en>0)live.push(o);else{this.cur.deaths++;this.lineageCredit(o.l,{deaths:1})}continue}
@@ -696,7 +703,7 @@ class S{
     let at=occ.findPlacement(p.parent.x,p.parent.y,LOCAL_OCCUPANCY_CAP);
     if(at===null){this.cur.blocked_births=(this.cur.blocked_births as number||0)+1;continue}
     let o=p.parent,baby=p.baby;
-    o.ra=0;o.rb=0;o.rc=0;o.en*=.52;o.readyAt=this.t+REPRO_COOLDOWN;
+    o.ra=0;o.rb=0;o.rc=0;o.en*=.52;o.readyAt=this.t+STEADY_COOLDOWN(o.rr);
     let[cx,cy]=occ.cellXY(at);
     baby.en=o.en*.92;
     baby.x=(cx*occ.cell+occ.cell/2+([-3,0,3][baby.id%3]!)+600)%600;
@@ -803,4 +810,7 @@ export {
   SpatialIndex,
   settleMovementClaims,
   RRN,
+  WAKE_DELAY,
+  STEADY_COOLDOWN,
+  REPRO_COOLDOWN,
 };

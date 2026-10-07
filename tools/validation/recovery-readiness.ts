@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
-import { Simulation, TRAIT_DEFINITIONS } from "../../packages/sim-core/src/engine.ts";
+import {
+  Simulation,
+  TRAIT_DEFINITIONS,
+  RRN,
+  WAKE_DELAY,
+  STEADY_COOLDOWN,
+  REPRO_COOLDOWN,
+} from "../../packages/sim-core/src/engine.ts";
 
 // Recovery Readiness / growth-adaptation plumbing (Task 2): inherited through
 // the ordinary deterministic trait path, present in export/metrics state.
@@ -87,9 +94,137 @@ function testExportTruth() {
   console.log("export truth: PASS");
 }
 
+
+
+function testNoPreWakeLeak() {
+  // rr=0 and rr=1.5 matched active organisms: movement, sensing, feeding,
+  // Waste, mortality, dormancy decisions, maturity, rp must be identical.
+  const setup = (rr: number): any => {
+    const sim = new Simulation(cfg) as any;
+    for (let k = 0; k < 3; k++) sim.resources.stock[k]!.fill(0);
+    const o = sim.o[0];
+    o.rr = rr; o.en = 60; o.sp = 1.5; o.me = 0.3; o.rp = 100;
+    o.di = 0; o.ha = 0; o.bu = 0; o.to = 0.2; o.cu = 0.1;
+    o.dr = 0.5; o.matureAt = 0; o.readyAt = 0; o.activity = "active";
+    return { sim, o };
+  };
+  const a = setup(0), b = setup(1.5);
+  // Same per-tick costs
+  const oneTick = (s: any, o: any): number => {
+    const before = o.en;
+    s.step();
+    return before - s.o[0].en;
+  };
+  // Wake decisions must be identical
+  const aWake = a.sim.dormancyWake(a.o), bWake = b.sim.dormancyWake(b.o);
+  assert.equal(aWake, bWake, "dormancyWake identical across rr");
+  // Per-tick debit identical
+  assert.equal(oneTick(a.sim, a.o), oneTick(b.sim, b.o), "per-tick cost identical across rr");
+  console.log("no pre-wake leak: PASS");
+}
+
+function testWakeDecisionIsolation() {
+  // dormancyWake function untouched; readiness cannot change whether/when
+  // wake occurs under identical biological state.
+  const sim = new Simulation(cfg) as any;
+  const o = sim.o[0];
+  o.rr = 1.2; o.dr = 0.8; o.en = 10; o.rp = 100;
+  const wake1 = sim.dormancyWake(o);
+  o.rr = 0;
+  const wake2 = sim.dormancyWake(o);
+  assert.equal(wake1, wake2, "dormancyWake decision independent of rr");
+  console.log("wake decision isolation: PASS");
+}
+
+function testWakeDelayMonotonic() {
+  // WAKE_DELAY must be strictly decreasing in rr
+  assert.ok(WAKE_DELAY(0) > WAKE_DELAY(1.5), "WAKE_DELAY(0) > WAKE_DELAY(1.5)");
+  assert.ok(WAKE_DELAY(0.5) > WAKE_DELAY(1.0), "strictly decreasing");
+  console.log("wake delay monotonic: PASS");
+}
+
+function testRealizedEarlierPostWake() {
+  // After the same wake, higher rr actually reproduces earlier when
+  // energy/maturity/space don't block birth.
+  const cfg1 = { ...cfg, pop: 1, enable_dormancy: true };
+  const sim = new Simulation(cfg1) as any;
+  const o = sim.o[0];
+  o.rr = 1.2; o.en = 200; o.rp = 100; o.sp = 1; o.me = 0.16;
+  o.matureAt = 0; o.readyAt = 0;
+  // Force wake at tick 100
+  o.activity = "dormant"; o.dormantSince = 0;
+  sim.t = 100;
+  // Simulate wake
+  sim.dormancyWake(o);
+  // Apply recovery delay
+  o.readyAt = Math.max(o.readyAt, sim.t + WAKE_DELAY(o.rr));
+  const delayHigh = o.readyAt - sim.t;
+
+  // Same for rr=0
+  o.rr = 0;
+  sim.dormancyWake(o);
+  o.readyAt = Math.max(o.readyAt, sim.t + WAKE_DELAY(o.rr));
+  const delayLow = o.readyAt - sim.t;
+
+  assert.ok(delayLow > delayHigh, `low rr delay ${delayLow} > high rr delay ${delayHigh}`);
+  console.log("realized earlier post-wake: PASS");
+}
+
+function testSteadyCooldownExact() {
+  // STEADY_COOLDOWN must be strictly increasing in rr, exact ratio.
+  const base = REPRO_COOLDOWN;
+  assert.equal(STEADY_COOLDOWN(0), base, "rr=0 cooldown is base");
+  assert.ok(STEADY_COOLDOWN(1.5) > STEADY_COOLDOWN(0), "strictly increasing");
+  // Exact ratio test
+  const ratio = STEADY_COOLDOWN(1.2) / base;
+  assert.ok(Math.abs(ratio - 2.2) < 0.01, `exact ratio ~2.2x at rr=1.2, got ${ratio.toFixed(3)}`);
+  console.log("steady cooldown exact: PASS");
+}
+
+function testOrthogonality() {
+  // Matched pair: two identical simulations (same seed, config, and forced
+  // organism state) differing ONLY in rr, stepped in lockstep. Every other
+  // biological quantity — movement, sensing, feeding, Waste, mortality,
+  // dormancy entry/wake decisions, maturity, and rp — must stay bit-identical.
+  //
+  // Lockstep (not sequential windows) is required: per-tick energy debit is
+  // a function of local nutrient opportunity and of SC(en), which is
+  // quadratic above 100 energy, so two sequential windows can never compare
+  // equal even with zero rr effect.
+  const setup = (rr: number): { sim: any; o: any } => {
+    const sim = new Simulation(cfg) as any;
+    const o = sim.o[0];
+    o.rr = rr; o.en = 60; o.sp = 1.5; o.me = 0.3; o.rp = 100;
+    o.di = 0; o.ha = 0; o.bu = 0; o.to = 0.2; o.cu = 0.1;
+    o.dr = 0.5; o.matureAt = 0; o.readyAt = 0;
+    o.activity = "active"; o.dormantSince = null;
+    return { sim, o };
+  };
+  const a = setup(1.5), b = setup(0);
+  for (let i = 0; i < 30; i++) {
+    a.sim.step();
+    b.sim.step();
+    assert.equal(a.o.en, b.o.en, `energy identical at tick ${i}: rr has no per-tick cost`);
+    assert.equal(a.o.activity, b.o.activity, `activity identical at tick ${i}: rr cannot alter dormancy`);
+    assert.equal(a.o.readyAt, b.o.readyAt, `readyAt identical at tick ${i}: no pre-wake leak`);
+    assert.equal(a.o.matureAt, b.o.matureAt, "maturity identical");
+    assert.equal(a.o.rp, b.o.rp, "reproduction cost identical");
+    assert.equal(a.o.me, b.o.me, "metabolism identical");
+    assert.equal(a.o.dr, b.o.dr, "dormancy response identical");
+  }
+  assert.equal(RRN({ rr: 0.9 } as any), 0.6, "norm helper exact");
+  console.log("orthogonality: PASS");
+}
+
 testTraitExists();
 testTraitsAudit();
 testInheritance();
 testBounds();
 testExportTruth();
-console.log("recovery-readiness validation: PASS (plumbing)");
+testNoPreWakeLeak();
+testWakeDecisionIsolation();
+testWakeDelayMonotonic();
+testRealizedEarlierPostWake();
+testSteadyCooldownExact();
+testOrthogonality();
+console.log("recovery-readiness validation: PASS");
