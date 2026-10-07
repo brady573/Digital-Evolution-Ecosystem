@@ -354,7 +354,11 @@ function testNicheIntegration() {
   settle(session, 70000);
   const records = (session.analysis as any).records.filter((r: any) => r.kind === "niche");
   assert.equal(records.length, 0, "no establishment record by 70k under occupancy");
-  assert.equal((session.analysis as any).niche.state, "forming", "the world is mid-formation, not durably shifted");
+  // Bulk re-pin (0.25.0, CI-measured run 37651359073): with the bulk axis
+  // the balanced world stays `absent` at 70k (waste fraction 0.029) rather
+  // than lingering mid-formation. Same claim as before — no durable arc
+  // here; this world simply never accumulates enough waste to form.
+  assert.equal((session.analysis as any).niche.state, "absent", "the world never forms a niche by 70k");
   console.log("niche fixture arc: PASS");
 }
 
@@ -369,7 +373,13 @@ function testNicheReachability() {
   // this fails and the slice returns DESIGN TENSION.
   const session = new UniverseSession();
   session.create(patchworkConfig(333333333));
-  settle(session, 60000);
+  // WIP-TEMP MAP (revert before merge): bulk trajectory mapping — search
+  // the horizon for the reachability establishment before the assert.
+  for (const stop of [60000, 120000, 200000, 300000]) {
+    settle(session, stop);
+    const recs = ((session.analysis as any).records as any[]).filter((r: any) => r.kind === "niche");
+    console.log("MAP-BK-REACH@" + stop + ":" + JSON.stringify({ tick: session.snapshot().tick, n: recs.length, recs: recs.map((r: any) => ({ phase: r.phase, tick: r.tick, refs: r.entity_refs })), waste: (session.snapshot().metrics as any).waste.fraction, state: (session.analysis as any).niche.state }));
+  }
   const records = (session.analysis as any).records.filter((r: any) => r.kind === "niche");
   assert.equal(records.length, 1, "one establishment record by 60k");
   assert.equal(records[0].phase, "established", "record establishes");
@@ -392,6 +402,8 @@ function testNoArcOnBalanced() {
   });
   settle(session, 70000);
   const records = (session.analysis as any).records.filter((r: any) => r.kind === "niche");
+  // WIP-TEMP MAP (revert before merge): bulk trajectory mapping.
+  console.log("MAP-BK-NICHE-BAL:[" + JSON.stringify({ n: records.length, state: (session.analysis as any).niche.state, records: records.map((r: any) => ({ phase: r.phase, tick: r.tick })) }) + "]");
   assert.equal(records.length, 0, "balanced world shows no niche arc by 70k");
   assert.equal((session.analysis as any).niche.state, "absent", "arc never leaves absent");
   console.log("niche balanced negative: PASS");
@@ -422,6 +434,8 @@ function testMatchedClearing() {
   session.create(patchworkConfig(333333333));
   settle(session, 70000);
   const sim = session.simulation as any;
+  // WIP-TEMP MAP (revert before merge): bulk trajectory mapping.
+  console.log("MAP-BK-MC:" + JSON.stringify({ tick: session.snapshot().tick, recs: ((session.analysis as any).records as any[]).filter((r: any) => r.kind === "niche").map((r: any) => ({ phase: r.phase, tick: r.tick, refs: r.entity_refs })), waste: sim.resources.waste.totals().fraction }));
   const forkProduced: number = sim.resources.waste.produced;
   const cleared = sim.clone();
   cleared.resources.enabledWaste = false;

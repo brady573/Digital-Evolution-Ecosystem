@@ -191,9 +191,14 @@ function testVerticalSliceAndGate() {
   // placement shift energy/trajectories slightly; the first durable
   // formation lands @6777 rather than @7279. Counts/structure unchanged:
   // still the earliest formation.
+  // WIP-TEMP MAP (revert before merge): bulk trajectory mapping.
+  // Bulk re-pin (0.25.0, CI-measured run 37651359073): reserve capacity
+  // delays the seedbank establishment from @6777 to @7530. Structure is
+  // unchanged — still the earliest durable formation, still seedbank;
+  // only its tick moves.
   assert.equal(
     pending.sourceEventId,
-    "eco-seedbank-1-established-6777",
+    "eco-seedbank-1-established-7530",
     "first decision comes from the earliest durable formation (deterministic)",
   );
   // The policy saw the same context the evidence supports: contextSnapshot must
@@ -342,6 +347,12 @@ function testForwardCompatPolicyVersion() {
   // 78312 falls inside it — observed during protection, never prompted
   // (the flow resolves only catalyst windows afterwards). Same claim:
   // protected observation stays durable evidence, not a prompt.
+  // Bulk re-pin (0.25.0, CI-measured run 37651880469): with the bulk axis
+  // no crossfeeding establishment occurs on this run at all, so the
+  // decision-eligible protected event cannot be crossfeeding — the
+  // Aftermath coverage proof needs a different (existence-based) claim.
+  // WIP-TEMP MAP (revert before merge): locate what formation does occur.
+  console.log("MAP-BK-PROT:" + JSON.stringify({ res: (session as any).decisionResolutions.map((r: any) => r.tick), evts: session.analysis.observedEvents().map((e: any) => e.eventId) }));
   const protectedEra = session.analysis.observedEvents().find(
     event => event.eventId === "eco-crossfeeding-1-established-78312",
   );
