@@ -111,8 +111,10 @@ runtime evidence, and final Stage P1 acceptance remain out of scope.
   `visual-capture` trail.
 - `packages/phenotype` has no row in the `AGENTS.md` architecture table (fix
   before Tranche D).
-- Uncommitted `.opencode/agents/project-manager.md` write grant (resolve
-  before Tranche F).
+- Resolved: the `project-manager`/lane topology is retired. `.opencode` now sets
+  `default_agent: architect` and adds a `legacy/prototype/**` edit deny enforced by
+  the runtime. The former "uncommitted project-manager write grant" known issue no
+  longer applies.
 
 ## Things AI Should Know
 

@@ -4,16 +4,16 @@ Source: https://github.com/YoelCieno/settings-opencode (cloned 2026-09-29,
 depth 1, to `/tmp/opencode/settings-opencode` for inspection; not committed).
 
 Mode: **project-local selective import**. Nothing global was touched
-(`~/.config/opencode` keeps superpowers + custom agents). `install.sh` was
+(`~/.config/opencode` keeps the global `architect` team). `install.sh` was
 **not** run — it would symlink `~/.config/opencode` to the upstream repo and
-clobber this project's `project-manager` + lane topology.
+replace the global agent team this project now relies on.
 
 ## Vendored (adapted, offline-safe)
 
 | File | Upstream source | Adaptation |
 |---|---|---|
-| `.opencode/skills/socratic-design/SKILL.md` | `skills/socratic-design/` | `question` tool; Owner-gated web; lane/Owner stop rules |
-| `.opencode/skills/discuss/SKILL.md` | `skills/discuss/` | No Context7/Serena; Owner-gated web; handoff via `digital-evolution` |
+| `.opencode/skills/socratic-design/SKILL.md` | `skills/socratic-design/` | `question` tool; Owner-gated web; Owner stop rules |
+| `.opencode/skills/discuss/SKILL.md` | `skills/discuss/` | No Context7/Serena; Owner-gated web; `architect` implements |
 | `.opencode/skills/strategic-compact/SKILL.md` | `skills/strategic-compact/` | Durable state → `/sdcard/DEE/<topic>/`, never `./docs/` |
 | `.opencode/skills/tdd-workflow/SKILL.md` | `skills/tdd-workflow/` | Added missing frontmatter; `pnpm verify` gate; `legacy/prototype/` frozen |
 | `.opencode/skills/test-coverage/SKILL.md` | `skills/test-coverage/` | pnpm; no vitest/`fe-*` assumptions |
@@ -23,10 +23,11 @@ clobber this project's `project-manager` + lane topology.
 ## Deliberately skipped (and why)
 
 - `conductor` + 16 subagents (`opencode.jsonc:agent`) — conflicts with the
-  `project-manager` → lanes → `digital-evolution` topology. `default_agent`
-  stays `project-manager`.
+  global `architect` team this project now uses. `default_agent` is
+  `architect`; specialists come from `~/.config/opencode/agents/`.
 - `instructions/` (`subagent-routing`, `serena`, `verification-gate`) —
-  upstream routing contradicts lane dispatch; Serena needs `uv`/network.
+  upstream routing contradicts the architect/specialist split; Serena needs
+  `uv`/network.
 - `mcp.servers` (serena, context7, Figma), `plugins/` (auto-compact,
   notification, bootstrap, memory), `provider`/`model` env block
   (`OPENCODE_MODEL_*`) — network/paid/macOS-specific; violate offline-first
