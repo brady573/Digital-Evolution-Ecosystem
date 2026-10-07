@@ -380,6 +380,20 @@ export const UNITS: readonly ValidationUnit[] = [
       "Local space is finite identity-free opportunity: settlement and birth placement resolve deterministically by seniority with deflection and atomic discard, vacancy recolonizes, lineage never steers, and throughput stays viable at thousands scale.",
   },
   {
+    id: "cell-shape",
+    title: "Cell-shape structural axis (reach vs drag)",
+    script: "test:cell-shape",
+    cls: "deterministic",
+    enforcement: "blocking",
+    mergeGate: true,
+    domains: withApparatus("contracts", "sim-core", "sim-runtime"),
+    needs: [],
+    parallelSafe: true,
+    baselineSeconds: 10,
+    claim:
+      "Elongation is inherited, mutates, persists, and exports truthfully; elongated forms sense farther with identical draw/geometry discipline while paying exact locomotion drag; compact and elongated morphs each win in opposite regimes with no universal optimum; el=0 replays 0.24.0 exactly.",
+  },
+  {
     id: "aftermath",
     title: "Aftermath state and comparison",
     script: "test:aftermath",
@@ -833,6 +847,7 @@ export const GROUPS: readonly ValidationGroup[] = [
       "dependency-tradeoff",
       "dependency-washout",
       "spatial-occupancy",
+      "cell-shape",
     ],
     ci: false,
   },
@@ -912,7 +927,7 @@ export const GROUPS: readonly ValidationGroup[] = [
   {
     id: "ci-sim-c",
     title: "Deterministic suites C (niche, ecology, runtime boundary)",
-    unitIds: ["niche", "ecology", "runtime-boundary", "spatial-occupancy"],
+    unitIds: ["niche", "ecology", "runtime-boundary", "spatial-occupancy", "cell-shape"],
     ci: true,
   },
   {
