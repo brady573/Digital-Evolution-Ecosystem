@@ -259,6 +259,183 @@ async function testProjectionOnlyAddsBoundedOutwardReach(): Promise<void> {
   }
 }
 
+const BRANCHING_BASE: Parameters<typeof resolvePhenotype>[0] = {
+  speed: 1,
+  sensing: 139.2,
+  metabolism: 0.247,
+  reproduction: 100,
+  diet: 1.4,
+  habitat: 1.4,
+  byproductUse: 1.4,
+  dormancyResponse: 0.8,
+};
+
+function branchingPhenotype(overrides: Partial<typeof BRANCHING_BASE> = {}): ResolvedPhenotype {
+  return resolvePhenotype({ ...BRANCHING_BASE, ...overrides },
+    { parentFamily: "branching", organismId: 7100, lineageId: 4343 });
+}
+
+async function testBranchingIdentityAndHierarchy(): Promise<void> {
+  const art = await import("../../packages/phenotype/src/art/index.ts");
+  const resolved = branchingPhenotype();
+  assert.equal(resolved.family, "branching", "branching fixture resolves to the branching family");
+  const recipe = art.buildArtRecipe(resolved);
+
+  assert.equal(recipe.family, "branching");
+  assert.match(recipe.structuralVersion, /^branching-grammar-v1$/,
+    "branching art carries its own structural-art identity");
+
+  const trunk = recipe.regions.filter((region) => region.depth === 0);
+  assert.ok(trunk.length >= 1, "a rooted trunk anchors the colony");
+  const offshoots = recipe.regions.filter((region) => region.detail === "secondary");
+  assert.ok(offshoots.length >= 3, "hierarchical branches exist beyond the trunk");
+  const nodules = recipe.regions.filter((region) => region.materialRole === "core");
+  assert.ok(nodules.length >= 2, "terminal nodules cap the branches");
+
+  // Rooting is asserted on the trunk's own lower extent: the trunk base must sit
+  // in the lower part of the frame so the colony reads as anchored.
+  const trunkGeometry = trunk[0]!.geometry;
+  assert.notEqual(trunkGeometry.kind, "polygon");
+  if (trunkGeometry.kind !== "polygon") {
+    assert.ok(trunkGeometry.center.y + trunkGeometry.length / 2 > 0.8,
+      "the trunk is rooted in the lower body rather than floating at the centre");
+  }
+  // Both sides of the colony must carry branches; a budget that kept only one
+  // side previously produced a visibly one-sided silhouette.
+  const branchXs = recipe.regions
+    .filter((region) => region.geometry.kind !== "polygon")
+    .map((region) => region.geometry.kind === "polygon" ? 0.5 : region.geometry.center.x);
+  assert.ok(Math.max(...branchXs) - 0.5 > 0.08,
+    "the colony branches meaningfully to the right of the trunk axis");
+  assert.ok(0.5 - Math.min(...branchXs) > 0.08,
+    "the colony branches meaningfully to the left of the trunk axis");
+  // Centers are clamped to the normalized frame; a segment's bounding box can
+  // still exceed it by up to half its length where a limb runs nearly
+  // horizontally. The rasterizer clips to the canvas, so the meaningful bound
+  // is that the segment center stays inside the frame.
+  for (const region of recipe.regions) {
+    if (region.geometry.kind === "polygon") continue;
+    assert.ok(region.geometry.center.x >= 0 && region.geometry.center.x <= 1
+      && region.geometry.center.y >= 0 && region.geometry.center.y <= 1,
+      `${region.id} center stays inside the normalized frame`);
+  }
+
+  const centers = recipe.regions.filter((region) => region.geometry.kind !== "polygon")
+    .map((region) => (region.geometry.kind === "polygon" ? null : region.geometry.center) as { x: number; y: number });
+  const meanX = centers.reduce((sum, point) => sum + point.x, 0) / centers.length;
+  const meanY = centers.reduce((sum, point) => sum + point.y, 0) / centers.length;
+  const xSpread = Math.sqrt(centers.reduce((sum, point) => sum + (point.x - meanX) ** 2, 0) / centers.length);
+  const ySpread = Math.sqrt(centers.reduce((sum, point) => sum + (point.y - meanY) ** 2, 0) / centers.length);
+  // The accepted Branching artwork is a wide, rooted, spreading colony rather
+  // than a tall narrow stem, so horizontal spread is the identity requirement.
+  // This replaces an earlier vertical-dominance expectation that encoded a
+  // bare-tree silhouette the Owner rejected.
+  assert.ok(xSpread >= ySpread * 0.85,
+    "the colony spreads horizontally at least as much as vertically, matching the accepted rooted spread");
+  assert.ok(xSpread > 0.06,
+    "branches reach meaningfully sideways from the trunk");
+  assert.ok(centers.every((point) => point.y <= 0.92), "no colony part escapes the top boundary");
+}
+
+async function testBranchingDormancyWithdrawsGeometry(): Promise<void> {
+  const art = await import("../../packages/phenotype/src/art/index.ts");
+  const resolved = branchingPhenotype();
+  const active = art.buildBranchingRecipe(resolved, "active");
+  const dormant = art.buildBranchingRecipe(resolved, "dormant");
+  assert.notDeepEqual(active.regions, dormant.regions,
+    "branching dormancy withdraws branches rather than only dimming them");
+  const secondaryCount = (recipe: typeof active) =>
+    recipe.regions.filter((region) => region.detail === "secondary").length;
+  assert.ok(secondaryCount(dormant) < secondaryCount(active),
+    "dormancy compacts secondary branching");
+  const area = (recipe: typeof active) => {
+    const raster = art.rasterizeStructuralArt(recipe, { width: 128, height: 128 });
+    return raster.masks.silhouette.reduce((sum, value) => sum + value, 0);
+  };
+  assert.ok(area(dormant) < area(active) * 0.75,
+    "the dormant silhouette is materially more compact than the active one");
+
+  const raster = art.rasterizeStructuralArt(dormant, { width: 128, height: 128 });
+  const rgba = art.materializeRaster(raster, art.applyMaterialRoles(art.resolveArtLod(dormant, "inspection"), resolved))
+    .rgba;
+  assert.equal(rgba.length, 128 * 128 * 4, "dormant branching raster keeps its declared dimensions");
+  const silhouette = raster.masks.silhouette.reduce((sum, value) => sum + value, 0);
+  assert.ok(silhouette > 0, "the dormant colony remains visible rather than vanishing");
+}
+
+async function testBranchingTraitContinuityAndDeterminism(): Promise<void> {
+  const art = await import("../../packages/phenotype/src/art/index.ts");
+  const base = branchingPhenotype();
+  assert.deepEqual(art.buildBranchingRecipe(base, "active"), art.buildBranchingRecipe(base, "active"),
+    "identical branching inputs rerender byte-identically");
+
+  // Trait continuity is measured inside the branching neighbourhood: a value
+  // far enough away flips family assignment, which would test family
+  // resolution rather than branching geometry.
+  const branchingAt = (overrides: Partial<typeof BRANCHING_BASE>) => {
+    const phenotype = branchingPhenotype(overrides);
+    assert.equal(phenotype.family, "branching",
+      `fixture ${JSON.stringify(overrides)} must stay inside the branching neighbourhood`);
+    return art.buildBranchingRecipe(phenotype, "active");
+  };
+  const reach = (overrides: Partial<typeof BRANCHING_BASE>) => Math.max(...branchingAt(overrides)
+    .regions.map((region) => region.geometry.kind === "polygon"
+      ? 0
+      : Math.hypot(region.geometry.center.x - 0.5, region.geometry.center.y - 0.5)));
+  assert.ok(reach({ sensing: 155 }) > reach({ sensing: 120 }), "sensing increases branching reach");
+
+  // Sprawl is outward extent from the colony's vertical axis, not the mean x
+  // coordinate: a centred colony has a near-constant mean x regardless of how
+  // wide it actually grows.
+  const sprawl = (overrides: Partial<typeof BRANCHING_BASE>) => Math.max(...branchingAt(overrides).regions
+    .filter((region) => region.geometry.kind !== "polygon")
+    .map((region) => region.geometry.kind === "polygon"
+      ? 0
+      : Math.abs(region.geometry.center.x - 0.5)));
+  assert.ok(sprawl({ speed: 0.7 }) > sprawl({ speed: 1.7 }),
+    "mobility suppresses horizontal sprawl");
+
+  const offshootCount = (overrides: Partial<typeof BRANCHING_BASE>) =>
+    branchingAt(overrides).regions.filter((region) => region.detail === "secondary").length;
+  assert.ok(offshootCount({ byproductUse: 1.45, diet: 1.45, habitat: 1.45 })
+    >= offshootCount({ byproductUse: 0.75, diet: 0.75, habitat: 0.75 }),
+    "specialization never reduces secondary branching below the low-specialization count");
+  // The budget is indexed by offshoot-local count, so a fully specialized
+  // colony reaches the authored hierarchy and dormancy still withdraws a real
+  // number of branches rather than none.
+  assert.equal(offshootCount({ byproductUse: 1.45, diet: 1.45, habitat: 1.45 }), 8,
+    "the maximum specialization budget expresses all eight authored secondary offshoots");
+  const dormantSecondaries = art.buildBranchingRecipe(branchingPhenotype(), "dormant").regions
+    .filter((region) => region.detail === "secondary").length;
+  assert.equal(dormantSecondaries, 4,
+    "the dormant budget withdraws a bounded, nonzero set of secondary branches");
+
+  const source = art.buildArtRecipe(base);
+  const population = art.resolveArtLod(source, "population");
+  const inspection = art.resolveArtLod(source, "inspection");
+  assert.strictEqual(population.source, inspection.source,
+    "branching population and inspection share one deformed source recipe");
+  assert.ok(population.regions.every((region) => region.detail === "structure"),
+    "population keeps only structural branching regions");
+  assert.deepEqual(inspection.regions, source.regions,
+    "inspection retains every branching source region");
+  const palette = art.applyMaterialRoles(inspection, base).palette;
+  for (const channel of [palette.body.r, palette.body.g, palette.body.b]) {
+    assert.ok(Number.isInteger(channel) && channel >= 0 && channel <= 255,
+      "branching palette channels are bounded byte values");
+  }
+  assert.notDeepEqual(palette, art.PLATED_MATERIAL_PALETTE,
+    "branching uses its own material identity rather than the plated palette");
+  // Accepted family direction: cool aquatic body mass with warm terminal
+  // accents. A brown/ochre palette previously pulled the family back toward
+  // the rejected plant read.
+  const mean = (color: { r: number; g: number; b: number }) => (color.r + color.g + color.b) / 3;
+  assert.ok(palette.light.b > palette.light.r,
+    "branching body mass reads cool aqua, not brown");
+  assert.ok(palette.core.r > palette.core.b,
+    "branching terminal nodules read warm coral against the cool body");
+}
+
 async function testPackedDirectionalShellMound(): Promise<void> {
   const { buildArtRecipe } = await import("../../packages/phenotype/src/art/index.ts");
   const recipe = buildArtRecipe(platedPhenotype());
@@ -447,6 +624,9 @@ void testArtPackageBoundary().then(() => {
 }).then(() => testRecipeDeterminism()).then(() => testCosmeticSeedVariationIsBounded())
   .then(() => testRecipeUsesResolvedDeformationInputs())
   .then(() => testProjectionOnlyAddsBoundedOutwardReach())
+  .then(() => testBranchingIdentityAndHierarchy())
+  .then(() => testBranchingDormancyWithdrawsGeometry())
+  .then(() => testBranchingTraitContinuityAndDeterminism())
   .then(() => testPackedDirectionalShellMound())
   .then(() => testCpuRasterAndNearestScale())
   .then(() => testMaterialPassPreservesStructuralMasks())

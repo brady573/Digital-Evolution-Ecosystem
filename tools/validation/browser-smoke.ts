@@ -28,6 +28,64 @@ async function tick(page:Page){
   return Number(text.replace(/[^0-9]/g,""));
 }
 
+/**
+ * Branching must reach the real production normal-lens rich path at both rich
+ * LODs, keep every other family on its existing renderer, and withdraw
+ * geometry when dormant.
+ */
+async function verifyBranchingInProduction(context: BrowserContext) {
+  const page = await context.newPage();
+  try {
+    await page.goto(`${baseUrl}?deeTest=1&deeBranching=1`, { waitUntil: "domcontentloaded" });
+    await page.locator(".world-pixi-host canvas").waitFor({ timeout: 30_000 });
+    await page.getByRole("button", { name: "Landscape", exact: true }).click();
+    const readEvidence = () => page.evaluate(() =>
+      (window as Window & { __DEE_PIXI_RASTER_EVIDENCE__?: Array<{ organismId: number; family: string; tier: string; key: string; pixels: string }> })
+        .__DEE_PIXI_RASTER_EVIDENCE__ ?? []);
+    const waitForTier = async (tier: string) => {
+      await page.waitForFunction((expected) =>
+        (window as Window & { __DEE_PIXI_RASTER_EVIDENCE__?: Array<{ organismId: number; family: string; tier: string; key: string; pixels: string }> })
+          .__DEE_PIXI_RASTER_EVIDENCE__?.some((item) => item.organismId === 900000003
+            && item.family === "branching" && item.tier === expected && item.pixels === "rich-rgba"),
+      tier, { timeout: 10_000 });
+    };
+
+    // Ecosystem tier must keep Branching on the accepted coarse renderer.
+    const ecosystem = await readEvidence();
+    assert.ok(ecosystem.some((item) => item.organismId === 900000003 && item.family === "branching" && item.tier === "ecosystem" && item.pixels === "legacy-grid"),
+      "branching stays on the accepted coarse ecosystem renderer");
+    assert.ok(ecosystem.some((item) => item.organismId === 900000002 && item.family !== "branching" && item.pixels === "legacy-grid"),
+      "non-branching families keep the legacy renderer at ecosystem tier");
+
+    await page.getByRole("button", { name: "Zoom in" }).click();
+    await page.getByRole("button", { name: "Zoom in" }).click();
+    await waitForTier("population");
+    const population = await readEvidence();
+    assert.ok(population.some((item) => item.organismId === 900000003 && item.family === "branching" && item.tier === "population" && item.pixels === "rich-rgba"),
+      "branching uses the rich production raster at population tier");
+    assert.ok(population.some((item) => item.organismId === 900000001 && item.family === "plated" && item.tier === "population" && item.pixels === "rich-rgba"),
+      "plated keeps its rich population raster alongside branching");
+
+    const activeKey = population.find((item) => item.organismId === 900000003)!.key;
+    const dormantKey = population.find((item) => item.organismId === 900000004)?.key;
+    assert.ok(dormantKey && dormantKey !== activeKey,
+      "dormant branching withdraws geometry, producing a distinct production texture");
+
+    await page.getByRole("button", { name: "Zoom in" }).click();
+    await page.getByRole("button", { name: "Zoom in" }).click();
+    await waitForTier("inspection");
+    const inspection = await readEvidence();
+    assert.ok(inspection.some((item) => item.organismId === 900000003 && item.family === "branching" && item.tier === "inspection" && item.pixels === "rich-rgba"),
+      "branching uses the rich production raster at inspection tier");
+    const inspectionKey = inspection.find((item) => item.organismId === 900000003)!.key;
+    assert.ok(inspectionKey.includes("branching-grammar-v1"),
+      "the production branching texture carries its structural-art identity");
+    console.log(`Branching production keys: active=${activeKey} dormant=${dormantKey} inspection=${inspectionKey}`);
+  } finally {
+    await page.close();
+  }
+}
+
 async function verifyProjectionDeformationInProduction(context: BrowserContext) {
   const keys: Record<"0" | "1", Record<"population" | "inspection", string>> = {
     "0": { population: "", inspection: "" },
@@ -152,7 +210,10 @@ async function main(){
     assert.equal(await routePage.locator(".world-pixi-host canvas").count(),1,
       "default route has exactly one active Pixi canvas");
     await routePage.close();
-    await verifyProjectionDeformationInProduction(context);
+    // Rich-art evidence runs at the END of the journey. Booting extra Pixi
+    // worlds earlier loads the runner and perturbs frame cadence during the
+    // timing-sensitive save/restore assertions, which is not this evidence's
+    // business to influence.
     const pixiRoutePage=await context.newPage();
     await pixiRoutePage.goto(`${baseUrl}?deeTest=1`,{waitUntil:"domcontentloaded"});
     await pixiRoutePage.locator(".world-pixi-host canvas").waitFor({timeout:30_000});
@@ -1334,6 +1395,8 @@ async function main(){
     assert.equal(await page.getByRole("button",{name:"Pause"}).count(), 0, "no Pause affordance on a dead runtime");
     assert.match(await page.getByTestId("runtime-status").innerText(), /stopped/i, "stopped status survives Play after death");
     console.log("fatal worker path reads as stopped: PASS");
+    await verifyProjectionDeformationInProduction(context);
+    await verifyBranchingInProduction(context);
     console.log("browser smoke: PASS");
   }finally{
     await browser.close();

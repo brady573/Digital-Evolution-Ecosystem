@@ -3,6 +3,7 @@ import type { LodTier, ResolvedPhenotype } from "@digital-evolution/phenotype";
 import { Container, Graphics, Sprite, Texture } from "pixi.js";
 import { renderPhenotypeGrid } from "@digital-evolution/phenotype";
 import { toTextureRequests } from "../pixi/adapter";
+import { hasRichArt } from "../pixi/phenotypeTextures";
 import { PhenotypeTextureCache } from "../pixi/textureCache";
 import type { Lens, TraitView } from "../worldViewTypes";
 import { organismColor, dormantChannel } from "../organismEncoding";
@@ -250,7 +251,7 @@ export function updateOrganismLayer(
         family: resolved.family,
         tier: input.tier,
         key: request.key,
-        pixels: input.tier !== "ecosystem" && resolved.family === "plated" ? "rich-rgba" : "legacy-grid",
+        pixels: input.tier !== "ecosystem" && hasRichArt(resolved) ? "rich-rgba" : "legacy-grid",
       });
     }
     display.sprite.visible = input.lens === "normal" && !!request && !!resolved;
