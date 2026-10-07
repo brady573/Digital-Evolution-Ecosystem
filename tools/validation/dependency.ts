@@ -399,6 +399,8 @@ function testFixtureArc() {
   const session = new UniverseSession();
   session.create(fixtureConfig(FIXTURE_SEED));
   settle(session, 60000);
+  // WIP-TEMP MAP (revert before merge): bulk trajectory mapping.
+  console.log("MAP-BK-WASH-PRE:" + JSON.stringify({ tick: session.snapshot().tick, roles: (session.snapshot().metrics as any).metabolic_roles?.counts }));
   session.applyIntervention(
     { schemaVersion: 1, kind: "nutrient_disturbance", mode: "drought_b" },
     "dependency validation",

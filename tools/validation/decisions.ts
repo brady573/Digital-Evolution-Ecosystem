@@ -192,8 +192,7 @@ function testVerticalSliceAndGate() {
   // formation lands @6777 rather than @7279. Counts/structure unchanged:
   // still the earliest formation.
   // WIP-TEMP MAP (revert before merge): bulk trajectory mapping.
-  console.log("MAP-BK-RES:" + JSON.stringify((session as any).decisionResolutions.map((r: any) => r.tick)));
-  console.log("MAP-BK-EVTS:" + JSON.stringify(session.analysis.observedEvents().map((e: any) => e.eventId)));
+  console.log("MAP-BK-FIXTURE:" + JSON.stringify({ src: (pending as any).sourceEventId, tick: (pending as any).createdTick }));
   assert.equal(
     pending.sourceEventId,
     "eco-seedbank-1-established-6777",
