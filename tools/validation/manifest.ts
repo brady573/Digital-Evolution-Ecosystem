@@ -380,6 +380,20 @@ export const UNITS: readonly ValidationUnit[] = [
       "Local space is finite identity-free opportunity: settlement and birth placement resolve deterministically by seniority with deflection and atomic discard, vacancy recolonizes, lineage never steers, and throughput stays viable at thousands scale.",
   },
   {
+    id: "bulk",
+    title: "Bulk / body-mass allocation (reserve vs cost)",
+    script: "test:bulk",
+    cls: "deterministic",
+    enforcement: "blocking",
+    mergeGate: true,
+    domains: withApparatus("contracts", "sim-core", "sim-runtime"),
+    needs: [],
+    parallelSafe: true,
+    baselineSeconds: 30,
+    claim:
+      "Bulk is inherited, mutates additively, persists, and exports truthfully; larger bodies hold a greater bounded energy reserve while paying exact movement and reproductive-threshold costs with unchanged metabolism; small and large morphs each win in opposite regimes with no universal optimum; twin replay and checkpoint continuation are exact.",
+  },
+  {
     id: "aftermath",
     title: "Aftermath state and comparison",
     script: "test:aftermath",
@@ -926,7 +940,7 @@ export const GROUPS: readonly ValidationGroup[] = [
   {
     id: "ci-sim-c",
     title: "Deterministic suites C (niche, ecology, runtime boundary)",
-    unitIds: ["niche", "ecology", "runtime-boundary", "spatial-occupancy"],
+    unitIds: ["niche", "ecology", "runtime-boundary", "spatial-occupancy", "bulk"],
     ci: true,
   },
   {
