@@ -392,6 +392,8 @@ function testNoArcOnBalanced() {
   });
   settle(session, 70000);
   const records = (session.analysis as any).records.filter((r: any) => r.kind === "niche");
+  // WIP-TEMP MAP (revert before merge): bulk trajectory mapping.
+  console.log("MAP-BK-NICHE-BAL:[" + JSON.stringify({ n: records.length, state: (session.analysis as any).niche.state, records: records.map((r: any) => ({ phase: r.phase, tick: r.tick })) }) + "]");
   assert.equal(records.length, 0, "balanced world shows no niche arc by 70k");
   assert.equal((session.analysis as any).niche.state, "absent", "arc never leaves absent");
   console.log("niche balanced negative: PASS");
