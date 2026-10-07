@@ -191,9 +191,12 @@ function testVerticalSliceAndGate() {
   // placement shift energy/trajectories slightly; the first durable
   // formation lands @6777 rather than @7279. Counts/structure unchanged:
   // still the earliest formation.
+  // Cell-shape re-pin (probe-measured, same seed): elongation shifts early
+  // foraging (reach + contact), so seedbank establishment lands @6024
+  // rather than @6777. Same structure: still the earliest durable formation.
   assert.equal(
     pending.sourceEventId,
-    "eco-seedbank-1-established-6777",
+    "eco-seedbank-1-established-6024",
     "first decision comes from the earliest durable formation (deterministic)",
   );
   // The policy saw the same context the evidence supports: contextSnapshot must
