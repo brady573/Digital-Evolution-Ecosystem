@@ -380,6 +380,20 @@ export const UNITS: readonly ValidationUnit[] = [
       "Local space is finite identity-free opportunity: settlement and birth placement resolve deterministically by seniority with deflection and atomic discard, vacancy recolonizes, lineage never steers, and throughput stays viable at thousands scale.",
   },
   {
+    id: "recovery-readiness",
+    title: "Recovery Readiness growth-adaptation allocation",
+    script: "test:recovery-readiness",
+    cls: "deterministic",
+    enforcement: "blocking",
+    mergeGate: true,
+    domains: withApparatus("contracts", "sim-core", "sim-runtime"),
+    needs: [],
+    parallelSafe: true,
+    baselineSeconds: 10,
+    claim:
+      "Recovery Readiness is inherited through the ordinary trait path and reported truthfully, expresses only through the existing readyAt reproduction boundary, leaves dormancy entry/wake, movement, feeding, Waste, and mortality untouched, separates slow-switcher/fast-grower from fast-switcher/slow-grower across scarcity and abundance regimes, has no universal optimum, and replays identically.",
+  },
+  {
     id: "aftermath",
     title: "Aftermath state and comparison",
     script: "test:aftermath",
@@ -847,6 +861,7 @@ export const GROUPS: readonly ValidationGroup[] = [
       "dependency-tradeoff",
       "dependency-washout",
       "spatial-occupancy",
+      "recovery-readiness",
     ],
     ci: false,
   },
@@ -926,7 +941,13 @@ export const GROUPS: readonly ValidationGroup[] = [
   {
     id: "ci-sim-c",
     title: "Deterministic suites C (niche, ecology, runtime boundary)",
-    unitIds: ["niche", "ecology", "runtime-boundary", "spatial-occupancy"],
+    unitIds: [
+      "niche",
+      "ecology",
+      "runtime-boundary",
+      "spatial-occupancy",
+      "recovery-readiness",
+    ],
     ci: true,
   },
   {
