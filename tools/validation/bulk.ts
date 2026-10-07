@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { Simulation, TRAIT_DEFINITIONS, BKN, SCBK, MCBK, RPBK } from "../../packages/sim-core/src/engine.ts";
+import { Simulation, TRAIT_DEFINITIONS, BKN, SCBK, MCBK, RPBK, createSimulationCheckpoint, restoreSimulationCheckpoint } from "../../packages/sim-core/src/engine.ts";
 
 // Bulk / body-mass plumbing (Task 2): inherited through the ordinary
 // deterministic trait path, present in export/metrics state. Mechanically
@@ -212,6 +212,42 @@ function testThresholdBoundary() {
   console.log("threshold boundary: PASS");
 }
 
+function testBkDeterminism() {
+  // Same engine/seed/config replays exactly, including bk trajectories.
+  const snapOf = (sim: any): string => JSON.stringify({
+    t: sim.t, pop: sim.o.length,
+    stock0: Array.from(sim.resources.stock[0] as Float32Array).map((v) => +v.toFixed(6)),
+    orgs: sim.o.map((o: any) => [o.id, +o.x.toFixed(4), +o.y.toFixed(4), +o.en.toFixed(6), +o.bk.toFixed(6)]),
+  });
+  const run = (): string => {
+    const sim = new Simulation(cfg) as any;
+    for (let t = 0; t < 3000; t++) sim.step();
+    return snapOf(sim);
+  };
+  assert.equal(run(), run(), "identical replay including bulk");
+  console.log("determinism: PASS");
+}
+
+function testBkCheckpoint() {
+  // Checkpoint with nonzero bk restores exactly and continues identically.
+  // Cross-version note: 0.24.0→0.25.0 trajectory identity is neither
+  // expected nor required — one extra mutation-stream draw per birth
+  // shifts post-first-birth sequences by design (precedent: every trait
+  // addition). Twin determinism within one engine is the pinned property.
+  const sim = new Simulation(cfg) as any;
+  for (const o of sim.o.slice(0, 5)) o.bk = 1.2;
+  for (let t = 0; t < 2000; t++) sim.step();
+  const snapOf = (s: any): string => JSON.stringify({
+    t: s.t,
+    orgs: s.o.map((o: any) => [o.id, +o.x.toFixed(4), +o.y.toFixed(4), +o.en.toFixed(6), +o.bk.toFixed(6)]),
+  });
+  const restored = restoreSimulationCheckpoint(JSON.parse(JSON.stringify(createSimulationCheckpoint(sim))));
+  assert.equal(snapOf(restored), snapOf(sim), "checkpoint restores bk state exactly");
+  for (let t = 0; t < 1000; t++) { sim.step(); restored.step(); }
+  assert.equal(snapOf(restored), snapOf(sim), "restored continuation identical");
+  console.log("checkpoint: PASS");
+}
+
 testTraitExists();
 testTraitsAudit();
 testInheritance();
@@ -223,4 +259,6 @@ testReproCostExact();
 testMeOrthogonal();
 testNoBonusLeak();
 testThresholdBoundary();
+testBkDeterminism();
+testBkCheckpoint();
 console.log("bulk validation: PASS (plumbing)");
