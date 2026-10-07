@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chromium, type Locator, type Page } from "playwright";
+import { chromium, type BrowserContext, type Locator, type Page } from "playwright";
 import { ENGINE_VERSION } from "../../packages/sim-core/src/index.ts";
 import { BARE_RGB } from "../../apps/explorer/src/landscape.ts";
 
@@ -26,6 +26,45 @@ function minimapCoversWorld(quadrantInk:readonly number[]):boolean{
 async function tick(page:Page){
   const text=await page.getByTestId("tick").innerText();
   return Number(text.replace(/[^0-9]/g,""));
+}
+
+async function verifyProjectionDeformationInProduction(context: BrowserContext) {
+  const keys: Record<"0" | "1", Record<"population" | "inspection", string>> = {
+    "0": { population: "", inspection: "" },
+    "1": { population: "", inspection: "" },
+  };
+  for (const projection of ["0", "1"] as const) {
+    const page = await context.newPage();
+    try {
+      await page.goto(`${baseUrl}?deeTest=1&deeProjection=${projection}`, { waitUntil: "domcontentloaded" });
+      await page.locator(".world-pixi-host canvas").waitFor({ timeout: 30_000 });
+      await page.getByRole("button", { name: "Landscape", exact: true }).click();
+      const readKey = async (tier: "population" | "inspection") => {
+        await page.waitForFunction((expectedTier) =>
+          (window as Window & { __DEE_PIXI_RASTER_EVIDENCE__?: Array<{ organismId: number; family: string; tier: string; key: string; pixels: string }> })
+            .__DEE_PIXI_RASTER_EVIDENCE__?.some((item) => item.organismId === 900000001 && item.family === "plated" && item.tier === expectedTier && item.pixels === "rich-rgba"),
+        tier, { timeout: 10_000 });
+        return page.evaluate((expectedTier) =>
+          (window as Window & { __DEE_PIXI_RASTER_EVIDENCE__?: Array<{ organismId: number; family: string; tier: string; key: string; pixels: string }> })
+            .__DEE_PIXI_RASTER_EVIDENCE__?.find((item) => item.organismId === 900000001 && item.family === "plated" && item.tier === expectedTier && item.pixels === "rich-rgba")?.key ?? "",
+        tier);
+      };
+      await page.getByRole("button", { name: "Zoom in" }).click();
+      await page.getByRole("button", { name: "Zoom in" }).click();
+      keys[projection].population = await readKey("population");
+      await page.getByRole("button", { name: "Zoom in" }).click();
+      await page.getByRole("button", { name: "Zoom in" }).click();
+      keys[projection].inspection = await readKey("inspection");
+    } finally {
+      await page.close();
+    }
+  }
+  for (const tier of ["population", "inspection"] as const) {
+    assert.ok(keys["0"][tier] && keys["1"][tier], `${tier} fixture exposes both rich production rasters`);
+    assert.notEqual(keys["0"][tier], keys["1"][tier],
+      `projection-only fixture variation changes the production ${tier} Plated texture`);
+  }
+  console.log(`Plated projection production keys: ${JSON.stringify(keys)}`);
 }
 
 /**
@@ -113,6 +152,7 @@ async function main(){
     assert.equal(await routePage.locator(".world-pixi-host canvas").count(),1,
       "default route has exactly one active Pixi canvas");
     await routePage.close();
+    await verifyProjectionDeformationInProduction(context);
     const pixiRoutePage=await context.newPage();
     await pixiRoutePage.goto(`${baseUrl}?deeTest=1`,{waitUntil:"domcontentloaded"});
     await pixiRoutePage.locator(".world-pixi-host canvas").waitFor({timeout:30_000});

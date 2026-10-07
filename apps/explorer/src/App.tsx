@@ -58,7 +58,10 @@ function deeTestPhenotypeFixtures():{organisms:RenderOrganism[];resolved:Map<num
   const plated=resolvePhenotype({speed:1.375,sensing:69.5,metabolism:0.339,reproduction:100,diet:0.675,habitat:0.675,byproductUse:0.675,dormancyResponse:1},{parentFamily:"plated",organismId:900000001,lineageId:900000001});
   const other=resolvePhenotype({speed:1.5,sensing:70,metabolism:0.2,reproduction:100,diet:0,habitat:0,byproductUse:0,dormancyResponse:1},{organismId:900000002,lineageId:900000002});
   if(plated.family!=="plated")throw new Error(`deeTest Plated fixture resolved to ${plated.family}`);
-  return {organisms,resolved:new Map([[900000001,plated],[900000002,other]])};
+  const projectionOverride=new URLSearchParams(window.location.search).get("deeProjection");
+  if(projectionOverride!==null&&projectionOverride!=="0"&&projectionOverride!=="1")throw new Error("deeTest projection fixture accepts only 0 or 1");
+  const platedFixture=projectionOverride===null?plated:{...plated,quantized:{...plated.quantized,projection:Number(projectionOverride)}};
+  return {organisms,resolved:new Map([[900000001,platedFixture],[900000002,other]])};
 }
 
 /** Display names for the lens set. The active-lens chip uses the same labels

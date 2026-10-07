@@ -540,7 +540,7 @@ export const UNITS: readonly ValidationUnit[] = [
     parallelSafe: true,
     baselineSeconds: 3,
     claim:
-      "Procedural Plated art materialization is deterministic, preserves accepted geometry and every structural mask, and colors only pixels owned by accepted structural regions using the finite palette roles.",
+      "Procedural Plated art is deterministic; projection-only deformation stays locally bounded and preserves the twelve plate sites and their depth/order; materialization preserves structural masks and colors only owned pixels using finite palette roles.",
   },
   {
     id: "pixi-spike",
