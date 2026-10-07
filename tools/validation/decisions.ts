@@ -192,10 +192,13 @@ function testVerticalSliceAndGate() {
   // formation lands @6777 rather than @7279. Counts/structure unchanged:
   // still the earliest formation.
   // WIP-TEMP MAP (revert before merge): bulk trajectory mapping.
-  console.log("MAP-BK-FIXTURE:" + JSON.stringify({ src: (pending as any).sourceEventId, tick: (pending as any).createdTick }));
+  // Bulk re-pin (0.25.0, CI-measured run 37651359073): reserve capacity
+  // delays the seedbank establishment from @6777 to @7530. Structure is
+  // unchanged — still the earliest durable formation, still seedbank;
+  // only its tick moves.
   assert.equal(
     pending.sourceEventId,
-    "eco-seedbank-1-established-6777",
+    "eco-seedbank-1-established-7530",
     "first decision comes from the earliest durable formation (deterministic)",
   );
   // The policy saw the same context the evidence supports: contextSnapshot must
@@ -344,6 +347,8 @@ function testForwardCompatPolicyVersion() {
   // 78312 falls inside it — observed during protection, never prompted
   // (the flow resolves only catalyst windows afterwards). Same claim:
   // protected observation stays durable evidence, not a prompt.
+  // WIP-TEMP MAP (revert before merge): bulk trajectory mapping.
+  console.log("MAP-BK-PROT:" + JSON.stringify({ res: (session as any).decisionResolutions.map((r: any) => r.tick), evts: session.analysis.observedEvents().map((e: any) => e.eventId) }));
   const protectedEra = session.analysis.observedEvents().find(
     event => event.eventId === "eco-crossfeeding-1-established-78312",
   );
