@@ -351,8 +351,10 @@ function traitsForAxes(mob: number, sen: number, met: number, spec: number) {
     "GPU upload mask has one bit per rich raster pixel");
   const changedPixels = richPopulationDescriptor.rgba!.slice();
   changedPixels[0] = changedPixels[0] === 0 ? 1 : changedPixels[0]! - 1;
-  assert.notEqual(richTextureKey(changedPixels, 64, "population", richPopulationDescriptor.key.split("/")[1]!, "plated-grammar-v1", plated.cosmeticSeed),
+  assert.notEqual(richTextureKey("plated", changedPixels, 64, "population", richPopulationDescriptor.key.split("/")[1]!, "plated-grammar-v1", plated.cosmeticSeed),
     richPopulationDescriptor.key, "one changed RGBA channel changes exact raster cache identity");
+  assert.ok(richPopulationDescriptor.key.startsWith("plated/"),
+    "the rich cache key names the family it actually renders");
   assert.equal(platedPopulation.liveDisplayCount, 1);
   const platedInspection = updateOrganismLayer(layer, { ...platedInput, tier: "inspection" }, makeRichTestTexture);
   const inspectionSprite = sprite;

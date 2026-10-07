@@ -16,5 +16,13 @@ export type {
 } from "./types";
 export { PROCEDURAL_ART_VERSION } from "./version";
 export { buildArtRecipe, resolveArtLod } from "./recipe";
+export { buildBranchingRecipe, type BranchingActivity } from "./families/branching";
 export { rasterizeStructuralArt, scaleRasterNearest } from "./raster";
-export { applyMaterialRoles, deriveMaterialRoleView, materializeRaster, MATERIAL_ROLE_IDS, PLATED_MATERIAL_PALETTE } from "./material";
+export {
+  applyMaterialRoles,
+  BRANCHING_MATERIAL_PALETTE,
+  deriveMaterialRoleView,
+  materializeRaster,
+  MATERIAL_ROLE_IDS,
+  PLATED_MATERIAL_PALETTE,
+} from "./material";
