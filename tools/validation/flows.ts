@@ -544,6 +544,25 @@ function testWasteCheckpoint() {
   console.log("waste checkpoint continuation: PASS");
 }
 
+function testEngineVersionGate() {
+  // Cell-shape slice: a new persistent inherited trait changes biological
+  // state semantics, so this is a new production engine line. The strict
+  // gate refuses older stamps and no backfill exists (an el field cannot
+  // be reconstructed for a saved organism).
+  assert.equal(ENGINE_VERSION, "0.25.0", "engine line is 0.25.0");
+  const session = new UniverseSession();
+  session.create(config(FIXTURE_SEED));
+  settle(session, 1000);
+  const stamped = JSON.parse(JSON.stringify(session.checkpoint()));
+  stamped.engineVersion = "0.24.0";
+  const restored = new UniverseSession();
+  assert.throws(() => restored.restore(stamped), "0.24.0 stamp refused by the 0.25.0 engine");
+  const ok = new UniverseSession();
+  ok.restore(JSON.parse(JSON.stringify(session.checkpoint())));
+  assert.equal(ok.snapshot().tick, session.snapshot().tick, "same-version round-trip works");
+  console.log("engine version gate: PASS");
+}
+
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const src = (rel: string): string => readFileSync(join(REPO, rel), "utf8");
 
@@ -942,6 +961,7 @@ testWasteAccounting();
 testCleanupExecution();
 testWasteDeterminism();
 testWasteCheckpoint();
+testEngineVersionGate();
 testIntervalDeterminism();
 testIntervalProduction();
 testIntervalNetMembers();
