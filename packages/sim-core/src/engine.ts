@@ -62,6 +62,11 @@ const SCI={disclaimer:'Sources inform experimental design and interpretation; th
 ]};
 const MC=(s:number):number=>.01*s*s+.004*s*s*s*s;
 const MV=(s:number):number=>2.7*Math.tanh(s/2.7);
+// Cell-shape structural axis (first slice): elongation grants sensing
+// reach at locomotion-drag cost. Coefficients are implementation
+// calibration; the reach-vs-drag MEANING is the accepted design.
+const EL_REACH=.5,EL_DRAG=1.0;
+const ELN=(o:Organism):number=>Q(o.el||0,0,1.5)/1.5;
 const PC=(m:number):number=>.8*m+.0055/m;
 const SC=(e:number):number=>.000035*Math.max(0,e-100)**2;
 const MATCH=(v:number,k:number):number=>k?v:-v;
@@ -376,7 +381,7 @@ class RS{
  scoreIndex(o:Organism,i:number):{score:number;substance:NutrientSubstance}{let best=-1,bestSub:NutrientSubstance=0,limit=this.enabledByproduct?3:2;for(let ki=0;ki<limit;ki++){let k=NUTRIENT_SUBSTANCES[ki]!;let amt=this.stock[k]![i]!,c=this.cap[k]![i]!;if(c<=1e-9||amt<=1e-9)continue;let score=amt*this.access(o,k);if(score>best){best=score;bestSub=k}}return{score:Math.max(0,best),substance:bestSub}}
  scoreAt(o:Organism,x:number,y:number):{score:number;substance:NutrientSubstance}{return this.scoreIndex(o,this.idx(x,y))}
  opportunity(o:Organism):number{let i=this.idx(o.x,o.y),best=0,limit=this.enabledByproduct?3:2;for(let ki=0;ki<limit;ki++){let k=NUTRIENT_SUBSTANCES[ki]!;let c=this.cap[k]![i]!,f=c>1e-9?this.stock[k]![i]!/c:0;best=Math.max(best,f*this.access(o,k))}return best}
- sense(o:Organism){let best={score:0,substance:0 as NutrientSubstance,angle:o.h},ds=[Q(o.se*.45,15,75),Q(o.se,25,150)];for(const d of ds)for(let j=0;j<8;j++){let a=o.h+j*Math.PI/4,x=(o.x+Math.cos(a)*d+600)%600,y=(o.y+Math.sin(a)*d+600)%600,q=this.scoreIndex(o,this.idx(x,y));if(q.score>best.score){best={...q,angle:a}}}let local=this.scoreIndex(o,this.idx(o.x,o.y));if(local.score>best.score*1.12)best={...local,angle:o.h};return best}
+ sense(o:Organism){let best={score:0,substance:0 as NutrientSubstance,angle:o.h},reach=1+EL_REACH*ELN(o),ds=[Q(o.se*.45*reach,15,75),Q(o.se*reach,25,150)];for(const d of ds)for(let j=0;j<8;j++){let a=o.h+j*Math.PI/4,x=(o.x+Math.cos(a)*d+600)%600,y=(o.y+Math.sin(a)*d+600)%600,q=this.scoreIndex(o,this.idx(x,y));if(q.score>best.score){best={...q,angle:a}}}let local=this.scoreIndex(o,this.idx(o.x,o.y));if(local.score>best.score*1.12)best={...local,angle:o.h};return best}
  deposit(kind:number,x:number,y:number,amount:number,cause:string|null=null,interval:Interval|null=null):number{if(amount<=0||kind<0||kind>=this.stock.length)return 0;let i=this.idx(x,y),st=this.stock[kind]!,cp=this.cap[kind]!,room=Math.max(0,cp[i]!-st[i]!),add=Math.min(room,amount);if(add<=0)return 0;st[i]!+=add;this.totalStock[kind]!+=add;this.biologicalProduction[kind]!+=add;if(interval&&kind===2)interval.produced_c+=add;return add}
  consume(o:Organism,interval:Interval):NutrientExecution|null{let i=this.idx(o.x,o.y),best=-1,sub:NutrientSubstance=0,limit=this.enabledByproduct?3:2;for(let ki=0;ki<limit;ki++){let k=NUTRIENT_SUBSTANCES[ki]!;let amt=this.stock[k]![i]!;if(amt<=1e-9)continue;let score=amt*this.access(o,k);if(score>best){best=score;sub=k}}if(best<=0)return null;return NUTRIENT_PROCESSES[sub].execute(this,o,interval)}
  diffuse(k:number):void{let st=this.stock[k]!,cp=this.cap[k]!,d=this.delta[k]!,right=this.right,down=this.down,mr=this.minCapRight[k]!,md=this.minCapDown[k]!,rate=this.diffusionRate[k]!;d.fill(0);for(let i=0;i<this.size;i++){let ci=cp[i]!>1e-9?st[i]!/cp[i]!:0,j=right[i]!,cj=cp[j]!>1e-9?st[j]!/cp[j]!:0,flux=rate*(ci-cj)*mr[i]!;d[i]!-=flux;d[j]!+=flux;j=down[i]!;cj=cp[j]!>1e-9?st[j]!/cp[j]!:0;flux=rate*(ci-cj)*md[i]!;d[i]!-=flux;d[j]!+=flux}let adj=0;for(let i=0;i<this.size;i++){let before=st[i]!,raw=before+d[i]!,next=Q(raw,0,cp[i]!);st[i]=next;adj+=next-before}this.totalStock[k]!+=adj;this.diffusionAdjustment[k]!+=adj}
@@ -640,7 +645,7 @@ class S{
    // <1 world unit against 10-unit cells, so this differs from eat-at-
    // destination only on cell-boundary crossings (legitimate downstream
    // spatial consequence, AC12).
-   let mv=MV(o.sp),ITX=(o.x+Math.cos(o.h)*mv+600)%600,ITY=(o.y+Math.sin(o.h)*mv+600)%600;o.en-=(PC(o.me)+MC(o.sp)+DC(o.di)+SC(o.en)+(this.c.enable_byproduct?BUC(o.bu||0):0))*this.c.press;
+   let mv=MV(o.sp),ITX=(o.x+Math.cos(o.h)*mv+600)%600,ITY=(o.y+Math.sin(o.h)*mv+600)%600;o.en-=(PC(o.me)+MC(o.sp)*(1+EL_DRAG*ELN(o))+DC(o.di)+SC(o.en)+(this.c.enable_byproduct?BUC(o.bu||0):0))*this.c.press;
    // Slice 1 settlement (§8): same-tick immediate commit against running
    // occupancy. Same-cell moves settle trivially; cross-cell intents go
    // through the seniority rule (loop is id-sorted). Waste/consumption below

@@ -61,4 +61,84 @@ function testTraitsAudit() {
 
 testTraitExists();
 testTraitsAudit();
+
+function testReachIsolation() {
+  // Elongated forms sense farther: probe distances scale with elongation.
+  // Direct white-box sense() call on a static field (no ticks, so regen
+  // cannot interfere): A-stock sits in exactly one cell at distance 150,
+  // inside the elongated far probe but beyond every compact probe.
+  const setup = (el: number): any => {
+    const sim = new Simulation(shapeConfig(7)) as any;
+    for (let k = 0; k < 3; k++) sim.resources.stock[k]!.fill(0);
+    sim.resources.deposit(0, 455, 300, 500, null, null);
+    const o = sim.o[0];
+    o.x = 300; o.y = 300; o.h = Math.PI / 2; o.se = 100;
+    o.di = -1.5; o.ha = 0; o.bu = 0; o.el = el;
+    return { sim, o };
+  };
+  const c = setup(0);
+  const compact = c.sim.resources.sense(c.o);
+  const run = setup(1.5);
+  const elongated = run.sim.resources.sense(run.o);
+  console.log(`reach: compact angle ${compact.angle.toFixed(2)} score ${compact.score.toFixed(3)} | elongated angle ${elongated.angle.toFixed(2)} score ${elongated.score.toFixed(3)}`);
+  assert.equal(compact.angle, Math.PI / 2, "compact sees nothing, holds heading");
+  assert.equal(compact.score, 0, "compact scores nothing at range");
+  const angDist = Math.abs(((elongated.angle % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI));
+  assert.ok(angDist < 0.3 || angDist > 2 * Math.PI - 0.3, "elongated orients to the distant stock");
+  assert.ok(elongated.score > 0, "elongated scores the distant stock");
+  console.log("reach isolation: PASS");
+}
+
+function testDragIsolation() {
+  // Elongation drags locomotion: matched clones, zeroed field (no eating),
+  // one tick — the extra energy cost equals exactly the drag factor.
+  const run = (el: number): number => {
+    const sim = new Simulation(shapeConfig(7)) as any;
+    for (let k = 0; k < 3; k++) sim.resources.stock[k]!.fill(0);
+    const o = sim.o[0];
+    o.sp = 2.0; o.el = el; o.en = 200; o.rp = 500; o.dr = 0;
+    const before = o.en;
+    sim.step();
+    return before - o.en;
+  };
+  const cost0 = run(0);
+  const costEl = run(1.5);
+  const mc = 0.01 * 2 * 2 + 0.004 * 2 * 2 * 2 * 2;
+  const ratio = (costEl - cost0) / (mc * (1.5 / 1.5) * 1.0875);
+  console.log(`drag: base ${cost0.toFixed(5)} vs elongated ${costEl.toFixed(5)} (ratio ${ratio.toFixed(3)})`);
+  assert.ok(ratio > 0.99 && ratio < 1.01, "drag factor exact at 1.0");
+  console.log("drag isolation: PASS");
+}
+
+function testGeometryUntouched() {
+  // Drag changes cost, never geometry: on a tick with no sensing evaluation
+  // for an organism ((1+id)%4 != 0), its displacement is byte-identical
+  // across elongation — same draws, same distances. (Sensing ticks may
+  // legitimately bend paths: farther sight is the reach effect itself.)
+  // Energies still diverge by drag cost.
+  const run = (el: number): any[] => {
+    const sim = new Simulation(shapeConfig(7)) as any;
+    for (let k = 0; k < 3; k++) sim.resources.stock[k]!.fill(0);
+    for (const o of sim.o) { o.sp = 2.0; o.el = el; o.en = 200; o.rp = 500; o.dr = 0; }
+    sim.step();
+    return sim.o.map((o: any) => [o.id, o.x, o.y, o.en]);
+  };
+  const a = run(0), b = run(1.5);
+  const key = (r: any[]): number => r[0];
+  const aMap = new Map(a.map((r) => [key(r), r]));
+  let compared = 0, diverged = 0;
+  for (const r of b) {
+    if ((1 + (r[0] as number)) % 4 === 0) continue;
+    compared++;
+    const s = aMap.get(r[0])!;
+    assert.deepEqual([r[1], r[2]], [s[1], s[2]], `organism ${r[0]} displacement identical`);
+    if (r[3] !== s[3]) diverged++;
+  }
+  assert.ok(compared > 0 && diverged > 0, `compared ${compared}, cost-diverged ${diverged}`);
+  console.log("geometry untouched: PASS");
+}
+
+testReachIsolation();
+testDragIsolation();
+testGeometryUntouched();
 console.log("cell-shape validation: PASS (plumbing)");
