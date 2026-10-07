@@ -391,7 +391,7 @@ export const UNITS: readonly ValidationUnit[] = [
     parallelSafe: true,
     baselineSeconds: 30,
     claim:
-      "Bulk is inherited, mutates additively, persists, and exports truthfully; larger bodies hold a greater bounded energy reserve while paying exact movement and reproductive-threshold costs with unchanged metabolism; small and large morphs each win in opposite regimes with no universal optimum; twin replay and checkpoint continuation are exact.",
+      "Bulk is inherited, mutates additively, persists, and exports truthfully; larger bodies hold a greater bounded energy reserve while paying an exact reproductive-threshold cost with unchanged metabolism and movement cost independent of bulk; small and large morphs each win in opposite regimes with no universal optimum; twin replay and checkpoint continuation are exact.",
   },
   {
     id: "aftermath",
