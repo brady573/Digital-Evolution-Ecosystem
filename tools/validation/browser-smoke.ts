@@ -210,8 +210,10 @@ async function main(){
     assert.equal(await routePage.locator(".world-pixi-host canvas").count(),1,
       "default route has exactly one active Pixi canvas");
     await routePage.close();
-    await verifyProjectionDeformationInProduction(context);
-    await verifyBranchingInProduction(context);
+    // Rich-art evidence runs at the END of the journey. Booting extra Pixi
+    // worlds earlier loads the runner and perturbs frame cadence during the
+    // timing-sensitive save/restore assertions, which is not this evidence's
+    // business to influence.
     const pixiRoutePage=await context.newPage();
     await pixiRoutePage.goto(`${baseUrl}?deeTest=1`,{waitUntil:"domcontentloaded"});
     await pixiRoutePage.locator(".world-pixi-host canvas").waitFor({timeout:30_000});
@@ -1393,6 +1395,8 @@ async function main(){
     assert.equal(await page.getByRole("button",{name:"Pause"}).count(), 0, "no Pause affordance on a dead runtime");
     assert.match(await page.getByTestId("runtime-status").innerText(), /stopped/i, "stopped status survives Play after death");
     console.log("fatal worker path reads as stopped: PASS");
+    await verifyProjectionDeformationInProduction(context);
+    await verifyBranchingInProduction(context);
     console.log("browser smoke: PASS");
   }finally{
     await browser.close();
