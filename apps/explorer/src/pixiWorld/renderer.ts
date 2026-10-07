@@ -8,7 +8,7 @@ import {
   destroyEnvironmentWorld,
   type EnvironmentMetrics,
 } from "./environment";
-import { updateOrganismLayer, destroyOrganismLayer, type OrganismMetrics } from "./organisms";
+import { updateOrganismLayer, destroyOrganismLayer, inspectOrganismRasters, type OrganismMetrics, type OrganismRasterEvidence } from "./organisms";
 import type { PixiWorldHandle } from "./boot";
 import { Container, Graphics } from "pixi.js";
 
@@ -16,6 +16,7 @@ export interface WorldRenderer {
   update(props: PixiWorldProps): void;
   destroy(): void;
   metrics(): { readonly environment: EnvironmentMetrics; readonly organisms: OrganismMetrics } | null;
+  rasterEvidence(): readonly OrganismRasterEvidence[];
 }
 
 export function createWorldRenderer(handle: PixiWorldHandle): WorldRenderer {
@@ -161,5 +162,6 @@ export function createWorldRenderer(handle: PixiWorldHandle): WorldRenderer {
     metrics: () => organismMetrics && environmentMetrics
       ? { environment: environmentMetrics, organisms: organismMetrics }
       : null,
+    rasterEvidence: () => inspectOrganismRasters(layers.organisms),
   };
 }

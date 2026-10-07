@@ -46,6 +46,12 @@ export function WorldPixi(_props: PixiWorldProps): ReactElement {
         };
         ownedRenderer = createWorldRenderer(next);
         rendererRef.current = ownedRenderer;
+        if (params.has("deeTest")) {
+          Object.defineProperty(window, "__DEE_PIXI_RASTER_EVIDENCE__", {
+            configurable: true,
+            get: () => ownedRenderer?.rasterEvidence() ?? [],
+          });
+        }
         ownedRenderer.update(latestPropsRef.current);
         setBackend(next.backend);
       }

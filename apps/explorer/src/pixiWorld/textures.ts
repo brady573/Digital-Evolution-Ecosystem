@@ -16,6 +16,7 @@ import { Texture } from "pixi.js";
 export interface PhenotypeBitmap {
   readonly bits: string;
   readonly size: number;
+  readonly rgba?: Uint8Array;
 }
 
 /** Mint one nearest-filtered GPU texture from grid bits. Caller retires it. */
@@ -34,6 +35,26 @@ export function textureFromBits(bits: string, size: number, fill = "#e6f2ea"): T
   const tex = Texture.from(cv);
   tex.source.scaleMode = "nearest";
   return tex;
+}
+
+/** Mint a nearest-filtered material RGBA texture from a rich Plated raster. */
+export function textureFromRgba(rgba: Uint8Array, size: number): Texture {
+  if (rgba.length !== size * size * 4) throw new Error(`RGBA mismatch: ${rgba.length} bytes for ${size}x${size}`);
+  const cv = document.createElement("canvas");
+  cv.width = size;
+  cv.height = size;
+  const ctx = cv.getContext("2d");
+  if (!ctx) throw new Error("2d context unavailable for texture upload");
+  const image = ctx.createImageData(size, size);
+  image.data.set(rgba);
+  ctx.putImageData(image, 0, 0);
+  const texture = Texture.from(cv);
+  texture.source.scaleMode = "nearest";
+  return texture;
+}
+
+export function textureFromPixels(bits: string, rgba: Uint8Array | undefined, size: number): Texture {
+  return rgba ? textureFromRgba(rgba, size) : textureFromBits(bits, size, "#ffffff");
 }
 
 /**

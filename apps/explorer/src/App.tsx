@@ -20,6 +20,7 @@ import { synchronizeAftermathPresentation, transitionAftermath } from "./experie
 import { AFTERMATH_OBSERVATION_TICKS, type AftermathLifecycleEvent, type AftermathPresentationState, type AftermathStage2Fixture, type DevelopmentEvidence } from "./experience/aftermath/model";
 import { projectLiveAftermath } from "./experience/aftermath/project";
 import { phenotypeCache } from "./phenotype";
+import { resolvePhenotype } from "@digital-evolution/phenotype";
 import { familyArtwork } from "./familyArt";
 import { TRAIT_DISPLAY_RANGES, type Lens, type PixiWorldProps, type ResourceView, type TraitView, type WorldCamera } from "./worldViewTypes";
 import { WorldPixi } from "./pixiWorld/WorldPixi";
@@ -47,6 +48,19 @@ function SelectedOrganismCard({ selected, onViewLineage, onClear }: {
 }
 
 type Surface="world"|"history"|"tree"|"experiments";
+type SaveDiagnostic={readonly stage:string;readonly at:number;readonly tick?:number;readonly detail?:string};
+
+function deeTestPhenotypeFixtures():{organisms:RenderOrganism[];resolved:Map<number,ReturnType<typeof resolvePhenotype>>}{
+  const organisms:RenderOrganism[]=[
+    {id:900000001 as OrganismId,parent:899999999 as OrganismId,generation:1,lineageId:900000001 as RenderOrganism["lineageId"],cladeId:900000001 as RenderOrganism["cladeId"],x:296,y:300,energy:90,activity:"active",speed:1.375,sensing:69.5,metabolism:0.339,reproduction:100,diet:0.675,habitat:0.675,byproductUse:0.675,dormancyResponse:1,tolerance:0,cleanup:0},
+    {id:900000002 as OrganismId,parent:899999999 as OrganismId,generation:1,lineageId:900000002 as RenderOrganism["lineageId"],cladeId:900000002 as RenderOrganism["cladeId"],x:304,y:300,energy:90,activity:"active",speed:1.5,sensing:70,metabolism:0.2,reproduction:100,diet:0,habitat:0,byproductUse:0,dormancyResponse:1,tolerance:0,cleanup:0},
+  ];
+  const plated=resolvePhenotype({speed:1.375,sensing:69.5,metabolism:0.339,reproduction:100,diet:0.675,habitat:0.675,byproductUse:0.675,dormancyResponse:1},{parentFamily:"plated",organismId:900000001,lineageId:900000001});
+  const other=resolvePhenotype({speed:1.5,sensing:70,metabolism:0.2,reproduction:100,diet:0,habitat:0,byproductUse:0,dormancyResponse:1},{organismId:900000002,lineageId:900000002});
+  if(plated.family!=="plated")throw new Error(`deeTest Plated fixture resolved to ${plated.family}`);
+  return {organisms,resolved:new Map([[900000001,plated],[900000002,other]])};
+}
+
 /** Display names for the lens set. The active-lens chip uses the same labels
  *  as the expanded buttons, so the two never disagree. */
 const LENS_LABELS:Record<Lens,string>={
@@ -263,6 +277,9 @@ export function App(){
   wasPlayingRef.current=wasPlaying;
   const [speed,setSpeed]=useState(100);
   const [status,setStatus]=useState("Creating universe…");
+  const statusRef=useRef(status);
+  statusRef.current=status;
+  const saveDiagnosticsRef=useRef<SaveDiagnostic[]>([]);
   const [settings,setSettings]=useState(DEFAULT_SETTINGS);
   // Recipe of the running universe (set on create/load). Settings staged in
   // the modal stay pending until Create universe applies them.
@@ -365,7 +382,12 @@ export function App(){
   // reporting F3a exists to close, so a failure status is pinned until the player
   // does something next (toggles playback, saves, loads, or creates a universe).
   const stickyStatusRef=useRef(false);
-  const say=(text:string,sticky=false)=>{stickyStatusRef.current=sticky;setStatus(text)};
+  const saveDiagnostic=(stage:string,tick?:number,detail?:string)=>{
+    if(typeof window==="undefined"||!new URLSearchParams(window.location.search).has("deeTest"))return;
+    saveDiagnosticsRef.current.push({stage,at:performance.now(),...(tick===undefined?{}:{tick}),...(detail===undefined?{}:{detail})});
+    if(saveDiagnosticsRef.current.length>40)saveDiagnosticsRef.current.shift();
+  };
+  const say=(text:string,sticky=false)=>{stickyStatusRef.current=sticky;statusRef.current=text;setStatus(text)};
   useEffect(()=>{
     // Read-model delivery only. The live frame is the per-advance heartbeat —
     // it emits on every advance — so one advance releases backpressure exactly
@@ -382,7 +404,11 @@ export function App(){
       if(!("metrics" in frame))return;
       const transition=knownWorldRef.current!==null&&view.worldId!==knownWorldRef.current;
       knownWorldRef.current=view.worldId;
-      if(!transition&&!stickyStatusRef.current)setStatus("");
+      if(!transition&&!stickyStatusRef.current){
+        if(statusRef.current.startsWith("Saved tick "))saveDiagnostic("confirmation-cleared");
+        statusRef.current="";
+        setStatus("");
+      }
       const interp=view.interpretation;
       // A pending decision is a visible pause: the player must choose before
       // time moves again (A13). Runtime enforces the same gate independently.
@@ -461,6 +487,8 @@ export function App(){
         worldId:presentation.identity?.worldId??null,
         environment:presentation.environment??null,
       }),
+      saveDiagnostics:()=>[...saveDiagnosticsRef.current],
+      currentStatus:()=>statusRef.current,
     };
     (window as any).__DEE_TEST__=hook;
     return()=>{delete (window as any).__DEE_TEST__};
@@ -545,15 +573,27 @@ export function App(){
   };
   const save=async()=>{
     say("Saving exact checkpoint…");
+    saveDiagnostic("checkpoint-request-start");
     try{
-      const checkpoint=await runtime.requestCheckpoint();
+      let checkpoint;
+      try{
+        checkpoint=await runtime.requestCheckpoint();
+      }catch(error){
+        saveDiagnostic("checkpoint-request-failed",undefined,error instanceof Error?error.message:String(error));
+        throw error;
+      }
+      saveDiagnostic("checkpoint-request-resolved",checkpoint.createdTick);
       // Presentation-side family anchors travel with the save record (never in
       // biology) so a restored world reconstructs identical families.
+      saveDiagnostic("repository-save-start",checkpoint.createdTick);
       const summary=await repository.save("current",checkpoint,phenotypeCache.snapshotAnchors());
       // F3a: reached only after the storage transaction committed. A failed
       // write leaves the previously confirmed save intact and says so.
+      saveDiagnostic("indexeddb-transaction-committed",summary.tick);
       say(`Saved tick ${summary.tick.toLocaleString()}`);
+      saveDiagnostic("confirmation-set",summary.tick);
     }catch(error){
+      saveDiagnostic("save-failed",undefined,error instanceof Error?error.message:String(error));
       say(storageFailureMessage(error),true);
     }
   };
@@ -640,12 +680,16 @@ export function App(){
   // gate: it arrives only with request-correlated replies now.
   const live=presentation.live,env=presentation.environment,interp=presentation.interpretation,ident=presentation.identity,catalog=presentation.catalog;
   if(!live||!env||!interp||!ident||!catalog)return <main className="loading">{status}</main>;
+  const normalOrganisms=presentation.organisms;
+  const normalResolved=phenotypeCache.resolveSnapshot({worldId:ident.worldId,organisms:normalOrganisms});
+  const deeTestMode=typeof window!=="undefined"&&new URLSearchParams(window.location.search).has("deeTest");
+  const fixture=deeTestMode?deeTestPhenotypeFixtures():null;
   const pixiWorldProps:PixiWorldProps={
     worldId:ident.worldId,
     tick:live.tick,
     environment:env,
-    organisms:presentation.organisms,
-    resolvedPhenotypes:phenotypeCache.resolveSnapshot({worldId:ident.worldId,organisms:presentation.organisms}),
+    organisms:fixture?[...normalOrganisms,...fixture.organisms]:normalOrganisms,
+    resolvedPhenotypes:fixture?new Map([...normalResolved,...fixture.resolved]):normalResolved,
     lens,resourceView,traitView,selectedId,camera:cam,zoom,
     onSelect:setSelectedId,onCamera:setCam,onView:reportView,
   };

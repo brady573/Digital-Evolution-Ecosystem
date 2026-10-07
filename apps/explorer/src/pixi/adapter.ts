@@ -11,7 +11,7 @@
 
 import type { RenderOrganism } from "@digital-evolution/contracts";
 import type { LodTier, ResolvedPhenotype } from "@digital-evolution/phenotype";
-import { describeTexture, type ActivityState } from "./phenotypeTextures";
+import { describeRenderableTexture, type ActivityState } from "./phenotypeTextures";
 
 export interface OrganismTextureRequest {
   readonly organismId: number;
@@ -38,7 +38,7 @@ export function toTextureRequests(
     const res = resolved.get(o.id);
     if (!res) continue;
     const activity: ActivityState = o.activity === "dormant" ? "dormant" : "active";
-    const desc = describeTexture(res, tier, activity);
+    const desc = describeRenderableTexture(res, tier, activity);
     out.push({ organismId: o.id, x: o.x, y: o.y, key: desc.key, tier, activity, size: desc.size });
   }
   return out;

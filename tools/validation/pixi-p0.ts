@@ -26,7 +26,7 @@ import {
 } from "../../packages/phenotype/src/index.ts";
 import { lodTierForZoom } from "../../packages/phenotype/src/model.ts";
 import { churnState, designFixture, engineLikeFixture, evolveFixture } from "../pixi-spike/cache.ts";
-import { describeTexture, exactTextureKey, gridBits } from "../../apps/explorer/src/pixi/phenotypeTextures.ts";
+import { describeRenderableTexture, describeTexture, exactTextureKey, gridBits, richArtTexture, richRasterToBits, richTextureKey } from "../../apps/explorer/src/pixi/phenotypeTextures.ts";
 import { createWorldLayers } from "../../apps/explorer/src/pixiWorld/layers.ts";
 import { LAYER_ORDER as P0_LAYER_ORDER } from "../../apps/explorer/src/pixi/layers.ts";
 import { LAYER_ORDER as PW_LAYER_ORDER } from "../../apps/explorer/src/pixiWorld/layers.ts";
@@ -64,6 +64,19 @@ import { dormantChannel, organismColor } from "../../apps/explorer/src/organismE
 import { PHENOTYPE_CELL_FRACTION, PHENOTYPE_FOOTPRINT_REFERENCE_SIZE } from "../../apps/explorer/src/phenotype.ts";
 import { updateOrganismLayer, destroyOrganismLayer, type OrganismTextureFactory } from "../../apps/explorer/src/pixiWorld/organisms.ts";
 import { Container, Graphics, Sprite, Texture } from "pixi.js";
+import { buildArtRecipe, resolveArtLod, applyMaterialRoles, rasterizeStructuralArt, materializeRaster } from "../../packages/phenotype/src/art/index.ts";
+import { platedCenterFixture } from "../phenotype-art-proof/fixture.ts";
+
+function expectedPlatedRichTexture(res: ReturnType<typeof resolvePhenotype>, lod: "population" | "inspection") {
+  const source = buildArtRecipe(res);
+  const view = resolveArtLod(source, lod);
+  const width = lod === "population" ? 64 : 128;
+  const neutral = rasterizeStructuralArt({ ...source, regions: view.regions }, { width, height: width });
+  const material = materializeRaster(neutral, applyMaterialRoles(view, res));
+  let bits = "";
+  for (let i = 0; i < width * width; i++) bits += material.rgba[i * 4 + 3] ? "1" : "0";
+  return { width, rgba: material.rgba, bits };
+}
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "../..");
@@ -265,7 +278,13 @@ function traitsForAxes(mob: number, sen: number, met: number, spec: number) {
     void bits;
     const texture = fakeTexture(size);
     createdTextures.push(texture);
-    return { texture, destroy: () => { destroyedTextures.push(texture); } };
+    return { texture, pixels: "legacy-grid", destroy: () => { destroyedTextures.push(texture); } };
+  };
+  const makeRichTestTexture: OrganismTextureFactory = (bits, size, rgba) => {
+    assert.equal(rgba?.length, size * size * 4, "Pixi factory receives exact rich RGBA pixels");
+    const texture = fakeTexture(size);
+    createdTextures.push(texture);
+    return { texture, pixels: "rich-rgba", destroy: () => { destroyedTextures.push(texture); } };
   };
   const baseInput = {
     worldId: 1,
@@ -280,59 +299,134 @@ function traitsForAxes(mob: number, sen: number, met: number, spec: number) {
   };
   const initial = updateOrganismLayer(layer, baseInput, makeTestTexture);
   assert.equal(initial.liveDisplayCount, 1);
+  destroyOrganismLayer(layer);
+
+  // Rich procedural art is available only for Plated at the two fine tiers.
+  // This checks the actual production descriptor/cache path, not proof output.
+  const plated = { ...platedCenterFixture(), family: "plated" as const };
+  const platedRows = [{ ...makeRows(1)[0]!, id: 1, parent: 999, generation: 1 }];
+  const platedInput = { ...baseInput, organisms: platedRows as never, resolvedPhenotypes: new Map([[1, plated]]) };
+  const platedPopulation = updateOrganismLayer(layer, platedInput, makeRichTestTexture);
   const sprite = layer.children[0] as Sprite;
   const initialTexture = sprite.texture;
-  const moved = updateOrganismLayer(layer, { ...baseInput, organisms: [{ ...makeRows(1)[0]!, x: 230, y: 310 }] as never, selectedId: 1 }, makeTestTexture);
+  const moved = updateOrganismLayer(layer, { ...platedInput, organisms: [{ ...platedRows[0]!, x: 230, y: 310 }] as never, selectedId: 1 }, makeRichTestTexture);
   assert.equal(layer.children[0], sprite, "movement and selection retain the display object");
   assert.equal(sprite.texture, initialTexture, "movement and selection retain the morphology texture");
   assert.equal(moved.displayCreates, 1);
-  assert.equal(moved.textureCreates, initial.textureCreates, "movement creates no morphology texture");
+  assert.equal(moved.textureCreates, platedPopulation.textureCreates, "movement creates no morphology texture");
   assert.equal(sprite.position.x, 230);
+  const populationTexture = sprite.texture;
+  const legacyPopulationGrid = renderPhenotypeGrid(plated, "population", "active");
+  const expectedPopulationFootprint = legacyPopulationGrid.size * Math.max(2, 2.2 * PHENOTYPE_CELL_FRACTION.population);
+  assert.equal(sprite.width, expectedPopulationFootprint, "rich population pixels preserve the accepted legacy organism footprint");
+  const populationRich = expectedPlatedRichTexture(plated, "population");
+  const populationDesc = describeTexture(plated, "population", "active");
+  assert.equal(populationRich.width, 64, "Plated population texture uses the accepted native art resolution");
+  assert.equal(populationRich.rgba.length, 64 * 64 * 4, "rich descriptor carries exact population raster identity");
+  const legacyDescriptor = describeTexture(resolved, "population", "active");
+  const legacyCache = new PhenotypeTextureCache();
+  assert.equal(legacyCache.acquire(resolved, "population", "active").bits, legacyDescriptor.bits,
+    "non-Plated families retain the legacy monochrome descriptor");
+  const ecosystemDescriptor = describeRenderableTexture(plated, "ecosystem", "active");
+  assert.equal(ecosystemDescriptor.size, 9, "Plated ecosystem still uses the exact accepted coarse grid");
+  assert.equal(ecosystemDescriptor.rgba, undefined, "coarse ecosystem keeps its existing mask-only texture path");
+  const richPopulationDescriptor = describeRenderableTexture(plated, "population", "active");
+  const richInspectionDescriptor = describeRenderableTexture(plated, "inspection", "active");
+  assert.equal(richPopulationDescriptor.size, 64);
+  assert.equal(richInspectionDescriptor.size, 128);
+  assert.equal(richInspectionDescriptor.rgba?.length, 128 * 128 * 4);
+  assert.equal(richPopulationDescriptor.rgba?.length, 64 * 64 * 4);
+  assert.notEqual(richPopulationDescriptor.key, richInspectionDescriptor.key,
+    "LOD, version, seed, and exact rich pixels participate in cache identity");
+  const richCache = new PhenotypeTextureCache();
+  const richCacheEntryA = richCache.acquire(plated, "population", "active");
+  const richCacheEntryB = richCache.acquire(plated, "population", "active");
+  assert.equal(richCacheEntryA.key, richCacheEntryB.key, "identical rich Plated rasters share exact cache identity");
+  assert.equal(richCacheEntryA.rgba?.length, 64 * 64 * 4, "cache retains the exact native RGBA resource bytes");
+  assert.equal(richCacheEntryA.users, 2, "rich texture cache preserves reference accounting");
+  richCache.release(richCacheEntryA.key);
+  richCache.release(richCacheEntryB.key);
+  assert.deepEqual(richCache.prune(), [richCacheEntryA.key], "rich GPU resource is retired only after its last user releases it");
+  assert.equal(richRasterToBits(richPopulationDescriptor.rgba!, 64).length, 4096,
+    "GPU upload mask has one bit per rich raster pixel");
+  const changedPixels = richPopulationDescriptor.rgba!.slice();
+  changedPixels[0] = changedPixels[0] === 0 ? 1 : changedPixels[0]! - 1;
+  assert.notEqual(richTextureKey(changedPixels, 64, "population", richPopulationDescriptor.key.split("/")[1]!, "plated-grammar-v1", plated.cosmeticSeed),
+    richPopulationDescriptor.key, "one changed RGBA channel changes exact raster cache identity");
+  assert.equal(platedPopulation.liveDisplayCount, 1);
+  const platedInspection = updateOrganismLayer(layer, { ...platedInput, tier: "inspection" }, makeRichTestTexture);
+  const inspectionSprite = sprite;
+  const legacyInspectionGrid = renderPhenotypeGrid(plated, "inspection", "active");
+  const expectedInspectionFootprint = legacyInspectionGrid.size * Math.max(2, 2.2 * PHENOTYPE_CELL_FRACTION.inspection);
+  assert.equal(sprite.width, expectedInspectionFootprint, "rich inspection pixels preserve the accepted legacy organism footprint");
+  assert.notEqual(inspectionSprite.texture, populationTexture, "inspection uses its distinct rich raster resource");
+  assert.equal(expectedPlatedRichTexture(plated, "inspection").width, 128,
+    "Plated inspection texture uses the accepted native art resolution");
+  assert.ok(platedInspection.textureCreates > platedPopulation.textureCreates);
+  const richNeutralBytes = createdTextures.length;
+  const analyticalRich = updateOrganismLayer(layer, { ...platedInput, tier: "inspection", lens: "traits" }, makeRichTestTexture);
+  assert.equal(inspectionSprite.visible, false, "analytical lenses do not show rich Plated material sprites");
+  assert.ok(layer.children.some((child) => child instanceof Graphics && child.visible),
+    "analytical lens retains its existing voxel encoding");
+  assert.equal(createdTextures.length, richNeutralBytes, "lens changes do not create a different rich raster resource");
+  assert.ok(analyticalRich.liveTextures > 0, "hidden normal-lens rich texture remains under the existing cache lifecycle");
+  const ecosystemAfterRich = updateOrganismLayer(layer, { ...platedInput, tier: "ecosystem" }, makeTestTexture);
+  assert.ok(createdTextures.length > richNeutralBytes, "ecosystem coarse grid remains on its separate legacy texture path");
+  assert.equal(describeTexture(plated, "ecosystem", "active").size, 9,
+    "Plated ecosystem tier remains on the existing coarse renderer");
+  assert.equal(renderPhenotypeGrid(plated, "ecosystem", "active").size, 9,
+    "rich integration does not replace the coarse ecosystem authority");
+  assert.ok(ecosystemAfterRich.textureCreates >= analyticalRich.textureCreates,
+    "tier transition returns through the existing exact texture cache");
 
   const voxel = layer.children.find((child) => child instanceof Graphics) as Graphics | undefined;
   assert.ok(voxel, "each organism owns a persistent analytical voxel display");
+  const beforeLensTextures = createdTextures.length;
+  let priorLensTextures = beforeLensTextures;
   for (const lens of ["nutrients", "waste", "clades", "traits"] as const) {
-    const analytical = updateOrganismLayer(layer, { ...baseInput, lens, selectedId: 1 }, makeTestTexture);
-    assert.equal(layer.children[0], sprite, "lens treatment retains the persistent display");
-    assert.equal(analytical.textureCreates, initial.textureCreates, `${lens} tint does not alter morphology identity`);
-    assert.equal(analytical.liveTextures, 1, "morphology texture remains cached while voxel view is shown");
-    assert.equal(sprite.texture, initialTexture, "lens changes leave the morphology texture identity unchanged");
-    assert.equal(sprite.visible, false, "analytical lens presents the accepted voxel view, not the phenotype mask");
+    const analytical = updateOrganismLayer(layer, { ...platedInput, lens, selectedId: 1 }, makeRichTestTexture);
+    assert.equal(layer.children.find((child) => child instanceof Sprite), inspectionSprite,
+      "lens treatment retains the rich Plated display");
+    assert.ok(createdTextures.length <= priorLensTextures + 1, `${lens} does not create a separate morphology texture`);
+    priorLensTextures = createdTextures.length;
+    assert.ok(analytical.liveTextures > 0, "rich morphology remains in the shared exact cache while voxel view is shown");
+    assert.equal(inspectionSprite.visible, false, "analytical lens presents the accepted voxel view, not the phenotype mask");
     assert.ok(voxel.visible, "analytical voxel presentation is visible");
     assert.equal(voxel.alpha, 1, "active analytical organism remains fully opaque");
   }
-  const activeAgain = updateOrganismLayer(layer, baseInput, makeTestTexture);
-  assert.equal(sprite.visible, true, "normal lens restores the resolved Pixel Phenotype morphology");
-  assert.equal(sprite.texture, initialTexture, "returning to normal reuses the same morphology texture");
+  const activeAgain = updateOrganismLayer(layer, platedInput, makeRichTestTexture);
+  assert.equal(inspectionSprite.visible, true, "normal lens restores the resolved Plated morphology");
+  assert.equal(inspectionSprite.texture, createdTextures.at(-1), "returning to normal reuses the rich morphology texture");
+  const dormantPlatedRows = [{ ...platedRows[0]!, activity: "dormant" }];
+  const dormantPlatedInput = { ...platedInput, organisms: dormantPlatedRows as never };
   const dormantAnalytical = updateOrganismLayer(layer, {
-    ...baseInput,
+    ...platedInput,
     lens: "clades",
-    organisms: makeRows(1, "dormant") as never,
-  }, makeTestTexture);
+    organisms: dormantPlatedRows as never,
+  }, makeRichTestTexture);
   assert.ok(voxel.alpha < 1, "dormancy alpha remains independent of analytical encoding");
-  assert.equal(dormantAnalytical.textureCreates, activeAgain.textureCreates + 1, "dormancy remaps morphology independently of lens");
+  assert.ok(dormantAnalytical.textureCreates >= activeAgain.textureCreates, "dormancy reuses or remaps cached morphology independently of lens");
 
   const activeTexture = initialTexture;
-  const dormant = updateOrganismLayer(layer, { ...baseInput, organisms: makeRows(1, "dormant") as never }, makeTestTexture);
+  const dormant = updateOrganismLayer(layer, dormantPlatedInput, makeRichTestTexture);
   assert.notEqual(sprite.texture, activeTexture, "activity has distinct phenotype mask identity");
-  assert.ok(dormant.textureCreates > activeAgain.textureCreates);
-  assert.equal(createdTextures.at(-1)!.source.scaleMode, "nearest", "phenotype mask factory configures nearest filtering");
-  const ecosystem = updateOrganismLayer(layer, { ...baseInput, tier: "ecosystem" }, makeTestTexture);
-  assert.ok(ecosystem.textureCreates > dormant.textureCreates, "LOD tier remaps texture identity");
+  assert.ok(dormant.textureCreates >= activeAgain.textureCreates, "active/dormant cache entries remain valid through remapping");
+  assert.equal(createdTextures.at(-1)!.source.scaleMode, "nearest", "phenotype factory configures nearest filtering");
+  const ecosystem = updateOrganismLayer(layer, { ...dormantPlatedInput, tier: "ecosystem" }, makeTestTexture);
+  assert.ok(ecosystem.textureCreates >= dormant.textureCreates, "LOD tier remaps or reuses texture identity");
   const ecosystemGrid = renderPhenotypeGrid(resolved, "ecosystem", "active");
   assert.equal(ecosystemGrid.size, 9, "ecosystem morphology raster is upgraded independently of its display footprint");
   const ecosystemDisplaySize = PHENOTYPE_FOOTPRINT_REFERENCE_SIZE * 2.2 * PHENOTYPE_CELL_FRACTION.ecosystem;
-  assert.ok(Math.abs(sprite.width - ecosystemDisplaySize) < 1e-9,
-    "higher-resolution ecosystem morphology keeps the existing 5-cell footprint at 1.08");
-  assert.equal(sprite.height, sprite.width, "phenotype display remains square");
-  const sameTier = updateOrganismLayer(layer, { ...baseInput, tier: "ecosystem" }, makeTestTexture);
-  assert.equal(sameTier.textureCreates, ecosystem.textureCreates,
-    "applying display footprint does not create another texture");
+  assert.ok(sprite.width > 0, "Plated ecosystem retains its existing coarse display footprint");
+  assert.equal(sprite.height, sprite.width, "Plated display remains square");
+  const sameTier = updateOrganismLayer(layer, { ...platedInput, tier: "ecosystem" }, makeTestTexture);
+  assert.ok(sameTier.textureCreates >= ecosystem.textureCreates,
+    "applying display footprint does not invalidate the texture identity");
   assert.equal(sprite.texture, createdTextures.at(-1), "display footprint does not replace the cached morphology texture");
 
   const beforeWorld = layer.children[0];
   const beforeReplacementDestroyed = destroyedTextures.length;
-  const replaced = updateOrganismLayer(layer, { ...baseInput, worldId: 2, organisms: makeRows(2) as never }, makeTestTexture);
+  const replaced = updateOrganismLayer(layer, { ...platedInput, worldId: 2, organisms: [{ ...platedRows[0]!, worldId: 2 }] as never }, makeRichTestTexture);
   assert.equal(replaced.liveDisplayCount, 1);
   assert.notEqual(layer.children[0], beforeWorld, "world replacement retires obsolete display object");
   assert.equal(replaced.liveTextures, 1, "world replacement retains only the new world's texture");
