@@ -261,4 +261,88 @@ testNoBonusLeak();
 testThresholdBoundary();
 testBkDeterminism();
 testBkCheckpoint();
+
+const regimeBase = {
+  cap: 360, pop: 30, div: 0.35, mr: 0.03, ms: 0.12, press: 1.0875,
+  resource_b_fraction: 0.5, cat: "global", st: null,
+  resource_model: "definition_driven_substances", resource_grid: 60,
+  enable_byproduct: true, enable_dormancy: true, study: true,
+};
+
+function lineageShare(sim: any, marked: Set<number>): number {
+  if (!sim.o.length) return 0;
+  let n = 0;
+  for (const o of sim.o) {
+    if (marked.has(o.id)) n++;
+    else if (o.parent != null && marked.has(o.parent)) { marked.add(o.id); n++; }
+  }
+  return n / sim.o.length;
+}
+
+// Mixed-morph competition with enrichment tracking: shares sampled every
+// 10k so dead intermediate generations never hide living descendants.
+function compete(cfg: any, markedBk: number, stops: number[], pulse = 0): { traj: number[]; pop: number } {
+  const sim = new Simulation(cfg) as any;
+  const marked = new Set<number>();
+  sim.o.forEach((o: any, i: number) => {
+    o.bk = i % 2 === 0 ? 1.2 : 0.05;
+    if ((i % 2 === 0 ? 1.2 : 0.05) === markedBk) marked.add(o.id);
+  });
+  const traj = [lineageShare(sim, marked)];
+  for (const stop of stops) {
+    while (sim.t < stop) {
+      sim.step();
+      if (pulse > 0 && sim.t % pulse === 0) sim.catalyst("global", "bulk validation");
+    }
+    traj.push(lineageShare(sim, marked));
+  }
+  return { traj, pop: sim.o.length };
+}
+
+const verdicts: Record<string, boolean> = {};
+
+function testSmallRegime() {
+  // Steady-rich world (start .75/prod 1.0/patch .25): reserves add little
+  // value while movement + reproductive costs compound every tick — the
+  // large lineage is fully excluded by 30k. Small wins stably.
+  // Probe-measured trajectory (seed 7): 0.500/0.133/0.002/0.000/0.000
+  // @0-40k. Bar pins the stable endpoint with daylight.
+  const { traj, pop } = compete(
+    { ...regimeBase, seed: 7, start: 0.75, prod: 1.0, patch: 0.25 },
+    1.2, [10000, 20000, 30000, 40000],
+  );
+  console.log(`small regime (steady-rich, mark-hi): ${traj.map((s) => s.toFixed(3)).join("/")} pop=${pop}`);
+  assert.ok(pop > 0, "world viable at assay end (no wipeout confound)");
+  assert.ok(traj[traj.length - 1]! < 0.1, "large-bulk lineage excluded by 40k in steady-rich");
+  verdicts.small = true;
+  console.log("small regime: PASS");
+}
+
+function testLargeRegime() {
+  // Feast-famine world (start .6/prod .5/patch .5, supported global-crash
+  // catalyst every 3000 ticks): famines outlast small reserves while large
+  // bodies ride through — the small lineage is fully excluded by 10k.
+  // Probe-measured trajectory (seed 7): 0.500/0.000/0.000/0.000/0.000
+  // @0-40k. Bar pins the stable endpoint with daylight.
+  const { traj, pop } = compete(
+    { ...regimeBase, seed: 7, start: 0.6, prod: 0.5, patch: 0.5 },
+    0.05, [10000, 20000, 30000, 40000], 3000,
+  );
+  console.log(`large regime (feast-famine, mark-lo): ${traj.map((s) => s.toFixed(3)).join("/")} pop=${pop}`);
+  assert.ok(pop > 0, "world viable at assay end (no wipeout confound)");
+  assert.ok(traj[traj.length - 1]! < 0.05, "small-bulk lineage excluded by 40k in feast-famine");
+  verdicts.large = true;
+  console.log("large regime: PASS");
+}
+
+function testNoUniversalOptimum() {
+  // Evidence: the two regime verdicts jointly — each morph is excluded
+  // somewhere, so neither is a universal directional optimum.
+  assert.ok(verdicts.small && verdicts.large, "both ends won a regime (see trajectories above)");
+  console.log("no universal optimum: PASS");
+}
+
+testSmallRegime();
+testLargeRegime();
+testNoUniversalOptimum();
 console.log("bulk validation: PASS (plumbing)");
