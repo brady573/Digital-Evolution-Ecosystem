@@ -45,7 +45,18 @@ export interface RichArtTextureDescriptor {
 const richRasterCache = new Map<string, RichArtTextureDescriptor>();
 const RICH_RASTER_CACHE_LIMIT = 256;
 
+/** Families with an authored procedural grammar that can back a rich raster. */
+export const RICH_ART_FAMILIES: ReadonlySet<string> = new Set(["plated", "branching"]);
+
+/**
+ * Presentation/cache identity for one rich raster.
+ *
+ * The key names the actual family. A literal `plated/` prefix would misreport
+ * every Branching texture and would only be kept apart by the structural
+ * version, which is a weaker and more accidental separation than intended.
+ */
 export function richTextureKey(
+  family: string,
   rgba: Uint8Array,
   size: number,
   tier: "population" | "inspection",
@@ -53,14 +64,12 @@ export function richTextureKey(
   structuralVersion: string,
   seed: number,
 ): string {
+  if (!RICH_ART_FAMILIES.has(family)) throw new Error(`Rich texture key requested for unsupported family ${family}`);
   if (rgba.length !== size * size * 4) throw new Error("Rich phenotype raster dimensions do not match its RGBA bytes");
   let hash = 2166136261;
   for (const byte of rgba) hash = Math.imul(hash ^ byte, 16777619) >>> 0;
-  return `plated/${rendererVersion}/${structuralVersion}/${tier}/${size}/${(seed >>> 0).toString(16)}/${hash.toString(16).padStart(8, "0")}`;
+  return `${family}/${rendererVersion}/${structuralVersion}/${tier}/${size}/${(seed >>> 0).toString(16)}/${hash.toString(16).padStart(8, "0")}`;
 }
-
-/** Families with an authored procedural grammar that can back a rich raster. */
-export const RICH_ART_FAMILIES: ReadonlySet<string> = new Set(["plated", "branching"]);
 
 export function hasRichArt(res: ResolvedPhenotype): boolean {
   return RICH_ART_FAMILIES.has(res.family);
@@ -95,7 +104,7 @@ export function richArtTexture(
   const material = applyMaterialRoles(view, res);
   const rendered = materializeRaster(neutral, material);
   const rgba = rendered.rgba;
-  const key = richTextureKey(rgba, size, tier, material.rendererVersion, source.structuralVersion, material.cosmeticSeed);
+  const key = richTextureKey(res.family, rgba, size, tier, material.rendererVersion, source.structuralVersion, material.cosmeticSeed);
   const descriptor = { key, tier, size, rgba, bits: richRasterToBits(rgba, size) };
   richRasterCache.set(inputKey, descriptor);
   if (richRasterCache.size > RICH_RASTER_CACHE_LIMIT) {

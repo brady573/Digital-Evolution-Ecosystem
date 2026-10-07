@@ -400,6 +400,15 @@ async function testBranchingTraitContinuityAndDeterminism(): Promise<void> {
   assert.ok(offshootCount({ byproductUse: 1.45, diet: 1.45, habitat: 1.45 })
     >= offshootCount({ byproductUse: 0.75, diet: 0.75, habitat: 0.75 }),
     "specialization never reduces secondary branching below the low-specialization count");
+  // The budget is indexed by offshoot-local count, so a fully specialized
+  // colony reaches the authored hierarchy and dormancy still withdraws a real
+  // number of branches rather than none.
+  assert.equal(offshootCount({ byproductUse: 1.45, diet: 1.45, habitat: 1.45 }), 8,
+    "the maximum specialization budget expresses all eight authored secondary offshoots");
+  const dormantSecondaries = art.buildBranchingRecipe(branchingPhenotype(), "dormant").regions
+    .filter((region) => region.detail === "secondary").length;
+  assert.equal(dormantSecondaries, 4,
+    "the dormant budget withdraws a bounded, nonzero set of secondary branches");
 
   const source = art.buildArtRecipe(base);
   const population = art.resolveArtLod(source, "population");
@@ -417,6 +426,14 @@ async function testBranchingTraitContinuityAndDeterminism(): Promise<void> {
   }
   assert.notDeepEqual(palette, art.PLATED_MATERIAL_PALETTE,
     "branching uses its own material identity rather than the plated palette");
+  // Accepted family direction: cool aquatic body mass with warm terminal
+  // accents. A brown/ochre palette previously pulled the family back toward
+  // the rejected plant read.
+  const mean = (color: { r: number; g: number; b: number }) => (color.r + color.g + color.b) / 3;
+  assert.ok(palette.light.b > palette.light.r,
+    "branching body mass reads cool aqua, not brown");
+  assert.ok(palette.core.r > palette.core.b,
+    "branching terminal nodules read warm coral against the cool body");
 }
 
 async function testPackedDirectionalShellMound(): Promise<void> {

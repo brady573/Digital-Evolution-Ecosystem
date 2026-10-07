@@ -110,16 +110,18 @@ function placeSite(
   parent: Placement | null,
   res: ResolvedPhenotype,
   activity: BranchingActivity,
-  slot: number,
+  seedSlot: number,
+  offshootIndex: number,
   offshootBudget: number,
 ): Placement | null {
   const seed = res.cosmeticSeed >>> 0;
   const dormant = activity === "dormant";
 
-  if (site.detail === "secondary") {
-    // Bounded budget: specialization adds offshoots, dormancy removes them.
-    if (slot > offshootBudget) return null;
-  }
+  // `offshootIndex` counts only secondary sites. A shared placement counter
+  // would let the trunk and primary limbs consume the budget before any
+  // offshoot was considered, so the expressed count would never match the
+  // budget.
+  if (site.detail === "secondary" && offshootIndex >= offshootBudget) return null;
 
   const specialization = res.quantized.asymmetry;
   const directional = res.dietSigned * 0.05 + res.habitatSigned * 0.02;
@@ -139,10 +141,10 @@ function placeSite(
     const length = 0.72 * (0.94 + res.quantized.bulk * 0.08) * compaction;
     return {
       center: {
-        x: clamp(0.5 + directional + jitter(seed, slot, 0, 0.008), 0.28, 0.72),
+        x: clamp(0.5 + directional + jitter(seed, seedSlot, 0, 0.008), 0.28, 0.72),
         y: clamp(0.94 - length / 2, 0.2, 0.96),
       },
-      axisRadians: -Math.PI / 2 + jitter(seed, slot, 2, 0.05),
+      axisRadians: -Math.PI / 2 + jitter(seed, seedSlot, 2, 0.05),
       length,
       width: 0.1 * (0.95 + res.quantized.density * 0.1) * compaction,
       taper: clamp(0.16 + specialization * 0.04, 0.08, 0.24),
@@ -158,13 +160,17 @@ function placeSite(
   const attachY = parent.center.y + Math.sin(parentDirection) * offset;
 
   const length = parent.length * site.lengthRatio * (dormant ? 0.62 : 1) * reach;
+  const rawX = attachX + Math.cos(direction) * length / 2;
+  // Mobility damps horizontal displacement directly. Scaling only the branch
+  // angle saturated at the frame clamp, so the fastest phenotypes were as wide
+  // as the slowest and the trait had no visible effect.
   const center: NormalizedPoint = {
-    x: clamp(attachX + Math.cos(direction) * length / 2, 0.04, 0.96),
+    x: clamp(0.5 + (rawX - 0.5) * sprawlSuppression, 0.04, 0.96),
     y: clamp(attachY + Math.sin(direction) * length / 2, 0.04, 0.96),
   };
   return {
     center,
-    axisRadians: direction + jitter(seed, slot, 2, 0.05),
+    axisRadians: direction + jitter(seed, seedSlot, 2, 0.05),
     length,
     width: parent.width * site.widthRatio * (dormant ? 0.7 : 1),
     taper: clamp(parent.taper + 0.03 + specialization * 0.03, 0.12, 0.32),
@@ -186,11 +192,13 @@ function regionsFor(
       4 + Math.round(res.quantized.secondary * 3) + Math.round(res.quantized.asymmetry * 2)));
   const regions: ArtRegion[] = [];
   const placements = new Map<string, Placement>();
-  let slot = 0;
+  let seedSlot = 0;
+  let offshootIndex = 0;
 
   const emit = (site: BranchSite, parent: Placement | null) => {
-    const placement = placeSite(site, parent, res, activity, slot, offshootBudget);
-    slot++;
+    const placement = placeSite(site, parent, res, activity, seedSlot, offshootIndex, offshootBudget);
+    seedSlot++;
+    if (site.detail === "secondary") offshootIndex++;
     if (!placement) return null;
     placements.set(site.id, placement);
     regions.push({
