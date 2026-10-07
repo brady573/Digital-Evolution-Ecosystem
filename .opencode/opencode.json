@@ -1,4 +1,11 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "default_agent": "project-manager"
+  "default_agent": "architect",
+  "permissions": [
+    {
+      "action": "edit",
+      "resource": "legacy/prototype/**",
+      "effect": "deny"
+    }
+  ]
 }

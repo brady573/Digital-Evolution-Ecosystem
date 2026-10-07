@@ -6,14 +6,15 @@ description: Evidence-first decision gating for planning and design. Use before 
 # Socratic Design (DEE adaptation)
 
 Source: https://github.com/YoelCieno/settings-opencode (`skills/socratic-design/SKILL.md`).
-Adapted for this repo: offline-first, lane/Owner workflow, no network MCPs.
+Adapted for this repo: offline-first, Owner-gated workflow, no network MCPs.
 
 ## When to Activate
 
 Before any planning, design, architecture, or refactor work when critical
 decisions are not yet closed. Resolve those decisions with evidence before
-producing a plan or implementation. Complements the project-manager lane
-dispatch: accepted design comes from the task text, never inferred from code.
+producing a plan or implementation. Complements the specialist dispatch that
+`architect` performs: accepted design comes from the task text, never inferred
+from code.
 
 ## Non-Negotiables
 
@@ -21,7 +22,7 @@ dispatch: accepted design comes from the task text, never inferred from code.
 - Each turn includes: Question, Recommended answer, Why, If-opposite path change.
 - Inspect the repo first when the repo can answer (`read`/`grep`/`glob`).
 - No plan or implementation before critical decisions are closed.
-- Web research only with Owner approval (project-manager rule). Never automatic.
+- Web research only with Owner approval. Never automatic.
 
 ## Order (strict)
 
@@ -34,7 +35,7 @@ dispatch: accepted design comes from the task text, never inferred from code.
 7. Tradeoffs
 8. Decision
 9. Validation (narrowest check from `tools/validation/manifest.ts`)
-10. Exec gate (who implements: `digital-evolution` via bounded handoff)
+10. Exec gate (who implements: `architect`, delegating bounded read-only analysis to specialists when useful)
 
 ## Question Gate
 

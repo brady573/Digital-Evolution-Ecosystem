@@ -38,6 +38,19 @@ Before implementing an issue-based handoff, read the current issue thread, inclu
 
 If repository prose conflicts with an explicitly supplied newer accepted design handoff, stop and surface the conflict rather than silently choosing one.
 
+Source-of-truth precedence
+
+Use this only when authority or intent actually needs resolving; it is not a step to perform on every task. When sources appear to conflict, weigh them in this order:
+
+1. Owner direction. Explicit direction in the current task controls the current product decision when it is clear.
+2. Accepted design. An accepted design, handoff, or explicitly supplied design reference defines required behavior, simulation meaning, protected invariants, and acceptance criteria within its scope.
+3. Repository instructions. The applicable AGENTS.md and current repository policy govern engineering workflow, architecture constraints, validation, and repository practices.
+4. Current implementation. Source, tests, issues, pull requests, and CI describe what currently exists; they do not silently redefine intended product behavior.
+5. Validation evidence. Evidence supports only the claim actually exercised, and never creates a new product requirement.
+6. Historical material. Prototypes, superseded plans, and prior behavior are provenance unless a current contract explicitly preserves them as authority.
+
+Classify the conflict first, as product or design intent, implementation fact, validation evidence, or historical provenance. Do not infer intended product behavior from current code or from a historical implementation, and never resolve a product-design conflict by guessing from code. Surface a genuinely unresolved product or design decision instead of inventing one.
+
 What this repository is
 
 Digital Evolution Ecosystem implements the Living Evolution Explorer, an offline-first evolutionary simulation and investigation product.
@@ -230,6 +243,8 @@ Presentation systems and "packages/phenotype" may derive visual state from resol
 
 They must not become biological authority.
 
+Story, explanation, salience, visualization, and the rest of the presentation layer may explain or expose observed simulation state, but must never rewrite biological or simulation-authoritative state to produce a desired presentation.
+
 Rendering constraints must not introduce population caps, alter abundance, rewrite ecology, or change simulation behavior merely to make presentation easier or faster.
 
 Reproducibility
@@ -266,6 +281,8 @@ A checkpoint exists to preserve supported resumable state.
 
 An evidence export exists to support inspection, analysis, provenance, or scientific review.
 
+A contract that crosses a package or system boundary changes as a whole: update every materially affected producer, consumer, shared type, serialization and round-trip path, and the validation that protects it.
+
 Working conventions
 
 1. Inspect before abstracting. Read the implementation that owns a behavior before introducing a new abstraction.
@@ -295,6 +312,10 @@ Do not edit:
 legacy/prototype/
 
 These files are historical regression evidence.
+
+This is enforced by the runtime, not only by this prose: ".opencode/opencode.json" adds a project-level edit deny for "legacy/prototype/**", so the refusal happens before anything is written.
+
+That file also names the default OpenCode agent, but no agent definition is versioned here; the agent team is a local prerequisite described in ".opencode/ADOPTED-SETTINGS.md". A session that cannot see that agent falls back to a different one silently, so confirm it with "opencode debug agents" rather than assuming it.
 
 If a task appears to require modifying them, stop and surface the conflict.
 

@@ -57,10 +57,10 @@ back. State facts, cite evidence, present tradeoffs.
 
 1. Summarize the agreed path in 2–3 sentences.
 2. Wait — do NOT auto-implement or auto-plan.
-3. Say: "Ready when you are. Say 'go ahead' and I'll [produce plan | write handoff | implement]."
-4. On "go ahead": implementation goes through the repo workflow
-   (project-manager handoff → `digital-evolution`), not a direct edit from
-   a discussion. Always end with a `Source/s:` section.
+3. Say: "Ready when you are. Say 'go ahead' and I'll [produce plan | implement]."
+4. On "go ahead": `architect` implements, delegating bounded read-only
+   analysis to specialists when that materially reduces uncertainty. Always
+   end with a `Source/s:` section.
 
 ## What NOT To Do
 
