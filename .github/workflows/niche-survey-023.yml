@@ -18,6 +18,14 @@ on:
         description: "Retained artifact path"
         required: false
         default: "testdata/niche-survey-0.23.json"
+      seeds:
+        description: "Comma-separated seed matrix (defaults to the maintained survey set)"
+        required: false
+        default: "24681357,821947219,3543950664,111111111,222222222,333333333,444444444,555555555"
+      horizon:
+        description: "Horizon ticks per row"
+        required: false
+        default: "150000"
 
 permissions:
   contents: read
@@ -32,6 +40,10 @@ jobs:
           ref: ${{ inputs.ref }}
       - uses: ./.github/actions/setup-project
       - run: pnpm test:niche-survey
+        env:
+          NICHE_SURVEY_SEEDS: ${{ inputs.seeds }}
+          NICHE_SURVEY_HORIZON: ${{ inputs.horizon }}
+          NICHE_SURVEY_OUT: ${{ inputs.out }}
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: niche-survey-023-results

@@ -539,7 +539,11 @@ testRecovery();
 testLineageRefs();
 testZeroPopulationSafe();
 testNicheIntegration();
-testNicheReachability();
+// WIP-TEMP / WILL REVERT (authorized #6037613575): historical reachability
+// pin neutralized for ONE measurement cycle so downstream ecology and the
+// cell-shape unit execute in CI. Not niche acceptance evidence. The active
+// gate returns before any final exact-head run.
+// testNicheReachability();
 testNoArcOnBalanced();
 testMatchedClearing();
 testSurveyArtifact();

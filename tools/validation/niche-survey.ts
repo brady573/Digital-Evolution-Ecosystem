@@ -18,9 +18,10 @@ import { ENGINE_VERSION } from "../../packages/sim-core/src/index.ts";
  * in tools/validation/niche.ts checks the retained artifact in.
  */
 
-const OUT = "testdata/niche-survey-0.24.json";
-const SEEDS = [24681357, 821947219, 3543950664, 111111111, 222222222, 333333333, 444444444, 555555555];
-const HORIZON = 150000;
+const OUT = process.env.NICHE_SURVEY_OUT ?? "testdata/niche-survey-0.24.json";
+const SEEDS = (process.env.NICHE_SURVEY_SEEDS ?? "24681357,821947219,3543950664,111111111,222222222,333333333,444444444,555555555")
+  .split(",").map((s) => Number(s.trim())).filter((n) => Number.isFinite(n) && n >= 0);
+const HORIZON = Number(process.env.NICHE_SURVEY_HORIZON ?? 150000);
 const ASSAY_TICKS = 15000;
 
 function config(name: string, seed: number): EngineConfig {
