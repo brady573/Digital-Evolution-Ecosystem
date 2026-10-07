@@ -5,6 +5,6 @@ export const APP_VERSION = "0.31.0";
 // unmerged experimental numbers. Checkpoint schemas unchanged: occupancy
 // is derived per step (never persisted); interval facts are additive keys
 // tolerated as absent by old decodes.
-export const ENGINE_VERSION = "0.24.0";
+export const ENGINE_VERSION = "0.25.0";
 export const EXPORT_FORMAT_VERSION = "0.31";
 export const CHECKPOINT_SCHEMA_VERSION = "0.1";
