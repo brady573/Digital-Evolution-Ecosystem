@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { Simulation, TRAIT_DEFINITIONS } from "../../packages/sim-core/src/engine.ts";
+import { Simulation, TRAIT_DEFINITIONS, BKN, SCBK, MCBK, RPBK } from "../../packages/sim-core/src/engine.ts";
 
 // Bulk / body-mass plumbing (Task 2): inherited through the ordinary
 // deterministic trait path, present in export/metrics state. Mechanically
@@ -87,9 +87,140 @@ function testExportTruth() {
   console.log("export truth: PASS");
 }
 
+function testReserveIsolation() {
+  // bk=0 keeps the legacy storage curve exactly; bk>0 raises the
+  // penalty-free threshold (bounded reserve), never the rate.
+  assert.equal(SCBK(150, 0), 0.000035 * 50 ** 2, "bk=0 storage cost is legacy SC");
+  assert.equal(SCBK(150, 1.5), 0, "full bulk holds 150 penalty-free (threshold 220)");
+  assert.equal(SCBK(250, 1.5), 0.000035 * 30 ** 2, "penalty above the raised threshold only");
+  // Starvation buffer, same metabolism: the large morph outlasts the small.
+  const starve = (bk: number, en: number): number => {
+    const sim = new Simulation({ ...cfg, pop: 1 }) as any;
+    const o = sim.o[0];
+    o.bk = bk; o.en = en; o.sp = 1.0; o.me = 0.16; o.di = 0; o.bu = 0;
+    let t = 0;
+    while (sim.o.length && t < 30000) {
+      for (let k = 0; k < 3; k++) sim.resources.stock[k]!.fill(0);
+      sim.step();
+      t++;
+    }
+    return t;
+  };
+  // Equal store: bulk never hurts survival — the reserve offsets its own drag.
+  assert.ok(starve(1.5, 200) >= starve(0, 200), "equal store: large survives at least as long");
+  // Full penalty-free capacity: small holds ~100, large ~220 — the bounded
+  // reserve is real survival time, not just a number.
+  const small = starve(0, 100), large = starve(1.5, 220);
+  assert.ok(large > small * 1.3, `full reserve: large outlasts small (${large} vs ${small} ticks)`);
+  // Dormant maintenance shares the reserve: same burden, less storage tax.
+  const dormantOneTick = (bk: number): number => {
+    const sim = new Simulation({ ...cfg, pop: 1 }) as any;
+    for (let k = 0; k < 3; k++) sim.resources.stock[k]!.fill(0);
+    const o = sim.o[0];
+    o.bk = bk; o.en = 200; o.me = 0.16; o.sp = 1.0; o.activity = "dormant";
+    const before = o.en;
+    sim.step();
+    return before - sim.o[0].en;
+  };
+  assert.ok(dormantOneTick(1.5) < dormantOneTick(0), "dormant large pays less storage tax");
+  console.log("reserve isolation: PASS");
+}
+
+function testMoveCostExact() {
+  // Movement debit scales by exactly (1+BK_MOVE*BKN), nothing else.
+  assert.equal(MCBK(2, 0) / (0.01 * 4 + 0.004 * 16), 1, "bk=0 movement is legacy MC");
+  assert.equal(MCBK(2, 1.2) / (0.01 * 4 + 0.004 * 16), 1 + 0.35 * 0.8, "exact drag ratio");
+  const oneTick = (bk: number): number => {
+    const sim = new Simulation({ ...cfg, pop: 1 }) as any;
+    for (let k = 0; k < 3; k++) sim.resources.stock[k]!.fill(0);
+    const o = sim.o[0];
+    o.bk = bk; o.en = 60; o.sp = 2.0; o.me = 0.16; o.di = 0; o.bu = 0; o.h = 0;
+    const before = o.en;
+    sim.step();
+    return before - sim.o[0].en;
+  };
+  const d0 = oneTick(0), d1 = oneTick(1.2);
+  const mc = 0.01 * 4 + 0.004 * 16;
+  assert.ok(Math.abs((d1 - d0) / 1.0875 - mc * 0.35 * 0.8) < 1e-9, "behavioral drag matches");
+  console.log("move cost exact: PASS");
+}
+
+function testReproCostExact() {
+  // Effective reproduction threshold scales by exactly (1+BK_REPRO*BKN).
+  assert.equal(RPBK(100, 0), 100, "bk=0 threshold unchanged");
+  assert.equal(RPBK(100, 1.2), 140, "exact threshold ratio");
+  const reproduces = (bk: number, en: number): boolean => {
+    const sim = new Simulation({ ...cfg, pop: 1 }) as any;
+    const o = sim.o[0];
+    o.bk = bk; o.en = en; o.rp = 100; o.matureAt = 0; o.readyAt = 0;
+    sim.step();
+    return sim.o.length > 1;
+  };
+  assert.equal(reproduces(0, 120), true, "small reproduces at en=120>=100");
+  assert.equal(reproduces(1.2, 120), false, "large waits at en=120<140");
+  assert.equal(reproduces(1.2, 160), true, "large reproduces at en=160>=140");
+  console.log("repro cost exact: PASS");
+}
+
+function testMeOrthogonal() {
+  // Matched pair differing ONLY in bk: physiology debit identical, the
+  // only delta is the bulk movement term. Distinct from metabolism.
+  const oneTick = (bk: number): number => {
+    const sim = new Simulation({ ...cfg, pop: 1 }) as any;
+    for (let k = 0; k < 3; k++) sim.resources.stock[k]!.fill(0);
+    const o = sim.o[0];
+    o.bk = bk; o.en = 60; o.sp = 1.5; o.me = 0.3; o.di = 0; o.bu = 0; o.h = 0;
+    const before = o.en;
+    sim.step();
+    return before - sim.o[0].en;
+  };
+  const d0 = oneTick(0), d1 = oneTick(0.9);
+  const mc = 0.01 * 1.5 * 1.5 + 0.004 * 1.5 ** 4;
+  assert.ok(Math.abs((d1 - d0) / 1.0875 - mc * 0.35 * 0.6) < 1e-9, "only the bulk movement term differs");
+  assert.equal(BKN({ bk: 0.9 } as any), 0.6, "norm helper exact");
+  console.log("me orthogonal: PASS");
+}
+
+function testNoBonusLeak() {
+  // Sensing, uptake take, yield, diet access, waste burden, and analysis
+  // role are bit-identical across bk — size grants no other bonus.
+  const setup = (bk: number): any => {
+    const sim = new Simulation({ ...cfg, pop: 1 }) as any;
+    for (let k = 0; k < 3; k++) sim.resources.stock[k]!.fill(0);
+    const o = sim.o[0];
+    o.x = 300; o.y = 300; o.h = 0; o.di = 0.5; o.ha = 0; o.se = 55;
+    o.me = 0.16; o.sp = 1.0; o.bu = 0.2; o.to = 0.2; o.cu = 0.1;
+    o.bk = bk; o.en = 60;
+    sim.resources.deposit(0, 300, 300, 500, null, null);
+    return { sim, o };
+  };
+  const a = setup(0), b = setup(1.5);
+  assert.deepEqual(a.sim.resources.sense(a.o), b.sim.resources.sense(b.o), "sense identical");
+  assert.equal(a.sim.resources.access(a.o, 0), b.sim.resources.access(b.o, 0), "access identical");
+  const ma = a.sim.resources.consume(a.o, null), mb = b.sim.resources.consume(b.o, null);
+  assert.equal(mb.amount, ma.amount, "identical take amounts");
+  assert.equal(mb.gain, ma.gain, "identical gains");
+  console.log("no bonus leak: PASS");
+}
+
+function testThresholdBoundary() {
+  // en exactly at the raised threshold is unpenalized, stably across ticks.
+  const th = 100 + 120 * 0.8;
+  assert.equal(SCBK(th, 1.2), 0, "exactly at threshold: no penalty");
+  assert.ok(SCBK(th + 0.001, 1.2) > 0, "above threshold: penalized");
+  assert.equal(SCBK(100, 0), 0, "legacy boundary preserved");
+  console.log("threshold boundary: PASS");
+}
+
 testTraitExists();
 testTraitsAudit();
 testInheritance();
 testBounds();
 testExportTruth();
+testReserveIsolation();
+testMoveCostExact();
+testReproCostExact();
+testMeOrthogonal();
+testNoBonusLeak();
+testThresholdBoundary();
 console.log("bulk validation: PASS (plumbing)");
