@@ -353,6 +353,8 @@ function testNicheIntegration() {
   session.create(patchworkConfig(PATCHWORK_SEED));
   settle(session, 70000);
   const records = (session.analysis as any).records.filter((r: any) => r.kind === "niche");
+  // WIP-TEMP MAP (revert before merge): elongation trajectory mapping.
+  console.log("MAP-SH-NICHE-INT:" + JSON.stringify({ n: records.length, state: (session.analysis as any).niche.state }));
   assert.equal(records.length, 0, "no establishment record by 70k under occupancy");
   assert.equal((session.analysis as any).niche.state, "forming", "the world is mid-formation, not durably shifted");
   console.log("niche fixture arc: PASS");
@@ -371,6 +373,8 @@ function testNicheReachability() {
   session.create(patchworkConfig(333333333));
   settle(session, 60000);
   const records = (session.analysis as any).records.filter((r: any) => r.kind === "niche");
+  // WIP-TEMP MAP (revert before merge): elongation trajectory mapping.
+  console.log("MAP-SH-NICHE-REACH:" + JSON.stringify(records.map((r: any) => ({ phase: r.phase, tick: r.tick, refs: r.entity_refs }))));
   assert.equal(records.length, 1, "one establishment record by 60k");
   assert.equal(records[0].phase, "established", "record establishes");
   assert.equal(records[0].tick, 58232, "establishment is deterministic after the durability window");

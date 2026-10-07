@@ -410,6 +410,8 @@ function testFixtureArc() {
   // 300k; structure unchanged.
   settle(session, 300000);
   const records = (session.analysis as any).records.filter((r: any) => r.kind === "cuse");
+  // WIP-TEMP MAP (revert before merge): elongation trajectory mapping.
+  console.log("MAP-SH-ARC:" + JSON.stringify(records.map((r: any) => ({ phase: r.phase, tick: r.tick, refs: r.entity_refs }))));
   assert.equal(records.length, 1, "one establishment record (no disruption on this run)");
   assert.equal(records[0].phase, "established", "record establishes");
   assert.equal(records[0].tick, 276100, "establishment is deterministic under the current catalyst policy");
@@ -464,6 +466,8 @@ function testMultiSeedPossibility() {
     if (records.length > 0) established.push(`${seed}@${records[0].tick}`);
   }
   assert.ok(established.length >= 1, "dependency establishment must be realizable");
+  // WIP-TEMP MAP (revert before merge): elongation trajectory mapping.
+  console.log("MAP-SH-POSS:" + JSON.stringify(established));
   assert.ok(
     established.some((s) => s === "3543950664@70531"),
     "pinned establishment reproduces exactly",
@@ -519,6 +523,8 @@ function testWashoutReliance() {
   const control = snap.control!.metrics as any;
   const liveShare = (live.metabolic_roles?.counts?.byproduct_scavenger || 0) / live.population;
   const controlShare = (control.metabolic_roles?.counts?.byproduct_scavenger || 0) / control.population;
+  // WIP-TEMP MAP (revert before merge): elongation trajectory mapping.
+  console.log("MAP-SH-WASH:" + JSON.stringify({ liveShare: +liveShare.toFixed(4), controlShare: +controlShare.toFixed(4), livePop: live.population, ctrlPop: control.population, washTick }));
   assert.ok(liveShare < 0.02, `washed guild collapses (live ${liveShare.toFixed(3)})`);
   assert.ok(controlShare > 0.03, `control guild exists (control ${controlShare.toFixed(3)})`);
   assert.ok(liveShare < controlShare, "washed guild underperforms its own twin");

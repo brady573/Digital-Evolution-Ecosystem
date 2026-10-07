@@ -345,6 +345,9 @@ function testForwardCompatPolicyVersion() {
   // 78312 falls inside it — observed during protection, never prompted
   // (the flow resolves only catalyst windows afterwards). Same claim:
   // protected observation stays durable evidence, not a prompt.
+  // WIP-TEMP MAP (revert before merge): elongation trajectory mapping.
+  console.log("MAP-SH-RES:" + JSON.stringify(session.decisionResolutions.map((r: any) => r.tick)));
+  console.log("MAP-SH-EVTS:" + JSON.stringify(session.analysis.observedEvents().map((e: any) => e.eventId)));
   const protectedEra = session.analysis.observedEvents().find(
     event => event.eventId === "eco-crossfeeding-1-established-78312",
   );
