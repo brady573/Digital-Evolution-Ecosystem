@@ -104,9 +104,11 @@ function testDragIsolation() {
   const cost0 = run(0);
   const costEl = run(1.5);
   const mc = 0.01 * 2 * 2 + 0.004 * 2 * 2 * 2 * 2;
+  // Tracks EL_DRAG in engine.ts (currently 0.25): if the constant moves,
+  // this expectation moves with it — the pin is exactness, not the value.
   const ratio = (costEl - cost0) / (mc * (1.5 / 1.5) * 1.0875);
   console.log(`drag: base ${cost0.toFixed(5)} vs elongated ${costEl.toFixed(5)} (ratio ${ratio.toFixed(3)})`);
-  assert.ok(ratio > 0.99 && ratio < 1.01, "drag factor exact at 1.0");
+  assert.ok(ratio > 0.24 && ratio < 0.26, "drag factor exact at 0.25");
   console.log("drag isolation: PASS");
 }
 

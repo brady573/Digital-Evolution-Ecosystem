@@ -65,7 +65,7 @@ const MV=(s:number):number=>2.7*Math.tanh(s/2.7);
 // Cell-shape structural axis (first slice): elongation grants sensing
 // reach at locomotion-drag cost. Coefficients are implementation
 // calibration; the reach-vs-drag MEANING is the accepted design.
-const EL_REACH=.5,EL_DRAG=1.0;
+const EL_REACH=1.0,EL_DRAG=.25;
 const ELN=(o:Organism):number=>Q(o.el||0,0,1.5)/1.5;
 const PC=(m:number):number=>.8*m+.0055/m;
 const SC=(e:number):number=>.000035*Math.max(0,e-100)**2;
