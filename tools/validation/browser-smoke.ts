@@ -556,9 +556,9 @@ async function main(){
     await page.getByRole("button",{name:"Reset view"}).click();
     assert.equal(await page.getByTestId("zoom-level").innerText(),"1.0×","reset restores the view");
 
-    // Issue #37: speed modes are genuinely distinct throughput policies.
-    // World is paused; each mode runs a fixed window and the tick deltas must
-    // order 1x < 10x < 100x <= Max with wide margins (headless timing is noisy).
+    // Exercise every player-facing speed mode through the real controls.
+    // Deterministic rate separation belongs to tools/validation/time-controls.ts;
+    // a short browser wall-clock ratio is host-throughput evidence, not policy proof.
     // Decision-gate aware: a legitimate pending decision auto-pauses mid-window.
     // Never bypass the gate — resolve through the normal Keep-watching UI and
     // restart that window fresh (up to 3 attempts per speed).
@@ -616,20 +616,13 @@ async function main(){
         await page.getByRole("button",{name:"Pause"}).click();
         deltas[v]=await tick(page)-before;
         console.log(`speed ${v}x: +${deltas[v]} ticks/2.5s`);
+        assert.ok(deltas[v]!>0,`real ${v}x control advances the simulation`);
         done=true;
       }
       assert.ok(done,`speed ${v}x completed a gate-free window`);
     }
-    assert.ok(deltas["10"]!>(deltas["1"]!*3),`10x materially faster than 1x (${deltas["10"]} vs ${deltas["1"]})`);
-    // 100x vs 10x uses a 1.5x margin, not 3x: per-tick engine cost dominates
-    // at high slice sizes, so both saturate toward the same worker ceiling
-    // (that plateau IS the throughput limit Max is defined by).
-    assert.ok(deltas["100"]!>(deltas["10"]!*1.5),`100x materially faster than 10x (${deltas["100"]} vs ${deltas["10"]})`);
-    // The 500x/Max ratio assertion is retired with design approval (AC21):
-    // Max is no longer a player-reachable mode, so the ratio no longer tested
-    // anything a player can select, and it was the flaky half of #46. The
-    // internal Max path still exists for tooling; only the product option and
-    // this assertion are gone.
+    // The browser proves each integrated control advances. Relative speed-policy
+    // semantics are validated deterministically without wall-clock scheduling.
     await speedSelect.selectOption("100");
     // Family artwork: clicking an organism opens the details card with its
     // 128x128 base family portrait. World is paused, so a bounded grid search
