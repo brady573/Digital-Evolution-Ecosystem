@@ -1,7 +1,11 @@
 import type { ResolvedPhenotype } from "../model";
 import type { ArtLod, ArtLodRecipe, StructuralArtRecipe } from "./types";
+import { buildBlobRecipe } from "./families/blob";
 import { buildBranchingRecipe, type BranchingActivity } from "./families/branching";
+import { buildPaddledRecipe } from "./families/paddled";
 import { buildPlatedRecipe } from "./families/plated";
+import { buildRadialRecipe } from "./families/radial";
+import { buildSegmentedRecipe } from "./families/segmented";
 
 /**
  * Activity reaches the grammar because Branching withdraws geometry when
@@ -17,8 +21,16 @@ export function buildArtRecipe(
       return buildPlatedRecipe(resolved);
     case "branching":
       return buildBranchingRecipe(resolved, activity);
+    case "blob":
+      return buildBlobRecipe(resolved, activity);
+    case "segmented":
+      return buildSegmentedRecipe(resolved, activity);
+    case "radial":
+      return buildRadialRecipe(resolved, activity);
+    case "paddled":
+      return buildPaddledRecipe(resolved, activity);
     default:
-      throw new Error(`Procedural art grammar is unsupported for ${resolved.family}; this tranche supports Plated and Branching only`);
+      throw new Error(`Procedural art grammar is unsupported for ${resolved.family}`);
   }
 }
 

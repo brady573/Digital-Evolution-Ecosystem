@@ -72,10 +72,22 @@ export interface ArtMaterialAccent {
   readonly kind: "pearl" | "highlight";
 }
 
+/**
+ * How internal region boundaries are treated during materialization.
+ *
+ * - "hard": stroke every ownership boundary. Correct for Plated's accepted
+ *   shell-and-plate language.
+ * - "soft": rim only the outer silhouette; shade internal boundaries by depth.
+ *   Required for soft-bodied families whose lobes, beads, and paddles overlap
+ *   and must read as one fleshy organism rather than assembled plates.
+ */
+export type ArtSeam = "hard" | "soft";
+
 export interface MaterialRecipe extends ArtLodRecipe {
   readonly palette: Readonly<Record<ArtMaterialRole, RGBColor>>;
   readonly cosmeticSeed: number;
   readonly rendererVersion: string;
+  readonly seam: ArtSeam;
   /** Color-only points constrained to already-owned structural pixels. */
   readonly accents: readonly ArtMaterialAccent[];
 }

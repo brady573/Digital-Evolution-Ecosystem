@@ -4,6 +4,7 @@ import type {
   ArtLodRecipe,
   ArtMaterialAccent,
   ArtMaterialRole,
+  ArtSeam,
   MaterialRecipe,
   ProceduralPhenotypeRaster,
   RGBColor,
@@ -128,9 +129,86 @@ function buildAccents(recipe: ArtLodRecipe, seed: number): ArtMaterialAccent[] {
   return accents;
 }
 
+/**
+ * The remaining four families, each read from its accepted family artwork:
+ *
+ * - Blob: teal/emerald green, mottled and vacuolated, with brighter green
+ *   at the lit rim and yellow cores inside the lobes.
+ * - Segmented: coral/salmon body with lighter pink segments and pale teal cilia,
+ *   matching the reference's ringed teal spines.
+ * - Radial: periwinkle-blue hub and rays with pale cyan bulbous tips, as in the
+ *   blue-violet accepted reference.
+ * - Paddled: rose-crimson body with warm highlights and a hot yellow core
+ *   and pale rim highlight from the reference's mottled wing surfaces.
+ *
+ * Each keeps the same eight finite roles as Plated and Branching so the
+ * material pass, mask ownership, and LOD reduction stay unchanged.
+ */
+const LOB_PALETTE: Readonly<Record<ArtMaterialRole, RGBColor>> = {
+  "deep-tissue": { r: 20, g: 74, b: 81 },
+  shadow: { r: 34, g: 112, b: 93 },
+  body: { r: 60, g: 166, b: 109 },
+  light: { r: 118, g: 212, b: 137 },
+  rim: { r: 194, g: 248, b: 177 },
+  interstitial: { r: 24, g: 82, b: 83 },
+  core: { r: 206, g: 240, b: 169 },
+  accent: { r: 234, g: 255, b: 213 },
+};
+
+const SEGMENTED_PALETTE: Readonly<Record<ArtMaterialRole, RGBColor>> = {
+  "deep-tissue": { r: 86, g: 28, b: 47 },
+  shadow: { r: 140, g: 52, b: 75 },
+  body: { r: 206, g: 88, b: 103 },
+  light: { r: 244, g: 142, b: 149 },
+  rim: { r: 152, g: 214, b: 214 },
+  interstitial: { r: 92, g: 32, b: 54 },
+  core: { r: 244, g: 178, b: 170 },
+  accent: { r: 198, g: 238, b: 236 },
+};
+
+const RADIAL_PALETTE: Readonly<Record<ArtMaterialRole, RGBColor>> = {
+  "deep-tissue": { r: 48, g: 36, b: 82 },
+  shadow: { r: 78, g: 74, b: 132 },
+  body: { r: 132, g: 130, b: 188 },
+  light: { r: 172, g: 172, b: 220 },
+  rim: { r: 156, g: 220, b: 238 },
+  interstitial: { r: 52, g: 46, b: 88 },
+  core: { r: 148, g: 180, b: 224 },
+  accent: { r: 228, g: 244, b: 252 },
+};
+
+const PADDLED_PALETTE: Readonly<Record<ArtMaterialRole, RGBColor>> = {
+  "deep-tissue": { r: 76, g: 10, b: 50 },
+  shadow: { r: 132, g: 24, b: 58 },
+  body: { r: 190, g: 48, b: 76 },
+  light: { r: 232, g: 104, b: 92 },
+  rim: { r: 250, g: 172, b: 126 },
+  interstitial: { r: 92, g: 14, b: 50 },
+  core: { r: 250, g: 216, b: 144 },
+  accent: { r: 255, g: 236, b: 196 },
+};
+
+/**
+ * Plated and Branching keep the accepted hard-seam treatment unchanged. The four
+ * soft-bodied families use "soft": their reference artwork shows continuous
+ * flesh with no visible joins between lobes, beads, or paddles.
+ */
+const SEAMS: Readonly<Record<string, ArtSeam>> = {
+  plated: "hard",
+  branching: "hard",
+  blob: "soft",
+  segmented: "soft",
+  radial: "soft",
+  paddled: "soft",
+};
+
 const PALETTES: Readonly<Record<string, Readonly<Record<ArtMaterialRole, RGBColor>>>> = {
   plated: PLATED_MATERIAL_PALETTE,
   branching: BRANCHING_MATERIAL_PALETTE,
+  blob: LOB_PALETTE,
+  segmented: SEGMENTED_PALETTE,
+  radial: RADIAL_PALETTE,
+  paddled: PADDLED_PALETTE,
 };
 
 /** Assign finite material roles and seed/version-bound color-only accent positions. */
@@ -145,6 +223,7 @@ export function applyMaterialRoles(recipe: ArtLodRecipe, resolved: ResolvedPheno
   return {
     ...recipe,
     palette,
+    seam: SEAMS[recipe.source.family] ?? "hard",
     cosmeticSeed: resolved.cosmeticSeed >>> 0,
     rendererVersion: PROCEDURAL_ART_VERSION,
     accents: buildAccents(recipe, resolved.cosmeticSeed >>> 0),
@@ -221,6 +300,13 @@ export function materializeRaster(
   }
 
   // Cyan seams/rims are color-only classification of existing ownership boundaries.
+  //
+  // `seam` selects how internal boundaries are treated. "hard" strokes every
+  // ownership boundary, which is correct for Plated's accepted shell-and-plate
+  // language but reads as assembled plates, seams, and an origami skeleton on
+  // soft-bodied families. "soft" keeps the bright rim only on the outer
+  // silhouette and shades internal boundaries by depth instead, so overlapping
+  // lobes, beads, and paddles read as one fleshy organism.
   for (let y = 0; y < raster.height; y++) {
     for (let x = 0; x < raster.width; x++) {
       const pixel = y * raster.width + x;
@@ -234,6 +320,15 @@ export function materializeRaster(
       const region = sorted[owner]!;
       const isOuterRim = neighbors.some((neighbor) => neighbor >= 0 && raster.masks.silhouette[neighbor] === 0);
       const variation = unit(material.cosmeticSeed, region.id, pixel % 17);
+
+      if (material.seam === "soft" && !isOuterRim) {
+        // Internal boundary: a gentle depth-driven shade, never a bright line.
+        const base = material.palette[region.materialRole];
+        const shade = raster.masks.depth[pixel] === 0 ? 0.78 : raster.masks.depth[pixel] === 1 ? 0.88 : 0.97;
+        setPixel(rgba, pixel * 4, scaleColor(base, shade));
+        continue;
+      }
+
       const color = variation > 0.965
         ? mixColor(material.palette.rim, material.palette.accent, 0.28)
         : isOuterRim
