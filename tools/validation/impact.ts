@@ -51,6 +51,15 @@ const RULES: ReadonlyArray<{ readonly test: RegExp; readonly verdict: PathVerdic
   // `tools/` holds the validation implementations and the manifest itself. A
   // change here must not be able to narrow what validates it.
   { test: /^tools\//, verdict: { kind: "domain", domain: "validation" } },
+  // Agent governance and execution policy. `.opencode/` holds the edit-deny
+  // rules and the default agent; `AGENTS.md` holds the repository execution
+  // contract and the definition of done. Neither is prose: each can change what
+  // runs, what is forbidden, and what counts as complete. Routing them to
+  // `docs` let a governance edit report a green browser lane it never executed,
+  // which is precisely the vacuous pass this rule exists to prevent. They route
+  // like validation changes instead.
+  { test: /^\.opencode\//, verdict: { kind: "domain", domain: "validation" } },
+  { test: /^AGENTS\.md$/, verdict: { kind: "domain", domain: "validation" } },
   // package.json holds the scripts the runner dispatches to; a change there can
   // silently unbind a check, so it routes like a validation change.
   { test: /^(package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig.*\.json)$/, verdict: { kind: "domain", domain: "validation" } },

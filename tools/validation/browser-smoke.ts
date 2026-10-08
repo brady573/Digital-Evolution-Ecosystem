@@ -725,20 +725,42 @@ async function main(){
     // The browser proves each integrated control advances. Relative speed-policy
     // semantics are validated deterministically without wall-clock scheduling.
     await speedSelect.selectOption("100");
-    // Family artwork: clicking an organism opens the details card with its
-    // 128x128 base family portrait. World is paused, so a bounded grid search
-    // over canvas points is deterministic enough (first hit wins).
-    const worldCanvas=page.getByLabel("Evolution world");
-    const wbox=await worldCanvas.boundingBox();
-    let portrait=0;
-    outer: for(const fy of [0.3,0.42,0.5,0.58,0.7]){
-      for(const fx of [0.3,0.42,0.5,0.58,0.7]){
-        await page.mouse.click(wbox!.x+wbox!.width*fx,wbox!.y+wbox!.height*fy);
-        await page.waitForTimeout(200);
-        portrait=await page.locator(".family-portrait img").count();
-        if(portrait>0)break outer;
-      }
-    }
+    // Family artwork: selecting an organism opens the details card with its
+    // 128x128 base family portrait.
+    //
+    // Select by asking the app where a cache-backed organism is, rather than
+    // probing a grid of canvas fractions. The portrait comes from the live
+    // phenotype cache, and only organisms resolveSnapshot actually saw have an
+    // entry there -- the deeTest presentation fixtures are appended to render
+    // props alone, so selecting one legitimately renders no portrait. A
+    // coordinate grid therefore tested which organism it happened to land on,
+    // not whether selection reveals a family portrait. The reported point still
+    // travels the real hit-test path: same camera, same scale, same
+    // selectAtScreenPoint, and it is asserted that the selection reports
+    // exactly the organism whose point was requested.
+    await page.getByRole("button",{name:"Pause"}).click().catch(()=>{});
+    await settlePaused(page);
+    const target=await page.evaluate(()=>{
+      const hook=(window as Window & { __DEE_TEST__?: { cacheBackedScreenPoint?:()=>{id:number;x:number;y:number}|null } }).__DEE_TEST__;
+      return hook?.cacheBackedScreenPoint?.()??null;
+    });
+    assert.ok(target,"a cache-backed organism is available to select");
+    await page.mouse.click(target!.x,target!.y);
+    // Wait on the semantic condition rather than a fixed delay.
+    //
+    // The inspector toggle's accessible name is state-dependent: "Hide details"
+    // while the card is expanded, "Details · #<id>" only while it is collapsed.
+    // The card is expanded by default at this viewport, so the name-based
+    // locator would never match. Wait on the toggle's presence instead, then on
+    // the card itself, which is the observable the assertion is actually about.
+    await page.locator(".inspector .sheet-toggle").waitFor({state:"visible",timeout:15_000});
+    await page.getByText("Selected organism").waitFor({state:"visible",timeout:15_000});
+    // The card heading names the organism that was actually selected. Asserting
+    // it closes the loop: a point that hit a different organism would render a
+    // portrait too, and would otherwise pass unnoticed.
+    assert.equal(await page.locator(".inspector h2").first().innerText(),`#${target!.id}`,
+      "the click selected exactly the cache-backed organism the app reported");
+    const portrait=await page.locator(".family-portrait img").count();
     assert.equal(portrait,1,"selecting an organism shows one family portrait");
     const art=page.locator(".family-portrait img").first();
     assert.match(await art.getAttribute("alt")||"",/family portrait$/,"portrait alt names the family");
