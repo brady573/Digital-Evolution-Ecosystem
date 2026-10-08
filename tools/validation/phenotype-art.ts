@@ -166,16 +166,14 @@ async function testPopulationMatchesInspectionSilhouette(): Promise<void> {
       `${family} population regions are the same objects as their inspection regions`);
     assert.ok(population.regions.every((region) => region.detail === "structure"),
       `${family} population LOD keeps structural detail only`);
-    // Where a family authors secondary detail, population must drop it. Radial
-    // currently authors none, so its population tier is not reduced; that is
-    // recorded rather than asserted away.
+    // Every soft-bodied family must have a real LOD split: inspection reveals
+    // detail population simplifies away. Radial previously authored no
+    // secondary regions, which made its two rich tiers identical geometry.
     const secondaryCount = inspection.regions.filter((region) => region.detail !== "structure").length;
-    if (secondaryCount > 0) {
-      assert.ok(population.regions.length < inspection.regions.length,
-        `${family} population LOD drops its ${secondaryCount} secondary regions`);
-    } else {
-      console.log(`  note: ${family} authors no secondary detail; its population tier is not LOD-reduced`);
-    }
+    assert.ok(secondaryCount > 0,
+      `${family} authors inspection-only secondary detail for population to simplify away`);
+    assert.ok(population.regions.length < inspection.regions.length,
+      `${family} population LOD drops its ${secondaryCount} secondary regions`);
     const covered = new Set(population.regions.map((region) => region.id));
     for (const region of population.regions) {
       const source = inspection.regions.find((candidate) => candidate.id === region.id);
@@ -195,6 +193,17 @@ async function testPopulationMatchesInspectionSilhouette(): Promise<void> {
     const coverage = populationInk / Math.max(1, inspectionInk);
     assert.ok(coverage > 0.75,
       `${family} population silhouette retains ${(coverage * 100).toFixed(0)}% of inspection silhouette (must be > 75%)`);
+    // Inspection must actually reveal more, not merely carry more region records.
+// Scoped to Radial: its LOD split was the documented AC4 gap, and secondary
+// regions hidden beneath structural ones contribute no ink, leaving the two
+// tiers pixel-identical. Blob currently adds only ~1.8% ink here and Segmented
+// and Paddled are unmeasured; widening this to every family would fail on
+// accepted artwork rather than on a defect, so it is raised as an observation
+// until that artwork is re-opened.
+    if (family === "radial") {
+      assert.ok(inspectionInk > populationInk * 1.1,
+        `radial inspection reveals substantially more silhouette than population (${populationInk} -> ${inspectionInk} px, must be >10% more)`);
+    }
   }
 }
 

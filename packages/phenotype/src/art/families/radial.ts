@@ -139,10 +139,62 @@ export function buildRadialRecipe(res: ResolvedPhenotype, activity: StemActivity
     }));
   }
 
+  // Inspection-only detail. Every region above is structural, so without this
+  // the two rich LODs rendered identical geometry and inspection revealed
+  // nothing the population view did not already show. These are secondary on
+  // purpose: population drops them and keeps the compact hub-plus-clubs
+  // identity, while inspection resolves the fine surface texture the reference
+  // carries between its rays.
+  //
+  // The features are authored short and rooted inside the ray field, so they
+  // add surface resolution without extending the silhouette outward or
+  // detaching into new components.
+  // Placed in the gaps BETWEEN rays, not beneath them. A filament at a ray's own
+  // bearing sits entirely inside that ray's footprint and contributes zero
+  // silhouette, so inspection would have revealed nothing.
+  const gapStep = (Math.PI * 2) / projectionCount;
+  const microFilamentCount = dormant ? 0 : projectionCount;
+  for (let index = 0; index < microFilamentCount; index++) {
+    const angle = index * gapStep + gapStep / 2 + heading;
+    const filamentLength = projectionLength * 0.72;
+    const distance = hubRadius + filamentLength * 0.5;
+    regions.push(teardropRegion({
+      id: `filament-${index}`,
+      centerX: clamp(0.5 + Math.cos(angle) * distance, 0.04, 0.96),
+      centerY: clamp(0.5 + Math.sin(angle) * distance, 0.04, 0.96),
+      axisRadians: angle,
+      length: filamentLength,
+      width: filamentLength * 0.1,
+      taper: 0.35,
+      depth: 4,
+      paintOrder: 40 + index,
+      detail: "secondary",
+      materialRole: "rim",
+    }));
+  }
+
+  // Small nodules on the hub surface, also inspection-only.
+  const noduleCount = dormant ? 0 : 3 + Math.round(res.quantized.secondary * 3);
+  for (let index = 0; index < noduleCount; index++) {
+    const angle = seededJitter(seed, index, 5, Math.PI * 2);
+    regions.push(ellipseRegion({
+      id: `hub-nodule-${index}`,
+      centerX: clamp(0.5 + Math.cos(angle) * hubRadius * 0.62, 0.06, 0.94),
+      centerY: clamp(0.5 + Math.sin(angle) * hubRadius * 0.62, 0.06, 0.94),
+      axisRadians: angle,
+      length: hubSize * 0.17,
+      width: hubSize * 0.085,
+      depth: 5,
+      paintOrder: 80 + index,
+      detail: "secondary",
+      materialRole: "core",
+    }));
+  }
+
   return {
     family: "radial",
     cosmeticSeed: seed,
-    structuralVersion: "radial-grammar-v1",
+    structuralVersion: "radial-grammar-v2",
     regions,
   };
 }
