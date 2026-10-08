@@ -4,7 +4,7 @@ import {
   TRAIT_DEFINITIONS,
   RRN,
   WAKE_DELAY,
-  STEADY_COOLDOWN,
+  MATURATION_COST,
   REPRO_COOLDOWN,
 } from "../../packages/sim-core/src/engine.ts";
 
@@ -170,15 +170,74 @@ function testRealizedEarlierPostWake() {
   console.log("realized earlier post-wake: PASS");
 }
 
-function testSteadyCooldownExact() {
-  // STEADY_COOLDOWN must be strictly increasing in rr, exact ratio.
-  const base = REPRO_COOLDOWN;
-  assert.equal(STEADY_COOLDOWN(0), base, "rr=0 cooldown is base");
-  assert.ok(STEADY_COOLDOWN(1.5) > STEADY_COOLDOWN(0), "strictly increasing");
-  // Exact ratio test
-  const ratio = STEADY_COOLDOWN(1.2) / base;
-  assert.ok(Math.abs(ratio - 2.2) < 0.01, `exact ratio ~2.2x at rr=1.2, got ${ratio.toFixed(3)}`);
-  console.log("steady cooldown exact: PASS");
+function testMaturationCost() {
+  // The growth leg: MATURATION_COST is the additive maturation tax in ticks,
+  // zero at minimum readiness and maximal at maximum readiness.
+  assert.equal(MATURATION_COST(0), 0, "no maturation tax at rr=0");
+  assert.ok(MATURATION_COST(1.5) > MATURATION_COST(0), "strictly increasing in rr");
+  assert.ok(MATURATION_COST(0.5) > MATURATION_COST(0.25), "monotone");
+  assert.equal(MATURATION_COST(0.75), 600, "exact midpoint tax");
+  console.log("maturation cost: PASS");
+}
+
+function testMaturationChannelIsolated() {
+  // Children of matched parents differing ONLY in rr must differ ONLY in rr and
+  // matureAt. Every other inherited and initial quantity stays bit-identical,
+  // proving maturation is the only steady-state channel rr reaches.
+  // mr=0 makes inheritance exact (no mutation draws).
+  const mk = (rr: number) => {
+    const sim = new Simulation({ ...cfg, pop: 1, mr: 0, ms: 0 }) as any;
+    const o = sim.o[0];
+    o.rr = rr;
+    return { sim, baby: sim.child(o) };
+  };
+  const lo = mk(0), hi = mk(1.5);
+  assert.equal(lo.baby.rr, 0, "low-readiness child inherits exactly");
+  assert.equal(hi.baby.rr, 1.5, "high-readiness child inherits exactly");
+  assert.equal(
+    hi.baby.matureAt - lo.baby.matureAt,
+    MATURATION_COST(1.5) - MATURATION_COST(0),
+    "matureAt differs by exactly the maturation tax",
+  );
+  for (const k of ["sp", "se", "me", "rp", "di", "ha", "bu", "dr", "to", "cu", "en", "x", "y", "h", "generation", "born"]) {
+    assert.equal(hi.baby[k], lo.baby[k], `${k} identical across rr (only rr/matureAt may differ)`);
+  }
+  assert.equal(hi.baby.readyAt, hi.baby.matureAt, "newborn readyAt still mirrors matureAt");
+  console.log("maturation channel isolated: PASS");
+}
+
+function testCooldownIndependent() {
+  // Parent REPRO_COOLDOWN is readiness-independent. Snapshot readyAt before the
+  // step, then attribute any parent whose readyAt moved to exactly
+  // this.t + REPRO_COOLDOWN on a tick that produced births. Newborns are absent
+  // from the snapshot and founders still awaiting maturity are excluded, so only
+  // genuine post-reproduction assignments are measured.
+  const sim = new Simulation(cfg) as any;
+  // Spread readiness across the whole trait range up front so the parents that
+  // reproduce genuinely span rr 0..1.5; otherwise the proof rests on whatever
+  // readiness drift happens to produce in a short window.
+  sim.o.forEach((o: any, i: number) => { o.rr = (i / Math.max(1, sim.o.length - 1)) * 1.5; });
+  let checked = 0;
+  const rrs: number[] = [];
+  for (let t = 0; t < 4000 && checked < 25; t++) {
+    const before = new Map<number, number>(sim.o.map((o: any) => [o.id, o.readyAt]));
+    sim.step();
+    const births = sim.cur.births || 0;
+    sim.cur.births = 0;
+    if (!births) continue;
+    for (const o of sim.o) {
+      if (!before.has(o.id)) continue;              // newborn, not a parent
+      if (before.get(o.id) === o.readyAt) continue; // readyAt did not move
+      assert.equal(o.readyAt - sim.t, REPRO_COOLDOWN, `parent cooldown is exactly REPRO_COOLDOWN (rr=${o.rr})`);
+      rrs.push(o.rr);
+      checked++;
+    }
+  }
+  assert.ok(checked > 0, "observed at least one post-birth cooldown assignment");
+  // The proof is strongest if the assignments span a wide rr range: a
+  // readiness-scaled cooldown would make the constant above impossible.
+  assert.ok(Math.max(...rrs) - Math.min(...rrs) > 1.0, `cooldown assignments span rr range (${Math.min(...rrs).toFixed(2)}-${Math.max(...rrs).toFixed(2)})`);
+  console.log("cooldown independent: PASS");
 }
 
 function testOrthogonality() {
@@ -207,7 +266,9 @@ function testOrthogonality() {
     assert.equal(a.o.en, b.o.en, `energy identical at tick ${i}: rr has no per-tick cost`);
     assert.equal(a.o.activity, b.o.activity, `activity identical at tick ${i}: rr cannot alter dormancy`);
     assert.equal(a.o.readyAt, b.o.readyAt, `readyAt identical at tick ${i}: no pre-wake leak`);
-    assert.equal(a.o.matureAt, b.o.matureAt, "maturity identical");
+    // Founders are seeded, not born, so they carry no maturation tax; the
+    // growth leg applies only to offspring (see testMaturationChannelIsolated).
+    assert.equal(a.o.matureAt, b.o.matureAt, "founder maturity identical (no tax on founders)");
     assert.equal(a.o.rp, b.o.rp, "reproduction cost identical");
     assert.equal(a.o.me, b.o.me, "metabolism identical");
     assert.equal(a.o.dr, b.o.dr, "dormancy response identical");
@@ -225,6 +286,8 @@ testNoPreWakeLeak();
 testWakeDecisionIsolation();
 testWakeDelayMonotonic();
 testRealizedEarlierPostWake();
-testSteadyCooldownExact();
+testMaturationCost();
+testMaturationChannelIsolated();
+testCooldownIndependent();
 testOrthogonality();
 console.log("recovery-readiness validation: PASS");

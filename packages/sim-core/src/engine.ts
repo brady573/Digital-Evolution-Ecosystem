@@ -62,13 +62,18 @@ const SCI={disclaimer:'Sources inform experimental design and interpretation; th
 ]};
 const MC=(s:number):number=>.01*s*s+.004*s*s*s*s;
 const RRN=(o:{rr?:unknown}):number=>Q(typeof o.rr==="number"?o.rr:0,0,1.5)/1.5;
-// Recovery Readiness (growth vs adaptation): higher readiness shortens
-// post-wake reproductive recovery delay and lengthens steady-state
-// post-birth cooldown. dr remains sole dormancy authority; me/rp unchanged.
+// Recovery Readiness (growth vs adaptation). Two opposing costs on two
+// EXISTING lifecycle boundaries, no new state or RNG:
+//   adaptation leg - post-wake reproductive lag on readyAt; higher readiness
+//     resumes reproduction sooner after waking from dormancy.
+//   growth leg     - offspring maturation on matureAt; higher readiness
+//     develops more slowly, so steady-state population turnover is slower.
+// Parent REPRO_COOLDOWN is readiness-independent. dr remains the sole dormancy
+// authority; me/rp/feeding/Waste/mortality are untouched.
 const WAKE_RECOVERY_BASE=900,WAKE_RECOVERY_SCALE=600;
-const STEADY_COOLDOWN_SCALE=1.5;
+const MATURATION_COST_SCALE=1200;
 const WAKE_DELAY=(rr:number):number=>WAKE_RECOVERY_BASE-WAKE_RECOVERY_SCALE*RRN({rr});
-const STEADY_COOLDOWN=(rr:number):number=>REPRO_COOLDOWN*(1+STEADY_COOLDOWN_SCALE*RRN({rr}));
+const MATURATION_COST=(rr:number):number=>MATURATION_COST_SCALE*RRN({rr});
 const MV=(s:number):number=>2.7*Math.tanh(s/2.7);
 const PC=(m:number):number=>.8*m+.0055/m;
 const SC=(e:number):number=>.000035*Math.max(0,e-100)**2;
@@ -578,7 +583,7 @@ class S{
  newL(p:number,m:string[]):number{let id=this.nL++;this.L.set(id,{id,parent:p,born:this.t,mutations:m,peak:0,last:this.t,established:false});return id}
  resourceKind(){return this.rFood()<this.c.resource_b_fraction?1:0}
  mut(n:string,v:number):[number,boolean]{let[k,lo,hi]=T[n]!,r=this.rMut;if((n==='byproduct_use'&&!this.c.enable_byproduct)||(n==='dormancy_response'&&!this.c.enable_dormancy))return[v,false];if(r()>=this.c.mr)return[v,false];this.cur.mutation_attempts++;let additive=n==='diet'||n==='habitat'||n==='byproduct_use'||n==='dormancy_response'||n==='recovery_readiness',p=additive?v+(r()*2-1)*this.c.ms*1.15:v*(1+(r()*2-1)*this.c.ms);if(p<lo)this.tb[n]![0]!++;if(p>hi)this.tb[n]![1]!++;let nv=Q(p,lo,hi),changed=Math.abs(nv-v)>1e-12;if(changed)this.cur.effective_mutations++;return[nv,changed]}
- child(o:Organism):Organism{let q:Record<string,number>={},m:string[]=[];for(let n in T){if((n==='byproduct_use'&&!this.c.enable_byproduct)||(n==='dormancy_response'&&!this.c.enable_dormancy)){q[T[n]![0]!]=(o[T[n]![0]!] as number)||0;continue}let[v,x]=this.mut(n,o[T[n]![0]!] as number);q[T[n]![0]!]=v;if(x)m.push(n)}let ang=this.rMove()*6.28,dist=2+18*Math.sqrt(this.rMove()),matureAt=this.t+OFFSPRING_MATURITY_MIN+Math.floor(this.rMove()*OFFSPRING_MATURITY_SPAN);return{id:this.nO++,parent:o.id,generation:(o.generation||0)+1,born:this.t,matureAt,readyAt:matureAt,x:(o.x+Math.cos(ang)*dist+600)%600,y:(o.y+Math.sin(ang)*dist+600)%600,en:o.en*.92,h:this.rMove()*6.28,sp:q.sp!,se:q.se!,me:q.me!,rp:q.rp!,di:q.di!,ha:q.ha!,bu:q.bu||0,dr:q.dr||0,to:q.to!,cu:q.cu!,rr:q.rr!,activity:'active',dormantSince:null,wakeCount:0,lastWakeTick:null,ma:0,mb:0,mc:0,pc:0,ga:0,gb:0,gc:0,ra:0,rb:0,rc:0,l:m.length?this.newL(o.l,m):o.l}}
+ child(o:Organism):Organism{let q:Record<string,number>={},m:string[]=[];for(let n in T){if((n==='byproduct_use'&&!this.c.enable_byproduct)||(n==='dormancy_response'&&!this.c.enable_dormancy)){q[T[n]![0]!]=(o[T[n]![0]!] as number)||0;continue}let[v,x]=this.mut(n,o[T[n]![0]!] as number);q[T[n]![0]!]=v;if(x)m.push(n)}let ang=this.rMove()*6.28,dist=2+18*Math.sqrt(this.rMove()),matureAt=this.t+OFFSPRING_MATURITY_MIN+MATURATION_COST(q.rr!)+Math.floor(this.rMove()*OFFSPRING_MATURITY_SPAN);return{id:this.nO++,parent:o.id,generation:(o.generation||0)+1,born:this.t,matureAt,readyAt:matureAt,x:(o.x+Math.cos(ang)*dist+600)%600,y:(o.y+Math.sin(ang)*dist+600)%600,en:o.en*.92,h:this.rMove()*6.28,sp:q.sp!,se:q.se!,me:q.me!,rp:q.rp!,di:q.di!,ha:q.ha!,bu:q.bu||0,dr:q.dr||0,to:q.to!,cu:q.cu!,rr:q.rr!,activity:'active',dormantSince:null,wakeCount:0,lastWakeTick:null,ma:0,mb:0,mc:0,pc:0,ga:0,gb:0,gc:0,ra:0,rb:0,rc:0,l:m.length?this.newL(o.l,m):o.l}}
  reproSupport(o:Organism):number{let t=(o.ra||0)+(o.rb||0)+(o.rc||0);if(t<=0)return 2;let c=(o.rc||0)/t;if(c>=.45)return 3;let p=(o.ra||0)+(o.rb||0),a=p?o.ra/p:.5;return a>=.65?0:a<=.35?1:2}
  catalyst(type:string,src:string):void{
   this.eventSn.push({...this.pack(),phase:'before_catalyst',source:src,catalyst:type});let pre=this.o.length,removed:number[];
@@ -703,7 +708,7 @@ class S{
     let at=occ.findPlacement(p.parent.x,p.parent.y,LOCAL_OCCUPANCY_CAP);
     if(at===null){this.cur.blocked_births=(this.cur.blocked_births as number||0)+1;continue}
     let o=p.parent,baby=p.baby;
-    o.ra=0;o.rb=0;o.rc=0;o.en*=.52;o.readyAt=this.t+STEADY_COOLDOWN(o.rr);
+    o.ra=0;o.rb=0;o.rc=0;o.en*=.52;o.readyAt=this.t+REPRO_COOLDOWN;
     let[cx,cy]=occ.cellXY(at);
     baby.en=o.en*.92;
     baby.x=(cx*occ.cell+occ.cell/2+([-3,0,3][baby.id%3]!)+600)%600;
@@ -811,6 +816,6 @@ export {
   settleMovementClaims,
   RRN,
   WAKE_DELAY,
-  STEADY_COOLDOWN,
+  MATURATION_COST,
   REPRO_COOLDOWN,
 };
