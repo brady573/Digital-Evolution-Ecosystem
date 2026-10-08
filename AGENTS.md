@@ -24,6 +24,16 @@ Project Owner / Design Partner
 
 The Coding Agent owns implementation strategy, source changes, low-level architecture, tests, and engineering execution within the accepted handoff and the repository constraints in this file.
 
+Implementation is performed by a primary implementation agent — the
+`architect` — working alone or with read-only specialists. Specialists
+investigate, reason about implementation options, analyze coverage, and
+perform independent review. They never become a second writer and never
+transfer product or design authority, which remains with the Owner and Design
+Partner. The controlling policy for that team model, its delegation rules, and
+its mandatory-review requirement is the global agent policy at
+`~/.config/opencode/AGENTS.md`; this file governs repository engineering
+practice only and does not restate the orchestration policy.
+
 The Coding Agent must not invent or silently redefine material product behavior, simulation meaning, reproducibility semantics, scientific claims, or evidence semantics.
 
 Implementation activation
@@ -44,7 +54,7 @@ Use this only when authority or intent actually needs resolving; it is not a ste
 
 1. Owner direction. Explicit direction in the current task controls the current product decision when it is clear.
 2. Accepted design. An accepted design, handoff, or explicitly supplied design reference defines required behavior, simulation meaning, protected invariants, and acceptance criteria within its scope.
-3. Repository instructions. The applicable AGENTS.md and current repository policy govern engineering workflow, architecture constraints, validation, and repository practices.
+3. Repository instructions. This file and current repository policy govern engineering workflow, architecture constraints, validation, and repository practices.
 4. Current implementation. Source, tests, issues, pull requests, and CI describe what currently exists; they do not silently redefine intended product behavior.
 5. Validation evidence. Evidence supports only the claim actually exercised, and never creates a new product requirement.
 6. Historical material. Prototypes, superseded plans, and prior behavior are provenance unless a current contract explicitly preserves them as authority.
@@ -422,9 +432,17 @@ A Coding Agent task is complete only when:
 - architecture and authority boundaries remain intact;
 - the handoff's focused acceptance checks pass;
 - all blocking validation required by the actual diff is satisfied in the appropriate environment;
+- for a change with a material regression surface, an independent review pass
+  was obtained over the actual diff, and its findings were either corrected or
+  explicitly surfaced rather than silently dropped;
 - relevant evidence is reported truthfully and only for the claims it supports;
 - no design-significant deviation is hidden as an implementation detail;
 - residual gaps or unsupported claims are explicitly identified;
 - no unrelated user work was destroyed or rewritten.
+
+The independent-review requirement is defined, with its material-risk trigger
+and its anti-ceremony exceptions, in `~/.config/opencode/AGENTS.md`. It applies
+to this file and to the primary agent's own definition: a change to agent
+governance or repository execution policy is itself material-risk.
 
 Merged code, passing tests, scientific evidence, and design acceptance are distinct facts. Report them as such.
