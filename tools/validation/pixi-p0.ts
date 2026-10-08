@@ -196,8 +196,13 @@ function traitsForAxes(mob: number, sen: number, met: number, spec: number) {
   const cache = new PhenotypeTextureCache();
   cache.acquire(res, "population", "active");
   const inner = cache as unknown as { entries: Map<string, { bits: string }> };
-  const key = exactTextureKey(res, "population", "active");
-  inner.entries.get(key)!.bits = "corrupted";
+  // Use the key the cache actually stored under. A rich family is cached under
+  // its rich-raster identity, not `exactTextureKey`, so looking up the exact key
+  // returns undefined for any authored family.
+  const key = describeRenderableTexture(res, "population", "active").key;
+  const entry = inner.entries.get(key);
+  assert.ok(entry, "collision guard finds the cache entry the renderer just stored");
+  entry.bits = "corrupted";
   assert.throws(() => cache.acquire(res, "population", "active"), /render-key collision/);
   console.log("p0 collision guard: PASS (mismatched bitmap on hash hit throws)");
 }
@@ -323,10 +328,36 @@ function traitsForAxes(mob: number, sen: number, met: number, spec: number) {
   const populationDesc = describeTexture(plated, "population", "active");
   assert.equal(populationRich.width, 64, "Plated population texture uses the accepted native art resolution");
   assert.equal(populationRich.rgba.length, 64 * 64 * 4, "rich descriptor carries exact population raster identity");
-  const legacyDescriptor = describeTexture(resolved, "population", "active");
-  const legacyCache = new PhenotypeTextureCache();
-  assert.equal(legacyCache.acquire(resolved, "population", "active").bits, legacyDescriptor.bits,
-    "non-Plated families retain the legacy monochrome descriptor");
+  // Every family now has an authored grammar, so "non-Plated keeps the legacy
+  // monochrome path" no longer has a subject. The surviving invariant is that
+  // the coarse ecosystem tier stays on the legacy grid for every family — and
+  // a single probe cannot establish that, so probe all six. Cheap defense in
+  // depth against a family being dropped from the rich-art set: that is exactly
+  // the failure a one-family probe would miss.
+  // One trait vector per family, each verified to resolve to its own family.
+  // Derived from traitsForAxes these would land on the wrong families: that
+  // function's output resolves to Segmented for most inputs.
+  const FAMILY_TRAITS: Readonly<Record<string, Parameters<typeof resolvePhenotype>[0]>> = {
+    plated: { speed: 1.4, sensing: 70, metabolism: 0.3392, reproduction: 100, diet: 0.675, habitat: 0.675, byproductUse: 0.68, dormancyResponse: 1 },
+    branching: { speed: 1, sensing: 139.2, metabolism: 0.247, reproduction: 100, diet: 1.4, habitat: 1.4, byproductUse: 1.4, dormancyResponse: 0.8 },
+    blob: { speed: 1.56, sensing: 69.5, metabolism: 0.224, reproduction: 100, diet: 0.6, habitat: 0.6, byproductUse: 0.6, dormancyResponse: 0.8 },
+    segmented: { speed: 2.5, sensing: 86.5, metabolism: 0.27, reproduction: 100, diet: 0.9, habitat: 1.5, byproductUse: 1.5, dormancyResponse: 0.8 },
+    radial: { speed: 1.38, sensing: 149.4, metabolism: 0.247, reproduction: 100, diet: 0.6, habitat: 0.9, byproductUse: 1.5, dormancyResponse: 0.8 },
+    paddled: { speed: 3.55, sensing: 115.4, metabolism: 0.371, reproduction: 100, diet: 1.5, habitat: 1.5, byproductUse: 1.5, dormancyResponse: 0.8 },
+  };
+  for (const [family, traits] of Object.entries(FAMILY_TRAITS)) {
+    const probe = resolvePhenotype({ ...traits }, { organismId: 1, lineageId: 1 });
+    assert.equal(probe.family, family, `${family} ecosystem probe resolves to its own family`);
+    const legacyProbe = describeTexture(probe, "ecosystem", "active");
+    assert.equal(new PhenotypeTextureCache().acquire(probe, "ecosystem", "active").bits, legacyProbe.bits,
+      `${family} retains the legacy monochrome descriptor at ecosystem tier`);
+    assert.equal(describeRenderableTexture(probe, "ecosystem", "active").rgba, undefined,
+      `${family} never reaches a rich RGBA path at ecosystem tier`);
+    assert.notEqual(describeRenderableTexture(probe, "population", "active").rgba, undefined,
+      `${family} reaches the rich raster at population tier`);
+    assert.notEqual(describeRenderableTexture(probe, "inspection", "active").rgba, undefined,
+      `${family} reaches the rich raster at inspection tier`);
+  }
   const ecosystemDescriptor = describeRenderableTexture(plated, "ecosystem", "active");
   assert.equal(ecosystemDescriptor.size, 9, "Plated ecosystem still uses the exact accepted coarse grid");
   assert.equal(ecosystemDescriptor.rgba, undefined, "coarse ecosystem keeps its existing mask-only texture path");

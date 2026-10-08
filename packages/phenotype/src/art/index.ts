@@ -7,6 +7,7 @@ export type {
   ArtLodRecipe,
   ArtMaterialRole,
   ArtRegion,
+  ArtSeam,
   MaterialRecipe,
   NormalizedPoint,
   ProceduralPhenotypeMasks,
