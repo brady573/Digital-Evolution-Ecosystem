@@ -25,8 +25,10 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { deflateSync } from "node:zlib";
+import { Container } from "pixi.js";
 import { resolvePhenotype, type ResolvedPhenotype } from "../packages/phenotype/src/index.ts";
 import { PhenotypeTextureCache } from "../apps/explorer/src/pixi/textureCache.ts";
+import { updateOrganismLayer } from "../apps/explorer/src/pixiWorld/organisms.ts";
 import {
   applyMaterialRoles,
   buildArtRecipe,
@@ -144,6 +146,68 @@ for (const tier of ["population", "inspection"] as const) {
   check(`${tier} descriptor work completes`, elapsedMs < 60_000, `${elapsedMs.toFixed(0)} ms for ${world.length} organisms`);
   for (const entry of entries) cache.release(entry.key);
   check(`${tier} releases cleanly`, cache.prune().length === entries.length, `retired ${entries.length} entries`);
+}
+
+// ---- Retained set: what the real renderer actually keeps -------------------
+//
+// The cache numbers above measure a synthetic acquire-per-organism loop. What
+// AC11 asks is whether the *production* path retains all of them. That is a
+// different question: updateOrganismLayer gates sprite visibility on lens and
+// resolved phenotype, but texture acquisition happens for every organism in
+// the input, so nothing culls textures by viewport. This drives the real
+// function and reads the counters it returns.
+console.log("\nproduction organism layer at world scale");
+const WORLD_SCALES = [50, 250, 1000, 3000] as const;
+interface Row { id: number; parent: number | null; generation: number; lineageId: number; cladeId: number; x: number; y: number; energy: number; activity: "active" | "dormant"; }
+interface Counters { liveDisplayCount: number; textureCreates: number; textureReuses: number; textureReleases: number; texturePrunes: number; liveTextures: number; displayCreates: number; }
+
+for (const tier of ["population", "inspection"] as const) {
+  console.log(`\n  ${tier} tier`);
+  for (const scale of WORLD_SCALES) {
+    const rows: Row[] = [];
+    const resolvedMap = new Map<number, ResolvedPhenotype>();
+    for (let index = 0; index < scale; index++) {
+      // Every organism is distinct, as in a real world. Reusing one fixture set
+      // across all scales would cap the cache by dedup and report a bounded
+      // retained set that no real world would ever produce.
+      const base = resolvePhenotype({ ...TRAITS[FAMILIES[index % FAMILIES.length]!]! }, {
+        organismId: index + 1, lineageId: index + 1,
+      });
+      const res: ResolvedPhenotype = { ...base, cosmeticSeed: (12345 + (index + 1) * 2654435761) >>> 0 };
+      resolvedMap.set(index + 1, res);
+      rows.push({
+        id: index + 1, parent: null, generation: 0, lineageId: index + 1, cladeId: index + 1,
+        x: (index * 37) % 600, y: (index * 53) % 600, energy: 80, activity: "active",
+      });
+    }
+    const layer = new Container();
+    let liveBytes = 0;
+    const factory = (bits: string, size: number, rgba?: Uint8Array) => {
+      if (rgba) liveBytes += rgba.length;
+      void bits;
+      return {
+        texture: { source: { scaleMode: "nearest" }, orig: { width: size, height: size }, frame: { width: size, height: size }, destroy: () => undefined } as never,
+        pixels: rgba ? "rich-rgba" as const : "legacy-grid" as const,
+        destroy: () => undefined,
+      };
+    };
+    const counters = updateOrganismLayer(layer, {
+      worldId: 1, organisms: rows as never, resolvedPhenotypes: resolvedMap,
+      tier, lens: "normal", traitView: "speed", traitRange: [0.25, 4],
+      selectedId: null, scale: 1,
+    }, factory) as unknown as Counters;
+
+    const retained = counters.liveTextures;
+    const bounded = retained < scale;
+    console.log(`    scale ${String(scale).padStart(4)}: sprites ${counters.liveDisplayCount} | live textures ${String(retained).padStart(4)} | creates ${counters.textureCreates} | prunes ${counters.texturePrunes} | rich bytes ${(liveBytes / 1e6).toFixed(1)} MB`);
+    // Reported, not asserted. Whether retaining one texture per organism is
+    // acceptable is an Owner judgement about the product's supported density,
+    // not something this tool may decide by picking a threshold.
+    if (!bounded) {
+      console.log(`    NOTE ${tier}@${scale}: retained set equals world size (${retained} textures, ${(liveBytes / 1e6).toFixed(1)} MB). No viewport culling or texture pruning is in this path; this needs Owner review rather than a passing gate.`);
+    }
+    layer.destroy({ children: true });
+  }
 }
 
 // ---- Legibility: does one organism still read at its on-screen size? -------
