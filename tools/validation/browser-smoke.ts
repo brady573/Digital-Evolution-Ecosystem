@@ -54,8 +54,8 @@ async function verifyBranchingInProduction(context: BrowserContext) {
     const ecosystem = await readEvidence();
     assert.ok(ecosystem.some((item) => item.organismId === 900000003 && item.family === "branching" && item.tier === "ecosystem" && item.pixels === "legacy-grid"),
       "branching stays on the accepted coarse ecosystem renderer");
-    assert.ok(ecosystem.some((item) => item.organismId === 900000002 && item.family !== "branching" && item.pixels === "legacy-grid"),
-      "non-branching families keep the legacy renderer at ecosystem tier");
+    assert.ok(ecosystem.every((item) => item.pixels === "legacy-grid"),
+      "the coarse ecosystem tier keeps every family on the legacy renderer");
     for (const [organismId, family] of [
       [900000001, "plated"], [900000003, "branching"], [900000005, "blob"],
       [900000006, "segmented"], [900000007, "radial"], [900000008, "paddled"],
@@ -642,8 +642,8 @@ async function main(){
     const ecosystemEvidence = await readRasterEvidence();
     assert.ok(ecosystemEvidence.some((item) => item.family === "plated" && item.tier === "ecosystem" && item.pixels === "legacy-grid"),
       "deeTest fixture guarantees Plated stays on the coarse ecosystem renderer");
-    assert.ok(ecosystemEvidence.some((item) => item.family !== "plated" && item.pixels === "legacy-grid"),
-      "deeTest fixture guarantees non-Plated families stay on the legacy renderer");
+    assert.ok(ecosystemEvidence.every((item) => item.pixels === "legacy-grid"),
+      "the coarse ecosystem tier keeps every family on the legacy renderer");
     for(let i=0;i<2;i++)await page.getByRole("button",{name:"Zoom in"}).click();
     assert.equal(await page.getByTestId("zoom-level").innerText(),"2.0×","population tier zoom is deterministic");
     await page.waitForTimeout(300);
@@ -675,8 +675,12 @@ async function main(){
     const inspectionRasterEvidence = await page.evaluate(() => (window as Window & { __DEE_PIXI_RASTER_EVIDENCE__?: Array<{ family: string; tier: string; key: string; pixels: string }> }).__DEE_PIXI_RASTER_EVIDENCE__ ?? []);
     assert.ok(inspectionRasterEvidence.some((item) => item.family === "plated" && item.tier === "inspection" && item.pixels === "rich-rgba"),
       "actual Explorer inspection zoom uses the rich Plated RGBA texture");
-    assert.ok(inspectionRasterEvidence.some((item) => item.family !== "plated" && item.pixels === "legacy-grid"),
-      "inspection zoom leaves non-Plated families on the existing renderer");
+    // The second deeTest fixture resolves to Blob, which now has an authored
+    // grammar, so it too reaches the rich inspection path. The stale claim that
+    // only Plated does was left over from before the four new families landed.
+    const nonPlatedFamily = inspectionRasterEvidence.find((item) => item.family !== "plated");
+    assert.equal(nonPlatedFamily?.pixels, "rich-rgba",
+      "inspection zoom gives every authored family the rich raster, not just Plated");
     await page.getByRole("button",{name:"Reset view"}).click();
     assert.equal(await page.getByTestId("zoom-level").innerText(),"1.0×","reset restores the view");
 

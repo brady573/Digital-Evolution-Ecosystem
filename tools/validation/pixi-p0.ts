@@ -196,8 +196,13 @@ function traitsForAxes(mob: number, sen: number, met: number, spec: number) {
   const cache = new PhenotypeTextureCache();
   cache.acquire(res, "population", "active");
   const inner = cache as unknown as { entries: Map<string, { bits: string }> };
-  const key = exactTextureKey(res, "population", "active");
-  inner.entries.get(key)!.bits = "corrupted";
+  // Use the key the cache actually stored under. A rich family is cached under
+  // its rich-raster identity, not `exactTextureKey`, so looking up the exact key
+  // returns undefined for any authored family.
+  const key = describeRenderableTexture(res, "population", "active").key;
+  const entry = inner.entries.get(key);
+  assert.ok(entry, "collision guard finds the cache entry the renderer just stored");
+  entry.bits = "corrupted";
   assert.throws(() => cache.acquire(res, "population", "active"), /render-key collision/);
   console.log("p0 collision guard: PASS (mismatched bitmap on hash hit throws)");
 }
@@ -323,10 +328,15 @@ function traitsForAxes(mob: number, sen: number, met: number, spec: number) {
   const populationDesc = describeTexture(plated, "population", "active");
   assert.equal(populationRich.width, 64, "Plated population texture uses the accepted native art resolution");
   assert.equal(populationRich.rgba.length, 64 * 64 * 4, "rich descriptor carries exact population raster identity");
-  const legacyDescriptor = describeTexture(resolved, "population", "active");
+  // Every family now has an authored grammar, so "non-Plated keeps the legacy
+  // monochrome path" no longer has a subject. The surviving invariant is that
+  // the coarse ecosystem tier stays on the legacy grid for every family.
+  const legacyEcosystem = describeTexture(resolved, "ecosystem", "active");
   const legacyCache = new PhenotypeTextureCache();
-  assert.equal(legacyCache.acquire(resolved, "population", "active").bits, legacyDescriptor.bits,
-    "non-Plated families retain the legacy monochrome descriptor");
+  assert.equal(legacyCache.acquire(resolved, "ecosystem", "active").bits, legacyEcosystem.bits,
+    "every family retains the legacy monochrome descriptor at ecosystem tier");
+  assert.equal(describeRenderableTexture(resolved, "ecosystem", "active").rgba, undefined,
+    "the coarse ecosystem tier never reaches a rich RGBA path, for any family");
   const ecosystemDescriptor = describeRenderableTexture(plated, "ecosystem", "active");
   assert.equal(ecosystemDescriptor.size, 9, "Plated ecosystem still uses the exact accepted coarse grid");
   assert.equal(ecosystemDescriptor.rgba, undefined, "coarse ecosystem keeps its existing mask-only texture path");
