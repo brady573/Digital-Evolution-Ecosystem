@@ -544,6 +544,22 @@ function testWasteCheckpoint() {
   console.log("waste checkpoint continuation: PASS");
 }
 
+function testEngineVersionGate() {
+  // 2C: staged cleanup changes biological resolution semantics, so this is
+  // a new production engine line. The strict gate refuses older stamps and
+  // no backfill exists (transient staging state is never persisted, so
+  // there is nothing to reconstruct — refusal is the correct behavior).
+  assert.equal(ENGINE_VERSION, "0.26.0", "engine line is 0.26.0");
+  const session = new UniverseSession();
+  session.create(config(FIXTURE_SEED));
+  settle(session, 1000);
+  const stamped = JSON.parse(JSON.stringify(session.checkpoint()));
+  stamped.engineVersion = "0.25.0";
+  const restored = new UniverseSession();
+  assert.throws(() => restored.restore(stamped), "0.25.0 stamp refused by the 0.26.0 engine");
+  console.log("engine version gate: PASS");
+}
+
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const src = (rel: string): string => readFileSync(join(REPO, rel), "utf8");
 
@@ -942,6 +958,7 @@ testWasteAccounting();
 testCleanupExecution();
 testWasteDeterminism();
 testWasteCheckpoint();
+testEngineVersionGate();
 testIntervalDeterminism();
 testIntervalProduction();
 testIntervalNetMembers();

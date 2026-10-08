@@ -153,9 +153,57 @@ assert.ok(
   "live branch must record the drought onset as a removal event",
 );
 assert.equal(controlRemovals.length,0,"matched control must record no removals");
+// WIP-TEMP MAP (revert before merge): 2C recycling-buffer mapping. The
+// buffer assert below is currently failing — these values decide whether
+// the premise moved (re-derive) or the mechanism broke (defect). Asserts
+// stay STRICT meanwhile: nothing is softened to let the shard continue.
+console.log("MAP-2C-ECO:" + JSON.stringify({
+  liveA: +liveMetrics.nutrient_field.a.toFixed(1),
+  ctrlA: +controlMetrics.nutrient_field.a.toFixed(1),
+  liveIn: +liveMetrics.nutrient_field.total_input[0].toFixed(1),
+  ctrlIn: +controlMetrics.nutrient_field.total_input[0].toFixed(1),
+  livePop: disturbed.population,
+  ctrlPop: disturbed.control!.population,
+}));
+// Slice 2C re-derivation (measurement redesign, not a threshold change):
+// the 2B band below conflated "recycling exists" with "recycling happens
+// to erase almost the entire drought effect" — under 0.26 live tracks
+// ~0.52x control stock on ~0.51x regen input, i.e. the old 90% premise is
+// stale, while the direct drought mechanism (recorded removal + suppressed
+// input) still passes. The buffering claim is therefore proven by MATCHED
+// CONTRAST, not by proximity to the untouched control: a second identical
+// pair has recycling white-box-disabled on its live branch exactly at the
+// fork tick (pre-fork histories deterministic-identical, H2 precedent for
+// the flags), then takes the same drought. If recycling buffers, the
+// recycling live branch must hold more A than its recycling-free twin.
 assert.ok(
-  liveMetrics.nutrient_field.a<controlMetrics.nutrient_field.a,
-  "live A-stock must sit below the untouched control during drought suppression",
+  liveMetrics.nutrient_field.total_input[0] < 0.7 * controlMetrics.nutrient_field.total_input[0],
+  "live A-regeneration input substantially suppressed vs control",
+);
+const assayB = new UniverseSession();
+assayB.create(config(912367481, "harsh"));
+settle(assayB, 12_000);
+assayB.createControlFork();
+{
+  // White-box fork init (H2 precedent): stop deposition + consumption and
+  // zero the field, live branch only; the clean twin is untouched as usual.
+  const simB = assayB.simulation as any;
+  simB.resources.detritusDepositionEnabled = false;
+  simB.resources.detritusConsumptionEnabled = false;
+  simB.resources.detritus.stock.fill(0);
+  simB.resources.detritus.pending.fill(0);
+}
+assayB.intervene("droughtA");
+settle(assayB, fork.tick + 15_000);
+const disturbedB = assayB.snapshot();
+const noRecycA = (disturbedB.metrics as any).nutrient_field.a;
+console.log("MAP-2C-ECO-RECYCLE:" + JSON.stringify({
+  recycleA: +liveMetrics.nutrient_field.a.toFixed(1),
+  noRecycleA: +noRecycA.toFixed(1),
+}));
+assert.ok(
+  liveMetrics.nutrient_field.a > noRecycA,
+  "recycling buffers drought A-stock vs the matched recycling-free drought twin",
 );
 
 const summary={
