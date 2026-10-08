@@ -36,8 +36,9 @@ interface Ledger {
   firstBirth: number | null;
   lastBirth: number | null;
   acquired: number;
-  eligibleTicks: number;
-  blockedInferred: number;
+  /** Post-step approximation only — see the note at the increment site. */
+  eligibleTicksApprox: number;
+  blockedApprox: number;
   dormantTicks: number;
   activeTicks: number;
   maxEnergy: number;
@@ -51,13 +52,14 @@ function decompose(configName: string, regime: any, seed: number, horizon: numbe
   const sim: any = new Simulation({ ...maintainedConfig(configName, seed), ...regime });
   const ledger = new Map<number, Ledger>();
   const acc = newAcc();
+  let accPrev: Record<string, number> = {};
   const perTickBirths: { tick: number; parentId: number; energy: number; generation: number }[] = [];
 
   const seedLedger = (o: any) => {
     ledger.set(o.id, {
       id: o.id, lineage: o.l, generation: o.generation || 0, born: o.born, rp: o.rp,
-      births: 0, firstBirth: null, lastBirth: null, acquired: 0, eligibleTicks: 0,
-      blockedInferred: 0, dormantTicks: 0, activeTicks: 0, maxEnergy: o.en, deathTick: null,
+      births: 0, firstBirth: null, lastBirth: null, acquired: 0, eligibleTicksApprox: 0,
+      blockedApprox: 0, dormantTicks: 0, activeTicks: 0, maxEnergy: o.en, deathTick: null,
     });
   };
   for (const o of sim.o) seedLedger(o);
@@ -76,7 +78,7 @@ function decompose(configName: string, regime: any, seed: number, horizon: numbe
       for (const o of sim.o) samples.push({ tick: t, energy: o.en, id: o.id });
     }
     sim.step();
-    drain(sim, acc);
+    accPrev = drain(sim, acc, accPrev);
 
     const before = prev;
     const next = new Map<number, { en: number; realized: number }>();
@@ -110,14 +112,19 @@ function decompose(configName: string, regime: any, seed: number, horizon: numbe
       if (prior) row.acquired += next.get(o.id)!.realized - prior.realized;
       if (o.en > row.maxEnergy) row.maxEnergy = o.en;
       if (o.activity === "dormant") row.dormantTicks++; else row.activeTicks++;
-      const eligible = sim.t >= (o.matureAt || 0) && sim.t >= (o.readyAt || 0) && o.en >= o.rp;
+      // Post-step recomputation of the reproduction gate CANNOT recover the
+      // quantities the ledger columns promise. The engine evaluates the gate
+      // BEFORE the birth commit, and that commit then spends the parent's
+      // reserve and sets its cooldown, so a successful parent reads as ineligible
+      // immediately afterwards; dormant organisms skip the gate entirely but
+      // would satisfy this recomputation. Both columns are therefore retained as
+      // explicitly-labelled approximations and are NOT emitted as measurements:
+      // only the run-level maintained counter (drained above) is reported.
+      const eligible = o.activity !== "dormant"
+        && sim.t >= (o.matureAt || 0) && sim.t >= (o.readyAt || 0) && o.en >= o.rp;
       if (eligible) {
-        row.eligibleTicks++;
-        // INFERRED blocked birth: the engine queues a birth exactly when this
-        // gate holds, so an eligible organism that produced no newborn this tick
-        // is a placement-blocked attempt. Main publishes blocked births only as a
-        // run-level counter, so this cannot be read per organism.
-        if (!parentsWithBirth.has(o.id)) row.blockedInferred++;
+        row.eligibleTicksApprox++;
+        if (!parentsWithBirth.has(o.id)) row.blockedApprox++;
       }
     }
 
@@ -197,10 +204,14 @@ function summariseRun(run: ReturnType<typeof decompose>) {
     birthTicksByParent.get(b.parentId)!.push(b.tick);
   }
   for (const s of run.samples) {
-    const ticks = birthTicksByParent.get(s.id);
-    if (!ticks) continue;
+    // EVERY sample counts, including organisms that never reproduce and windows
+    // with zero births. Dropping zero-birth windows conditions the denominator on
+    // the outcome being measured, which inflates the rate and inflates it most in
+    // the low-energy bands where a zero-birth window is most likely — flattening
+    // or inverting exactly the gradient this table exists to show. An organism
+    // that is not a key in birthTicksByParent has zero births, not missing data.
+    const ticks = birthTicksByParent.get(s.id) ?? [];
     const inWindow = ticks.filter((t) => t > s.tick && t <= s.tick + WINDOW).length;
-    if (inWindow === 0) continue;
     const idx = EDGES.findIndex((e, i) => i < EDGES.length - 1 && s.energy >= e && s.energy < EDGES[i + 1]!);
     if (idx < 0) continue;
     buckets[idx]!.samples++;

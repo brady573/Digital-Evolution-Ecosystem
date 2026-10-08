@@ -1,5 +1,5 @@
 import {
-  maintainedConfig, SEEDS, newSession, settleSession, protectedCapabilities,
+  Simulation, maintainedConfig, SEEDS, newSession, settleSession, protectedCapabilities,
   emit, emitFresh, header, summarise,
 } from "./common.ts";
 
@@ -39,6 +39,14 @@ interface Perturbation {
   rationale: string;
 }
 
+/**
+ * Every axis below is asserted to actually change biology before its results are
+ * trusted. `cap` was originally in this set and was REMOVED: it is declared on
+ * EngineConfig but never read by sim-core, so cap*0.9 and cap*1.1 produced
+ * bit-identical runs. Those rows would have reported "no capability lost" from a
+ * run that had changed nothing — false evidence of robustness. The liveness
+ * check below exists so a dead key cannot quietly reappear.
+ */
 const PERTURBATIONS: Perturbation[] = [
   { id: "mr-", axis: "mr", factor: 0.75, rationale: "mutation rate 25% down" },
   { id: "mr+", axis: "mr", factor: 1.25, rationale: "mutation rate 25% up" },
@@ -48,9 +56,35 @@ const PERTURBATIONS: Perturbation[] = [
   { id: "div+", axis: "div", factor: 1.25, rationale: "founder dispersion 25% up" },
   { id: "press-", axis: "press", factor: 0.95, rationale: "environmental pressure 5% down" },
   { id: "press+", axis: "press", factor: 1.05, rationale: "environmental pressure 5% up" },
-  { id: "cap-", axis: "cap", factor: 0.9, rationale: "nutrient field capacity 10% down" },
-  { id: "cap+", axis: "cap", factor: 1.1, rationale: "nutrient field capacity 10% up" },
 ];
+
+/**
+ * A perturbation is only evidence if it perturbs something. Runs a short
+ * baseline and a short perturbed simulation and requires a difference in
+ * observed biology, so a dead config key fails loudly instead of silently
+ * reporting "no capability lost".
+ */
+function axisIsLive(perturbation: Perturbation, configName: string, seed: number): { live: boolean; detail: string } {
+  const base = maintainedConfig(configName, seed);
+  const baseValue = (base as any)[perturbation.axis];
+  if (typeof baseValue !== "number") {
+    return { live: false, detail: `${perturbation.axis} is not a numeric key on the ${configName} config` };
+  }
+  const fingerprint = (over: Record<string, number>) => {
+    const s: any = new Simulation({ ...base, ...over });
+    for (let t = 1; t <= 2000; t++) s.step();
+    const m = s.metrics();
+    return JSON.stringify([m.population, m.dormant_fraction, m.trait_diversity, s.o.length]);
+  };
+  const control = fingerprint({});
+  const perturbed = fingerprint({ [perturbation.axis]: baseValue * perturbation.factor });
+  return {
+    live: control !== perturbed,
+    detail: control === perturbed
+      ? `${perturbation.axis} x${perturbation.factor} produced a bit-identical run — the axis does not affect biology`
+      : `${perturbation.axis} x${perturbation.factor} changes observed biology`,
+  };
+}
 
 /** Perturbations deliberately NOT measured, with the reason each is a design change. */
 const REFUSED = [
@@ -98,8 +132,19 @@ emitFresh("qD-protected-envelope.jsonl", header({
 }));
 
 const results: any[] = [];
+const liveness: any[] = [];
 for (const configName of configs) {
   for (const seed of seeds) {
+    // Every perturbation must demonstrably change biology before its capability
+    // reading is trusted. `cap` failed this check and was removed from the set.
+    for (const p of perturbations) {
+      const check = axisIsLive(p, configName, seed);
+      liveness.push({ configName, seed, perturbation: p.id, axis: p.axis, factor: p.factor, ...check });
+      if (!check.live) {
+        console.error(`ABORT: ${configName}/${seed}/${p.id} is a no-op — ${check.detail}`);
+        process.exitCode = 1;
+      }
+    }
     for (const p of rows) {
       const r = run(configName, seed, p);
       results.push(r);
@@ -108,6 +153,10 @@ for (const configName of configs) {
   }
 }
 
+summarise("Q-D perturbation liveness (a no-op axis would report false robustness)", [
+  "config", "seed", "perturbation", "axis", "factor", "live", "detail",
+], liveness.map((l) => [l.configName, l.seed, l.perturbation, l.axis, l.factor, l.live, l.detail]));
+
 summarise("Q-D protected capability state under symmetric perturbations (maintained detectors, 150k horizon)", [
   "config", "seed", "perturbation", "wasteNiche", "dep", "seedBank", "partitioning", "returnedClades", "population",
 ], results.map((r) => [
@@ -115,22 +164,29 @@ summarise("Q-D protected capability state under symmetric perturbations (maintai
   r.partitioning, r.seedBankReturnedClades, r.population,
 ]));
 
-/** Capability loss relative to the unperturbed arm, per config. */
-summarise("Q-D capability loss envelope (perturbed vs unperturbed baseline)", [
-  "config", "perturbation", "nicheEstablished", "depEstablished", "seedBankEstablished", "partitioned", "verdict",
+/**
+ * Capability loss relative to the unperturbed arm. The baseline is matched on
+ * BOTH config and seed: comparing every seed's perturbed row against a single
+ * shared baseline would fold seed-to-seed detector variation into the
+ * perturbation's column and report it as an effect of the perturbation.
+ */
+summarise("Q-D capability loss envelope (perturbed vs same-seed unperturbed baseline)", [
+  "config", "seed", "perturbation", "nicheEstablished", "depEstablished", "seedBankEstablished", "partitioned", "verdict",
 ], configs.flatMap((configName) => {
-  const base = results.find((r) => r.configName === configName && r.perturbation === "none");
-  if (!base) return [];
   return results
     .filter((r) => r.configName === configName && r.perturbation !== "none")
     .map((r) => {
+      const base = results.find(
+        (b) => b.configName === configName && b.seed === r.seed && b.perturbation === "none",
+      );
+      if (!base) return [configName, r.seed, r.perturbation, "n/a", "n/a", "n/a", "n/a", "no baseline row"];
       const lost: string[] = [];
       if (base.wasteNiche === "established" && r.wasteNiche !== "established") lost.push("niche");
       if (base.dependency === "established" && r.dependency !== "established") lost.push("dependency");
       if (base.seedBank === "established" && r.seedBank !== "established") lost.push("seedBank");
       if (base.partitioning === true && r.partitioning !== true) lost.push("partitioning");
       return [
-        configName, r.perturbation,
+        configName, r.seed, r.perturbation,
         `${base.wasteNiche}->${r.wasteNiche}`,
         `${base.dependency}->${r.dependency}`,
         `${base.seedBank}->${r.seedBank}`,

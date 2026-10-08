@@ -96,14 +96,28 @@ export function summarise(label: string, headers: string[], rows: (string | numb
 }
 
 /**
- * Advance a raw Simulation, summing interval counters into `acc` every tick.
- * `sim.cur` is replaced by the engine every EVENT_STRIDE ticks, so the counters
- * must be drained on every tick to be complete.
+ * Advance a raw Simulation, accumulating interval counters into `acc`.
+ *
+ * `sim.cur` is CUMULATIVE within a stride: the engine increments it every tick
+ * and only replaces it every EVENT_STRIDE (251) ticks. Summing the raw value
+ * every tick therefore sums prefixes of the same running total and inflates
+ * every counter by roughly EVENT_STRIDE/2. Measured on seed 333333333 over 1000
+ * ticks: per-tick summing reported 3027 births where observation counted 30.
+ *
+ * So counters must be SAMPLED every tick and DIFFERENCEd. A drop below the
+ * previous value is the stride reset, and the current value is then the whole
+ * delta. This mirrors the stride-safe accumulator already used by
+ * tools/validation/spatial-occupancy.ts.
  */
-export function drain(sim: any, acc: Record<string, number>): void {
+export function drain(sim: any, acc: Record<string, number>, prev?: Record<string, number>): Record<string, number> {
+  const prior = prev ?? {};
   for (const [k, v] of Object.entries(sim.cur as Record<string, unknown>)) {
-    if (typeof v === "number") acc[k] = (acc[k] ?? 0) + (v as number);
+    if (typeof v !== "number") continue;
+    const before = prior[k] ?? 0;
+    acc[k] = (acc[k] ?? 0) + (v >= before ? v - before : v);
+    prior[k] = v;
   }
+  return prior;
 }
 
 export function newAcc(): Record<string, number> {

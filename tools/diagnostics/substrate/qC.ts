@@ -47,9 +47,27 @@ function founderSplit(sim: any, field: string) {
   const mean = values.reduce((a, b) => a + b, 0) / values.length;
   const sd = Math.sqrt(values.reduce((a, b) => a + (b - mean) ** 2, 0) / values.length);
   const [lo, hi] = RANGES[field]!;
-  const low = Math.min(hi, Math.max(lo, mean - 0.5 * sd));
-  const high = Math.min(hi, Math.max(lo, mean + 0.5 * sd));
-  return { mean: +mean.toFixed(4), sd: +sd.toFixed(4), low: +low.toFixed(4), high: +high.toFixed(4) };
+  // Shrink the offset until BOTH sides fit, so the achieved split stays
+  // symmetric. Clamping each side independently would let one side saturate at a
+  // range boundary while the other kept the full offset, quietly turning a
+  // "symmetric" contrast into an asymmetric one.
+  let offset = 0.5 * sd;
+  for (let i = 0; i < 40; i++) {
+    if (mean - offset >= lo && mean + offset <= hi) break;
+    offset /= 2;
+  }
+  const low = Math.min(hi, Math.max(lo, mean - offset));
+  const high = Math.min(hi, Math.max(lo, mean + offset));
+  return {
+    mean: +mean.toFixed(4),
+    sd: +sd.toFixed(4),
+    low: +low.toFixed(4),
+    high: +high.toFixed(4),
+    offset: +offset.toFixed(4),
+    // A collapsed split (low === high) means the contrast is not a contrast at
+    // all; such rows must not be read as a zero gradient.
+    degenerate: low === high,
+  };
 }
 
 function gradient(configName: string, regime: any, regimeName: string, seed: number, trait: typeof TRAITS[number], horizon: number, sampleEvery: number) {
@@ -79,9 +97,17 @@ function gradient(configName: string, regime: any, regimeName: string, seed: num
       if (parentLow) lowBirths++; else highBirths++;
     }
     if (t % sampleEvery === 0 || t === horizon) {
-      let lowPop = 0, highPop = 0;
-      for (const o of sim.o) { if (isLow.get(o.id)) lowPop++; else highPop++; }
-      track.push({ tick: t, lowBirths, highBirths, lowPop, highPop });
+      let lowPop = 0, highPop = 0, unknownPop = 0;
+      for (const o of sim.o) {
+        const low = isLow.get(o.id);
+        // An unassigned organism is counted as neither group. Falling through to
+        // the high bucket would be exactly the silent misattribution this
+        // harness already had to fix once for births.
+        if (low === undefined) unknownPop++;
+        else if (low) lowPop++;
+        else highPop++;
+      }
+      track.push({ tick: t, lowBirths, highBirths, lowPop, highPop, unknownPop });
     }
   }
   const totalBirths = lowBirths + highBirths;
@@ -96,6 +122,8 @@ function gradient(configName: string, regime: any, regimeName: string, seed: num
     stockGradient: last.lowPop + last.highPop > 0
       ? +(((last.highPop - last.lowPop) / (last.lowPop + last.highPop))).toFixed(4) : null,
     finalPopulation: last.lowPop + last.highPop,
+    unknownPopAtEnd: last.unknownPop,
+    degenerateSplit: split.degenerate,
     track,
   };
 }
@@ -119,17 +147,22 @@ for (const trait of TRAITS) {
 
 /** Sign classification across seeds, per trait and regime. */
 function classify(rows: any[], trait: string, regimeName: string) {
+  // A degenerate founder split (low === high) is not a contrast, so its gradient
+  // is uninterpretable rather than zero. It is excluded from the verdict and
+  // reported separately.
   const rs = rows.filter((r) => r.trait === trait && r.regimeName === regimeName && r.flowGradient !== null);
-  if (!rs.length) return { verdict: "no data", signs: "", consistency: "n/a" };
-  const signs = rs.map((r) => (r.flowGradient > 0.02 ? "+" : r.flowGradient < -0.02 ? "-" : "0"));
+  const usable = rs.filter((r) => !r.degenerateSplit);
+  const dropped = rs.length - usable.length;
+  if (!usable.length) return { verdict: dropped ? "no usable rows (degenerate split)" : "no data", signs: "", consistency: "n/a" };
+  const signs = usable.map((r) => (r.flowGradient > 0.02 ? "+" : r.flowGradient < -0.02 ? "-" : "0"));
   const plus = signs.filter((s) => s === "+").length;
   const minus = signs.filter((s) => s === "-").length;
   const zero = signs.filter((s) => s === "0").length;
-  const verdict = plus === rs.length ? "consistently HIGH"
-    : minus === rs.length ? "consistently LOW"
-    : zero === rs.length ? "neutral"
+  const verdict = plus === usable.length ? "consistently HIGH"
+    : minus === usable.length ? "consistently LOW"
+    : zero === usable.length ? "neutral"
     : "mixed (drift/noise)";
-  return { verdict, signs: signs.join(""), consistency: `${plus}+/${minus}-/${zero}0 of ${rs.length}` };
+  return { verdict, signs: signs.join(""), consistency: `${plus}+/${minus}-/${zero}0 of ${usable.length}${dropped ? ` (${dropped} degenerate dropped)` : ""}` };
 }
 
 summarise("Q-C selection gradient per trait × regime (flow = share of births to the HIGH trait value)", [

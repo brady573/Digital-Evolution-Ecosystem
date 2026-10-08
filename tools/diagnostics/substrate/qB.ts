@@ -41,6 +41,7 @@ const median = (xs: number[]) => {
 function opportunityMap(configName: string, regime: any, regimeName: string, seed: number, horizon: number) {
   const sim: any = new Simulation({ ...maintainedConfig(configName, seed), ...regime });
   const acc = newAcc();
+  let accPrev: Record<string, number> = {};
 
   // Cumulative realized energy per organism, so per-tick gain is exact.
   const lastRealized = new Map<number, number>();
@@ -50,7 +51,11 @@ function opportunityMap(configName: string, regime: any, regimeName: string, see
   for (const o of sim.o) bornTick.set(o.id, o.born);
   const firstBirthTick = new Map<number, number>();
   const newbornEnergy: number[] = [];
-  const wakeTick = new Map<number, number>();
+  // Every wake is kept, not just the most recent one: an organism that wakes
+  // twice before its first birth contributes two observations, and collapsing it
+  // to the last wake would measure from the latest event while the channel's
+  // event count includes every wake.
+  const wakeTicks = new Map<number, number[]>();
 
   // Open episodes, keyed by organism. Only dormancy episodes are tracked here:
   // main does not publish blocked births per organism, so blocked-birth duration
@@ -65,7 +70,7 @@ function opportunityMap(configName: string, regime: any, regimeName: string, see
   for (let t = 1; t <= horizon; t++) {
     const before = new Set(sim.o.map((o: any) => o.id));
     sim.step();
-    drain(sim, acc);
+    accPrev = drain(sim, acc, accPrev);
 
     const parentsWithBirth = new Set<number>();
     for (const o of sim.o) {
@@ -91,7 +96,10 @@ function opportunityMap(configName: string, regime: any, regimeName: string, see
         activeTicks++;
         if (gain > 0) { fedTicks++; realizedEnergy += gain; }
       }
-      if (o.lastWakeTick === t) wakeTick.set(o.id, t);
+      if (o.lastWakeTick === sim.t) {
+        if (!wakeTicks.has(o.id)) wakeTicks.set(o.id, []);
+        wakeTicks.get(o.id)!.push(sim.t);
+      }
       if (sim.t >= (o.matureAt || 0)) matureTicks++;
     }
 
@@ -113,10 +121,18 @@ function opportunityMap(configName: string, regime: any, regimeName: string, see
     const b = bornTick.get(id);
     if (b !== undefined && t > b) birthToFirstBirth.push(t - b);
   }
+  // Ticks from EACH wake to that organism's next birth. A wake after the
+  // organism's first birth has no "next" birth and contributes no observation;
+  // that is stated in the channel note rather than silently dropped.
   const wakeToBirth: number[] = [];
-  for (const [id, w] of wakeTick) {
+  let wakesAfterFirstBirth = 0;
+  for (const [id, ws] of wakeTicks) {
     const f = firstBirthTick.get(id);
-    if (f !== undefined && f > w) wakeToBirth.push(f - w);
+    if (f === undefined) continue;
+    for (const w of ws) {
+      if (f > w) wakeToBirth.push(f - w);
+      else wakesAfterFirstBirth++;
+    }
   }
 
   const pct = (n: number) => +(((n / Math.max(1, organismTicks)) * 100).toFixed(2));
@@ -170,8 +186,9 @@ function opportunityMap(configName: string, regime: any, regimeName: string, see
     channel({
       channel: "wake", events: acc.wakes ?? 0, exposurePct: pct(acc.wakes ?? 0),
       durationMean: mean(wakeToBirth), durationMedian: median(wakeToBirth),
-      effect: `${wakeToBirth.length} wakes led to a later birth`, compounding: "multi-generation",
-      note: "mean/median ticks from wake to that organism's next birth",
+      effect: `${wakeToBirth.length} wakes led to a later birth (${wakesAfterFirstBirth} after an existing first birth, excluded)`,
+      compounding: "multi-generation",
+      note: "one observation per wake: mean/median ticks from that wake to the organism's next birth",
     }),
     channel({
       // Maintained counter, not a recomputed gate. The engine evaluates the
