@@ -24,6 +24,7 @@ import { resolvePhenotype } from "@digital-evolution/phenotype";
 import { familyArtwork } from "./familyArt";
 import { TRAIT_DISPLAY_RANGES, type Lens, type PixiWorldProps, type ResourceView, type TraitView, type WorldCamera } from "./worldViewTypes";
 import { WorldPixi } from "./pixiWorld/WorldPixi";
+import { viewScale, worldToScreen } from "./pixiWorld/camera";
 
 /** Details card for a selected organism, incl. its base family portrait. */
 function SelectedOrganismCard({ selected, onViewLineage, onClear }: {
@@ -506,12 +507,50 @@ export function App(){
         worldId:presentation.identity?.worldId??null,
         environment:presentation.environment??null,
       }),
+      // Screen point of a cache-backed organism, in viewport coordinates.
+      //
+      // The details card renders its family portrait from the live phenotype
+      // cache (familyOf), and that cache is populated only from the real
+      // read-model snapshot. So a suite that must observe a portrait has to
+      // select an organism that resolveSnapshot actually saw -- the deeTest
+      // presentation fixtures are appended to render props alone and have no
+      // cache entry, so selecting one legitimately renders no portrait.
+      //
+      // Reporting the point instead of making the suite guess it keeps the
+      // click on the real hit-test path (same camera, same scale, same
+      // selectAtScreenPoint) while removing the coordinate grid search. This is
+      // read-only: it selects nothing and mutates nothing.
+      cacheBackedScreenPoint:()=>{
+        const canvas=document.querySelector(".world-pixi-host canvas");
+        if(!(canvas instanceof HTMLCanvasElement))return null;
+        const rect=canvas.getBoundingClientRect();
+        const scale=viewScale(rect.width,rect.height,zoom);
+        // A raw pointer click at this point is delivered to whatever is topmost,
+        // so a point under the compact aftermath sheet, the zoom controls, or an
+        // open decision sheet would never reach the canvas. Reject those points
+        // rather than reporting one the click cannot land on.
+        const occluders=[...document.querySelectorAll(".aftermath-compact,.zoom-controls,.decision-sheet")];
+        const occluded=(x:number,y:number)=>occluders.some((el)=>{
+          const r=el.getBoundingClientRect();
+          return r.width>0&&r.height>0&&x>=r.left&&x<=r.right&&y>=r.top&&y<=r.bottom;
+        });
+        for(const o of presentation.organisms){
+          if(phenotypeCache.familyOf(o.id)===null)continue;
+          const point=worldToScreen(o.x,o.y,cam,scale,rect.width,rect.height);
+          const x=rect.left+point.x,y=rect.top+point.y;
+          // Keep the point strictly inside the canvas, clear of its border.
+          if(x<rect.left+2||y<rect.top+2||x>rect.right-2||y>rect.bottom-2)continue;
+          if(occluded(x,y))continue;
+          return {id:o.id,x,y};
+        }
+        return null;
+      },
       saveDiagnostics:()=>[...saveDiagnosticsRef.current],
       currentStatus:()=>statusRef.current,
     };
     (window as any).__DEE_TEST__=hook;
     return()=>{delete (window as any).__DEE_TEST__};
-  },[runtime,presentation]);
+  },[runtime,presentation,cam,zoom]);
 
   // Lane 3 Task 6: retained/detail path (handoff §5–§6). Analysis records and
   // the full decision history deliberately stay out of live-frame traffic,

@@ -359,6 +359,20 @@ export const runShard = (groupId: string): number => {
   if (decision.run.length === 0) {
     console.log(`  nothing to execute in this shard for this change`);
   }
+  // A skipped unit must never read as evidence that ran. The shard still
+  // resolves green (branch protection requires the check by name, and a
+  // vanished check is worse than one that says "nothing to do"), so the
+  // distinction is made explicit in the run summary rather than inferred from
+  // a green tick. Merge-gating units are called out separately, because that
+  // is where a reader decides whether the lane actually proved anything.
+  if (decision.skipped.length > 0) {
+    const gateSkipped = decision.skipped.filter((s) => s.unit.mergeGate).map((s) => s.unit.id);
+    console.log(
+      `\n::notice::impact routing skipped ${decision.skipped.length} unit(s) in ${groupId}` +
+        (gateSkipped.length > 0 ? `, including merge-gating: ${gateSkipped.join(", ")}` : "") +
+        ". This shard did NOT execute them and is not evidence for them.",
+    );
+  }
 
   const records: UnitRecord[] = [];
 

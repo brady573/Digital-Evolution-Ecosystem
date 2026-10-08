@@ -131,8 +131,10 @@ const testPathClassification = (): void => {
   assert.equal(domain("package.json"), "validation");
   assert.equal(domain("pnpm-lock.yaml"), "validation");
   assert.equal(domain(".github/workflows/product.yml"), "ci");
-  assert.equal(domain("AGENTS.md"), "docs");
   assert.equal(domain("docs/architecture/MIGRATION.md"), "docs");
+  // Governance is execution policy, not prose: it routes like validation.
+  assert.equal(domain("AGENTS.md"), "validation");
+  assert.equal(domain(".opencode/ADOPTED-SETTINGS.md"), "validation");
   assert.equal(domain("legacy/prototype/engine.ts"), "validation");
 
   // Generated output must never be mistaken for a source change.
@@ -237,7 +239,7 @@ const testValidationInfrastructureIsConservative = (): void => {
  */
 const testDocsChangeAvoidsExpensiveWork = (): void => {
   const EXPENSIVE_SECONDS = 20;
-  const { ids } = impactUnits(["AGENTS.md"]);
+  const { ids } = impactUnits(["README.md"]);
 
   // The architecture check is cheap, and it is the one thing a change to the
   // documentation of the validation system should re-verify.
@@ -700,7 +702,10 @@ const testExplorerSkipsUnrelatedBiologicalWork = (): void => {
 
 /** Documentation takes the minimum safe path: invariants, and nothing expensive. */
 const testDocsTakesMinimumSafePath = (): void => {
-  const { plan, shards } = planForChange(["AGENTS.md"]);
+  // `AGENTS.md` is deliberately NOT the example here: it is repository
+  // execution policy, so it routes as a validation change. See
+  // testGovernanceChangesAreNotDocs.
+  const { plan, shards } = planForChange(["README.md", "docs/architecture/MIGRATION.md"]);
   // A markdown file cannot break the type system, so typecheck is not forced by
   // the docs domain -- running it would be waste, not safety. The invariant
   // units still run for every shard that holds them.
@@ -719,6 +724,39 @@ const testDocsTakesMinimumSafePath = (): void => {
   for (const shard of shards) {
     if (shard.groupId === "ci-fast") continue;
     assert.equal(shard.run.length, 0, `a docs change must leave ${shard.groupId} with nothing to do`);
+  }
+};
+
+/**
+ * Agent governance is execution policy, not prose.
+ *
+ * `.opencode/` holds the edit-deny rules and the default agent; `AGENTS.md`
+ * holds the repository execution contract and the definition of done. Routing
+ * either to the `docs` domain let a governance edit report a green browser lane
+ * that executed nothing -- a vacuous pass on merge-gating evidence. Both must
+ * reach the validation lane instead, while genuinely harmless documentation
+ * keeps the cheap path.
+ */
+const testGovernanceChangesAreNotDocs = (): void => {
+  for (const path of [
+    "AGENTS.md",
+    ".opencode/opencode.json",
+    ".opencode/ADOPTED-SETTINGS.md",
+    ".opencode/commands/discuss.md",
+    ".opencode/skills/discuss/SKILL.md",
+  ]) {
+    const { plan, shards } = planForChange([path]);
+    assert.ok(!plan.domains.includes("docs"), `${path}: governance must not be classified as prose`);
+    assert.ok(plan.domains.includes("validation"), `${path}: governance must route to the validation lane`);
+    assert.ok(
+      plan.unitIds.includes("browser-smoke"),
+      `${path}: a governance change must select browser evidence, or the browser lane reports green without running`,
+    );
+    const browser = shards.find((s) => s.groupId === "ci-browser");
+    assert.ok(
+      browser && browser.run.some((u) => u.id === "browser-smoke"),
+      `${path}: the ci-browser shard must have browser-smoke selected to run`,
+    );
   }
 };
 
@@ -749,7 +787,8 @@ const testAndroidChangesTriggerTheAndroidLane = (): void => {
  */
 const testSkippedShardCannotDropRequiredWork = (): void => {
   const classes: Array<[string, string[]]> = [
-    ["docs-only", ["AGENTS.md"]],
+    ["docs-only", ["README.md"]],
+    ["governance", ["AGENTS.md"]],
     ["explorer-only", ["apps/explorer/src/App.tsx"]],
     ["phenotype-only", ["packages/phenotype/src/index.ts"]],
     ["sim-core", ["packages/sim-core/src/engine.ts"]],
@@ -792,6 +831,7 @@ const routingTests: Array<[string, () => void]> = [
   ["validation infrastructure cannot validate itself away", testValidationInfrastructureCannotValidateItselfAway],
   ["explorer changes skip unrelated biological work", testExplorerSkipsUnrelatedBiologicalWork],
   ["docs takes the minimum safe path", testDocsTakesMinimumSafePath],
+  ["governance changes are not docs", testGovernanceChangesAreNotDocs],
   ["android changes trigger the android lane", testAndroidChangesTriggerTheAndroidLane],
   ["a skipped shard cannot drop required work", testSkippedShardCannotDropRequiredWork],
 ];
