@@ -149,6 +149,48 @@ async function settlePaused(page:Page,timeoutMs=10_000){
   throw new Error(`world never settled after Pause (last tick ${previous})`);
 }
 
+/**
+ * Bring the World surface to a state where the inspector is eligible to render.
+ *
+ * The inspector is gated on `surface==="world" && !pending && !showAftermath &&
+ * !showAftermathStage2` (App.tsx). After the speed journey the world can
+ * legitimately be sitting on a decision gate or an Aftermath surface -- a
+ * pending decision outranks an Aftermath, and acknowledging one can open
+ * another -- and then the entire inspector subtree, including the toggle and
+ * the details card, is absent from the DOM.
+ *
+ * This clears those surfaces through the ordinary player controls only: the
+ * decision sheet's own "Keep watching", the Aftermath panel's acknowledge
+ * button, and the stage-2 panel's Collapse button. No runtime hook is used and
+ * no product state is forced. It loops because each clearance can legitimately
+ * reveal the next surface, and it asserts the end state rather than assuming
+ * it, so a journey that cannot be cleared fails here with a clear reason
+ * instead of timing out later on a selector that was never going to match.
+ */
+async function ensureWorldInspectorEligible(page:Page): Promise<void>{
+  const inspector=page.locator(".inspector");
+  for(let step=0;step<8;step++){
+    if(await inspector.count()>0)return;
+    const decision=page.getByTestId("decision-sheet");
+    const impact=page.getByTestId("aftermath-impact");
+    const stage2=page.getByTestId("aftermath-stage2");
+    if(await decision.count()>0){
+      await decision.getByText("Keep watching").click();
+      await decision.waitFor({state:"detached",timeout:15_000});
+    }else if(await impact.isVisible().catch(()=>false)){
+      await page.getByTestId("aftermath-acknowledge").click();
+      await impact.waitFor({state:"detached",timeout:15_000});
+    }else if(await stage2.isVisible().catch(()=>false)){
+      await stage2.getByRole("button",{name:"Collapse"}).click();
+      await stage2.waitFor({state:"hidden",timeout:15_000});
+    }else{
+      break;
+    }
+  }
+  assert.ok(await inspector.count()>0,
+    "the World inspector is eligible to render after clearing decision and Aftermath surfaces");
+}
+
 async function waitForTickOrDecision(page:Page,target:number,timeoutMs=120_000){
   const deadline=Date.now()+timeoutMs;
   while(Date.now()<deadline){
@@ -740,6 +782,11 @@ async function main(){
     // exactly the organism whose point was requested.
     await page.getByRole("button",{name:"Pause"}).click().catch(()=>{});
     await settlePaused(page);
+    // The inspector that renders the portrait is gated on no pending decision
+    // and no Aftermath surface, and the 100x journey above can legitimately
+    // leave either up. Clear them through the player's own controls first; the
+    // selection below cannot be observed while a sheet owns the slot.
+    await ensureWorldInspectorEligible(page);
     const target=await page.evaluate(()=>{
       const hook=(window as Window & { __DEE_TEST__?: { cacheBackedScreenPoint?:()=>{id:number;x:number;y:number}|null } }).__DEE_TEST__;
       return hook?.cacheBackedScreenPoint?.()??null;
