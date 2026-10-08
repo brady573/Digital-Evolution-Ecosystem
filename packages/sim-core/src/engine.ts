@@ -65,7 +65,7 @@ const RRN=(o:{rr?:unknown}):number=>Q(typeof o.rr==="number"?o.rr:0,0,1.5)/1.5;
 // Recovery Readiness (growth vs adaptation): higher readiness shortens
 // post-wake reproductive recovery delay and lengthens steady-state
 // post-birth cooldown. dr remains sole dormancy authority; me/rp unchanged.
-const WAKE_RECOVERY_BASE=300,WAKE_RECOVERY_SCALE=600;
+const WAKE_RECOVERY_BASE=900,WAKE_RECOVERY_SCALE=600;
 const STEADY_COOLDOWN_SCALE=1.5;
 const WAKE_DELAY=(rr:number):number=>WAKE_RECOVERY_BASE-WAKE_RECOVERY_SCALE*RRN({rr});
 const STEADY_COOLDOWN=(rr:number):number=>REPRO_COOLDOWN*(1+STEADY_COOLDOWN_SCALE*RRN({rr}));
