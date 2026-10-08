@@ -540,7 +540,7 @@ export const UNITS: readonly ValidationUnit[] = [
     parallelSafe: true,
     baselineSeconds: 3,
     claim:
-      "All six authored family grammars resolve through deterministic recipes; projection-only Plated deformation stays locally bounded and preserves the twelve plate sites and their depth/order; Branching keeps a rooted hierarchy with terminal nodules; every soft-bodied family contractures geometrically when dormant, responds to existing quantized traits without rerolling region topology or jumping on a small step, and shares one source recipe across population and inspection so zooming never moves a body; population keeps over 75% of the inspection silhouette; the four new families retain their measured family-specific silhouette constraints; materialization preserves structural masks and colors only owned pixels using finite palette roles.",
+      "All six authored family grammars resolve through deterministic recipes; projection-only Plated deformation stays locally bounded and preserves the twelve plate sites and their depth/order; Branching keeps a rooted hierarchy with terminal nodules; every soft-bodied family contractures geometrically when dormant, responds to existing quantized traits without rerolling region topology or jumping on a small step, and shares one source recipe across population and inspection so zooming never moves a body; population keeps over 75% of the inspection silhouette; the four new families retain their measured family-specific silhouette constraints; materialization preserves structural masks and colors only owned pixels using finite palette roles; every pixel of a rich population/inspection texture outside authored structural ownership is fully transparent and every owned pixel stays visible, so no opaque texture card is uploaded over the world and authored interstitial material is never erased.",
   },
   {
     id: "pixi-spike",
@@ -761,6 +761,21 @@ export const UNITS: readonly ValidationUnit[] = [
       "Inspectable landscape images for human review. Non-gating: the capture run is timing dependent, so a slow run must not block verified code. It still uploads on failure, so a failure stays visible.",
   },
   {
+    id: "rich-zoom-evidence",
+    title: "Rich-zoom transparency production evidence",
+    script: "test:rich-zoom",
+    cls: "browser",
+    enforcement: "evidence",
+    mergeGate: false,
+    domains: withApparatus("contracts", "phenotype", "explorer"),
+    needs: ["build"],
+    parallelSafe: false,
+    artifact: "rich-zoom-evidence",
+    baselineSeconds: 60,
+    claim:
+      "Issue #131 evidence: phone-class production frames at 2.5x and 3.0x carry no opaque texture cards, the world stays readable between organism silhouettes, source texture resolution is measured separately from the gameplay footprint and display scale, all six authored families reach the rich path in deterministic fixtures, and pointer/selection mapping still resolves. Blocking would make timing-dependent capture gate merges, so this is non-gating evidence that still uploads on failure; the blocking claim that rich pixels are transparent outside ownership stays in phenotype-art.",
+  },
+  {
     id: "pixi-capture",
     title: "Pixi spike browser captures",
     script: "spike:capture",
@@ -859,7 +874,8 @@ export const GROUPS: readonly ValidationGroup[] = [
   {
     id: "browser",
     title: "Browser and runtime behaviour",
-    unitIds: ["browser-smoke", "mobile-ui", "pixi-world-proof"],
+    unitIds: ["browser-smoke", "mobile-ui", "pixi-world-proof", "rich-zoom-evidence"],
+    ci: false,
     ci: false,
   },
   // Platform units are addressed as two routing groups rather than one, because
@@ -956,7 +972,7 @@ export const GROUPS: readonly ValidationGroup[] = [
   {
     id: "ci-visual",
     title: "Landscape visual evidence (non-gating)",
-    unitIds: ["visual-capture"],
+    unitIds: ["visual-capture", "rich-zoom-evidence"],
     ci: true,
   },
   {

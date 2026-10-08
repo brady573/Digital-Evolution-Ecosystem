@@ -15,7 +15,7 @@ export type {
   RGBColor,
   StructuralArtRecipe,
 } from "./types";
-export { PROCEDURAL_ART_VERSION } from "./version";
+export { PROCEDURAL_ART_VERSION, PROCEDURAL_VARIATION_VERSION } from "./version";
 export { buildArtRecipe, resolveArtLod } from "./recipe";
 export { buildBranchingRecipe, type BranchingActivity } from "./families/branching";
 export { rasterizeStructuralArt, scaleRasterNearest } from "./raster";
