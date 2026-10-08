@@ -315,6 +315,8 @@ Working conventions
 
 10. Keep historical evidence historical. Completed experiments, superseded handoffs, prototypes, and old validation results remain provenance. They do not automatically define current product behavior.
 
+11. Keep repositories and worktrees on durable storage under the Linux home (`/root/...`). On the Owner device `/tmp` is a separate tmpfs: it is wiped by `proot-distro clear-cache` and by device restart, and it is size-capped well below a full install. Do not create worktrees under `/tmp`, and never leave uncommitted work there — a branch can hold commits that are already pushed, but uncommitted changes in `/tmp` do not survive. Shared phone storage (`/sdcard`) is mounted `noexec` and may reject symlinks, so `node_modules` native binaries and `pnpm` linking break there; never place the repository, `node_modules`, or OpenCode state on it. Copying reviewable outputs only — viewer HTML, `EVIDENCE.md`, exports, screenshots, handoff files — to `/sdcard/DEE/<topic>/` is fine, and is a copy rather than a move: the repository stays the source of truth.
+
 Frozen sources
 
 Do not edit:
