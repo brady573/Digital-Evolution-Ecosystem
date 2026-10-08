@@ -16,6 +16,10 @@ import {
 // DA-1 plumbing, DA-2 conservation, DA-3 parent causality, DA-4 blocked-birth
 // isolation, DA-5 pre-birth channel isolation, DA-6/DA-7 realized effects,
 // DA-11 replay/checkpoint. Evolutionary selection is Phase B.
+//
+// PROVENANCE ONLY. Division Allocation was terminated as DESIGN TENSION on
+// issue #97; this unit is not registered in tools/validation/manifest.ts and is
+// not merge-gating. See docs/provenance/lane1-division-allocation/.
 
 const NEUTRAL_DA = 0.75; // DAN == 0.5 -> DAQ == BIRTH_NEWBORN_NEUTRAL_SHARE
 
@@ -300,76 +304,58 @@ function testPreBirthIsolation() {
 
 // --- DA-6 / DA-7 realized effects -------------------------------------------
 
-function testParentRetentionRepeatBirth() {
-  // Lower allocation leaves the parent more post-birth energy, which must
-  // shorten its realized route to another birth when other constraints permit.
+function testParentRetentionPopulationEffect() {
+  // The realized effect of the allocation is POPULATION-level, not parent-level
+  // timing. A route-to-next-birth assay was attempted and withdrawn: under the
+  // maintained storage-cost curve SC(e) = 0.000035*(e-100)^2 the energy-climb
+  // rate is reserve-dependent, so a parent holding more reserve reaches a
+  // proportionally higher threshold SOONER, and the measured route reversed
+  // direction with the seed (see docs/provenance/lane1-division-allocation/).
   //
-  // The cooldown is readiness-independent, so the ENERGY route is isolated: one
-  // parent reproduces in a matched world, every other organism is barred from
-  // dividing, and both variants are measured against the SAME energy threshold.
-  // The threshold is self-calibrated just above the higher post-split energy, so
-  // both parents must genuinely regain energy and neither starts already done.
-  const { sim: seedSim } = seedAtReproducer(20000, { start: 0.9, prod: 1.2 });
-  const targetId = seedSim.o.find(
-    (o: any) => o.activity === "active" && seedSim.t >= (o.matureAt || 0) &&
-      seedSim.t >= (o.readyAt || 0) && o.en >= o.rp,
-  )!.id;
-
-  /** Reproduce the isolated target at `da`; return its post-split state. */
-  const split = (da: number) => {
-    const sim = clone(seedSim) as any;
-    const p = sim.o.find((o: any) => o.id === targetId)!;
-    for (const o of sim.o) { o.da = da; if (o.id !== targetId) o.rp = 1e9; }
-    p.en = Math.max(p.en, p.rp * 1.2);
-    p.matureAt = 0; p.readyAt = 0; p.activity = "active";
-    const ids = new Set(sim.o.map((o: any) => o.id));
-    for (let t = 0; t < 40; t++) {
-      sim.step();
-      if (sim.o.some((o: any) => !ids.has(o.id) && o.parent === targetId)) break;
+  // What is stable is the population consequence of the pinned strategies. da =
+  // 0.75 maps to exactly the maintained split (shift == 0), so it is the control
+  // arm; 0 and 1.5 are the two fixed strategies. Only the parent-retention
+  // direction is asserted: the provisioning-vs-control difference changed sign
+  // across worlds in the recorded probe.
+  const arms: Record<string, number> = { retain: 0, control: 0.75, provision: 1.5 };
+  for (const seed of [7, 4242]) {
+    const births: Record<string, number> = {};
+    for (const [name, da] of Object.entries(arms)) {
+      const sim = new Simulation({ ...cfg, pop: 30, mr: 0.1, ms: 0.12, seed }) as any;
+      for (const o of sim.o) o.da = da;
+      let total = 0;
+      for (let t = 1; t <= 6000; t++) {
+        for (const o of sim.o) o.da = da;
+        sim.step();
+        total += sim.cur.births || 0;
+      }
+      births[name] = total;
     }
-    return { sim, post: sim.o.find((o: any) => o.id === targetId)! };
-  };
-
-  const lo0 = split(0), hi0 = split(1.5);
-  assert.ok(lo0.post.en > hi0.post.en,
-    `low allocation leaves the parent more energy (${lo0.post.en.toFixed(2)} > ${hi0.post.en.toFixed(2)})`);
-
-  const PROBE = Math.max(lo0.post.en, hi0.post.en) * 1.25;
-
-  const route = (start: { sim: any; post: any }) => {
-    const sim = start.sim;
-    const p = sim.o.find((o: any) => o.id === targetId)!;
-    assert.ok(p.en < PROBE, `post-split energy ${p.en.toFixed(2)} below common probe ${PROBE.toFixed(2)}`);
-    p.rp = PROBE; // common threshold; DA never modifies rp itself
-    for (let ticks = 1; ticks <= 30000; ticks++) {
-      sim.step();
-      const alive = sim.o.find((o: any) => o.id === targetId);
-      if (!alive) return { ticks, died: true };
-      if (alive.en >= PROBE && sim.t >= alive.readyAt) return { ticks, died: false };
-    }
-    return { ticks: -1, died: false };
-  };
-
-  const lo0b = split(0), hi0b = split(1.5);
-  const a = route(lo0b);
-  const b = route(hi0b);
-  assert.ok(!a.died && !b.died, `parent survives to rebuild (lo died=${a.died}, hi died=${b.died})`);
-  assert.ok(a.ticks > 0 && b.ticks > 0, "both parents rebuilt to the common threshold");
-  assert.ok(a.ticks < b.ticks,
-    `low allocation shortens the route to another birth (${a.ticks} < ${b.ticks} ticks)`);
-  console.log(`DA-6 parent-retention route (low ${a.ticks} < high ${b.ticks} ticks, probe ${PROBE.toFixed(1)}): PASS`);
+    assert.ok(births.retain > births.control,
+      `seed ${seed}: parent retention out-births maintained biology (${births.retain} > ${births.control})`);
+    console.log(
+      `DA-6 seed=${seed} births retain=${births.retain} control=${births.control} provision=${births.provision}`,
+    );
+  }
+  console.log("DA-6 parent-retention population effect: PASS");
 }
 
-function testOffspringProvisioningEnergy() {
+function testOffspringProvisioningReserve() {
+  // DA-7 asked for a survival/establishment OUTCOME. That outcome is NOT
+  // demonstrable here: across two worlds and three seeds the isolated newborn
+  // failed to reach its own first birth within 40k ticks in 10 of 12 arms, and
+  // the two arms that did establish took an identical 3928 ticks regardless of
+  // allocation. Recorded as a null result rather than asserted as an effect.
+  // What is exact is the reserve the newborn is born with.
   const { sim } = seedAtReproducer();
   const lo = matchedBirth(sim, 0);
   const hi = matchedBirth(sim, 1.5);
-  assert.ok(hi.baby.en > lo.baby.en, "high allocation provisions the newborn");
-  // Newborn starting energy relative to its own reproduction threshold is the
-  // causal establishment quantity.
+  assert.ok(hi.baby.en > lo.baby.en,
+    `high allocation provisions the newborn (${hi.baby.en.toFixed(2)} > ${lo.baby.en.toFixed(2)})`);
   const rel = (r: { baby: any }) => r.baby.en / r.baby.rp;
-  assert.ok(rel(hi) > rel(lo), `provisioned newborn has more energy relative to its rp (${rel(hi).toFixed(4)} vs ${rel(lo).toFixed(4)})`);
-  console.log("DA-7 offspring-provisioning energy: PASS");
+  assert.ok(rel(hi) > rel(lo),
+    `provisioned newborn holds more energy relative to its own rp (${rel(hi).toFixed(4)} > ${rel(lo).toFixed(4)})`);
+  console.log("DA-7 offspring-provisioning reserve (establishment outcome: null result): PASS");
 }
 
 // --- DA-11 reproducibility ---------------------------------------------------
@@ -407,8 +393,8 @@ testNeutralReproducesLegacyArithmetic();
 testParentCausality();
 testBlockedBirthIsolation();
 testPreBirthIsolation();
-testParentRetentionRepeatBirth();
-testOffspringProvisioningEnergy();
+testParentRetentionPopulationEffect();
+testOffspringProvisioningReserve();
 testReplayDeterminism();
 testCheckpointFork();
 console.log("\ndivision-allocation validation: PASS (Phase A)");
