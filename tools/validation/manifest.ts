@@ -245,7 +245,7 @@ export const UNITS: readonly ValidationUnit[] = [
     domains: withApparatus("contracts", "sim-core", "sim-decisions", "sim-runtime", "explorer"),
     needs: [],
     parallelSafe: true,
-    baselineSeconds: 58,
+    baselineSeconds: 250,
     claim:
       "Events still map to exactly the same offered choices as before, and an entity reference whose kind was never recorded yields no L- or C- claim rather than a guessed one.",
   },
@@ -259,7 +259,7 @@ export const UNITS: readonly ValidationUnit[] = [
     domains: withApparatus("contracts", "sim-core", "sim-decisions", "sim-runtime", "explorer"),
     needs: [],
     parallelSafe: true,
-    baselineSeconds: 77,
+    baselineSeconds: 310,
     claim: "The offered interventions produce their exact documented effects.",
   },
   {
@@ -272,7 +272,7 @@ export const UNITS: readonly ValidationUnit[] = [
     domains: withApparatus("contracts", "sim-core", "sim-analysis", "sim-decisions", "sim-runtime", "explorer"),
     needs: [],
     parallelSafe: true,
-    baselineSeconds: 200,
+    baselineSeconds: 426,
     claim:
       "Session lifecycle, forking, and pause gating behave exactly as specified; every named checkpoint migration rule is well-formed, hazard-classified and still matches the code that absorbs it; a save written before entity references carried their kind restores with the same reference count and no guessed namespace, and the current schema refuses that same bare-reference shape; a checkpoint from the maintained save path is accepted; each of the six rejection conditions refuses with the field named; a suppressed major-catalyst cooldown stays suppressed across restore from both the current schema and a real 0.3 save, while a 0.2 save predating the field migrates to the historically correct value; a source-schema preflight on the raw payload accepts each evidenced historical omission for its own schema and refuses every field its writer was required to emit, so a 0.3 save preserves its persisted lastDecisionTick and cannot omit it and a 0.2 save reconstructs the historically absent tick; present wrong-typed, malformed, non-finite, or self-contradicting values are refused at every supported schema across the encoded simulation with its resource, waste, organism, interval and identity state, the observer's detectors, history records and eras, entity references, and decision records, so named historical absence cannot excuse an invalid checked value; a preflight refusal leaves an existing running session unchanged; a preflighted source is then canonicalised into ONE restore representation and that representation is held to the current non-simulation contract before any state becomes live, with the candidate/validated distinction enforced by the compiler rather than by a runtime call; and the Owner-facing supported-save boundary document is generated rather than transcribed, carrying the live current schema version, no supported-version literal in code that could go stale behind it, the two independent schema and engine-version gates named separately, and the canonical ordering the implementation actually performs. export carries a versioned provenance block; dirty build → dirty; undeterminable revision → unknown, never clean.",
   },
@@ -308,7 +308,7 @@ export const UNITS: readonly ValidationUnit[] = [
     // ~350ms; the rest is tsx startup plus module resolution for the engine,
     // which no test-side change removes. ci-sim-c was 184s, so this is ~0.2%
     // of the shard and nowhere near the 278s ci-sim-a critical path.
-    baselineSeconds: 11,
+    baselineSeconds: 13,
     claim:
       "Malformed, unknown, non-finite, negative, fractional-when-integer, and out-of-range runtime commands are rejected as structured failures before any simulation loop begins; an unsupported command tag can never escape handle as undefined, which is what previously killed the worker with every pending request left unresolved; a rejected command mutates no tick, no biology, and no decision or analysis state, while still releasing the snapshot backpressure depends on; every worker request settles exactly once through a supported terminal outcome; a terminal worker failure or destroy clears every pending request and the pending checkpoint load; and a checkpoint load completes only through its own request identity, so a same-tick, stale, or unrelated live snapshot cannot satisfy it.",
   },
@@ -322,7 +322,7 @@ export const UNITS: readonly ValidationUnit[] = [
     domains: withApparatus("contracts", "sim-core", "sim-runtime", "explorer"),
     needs: [],
     parallelSafe: true,
-    baselineSeconds: 16,
+    baselineSeconds: 57,
     claim: "Playback speed changes advance exactly the tick counts they claim.",
   },
   {
@@ -348,7 +348,7 @@ export const UNITS: readonly ValidationUnit[] = [
     domains: withApparatus("contracts", "sim-core"),
     needs: [],
     parallelSafe: true,
-    baselineSeconds: 91,
+    baselineSeconds: 231,
     claim: "Conservation and accountancy hold; population stays emergent.",
   },
   {
@@ -375,9 +375,23 @@ export const UNITS: readonly ValidationUnit[] = [
     domains: withApparatus("contracts", "sim-core", "sim-runtime"),
     needs: [],
     parallelSafe: true,
-    baselineSeconds: 257,
+    baselineSeconds: 678,
     claim:
       "Local space is finite identity-free opportunity: settlement and birth placement resolve deterministically by seniority with deflection and atomic discard, vacancy recolonizes, lineage never steers, and throughput stays viable at thousands scale.",
+  },
+  {
+    id: "detritus",
+    title: "Detritus and recycling (Slice 2)",
+    script: "test:detritus",
+    cls: "deterministic",
+    enforcement: "blocking",
+    mergeGate: true,
+    domains: withApparatus("contracts", "sim-core", "sim-runtime"),
+    needs: [],
+    parallelSafe: true,
+    baselineSeconds: 524,
+    claim:
+      "Death deposits deterministic local detritus available next tick; the inherited du capability pays a real tradeoff and advantages recyclers only with opportunity; mineralization returns mass into A/B with closed accounting on both ledgers; hotspots form and are consumed; the strategy is maintained iff opportunity persists; checkpoints and forks stay exact.",
   },
   {
     id: "aftermath",
@@ -391,7 +405,7 @@ export const UNITS: readonly ValidationUnit[] = [
     parallelSafe: false,
     claim:
       "An impact pause retains both sides of the effect at one tick and auto-resume never loses them.",
-    baselineSeconds: 34,
+    baselineSeconds: 143,
   },
   // --- Dependency shards ----------------------------------------------------
   // `pnpm test:dependency` was 647s on CI and, as a single shard, the entire
@@ -433,7 +447,7 @@ export const UNITS: readonly ValidationUnit[] = [
     parallelSafe: true,
     claim:
       "One deterministic run establishes and then loses a dependency, resume from a checkpoint reproduces it, and each named entity reference asserts the kind it denotes rather than a bare id.",
-    baselineSeconds: 92,
+    baselineSeconds: 386,
   },
   {
     id: "dependency-possibility",
@@ -445,7 +459,7 @@ export const UNITS: readonly ValidationUnit[] = [
     domains: withApparatus("contracts", "sim-core", "sim-decisions", "sim-runtime"),
     needs: [],
     parallelSafe: true,
-    baselineSeconds: 251,
+    baselineSeconds: 589,
     claim: "Cross-feeding is genuinely possible across seeds, not just in one lucky world.",
   },
   {
@@ -458,7 +472,7 @@ export const UNITS: readonly ValidationUnit[] = [
     domains: withApparatus("contracts", "sim-core", "sim-decisions", "sim-runtime"),
     needs: [],
     parallelSafe: true,
-    baselineSeconds: 405,
+    baselineSeconds: 375,
     claim: "Cross-feeding carries a real energetic cost rather than being free.",
   },
   {
@@ -472,7 +486,7 @@ export const UNITS: readonly ValidationUnit[] = [
     needs: [],
     parallelSafe: true,
     claim: "A flushed nutrient column causes real reliance, and recovery is measurable.",
-    baselineSeconds: 42,
+    baselineSeconds: 169,
   },
 
   // --- Class C: presentation and executable product ------------------------
@@ -847,6 +861,7 @@ export const GROUPS: readonly ValidationGroup[] = [
       "dependency-tradeoff",
       "dependency-washout",
       "spatial-occupancy",
+      "detritus",
     ],
     ci: false,
   },
@@ -926,7 +941,7 @@ export const GROUPS: readonly ValidationGroup[] = [
   {
     id: "ci-sim-c",
     title: "Deterministic suites C (niche, ecology, runtime boundary)",
-    unitIds: ["niche", "ecology", "runtime-boundary", "spatial-occupancy"],
+    unitIds: ["niche", "ecology", "runtime-boundary", "spatial-occupancy", "detritus"],
     ci: true,
   },
   {
