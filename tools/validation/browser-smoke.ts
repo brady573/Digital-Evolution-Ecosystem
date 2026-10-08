@@ -6,6 +6,15 @@ import { BARE_RGB } from "../../apps/explorer/src/landscape.ts";
 const baseUrl=process.env.DEE_BASE_URL||"http://127.0.0.1:4173";
 
 /**
+ * Families with an authored procedural grammar, which therefore must reach the
+ * rich raster at population and inspection. `family !== "plated"` is not a valid
+ * substitute: it silently means "non-Plated", which would wrongly include any
+ * family that legitimately stays on the legacy renderer.
+ */
+const AUTHORED_FAMILIES:ReadonlySet<string>=new Set(
+  ["plated","branching","blob","segmented","radial","paddled"]);
+
+/**
  * Does the minimap resource field reach every corner of the world?
  *
  * The ratio bound is a judgement call, so it is a named function with its
@@ -54,6 +63,9 @@ async function verifyBranchingInProduction(context: BrowserContext) {
     const ecosystem = await readEvidence();
     assert.ok(ecosystem.some((item) => item.organismId === 900000003 && item.family === "branching" && item.tier === "ecosystem" && item.pixels === "legacy-grid"),
       "branching stays on the accepted coarse ecosystem renderer");
+    // `[].every()` is true, so state the non-emptiness the gate relies on rather
+    // than inheriting it incidentally from an adjacent assertion.
+    assert.ok(ecosystem.length > 0, "ecosystem raster evidence is present");
     assert.ok(ecosystem.every((item) => item.pixels === "legacy-grid"),
       "the coarse ecosystem tier keeps every family on the legacy renderer");
     for (const [organismId, family] of [
@@ -642,6 +654,9 @@ async function main(){
     const ecosystemEvidence = await readRasterEvidence();
     assert.ok(ecosystemEvidence.some((item) => item.family === "plated" && item.tier === "ecosystem" && item.pixels === "legacy-grid"),
       "deeTest fixture guarantees Plated stays on the coarse ecosystem renderer");
+    // `[].every()` is true, so state the non-emptiness this gate relies on rather
+    // than inheriting it incidentally from the adjacent assertion above.
+    assert.ok(ecosystemEvidence.length > 0, "ecosystem raster evidence is present");
     assert.ok(ecosystemEvidence.every((item) => item.pixels === "legacy-grid"),
       "the coarse ecosystem tier keeps every family on the legacy renderer");
     for(let i=0;i<2;i++)await page.getByRole("button",{name:"Zoom in"}).click();
@@ -675,11 +690,14 @@ async function main(){
     const inspectionRasterEvidence = await page.evaluate(() => (window as Window & { __DEE_PIXI_RASTER_EVIDENCE__?: Array<{ family: string; tier: string; key: string; pixels: string }> }).__DEE_PIXI_RASTER_EVIDENCE__ ?? []);
     assert.ok(inspectionRasterEvidence.some((item) => item.family === "plated" && item.tier === "inspection" && item.pixels === "rich-rgba"),
       "actual Explorer inspection zoom uses the rich Plated RGBA texture");
-    // The second deeTest fixture resolves to Blob, which now has an authored
-    // grammar, so it too reaches the rich inspection path. The stale claim that
-    // only Plated does was left over from before the four new families landed.
-    const nonPlatedFamily = inspectionRasterEvidence.find((item) => item.family !== "plated");
-    assert.equal(nonPlatedFamily?.pixels, "rich-rgba",
+    // Every authored family must reach the rich inspection path. Checking only the
+    // first non-Plated item proved "at least one", while the message claimed
+    // "every"; an unchecked family could regress to the legacy raster unnoticed.
+    const authoredInspection = inspectionRasterEvidence.filter(
+      (item) => item.tier === "inspection" && AUTHORED_FAMILIES.has(item.family));
+    assert.ok(authoredInspection.length > 0,
+      "inspection evidence contains at least one authored family");
+    assert.ok(authoredInspection.every((item) => item.pixels === "rich-rgba"),
       "inspection zoom gives every authored family the rich raster, not just Plated");
     await page.getByRole("button",{name:"Reset view"}).click();
     assert.equal(await page.getByTestId("zoom-level").innerText(),"1.0×","reset restores the view");
