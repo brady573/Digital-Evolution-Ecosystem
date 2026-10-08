@@ -1,0 +1,75 @@
+name: substrate-diagnostic
+
+# Evolutionary Substrate Diagnostic — issue #97 comment 6060686372.
+#
+# DIAGNOSTIC ONLY. Manual dispatch on the diagnostic branch, artifact upload,
+# never merge-gating, and it cannot run on pull requests: `workflow_dispatch`
+# has no `pull_request` trigger. It is deliberately separate from product.yml so
+# it can never become a merge gate or block a PR, and it runs against maintained
+# main biology with no production change of any kind.
+#
+# Why CI and not the Owner device: the AGENTS.md Owner-device execution rule
+# forbids sustained scientific characterization on the device, and the full
+# matrix is hundreds of multi-minute runs. Long probes belong here.
+#
+# Each question is a separate matrix entry so a single slow question can be
+# re-run without repeating the others.
+
+on:
+  workflow_dispatch:
+    inputs:
+      question:
+        description: "Which question to run (a, b, c, d, or all)"
+        required: true
+        default: "all"
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-project
+
+      # The commit under test is recorded into every emitted row so a table can
+      # never be read out of context.
+      - name: Record substrate baseline
+        run: echo "SUBSTRATE_COMMIT=${GITHUB_SHA::12} SUBSTRATE_BASE=origin/main" >> "$GITHUB_ENV"
+
+      - name: Q-A reproductive-value concentration
+        if: inputs.question == 'a' || inputs.question == 'all'
+        run: pnpm exec tsx tools/diagnostics/substrate/qA.ts
+
+      - name: Q-A matched parent-vs-newborn value assay
+        if: inputs.question == 'a' || inputs.question == 'all'
+        run: pnpm exec tsx tools/diagnostics/substrate/qA.ts --value
+
+      - name: Q-B opportunity-frequency map
+        if: inputs.question == 'b' || inputs.question == 'all'
+        run: pnpm exec tsx tools/diagnostics/substrate/qB.ts
+
+      - name: Q-C selection gradients
+        if: inputs.question == 'c' || inputs.question == 'all'
+        run: pnpm exec tsx tools/diagnostics/substrate/qC.ts
+
+      - name: Q-D protected-ecology sensitivity envelope
+        if: inputs.question == 'd' || inputs.question == 'all'
+        run: pnpm exec tsx tools/diagnostics/substrate/qD.ts
+
+      # The diagnostic must not be able to affect merge readiness. This step is
+      # informational: it proves the merge-gating suite is untouched by the
+      # diagnostic branch, and its failure does not fail this workflow's gate
+      # status because the workflow itself is dispatch-only.
+      - name: Confirm blocking validation is unaffected
+        run: pnpm validation:check
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: substrate-diagnostic-${{ inputs.question }}-${{ github.sha }}
+          path: |
+            testdata/substrate-diagnostic/
+          if-no-files-found: error
+          retention-days: 90
