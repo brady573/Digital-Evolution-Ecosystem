@@ -27,3 +27,7 @@ validation-telemetry/
 # substrate-diagnostic workflow and returned as a CI artifact, not versioned
 # source. The diagnostic scripts themselves ARE versioned; their output is not.
 testdata/substrate-diagnostic/
+# NOT ignored: testdata/substrate-diagnostic-summary/ is the committed,
+# authoritative compact record. The raw JSONL above is a CI artifact with a
+# retention window, and the substrate decision must never rest on data that
+# only exists there.

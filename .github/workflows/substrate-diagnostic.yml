@@ -80,10 +80,17 @@ jobs:
       - name: Confirm blocking validation is unaffected
         run: pnpm validation:check
 
+      # Compact the raw rows into committed, durable tables BEFORE uploading. The
+      # artifact below has a retention window, so the summary is what keeps the
+      # evidence readable after it expires; the return package cites the summary.
+      - name: Compact raw rows into durable tables
+        run: pnpm exec tsx tools/diagnostics/substrate/compact.ts
+
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: substrate-diagnostic-${{ inputs.question || 'push' }}-${{ github.sha }}
           path: |
             testdata/substrate-diagnostic/
+            testdata/substrate-diagnostic-summary/
           if-no-files-found: error
           retention-days: 90
