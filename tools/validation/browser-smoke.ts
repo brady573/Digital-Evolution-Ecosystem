@@ -29,9 +29,9 @@ async function tick(page:Page){
 }
 
 /**
- * Branching must reach the real production normal-lens rich path at both rich
- * LODs, keep every other family on its existing renderer, and withdraw
- * geometry when dormant.
+ * Every authored family must reach the real production rich path at both rich
+ * LODs, while the ecosystem tier stays coarse; dormant Branching must withdraw
+ * geometry.
  */
 async function verifyBranchingInProduction(context: BrowserContext) {
   const page = await context.newPage();
@@ -56,6 +56,14 @@ async function verifyBranchingInProduction(context: BrowserContext) {
       "branching stays on the accepted coarse ecosystem renderer");
     assert.ok(ecosystem.some((item) => item.organismId === 900000002 && item.family !== "branching" && item.pixels === "legacy-grid"),
       "non-branching families keep the legacy renderer at ecosystem tier");
+    for (const [organismId, family] of [
+      [900000001, "plated"], [900000003, "branching"], [900000005, "blob"],
+      [900000006, "segmented"], [900000007, "radial"], [900000008, "paddled"],
+    ] as const) {
+      assert.ok(ecosystem.some((item) => item.organismId === organismId && item.family === family
+        && item.tier === "ecosystem" && item.pixels === "legacy-grid"),
+      `${family} stays on the coarse renderer at ecosystem tier`);
+    }
 
     await page.getByRole("button", { name: "Zoom in" }).click();
     await page.getByRole("button", { name: "Zoom in" }).click();
@@ -65,6 +73,13 @@ async function verifyBranchingInProduction(context: BrowserContext) {
       "branching uses the rich production raster at population tier");
     assert.ok(population.some((item) => item.organismId === 900000001 && item.family === "plated" && item.tier === "population" && item.pixels === "rich-rgba"),
       "plated keeps its rich population raster alongside branching");
+    for (const [organismId, family] of [
+      [900000005, "blob"], [900000006, "segmented"], [900000007, "radial"], [900000008, "paddled"],
+    ] as const) {
+      assert.ok(population.some((item) => item.organismId === organismId && item.family === family
+        && item.tier === "population" && item.pixels === "rich-rgba"),
+      `${family} uses the rich production raster at population tier`);
+    }
 
     const activeKey = population.find((item) => item.organismId === 900000003)!.key;
     const dormantKey = population.find((item) => item.organismId === 900000004)?.key;
@@ -77,6 +92,14 @@ async function verifyBranchingInProduction(context: BrowserContext) {
     const inspection = await readEvidence();
     assert.ok(inspection.some((item) => item.organismId === 900000003 && item.family === "branching" && item.tier === "inspection" && item.pixels === "rich-rgba"),
       "branching uses the rich production raster at inspection tier");
+    for (const [organismId, family] of [
+      [900000001, "plated"], [900000005, "blob"], [900000006, "segmented"],
+      [900000007, "radial"], [900000008, "paddled"],
+    ] as const) {
+      assert.ok(inspection.some((item) => item.organismId === organismId && item.family === family
+        && item.tier === "inspection" && item.pixels === "rich-rgba"),
+      `${family} uses the rich production raster at inspection tier`);
+    }
     const inspectionKey = inspection.find((item) => item.organismId === 900000003)!.key;
     assert.ok(inspectionKey.includes("branching-grammar-v1"),
       "the production branching texture carries its structural-art identity");
