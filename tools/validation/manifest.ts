@@ -540,7 +540,7 @@ export const UNITS: readonly ValidationUnit[] = [
     parallelSafe: true,
     baselineSeconds: 3,
     claim:
-      "Procedural Plated and Branching art is deterministic; projection-only Plated deformation stays locally bounded and preserves the twelve plate sites and their depth/order; Branching keeps a rooted hierarchical structure with terminal nodules, varies boundedly by existing resolved traits, withdraws geometry when dormant, and shares one source recipe across population and inspection; materialization preserves structural masks and colors only owned pixels using finite palette roles.",
+      "All six authored family grammars resolve through deterministic recipes; projection-only Plated deformation stays locally bounded and preserves the twelve plate sites and their depth/order; Branching keeps a rooted hierarchy with terminal nodules; every soft-bodied family contractures geometrically when dormant, responds to existing quantized traits without rerolling region topology or jumping on a small step, and shares one source recipe across population and inspection so zooming never moves a body; population keeps over 75% of the inspection silhouette; the four new families retain their measured family-specific silhouette constraints; materialization preserves structural masks and colors only owned pixels using finite palette roles.",
   },
   {
     id: "pixi-spike",
@@ -583,7 +583,7 @@ export const UNITS: readonly ValidationUnit[] = [
     parallelSafe: false,
     baselineSeconds: 41,
     claim:
-      "The built product actually works in a browser: the Web Worker, canvas, control surface, and the authorized rich Plated and Branching production raster paths function at both rich LODs while other families keep their existing renderers.",
+      "The built product actually works in a browser: the Web Worker, canvas, and control surface function; all six authored family rasters reach the production Pixi renderer at population and inspection LODs, while every family remains on the coarse renderer at ecosystem LOD; dormant Branching withdraws geometry.",
   },
   {
     id: "mobile-ui",

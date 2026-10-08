@@ -46,7 +46,9 @@ const richRasterCache = new Map<string, RichArtTextureDescriptor>();
 const RICH_RASTER_CACHE_LIMIT = 256;
 
 /** Families with an authored procedural grammar that can back a rich raster. */
-export const RICH_ART_FAMILIES: ReadonlySet<string> = new Set(["plated", "branching"]);
+export const RICH_ART_FAMILIES: ReadonlySet<string> = new Set([
+  "plated", "branching", "blob", "segmented", "radial", "paddled",
+]);
 
 /**
  * Presentation/cache identity for one rich raster.

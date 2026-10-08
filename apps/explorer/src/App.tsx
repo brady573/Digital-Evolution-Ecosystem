@@ -77,6 +77,21 @@ function deeTestPhenotypeFixtures():{organisms:RenderOrganism[];resolved:Map<num
     );
     resolved.set(900000003,branching);
     resolved.set(900000004,branching);
+
+    // The remaining four families use the same production rich-raster path.
+    // Fixed fixtures make browser evidence independent of evolutionary timing.
+    const richFamilies=[
+      {id:900000005,family:"blob",x:270,y:330,traits:{speed:1.56,sensing:69.5,metabolism:0.224,reproduction:100,diet:0.6,habitat:0.6,byproductUse:0.6,dormancyResponse:0.8}},
+      {id:900000006,family:"segmented",x:290,y:348,traits:{speed:2.5,sensing:86.5,metabolism:0.27,reproduction:100,diet:0.9,habitat:1.5,byproductUse:1.5,dormancyResponse:0.8}},
+      {id:900000007,family:"radial",x:320,y:330,traits:{speed:1.38,sensing:149.4,metabolism:0.247,reproduction:100,diet:0.6,habitat:0.9,byproductUse:1.5,dormancyResponse:0.8}},
+      {id:900000008,family:"paddled",x:340,y:348,traits:{speed:3.55,sensing:115.4,metabolism:0.371,reproduction:100,diet:1.5,habitat:1.5,byproductUse:1.5,dormancyResponse:0.8}},
+    ] as const;
+    richFamilies.forEach(({id,family,x,y,traits})=>{
+      const phenotype=resolvePhenotype({...traits},{organismId:id,lineageId:id});
+      if(phenotype.family!==family)throw new Error(`deeTest ${family} fixture resolved to ${phenotype.family}`);
+      organismsWithBranching.push({...organisms[0]!,id:id as OrganismId,lineageId:id as RenderOrganism["lineageId"],cladeId:id as RenderOrganism["cladeId"],x,y,activity:"active"});
+      resolved.set(id,phenotype);
+    });
   }
   return {organisms:organismsWithBranching,resolved};
 }
