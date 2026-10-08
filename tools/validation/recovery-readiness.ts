@@ -5,6 +5,8 @@ import {
   RRN,
   WAKE_DELAY,
   MATURATION_COST,
+  createSimulationCheckpoint,
+  restoreSimulationCheckpoint,
   REPRO_COOLDOWN,
 } from "../../packages/sim-core/src/engine.ts";
 
@@ -240,6 +242,41 @@ function testCooldownIndependent() {
   console.log("cooldown independent: PASS");
 }
 
+function rrSnap(sim: any): string {
+  return JSON.stringify(sim.o.map((o: any) => [
+    o.id, o.generation, o.born, Math.round(o.x * 1e6), Math.round(o.y * 1e6),
+    o.rr, o.en.toFixed(9), o.readyAt, o.matureAt, o.activity,
+  ]));
+}
+
+function testRrDeterminism() {
+  // Twin replay is identical including rr. The rr field is inherited state, so
+  // it participates in the reproducibility contract like every other trait.
+  const a = new Simulation(cfg) as any;
+  const b = new Simulation(cfg) as any;
+  for (let t = 0; t < 3000; t++) { a.step(); b.step(); }
+  assert.equal(rrSnap(a), rrSnap(b), "twin replay identical incl. rr");
+  // Guard against a vacuous pass: rr must actually vary across the population.
+  assert.ok(new Set(a.o.map((o: any) => o.rr)).size > 3, "rr varies across population");
+  console.log("rr determinism: PASS");
+}
+
+function testRrCheckpoint() {
+  // rr is persistent resumed state, not derived per step, so it must survive
+  // the checkpoint round-trip exactly and continue identically.
+  const sim = new Simulation(cfg) as any;
+  for (let t = 0; t < 2500; t++) sim.step();
+  const restored = restoreSimulationCheckpoint(
+    JSON.parse(JSON.stringify(createSimulationCheckpoint(sim))),
+  ) as any;
+  assert.equal(rrSnap(restored), rrSnap(sim), "checkpoint restores rr state exactly");
+  assert.ok(sim.o.every((o: any) => typeof o.rr === "number"), "every organism carries rr");
+  assert.ok(sim.o.some((o: any) => o.rr !== 0), "checkpoint exercised with nonzero rr");
+  for (let t = 0; t < 1000; t++) { sim.step(); restored.step(); }
+  assert.equal(rrSnap(restored), rrSnap(sim), "restored continuation identical incl. rr");
+  console.log("rr checkpoint: PASS");
+}
+
 function testOrthogonality() {
   // Matched pair: two identical simulations (same seed, config, and forced
   // organism state) differing ONLY in rr, stepped in lockstep. Every other
@@ -289,5 +326,7 @@ testRealizedEarlierPostWake();
 testMaturationCost();
 testMaturationChannelIsolated();
 testCooldownIndependent();
+testRrDeterminism();
+testRrCheckpoint();
 testOrthogonality();
 console.log("recovery-readiness validation: PASS");
