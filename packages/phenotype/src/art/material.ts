@@ -1,5 +1,5 @@
 import type { ResolvedPhenotype } from "../model";
-import { PROCEDURAL_ART_VERSION } from "./version";
+import { PROCEDURAL_ART_VERSION, PROCEDURAL_VARIATION_VERSION } from "./version";
 import type {
   ArtLodRecipe,
   ArtMaterialAccent,
@@ -69,7 +69,9 @@ function hash32(seed: number, value: string): number {
 }
 
 function unit(seed: number, label: string, channel: number): number {
-  return hash32(seed ^ Math.imul(channel + 1, 0x9e3779b1), `${PROCEDURAL_ART_VERSION}:${label}`) / 0x1_0000_0000;
+  // Salted with the cosmetic variation version, not the renderer version: the
+  // accepted accent/boundary sequence must survive a renderer-identity bump.
+  return hash32(seed ^ Math.imul(channel + 1, 0x9e3779b1), `${PROCEDURAL_VARIATION_VERSION}:${label}`) / 0x1_0000_0000;
 }
 
 function clampByte(value: number): number {
@@ -291,7 +293,24 @@ export function materializeRaster(
   const rgba = raster.rgba.slice();
   for (let pixel = 0; pixel < pixels; pixel++) {
     const owner = raster.masks.ownership[pixel]!;
-    if (owner < 0) continue;
+    if (owner < 0) {
+      // Ownership-driven transparency. The structural raster fills its whole
+      // surface with an opaque backdrop before painting regions, so unowned
+      // pixels arrive here with alpha 255. Leaving them untouched uploaded the
+      // entire 64/128 texture rectangle to the GPU as an opaque dark card that
+      // overlapped and obscured neighbouring organisms and the world beneath.
+      //
+      // Transparency is derived from structural ownership alone. Interstitial,
+      // deep-tissue and shadow roles are authored regions, so they carry a
+      // non-negative owner and stay visible; only genuinely unpainted pixels
+      // clear. RGB is zeroed alongside alpha so a filtered or mis-sampled edge
+      // cannot reintroduce backdrop colour from uninitialized data.
+      rgba[pixel * 4] = 0;
+      rgba[pixel * 4 + 1] = 0;
+      rgba[pixel * 4 + 2] = 0;
+      rgba[pixel * 4 + 3] = 0;
+      continue;
+    }
     const region = sorted[owner];
     if (!region) throw new Error("Raster ownership references an unknown recipe region");
     const x = pixel % raster.width;

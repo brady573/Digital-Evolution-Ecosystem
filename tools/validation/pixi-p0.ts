@@ -25,6 +25,7 @@ import {
   type LodTier,
 } from "../../packages/phenotype/src/index.ts";
 import { lodTierForZoom } from "../../packages/phenotype/src/model.ts";
+import { PROCEDURAL_ART_VERSION } from "../../packages/phenotype/src/art/version.ts";
 import { churnState, designFixture, engineLikeFixture, evolveFixture } from "../pixi-spike/cache.ts";
 import { describeRenderableTexture, describeTexture, exactTextureKey, gridBits, richArtTexture, richRasterToBits, richTextureKey } from "../../apps/explorer/src/pixi/phenotypeTextures.ts";
 import { createWorldLayers } from "../../apps/explorer/src/pixiWorld/layers.ts";
@@ -386,6 +387,17 @@ function traitsForAxes(mob: number, sen: number, met: number, spec: number) {
     richPopulationDescriptor.key, "one changed RGBA channel changes exact raster cache identity");
   assert.ok(richPopulationDescriptor.key.startsWith("plated/"),
     "the rich cache key names the family it actually renders");
+  // Renderer provenance must participate in cache identity independently of the
+  // pixel hash. AC #131 changed final RGBA bytes for every rich raster, so the
+  // renderer version had to move; without this, a texture minted by the previous
+  // renderer would still share an identity with the corrected one.
+  const rendererPart = richPopulationDescriptor.key.split("/")[1]!;
+  assert.equal(rendererPart, PROCEDURAL_ART_VERSION,
+    "the rich cache key carries the current renderer version");
+  assert.notEqual(
+    richTextureKey("plated", richPopulationDescriptor.rgba!, 64, "population", "plated-art-v0", "plated-grammar-v1", plated.cosmeticSeed),
+    richPopulationDescriptor.key,
+    "identical bytes under a different renderer version must not collide in cache identity");
   assert.equal(platedPopulation.liveDisplayCount, 1);
   const platedInspection = updateOrganismLayer(layer, { ...platedInput, tier: "inspection" }, makeRichTestTexture);
   const inspectionSprite = sprite;

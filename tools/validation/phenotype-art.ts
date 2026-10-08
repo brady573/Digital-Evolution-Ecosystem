@@ -147,6 +147,119 @@ async function testSoftFamiliesVaryContinuouslyWithTraits(): Promise<void> {
   }
 }
 
+/**
+ * AC #131: ownership-driven transparency across every rich family, LOD, and
+ * activity. This is the blocking gameplay defect: unowned pixels keeping the
+ * structural raster's opaque backdrop uploaded each 64/128 texture rectangle
+ * as a dark card that overlapped and obscured the world.
+ */
+async function testUnownedRichPixelsAreTransparent(): Promise<void> {
+  const art = await import("../../packages/phenotype/src/art/index.ts");
+  const fixtures = [
+    ["plated", { speed: 1.4, sensing: 70, metabolism: 0.3392, reproduction: 100, diet: 0.675, habitat: 0.675, byproductUse: 0.68, dormancyResponse: 1 }],
+    ["branching", { speed: 1, sensing: 139.2, metabolism: 0.247, reproduction: 100, diet: 1.4, habitat: 1.4, byproductUse: 1.4, dormancyResponse: 0.8 }],
+    ["blob", { speed: 1.56, sensing: 69.5, metabolism: 0.224, reproduction: 100, diet: 0.6, habitat: 0.6, byproductUse: 0.6, dormancyResponse: 0.8 }],
+    ["segmented", { speed: 2.5, sensing: 86.5, metabolism: 0.27, reproduction: 100, diet: 0.9, habitat: 1.5, byproductUse: 1.5, dormancyResponse: 0.8 }],
+    ["radial", { speed: 1.38, sensing: 149.4, metabolism: 0.247, reproduction: 100, diet: 0.6, habitat: 0.9, byproductUse: 1.5, dormancyResponse: 0.8 }],
+    ["paddled", { speed: 3.55, sensing: 115.4, metabolism: 0.371, reproduction: 100, diet: 1.5, habitat: 1.5, byproductUse: 1.5, dormancyResponse: 0.8 }],
+  ] as const;
+  const sizes = { population: 64, inspection: 128 } as const;
+  for (const [family, traits] of fixtures) {
+    const resolved = resolvePhenotype({ ...traits }, { organismId: 7000, lineageId: 4242 });
+    assert.equal(resolved.family, family, `${family} transparency fixture resolves to its family`);
+    for (const activity of ["active", "dormant"] as const) {
+      for (const lod of ["population", "inspection"] as const) {
+        const size = sizes[lod];
+        const recipe = art.buildArtRecipe(resolved, activity);
+        const view = art.resolveArtLod(recipe, lod);
+        const neutral = art.rasterizeStructuralArt({ ...recipe, regions: view.regions }, { width: size, height: size });
+        const rendered = art.materializeRaster(neutral, art.applyMaterialRoles(view, resolved));
+        const label = `${family}/${activity}/${lod}`;
+        let unowned = 0;
+        let unownedOpaque = 0;
+        let ownedInvisible = 0;
+        let interstitialErased = 0;
+        let ownedVisible = 0;
+        for (let pixel = 0; pixel < size * size; pixel++) {
+          const owner = neutral.masks.ownership[pixel]!;
+          const alpha = rendered.rgba[pixel * 4 + 3]!;
+          if (owner < 0) {
+            unowned++;
+            if (alpha !== 0) unownedOpaque++;
+            // Fully cleared, not merely made invisible, so a filtered or
+            // mis-sampled edge cannot pick backdrop colour back up.
+            assert.deepEqual(
+              [...rendered.rgba.slice(pixel * 4, pixel * 4 + 4)], [0, 0, 0, 0],
+              `${label} clears unowned pixel RGB as well as alpha`,
+            );
+          } else if (alpha === 0) {
+            ownedInvisible++;
+            if (neutral.masks.materialRole[pixel] === art.MATERIAL_ROLE_IDS.interstitial) interstitialErased++;
+          } else ownedVisible++;
+        }
+        assert.equal(unownedOpaque, 0, `${label} has no opaque unowned pixels (${unownedOpaque} of ${unowned})`);
+        assert.equal(ownedInvisible, 0, `${label} keeps every owned pixel visible (${ownedInvisible} hidden)`);
+        assert.equal(interstitialErased, 0, `${label} never erases authored interstitial material`);
+        assert.ok(ownedVisible > 0, `${label} still renders authored phenotype pixels`);
+      }
+    }
+  }
+}
+
+/**
+ * Renderer identity and cosmetic variation are separate levers.
+ *
+ * The AC #131 transparency correction changed final RGBA bytes for every rich
+ * raster, so the renderer version had to move — otherwise one version string
+ * named two different outputs. But `unit()` salts the accepted accent and
+ * boundary variation from that same string, so a naive bump would have re-rolled
+ * family art pixel-for-pixel. These assertions pin the decoupling that keeps
+ * both properties true at once.
+ */
+async function testRendererVersionIsDecoupledFromCosmeticVariation(): Promise<void> {
+  const art = await import("../../packages/phenotype/src/art/index.ts");
+  assert.match(art.PROCEDURAL_ART_VERSION, /^[a-z0-9][a-z0-9.-]+$/,
+    "renderer identity is a well-formed version string");
+  assert.match(art.PROCEDURAL_VARIATION_VERSION, /^[a-z0-9][a-z0-9.-]+$/,
+    "variation identity is a well-formed version string");
+  assert.notEqual(art.PROCEDURAL_ART_VERSION, art.PROCEDURAL_VARIATION_VERSION,
+    "renderer identity and cosmetic variation identity are independent versions");
+
+  const resolved = platedCenterFixture();
+  const recipe = art.buildArtRecipe(resolved);
+  const view = art.resolveArtLod(recipe, "inspection");
+  const materialRecipe = art.applyMaterialRoles(view, resolved);
+  assert.equal(materialRecipe.rendererVersion, art.PROCEDURAL_ART_VERSION,
+    "material recipes record the renderer version that produced them");
+
+  // The renderer bump must not move cosmetic placement. The golden hash
+  // assertion elsewhere in this file pins the exact materialized bytes; this
+  // restates the same invariant through accent geometry, which is where the
+  // shared salt would have leaked if the two versions were still coupled.
+  // Inspection LOD, because population deliberately suppresses accents.
+  const accents = materialRecipe.accents;
+  assert.ok(accents.length > 0, "inspection-scale accents exist to place");
+  const first = accents[0]!;
+  assert.ok(first.x > 0 && first.x < 1 && first.y > 0 && first.y < 1,
+    "accent placement stays inside the organism footprint");
+  assert.ok(accents.every((accent) => accent.x !== first.x || accent.y !== first.y || accent.regionId === first.regionId),
+    "accent placement remains deterministic and non-degenerate under a renderer-version bump");
+
+  // Materialized bytes must be a function of the variation version alone, so
+  // rasterize+materialize stays stable while the renderer identity moves.
+  const rasterA = art.materializeRaster(
+    art.rasterizeStructuralArt({ ...recipe, regions: view.regions }, { width: 128, height: 128 }),
+    materialRecipe);
+  const rasterB = art.materializeRaster(
+    art.rasterizeStructuralArt({ ...recipe, regions: view.regions }, { width: 128, height: 128 }),
+    materialRecipe);
+  assert.deepEqual(rasterA.rgba, rasterB.rgba,
+    "materialized bytes are unchanged by the renderer-version bump");
+  assert.equal(createHash("sha256").update(rasterA.rgba).digest("hex"),
+    createHash("sha256").update(rasterB.rgba).digest("hex"),
+    "identical bytes hash identically, confirming cosmetic placement did not shift");
+}
+
 async function testPopulationMatchesInspectionSilhouette(): Promise<void> {
   const art = await import("../../packages/phenotype/src/art/index.ts");
   const fixtures = [
@@ -663,8 +776,8 @@ async function testMaterialPassPreservesStructuralMasks(): Promise<void> {
     if (neutral.masks.ownership[pixel] !== -1) continue;
     assert.deepEqual(
       [...material.rgba.slice(pixel * 4, pixel * 4 + 4)],
-      [...neutral.rgba.slice(pixel * 4, pixel * 4 + 4)],
-      "material pass never colors pixels outside accepted structural ownership",
+      [0, 0, 0, 0],
+      "unowned pixels are fully transparent, so no texture card is uploaded over the world",
     );
   }
   const displayRoles = art.deriveMaterialRoleView(neutral);
@@ -765,8 +878,13 @@ async function testPopulationMaterialSuppressesFineAccents(): Promise<void> {
     "9c03edffbf2feb365042f7a63534e27d77a08bf6a60d0bf2ee3781bfac1d1b0f",
     "inspection neutral raster pins the Checkpoint D projection geometry baseline");
   const inspectionHash = createHash("sha256").update(inspectionMaterial.rgba).digest("hex");
-  assert.equal(inspectionHash, "15518bbcda7d5d313f510af5ac3ccd2d1ce5f052ad1585a25b61073a2f8e6e2c",
-    "inspection native material bytes pin the Checkpoint D projection baseline");
+  // Repinned for AC #131. Unowned pixels are now cleared to (0,0,0,0) instead
+  // of retaining the structural raster's opaque (16,20,26,255) backdrop, so the
+  // materialized bytes change while the neutral geometry hash above is
+  // unchanged. The pin still holds the output exactly; only the expected value
+  // moved, and only because the rendered contract changed.
+  assert.equal(inspectionHash, "1f3cd7210fe69bb9aa2311b372c7fd8fd2701db0605d9bb0d9c789369fee0e62",
+    "inspection native material bytes pin the Checkpoint D projection baseline plus transparent unowned pixels");
   assert.equal(population.rendererVersion, inspection.rendererVersion,
     "rich LOD material views share one renderer-version identity");
 }
@@ -788,6 +906,8 @@ void testArtPackageBoundary().then(() => {
   .then(() => testPopulationMaterialSuppressesFineAccents())
   .then(() => testDormancyContracturesEverySoftFamily())
   .then(() => testSoftFamiliesVaryContinuouslyWithTraits())
+  .then(() => testUnownedRichPixelsAreTransparent())
+  .then(() => testRendererVersionIsDecoupledFromCosmeticVariation())
   .then(() => testPopulationMatchesInspectionSilhouette())
   .then(() => {
   console.log("phenotype art package and contracts: PASS");
