@@ -26,7 +26,10 @@ function readJsonl(name: string): any[] {
   return readFileSync(path, "utf8")
     .split("\n")
     .filter((l) => l.trim().length > 0)
-    .map((l) => JSON.parse(l));
+    .map((l) => JSON.parse(l))
+    // Each file opens with a header record carrying no seed. Header rows are
+    // provenance, not observations, and must not be counted as results.
+    .filter((r) => r.seed !== undefined || r.configName !== undefined);
 }
 
 /** Provenance carried onto every compacted row. */
@@ -52,6 +55,22 @@ const qB = readJsonl("qB-opportunity-map.jsonl");
 const qC = readJsonl("qC-selection-gradients.jsonl");
 const qD = readJsonl("qD-protected-envelope.jsonl");
 
+// Two table sets were printed to the CI log but never emitted to JSONL by the
+// probes: the Q-D perturbation-liveness gate and the Q-A1 maintained-counter
+// columns, plus the Q-C reversal verdicts the script derives. They were recovered
+// from the authoritative run's log into log-recovered.json. If that file is
+// absent the gap is reported rather than silently omitted.
+let recovered: any = null;
+const recoveredPath = `${OUT}/log-recovered.json`;
+if (existsSync(recoveredPath)) {
+  try {
+    recovered = JSON.parse(readFileSync(recoveredPath, "utf8"));
+  } catch (e) {
+    console.error(`ABORT: ${recoveredPath} exists but does not parse: ${(e as Error).message}`);
+    process.exitCode = 1;
+  }
+}
+
 const present = {
   "qA-decomposition": qaDecomp.length, "qA-generation-summary": qaGen.length,
   "qA-marginal-energy": qaMarginal.length, "qA-lineage-births": qaLineage.length,
@@ -60,23 +79,26 @@ const present = {
 };
 
 // --- Q-A1 concentration + maintained counters -------------------------------
-const qaConcentration = qaDecomp.map((r) => ({
-  ...provenance(r),
-  question: "A1",
-  organisms: r.organisms, totalBirths: r.totalBirths,
-  everReproduced: r.everReproduced, everReproducedShare: r.everReproducedShare,
-  repeatParents: r.repeatParents, birthsFromRepeatParents: r.birthsFromRepeatParents,
-  birthsFromRepeatParentsShare: r.birthsFromRepeatParentsShare,
-  top1pctLineageBirthShare: r.top1pctLineageBirthShare,
-  top10pctLineageBirthShare: r.top10pctLineageBirthShare,
-  lineageCount: r.lineageCount,
-  // Maintained counters, delta-accumulated (see drain()).
-  births: r.births ?? null, deaths: r.deaths ?? null,
-  repro_eligible: r.repro_eligible ?? null, blocked_births: r.blocked_births ?? null,
-  dormancy_entries: r.dormancy_entries ?? null, wakes: r.wakes ?? null,
-  energy_a: r.energy_a ?? null, energy_b: r.energy_b ?? null, energy_c: r.energy_c ?? null,
-  burden_energy: r.burden_energy ?? null, cleanup_energy: r.cleanup_energy ?? null,
-}));
+// The probe emits the concentration nested under `concentration`, and it does NOT
+// emit the drained maintained counters for this question (they were printed to the
+// CI log only). Those counters are recovered from the Q-B channel rows instead,
+// which carry the same maintained values for the same regime and seed. The gap is
+// recorded in `evidenceGaps` rather than papered over.
+const qaConcentration = qaDecomp.map((r) => {
+  const c = r.concentration ?? {};
+  return {
+    ...provenance(r),
+    question: "A1",
+    organisms: c.organisms ?? null, totalBirths: c.totalBirths ?? null,
+    everReproduced: c.everReproduced ?? null, everReproducedShare: c.everReproducedShare ?? null,
+    repeatParents: c.repeatParents ?? null,
+    birthsFromRepeatParents: c.birthsFromRepeatParents ?? null,
+    birthsFromRepeatParentsShare: c.birthsFromRepeatParentsShare ?? null,
+    top1pctLineageBirthShare: c.top1pctLineageBirthShare ?? null,
+    top10pctLineageBirthShare: c.top10pctLineageBirthShare ?? null,
+    lineageCount: c.lineageCount ?? null,
+  };
+});
 
 // --- Q-A2 matched value assay ------------------------------------------------
 const qaValueCompact = qaValue.map((r) => ({
@@ -156,6 +178,19 @@ const summary = {
     "retention window and is NOT the authoritative record; this file and the diagnostic scripts are. " +
     "Nothing in this file is recomputed — it is copied from the probe output.",
   inputsPresent: present,
+  evidenceGaps: recovered
+    ? []
+    : [
+        "qD_perturbationLiveness, qA1_concentrationWithCounters and qC_regimeReversalVerdicts " +
+        "were printed to the CI log but not emitted to JSONL. log-recovered.json is absent, so " +
+        "those values are not in this record. Re-run the probes, or recover them from run 37796607693.",
+      ],
+  recoveredFromRunLog: recovered
+    ? { runId: recovered.runId, source: recovered.recoveredFrom, why: recovered.why }
+    : null,
+  qD_perturbationLiveness: recovered?.qD_perturbationLiveness ?? null,
+  qA1_concentrationWithCounters: recovered?.qA1_concentrationWithCounters ?? null,
+  qC_regimeReversalVerdicts: recovered?.qC_regimeReversalVerdicts ?? null,
   qA_concentration: qaConcentration,
   qA_generation: qaGen.map((r) => ({ ...provenance(r), rows: r.rows })),
   qA_marginalEnergy: qaMarginal.map((r) => ({ ...provenance(r), rows: r.rows })),
@@ -210,6 +245,15 @@ summarise("Q-D protected capability state", [
   r.seedBankReturnedClades, r.population,
 ]));
 
+summarise("Q-C regime reversal verdicts (from run log)", ["trait", ...Object.keys({}), "verdict"],
+  (recovered?.qC_regimeReversalVerdicts ?? []).map((r: any) => Object.values(r)));
+
+summarise("Q-D perturbation liveness gate (from run log)", [
+  "config", "seed", "perturbation", "axis", "factor", "live",
+], (recovered?.qD_perturbationLiveness ?? []).map((l: any) => [
+  l.config, l.seed, l.perturbation, l.axis, l.factor, l.live,
+]));
+
 // Markdown rendering of the same numbers, for the return package and Drive.
 const md: string[] = [
   "# Substrate diagnostic — compact evidence tables",
@@ -238,6 +282,16 @@ const md: string[] = [
   "",
   table(["trait", "regime", "seed", "low", "high", "births", "flowGrad", "stockGrad", "degenerate"],
     qCCompact.map((r) => [r.trait, r.regime, r.seed, r.splitLow, r.splitHigh, r.totalBirths, r.flowGradient, r.stockGradient, r.degenerateSplit ? "YES" : "no"])),
+  "",
+  "## Q-C regime reversal verdicts",
+  "",
+  table(["trait", "replete", "marginal", "scarce", "verdict"],
+    (recovered?.qC_regimeReversalVerdicts ?? []).map((r: any) => Object.values(r) as (string | number)[])),
+  "",
+  "## Q-D perturbation liveness gate",
+  "",
+  table(["config", "seed", "perturbation", "axis", "factor", "live"],
+    (recovered?.qD_perturbationLiveness ?? []).map((l: any) => [l.config, l.seed, l.perturbation, l.axis, l.factor, l.live])),
   "",
   "## Q-D protected capability state",
   "",

@@ -1,0 +1,991 @@
+{
+  "recoveredFrom": "gh run view 37796607693 --log",
+  "runId": 37796607693,
+  "why": "The Q-D liveness table and the Q-A1 maintained-counter columns were printed to the CI log but not emitted to JSONL by the probes. They are recovered here so no cited value depends on an expiring artifact or a transient log.",
+  "qD_perturbationLiveness": [
+    {
+      "config": "patchwork",
+      "seed": "111111111",
+      "perturbation": "mr-",
+      "axis": "mr",
+      "factor": "0.75",
+      "live": true,
+      "detail": "mr x0.75 changes observed biology"
+    },
+    {
+      "config": "patchwork",
+      "seed": "111111111",
+      "perturbation": "mr+",
+      "axis": "mr",
+      "factor": "1.25",
+      "live": true,
+      "detail": "mr x1.25 changes observed biology"
+    },
+    {
+      "config": "patchwork",
+      "seed": "111111111",
+      "perturbation": "ms-",
+      "axis": "ms",
+      "factor": "0.75",
+      "live": true,
+      "detail": "ms x0.75 changes observed biology"
+    },
+    {
+      "config": "patchwork",
+      "seed": "111111111",
+      "perturbation": "ms+",
+      "axis": "ms",
+      "factor": "1.25",
+      "live": true,
+      "detail": "ms x1.25 changes observed biology"
+    },
+    {
+      "config": "patchwork",
+      "seed": "111111111",
+      "perturbation": "div-",
+      "axis": "div",
+      "factor": "0.75",
+      "live": true,
+      "detail": "div x0.75 changes observed biology"
+    },
+    {
+      "config": "patchwork",
+      "seed": "111111111",
+      "perturbation": "div+",
+      "axis": "div",
+      "factor": "1.25",
+      "live": true,
+      "detail": "div x1.25 changes observed biology"
+    },
+    {
+      "config": "patchwork",
+      "seed": "111111111",
+      "perturbation": "press-",
+      "axis": "press",
+      "factor": "0.95",
+      "live": true,
+      "detail": "press x0.95 changes observed biology"
+    },
+    {
+      "config": "patchwork",
+      "seed": "111111111",
+      "perturbation": "press+",
+      "axis": "press",
+      "factor": "1.05",
+      "live": true,
+      "detail": "press x1.05 changes observed biology"
+    },
+    {
+      "config": "patchwork",
+      "seed": "222222222",
+      "perturbation": "mr-",
+      "axis": "mr",
+      "factor": "0.75",
+      "live": true,
+      "detail": "mr x0.75 changes observed biology"
+    },
+    {
+      "config": "patchwork",
+      "seed": "222222222",
+      "perturbation": "mr+",
+      "axis": "mr",
+      "factor": "1.25",
+      "live": true,
+      "detail": "mr x1.25 changes observed biology"
+    },
+    {
+      "config": "patchwork",
+      "seed": "222222222",
+      "perturbation": "ms-",
+      "axis": "ms",
+      "factor": "0.75",
+      "live": true,
+      "detail": "ms x0.75 changes observed biology"
+    },
+    {
+      "config": "patchwork",
+      "seed": "222222222",
+      "perturbation": "ms+",
+      "axis": "ms",
+      "factor": "1.25",
+      "live": true,
+      "detail": "ms x1.25 changes observed biology"
+    },
+    {
+      "config": "patchwork",
+      "seed": "222222222",
+      "perturbation": "div-",
+      "axis": "div",
+      "factor": "0.75",
+      "live": true,
+      "detail": "div x0.75 changes observed biology"
+    },
+    {
+      "config": "patchwork",
+      "seed": "222222222",
+      "perturbation": "div+",
+      "axis": "div",
+      "factor": "1.25",
+      "live": true,
+      "detail": "div x1.25 changes observed biology"
+    },
+    {
+      "config": "patchwork",
+      "seed": "222222222",
+      "perturbation": "press-",
+      "axis": "press",
+      "factor": "0.95",
+      "live": true,
+      "detail": "press x0.95 changes observed biology"
+    },
+    {
+      "config": "patchwork",
+      "seed": "222222222",
+      "perturbation": "press+",
+      "axis": "press",
+      "factor": "1.05",
+      "live": true,
+      "detail": "press x1.05 changes observed biology"
+    },
+    {
+      "config": "patchwork",
+      "seed": "333333333",
+      "perturbation": "mr-",
+      "axis": "mr",
+      "factor": "0.75",
+      "live": true,
+      "detail": "mr x0.75 changes observed biology"
+    },
+    {
+      "config": "patchwork",
+      "seed": "333333333",
+      "perturbation": "mr+",
+      "axis": "mr",
+      "factor": "1.25",
+      "live": true,
+      "detail": "mr x1.25 changes observed biology"
+    },
+    {
+      "config": "patchwork",
+      "seed": "333333333",
+      "perturbation": "ms-",
+      "axis": "ms",
+      "factor": "0.75",
+      "live": true,
+      "detail": "ms x0.75 changes observed biology"
+    },
+    {
+      "config": "patchwork",
+      "seed": "333333333",
+      "perturbation": "ms+",
+      "axis": "ms",
+      "factor": "1.25",
+      "live": true,
+      "detail": "ms x1.25 changes observed biology"
+    },
+    {
+      "config": "patchwork",
+      "seed": "333333333",
+      "perturbation": "div-",
+      "axis": "div",
+      "factor": "0.75",
+      "live": true,
+      "detail": "div x0.75 changes observed biology"
+    },
+    {
+      "config": "patchwork",
+      "seed": "333333333",
+      "perturbation": "div+",
+      "axis": "div",
+      "factor": "1.25",
+      "live": true,
+      "detail": "div x1.25 changes observed biology"
+    },
+    {
+      "config": "patchwork",
+      "seed": "333333333",
+      "perturbation": "press-",
+      "axis": "press",
+      "factor": "0.95",
+      "live": true,
+      "detail": "press x0.95 changes observed biology"
+    },
+    {
+      "config": "patchwork",
+      "seed": "333333333",
+      "perturbation": "press+",
+      "axis": "press",
+      "factor": "1.05",
+      "live": true,
+      "detail": "press x1.05 changes observed biology"
+    },
+    {
+      "config": "patchwork",
+      "seed": "444444444",
+      "perturbation": "mr-",
+      "axis": "mr",
+      "factor": "0.75",
+      "live": true,
+      "detail": "mr x0.75 changes observed biology"
+    },
+    {
+      "config": "patchwork",
+      "seed": "444444444",
+      "perturbation": "mr+",
+      "axis": "mr",
+      "factor": "1.25",
+      "live": true,
+      "detail": "mr x1.25 changes observed biology"
+    },
+    {
+      "config": "patchwork",
+      "seed": "444444444",
+      "perturbation": "ms-",
+      "axis": "ms",
+      "factor": "0.75",
+      "live": true,
+      "detail": "ms x0.75 changes observed biology"
+    },
+    {
+      "config": "patchwork",
+      "seed": "444444444",
+      "perturbation": "ms+",
+      "axis": "ms",
+      "factor": "1.25",
+      "live": true,
+      "detail": "ms x1.25 changes observed biology"
+    },
+    {
+      "config": "patchwork",
+      "seed": "444444444",
+      "perturbation": "div-",
+      "axis": "div",
+      "factor": "0.75",
+      "live": true,
+      "detail": "div x0.75 changes observed biology"
+    },
+    {
+      "config": "patchwork",
+      "seed": "444444444",
+      "perturbation": "div+",
+      "axis": "div",
+      "factor": "1.25",
+      "live": true,
+      "detail": "div x1.25 changes observed biology"
+    },
+    {
+      "config": "patchwork",
+      "seed": "444444444",
+      "perturbation": "press-",
+      "axis": "press",
+      "factor": "0.95",
+      "live": true,
+      "detail": "press x0.95 changes observed biology"
+    },
+    {
+      "config": "patchwork",
+      "seed": "444444444",
+      "perturbation": "press+",
+      "axis": "press",
+      "factor": "1.05",
+      "live": true,
+      "detail": "press x1.05 changes observed biology"
+    },
+    {
+      "config": "patchwork",
+      "seed": "555555555",
+      "perturbation": "mr-",
+      "axis": "mr",
+      "factor": "0.75",
+      "live": true,
+      "detail": "mr x0.75 changes observed biology"
+    },
+    {
+      "config": "patchwork",
+      "seed": "555555555",
+      "perturbation": "mr+",
+      "axis": "mr",
+      "factor": "1.25",
+      "live": true,
+      "detail": "mr x1.25 changes observed biology"
+    },
+    {
+      "config": "patchwork",
+      "seed": "555555555",
+      "perturbation": "ms-",
+      "axis": "ms",
+      "factor": "0.75",
+      "live": true,
+      "detail": "ms x0.75 changes observed biology"
+    },
+    {
+      "config": "patchwork",
+      "seed": "555555555",
+      "perturbation": "ms+",
+      "axis": "ms",
+      "factor": "1.25",
+      "live": true,
+      "detail": "ms x1.25 changes observed biology"
+    },
+    {
+      "config": "patchwork",
+      "seed": "555555555",
+      "perturbation": "div-",
+      "axis": "div",
+      "factor": "0.75",
+      "live": true,
+      "detail": "div x0.75 changes observed biology"
+    },
+    {
+      "config": "patchwork",
+      "seed": "555555555",
+      "perturbation": "div+",
+      "axis": "div",
+      "factor": "1.25",
+      "live": true,
+      "detail": "div x1.25 changes observed biology"
+    },
+    {
+      "config": "patchwork",
+      "seed": "555555555",
+      "perturbation": "press-",
+      "axis": "press",
+      "factor": "0.95",
+      "live": true,
+      "detail": "press x0.95 changes observed biology"
+    },
+    {
+      "config": "patchwork",
+      "seed": "555555555",
+      "perturbation": "press+",
+      "axis": "press",
+      "factor": "1.05",
+      "live": true,
+      "detail": "press x1.05 changes observed biology"
+    },
+    {
+      "config": "balanced",
+      "seed": "111111111",
+      "perturbation": "mr-",
+      "axis": "mr",
+      "factor": "0.75",
+      "live": true,
+      "detail": "mr x0.75 changes observed biology"
+    },
+    {
+      "config": "balanced",
+      "seed": "111111111",
+      "perturbation": "mr+",
+      "axis": "mr",
+      "factor": "1.25",
+      "live": true,
+      "detail": "mr x1.25 changes observed biology"
+    },
+    {
+      "config": "balanced",
+      "seed": "111111111",
+      "perturbation": "ms-",
+      "axis": "ms",
+      "factor": "0.75",
+      "live": true,
+      "detail": "ms x0.75 changes observed biology"
+    },
+    {
+      "config": "balanced",
+      "seed": "111111111",
+      "perturbation": "ms+",
+      "axis": "ms",
+      "factor": "1.25",
+      "live": true,
+      "detail": "ms x1.25 changes observed biology"
+    },
+    {
+      "config": "balanced",
+      "seed": "111111111",
+      "perturbation": "div-",
+      "axis": "div",
+      "factor": "0.75",
+      "live": true,
+      "detail": "div x0.75 changes observed biology"
+    },
+    {
+      "config": "balanced",
+      "seed": "111111111",
+      "perturbation": "div+",
+      "axis": "div",
+      "factor": "1.25",
+      "live": true,
+      "detail": "div x1.25 changes observed biology"
+    },
+    {
+      "config": "balanced",
+      "seed": "111111111",
+      "perturbation": "press-",
+      "axis": "press",
+      "factor": "0.95",
+      "live": true,
+      "detail": "press x0.95 changes observed biology"
+    },
+    {
+      "config": "balanced",
+      "seed": "111111111",
+      "perturbation": "press+",
+      "axis": "press",
+      "factor": "1.05",
+      "live": true,
+      "detail": "press x1.05 changes observed biology"
+    },
+    {
+      "config": "balanced",
+      "seed": "222222222",
+      "perturbation": "mr-",
+      "axis": "mr",
+      "factor": "0.75",
+      "live": true,
+      "detail": "mr x0.75 changes observed biology"
+    },
+    {
+      "config": "balanced",
+      "seed": "222222222",
+      "perturbation": "mr+",
+      "axis": "mr",
+      "factor": "1.25",
+      "live": true,
+      "detail": "mr x1.25 changes observed biology"
+    },
+    {
+      "config": "balanced",
+      "seed": "222222222",
+      "perturbation": "ms-",
+      "axis": "ms",
+      "factor": "0.75",
+      "live": true,
+      "detail": "ms x0.75 changes observed biology"
+    },
+    {
+      "config": "balanced",
+      "seed": "222222222",
+      "perturbation": "ms+",
+      "axis": "ms",
+      "factor": "1.25",
+      "live": true,
+      "detail": "ms x1.25 changes observed biology"
+    },
+    {
+      "config": "balanced",
+      "seed": "222222222",
+      "perturbation": "div-",
+      "axis": "div",
+      "factor": "0.75",
+      "live": true,
+      "detail": "div x0.75 changes observed biology"
+    },
+    {
+      "config": "balanced",
+      "seed": "222222222",
+      "perturbation": "div+",
+      "axis": "div",
+      "factor": "1.25",
+      "live": true,
+      "detail": "div x1.25 changes observed biology"
+    },
+    {
+      "config": "balanced",
+      "seed": "222222222",
+      "perturbation": "press-",
+      "axis": "press",
+      "factor": "0.95",
+      "live": true,
+      "detail": "press x0.95 changes observed biology"
+    },
+    {
+      "config": "balanced",
+      "seed": "222222222",
+      "perturbation": "press+",
+      "axis": "press",
+      "factor": "1.05",
+      "live": true,
+      "detail": "press x1.05 changes observed biology"
+    },
+    {
+      "config": "balanced",
+      "seed": "333333333",
+      "perturbation": "mr-",
+      "axis": "mr",
+      "factor": "0.75",
+      "live": true,
+      "detail": "mr x0.75 changes observed biology"
+    },
+    {
+      "config": "balanced",
+      "seed": "333333333",
+      "perturbation": "mr+",
+      "axis": "mr",
+      "factor": "1.25",
+      "live": true,
+      "detail": "mr x1.25 changes observed biology"
+    },
+    {
+      "config": "balanced",
+      "seed": "333333333",
+      "perturbation": "ms-",
+      "axis": "ms",
+      "factor": "0.75",
+      "live": true,
+      "detail": "ms x0.75 changes observed biology"
+    },
+    {
+      "config": "balanced",
+      "seed": "333333333",
+      "perturbation": "ms+",
+      "axis": "ms",
+      "factor": "1.25",
+      "live": true,
+      "detail": "ms x1.25 changes observed biology"
+    },
+    {
+      "config": "balanced",
+      "seed": "333333333",
+      "perturbation": "div-",
+      "axis": "div",
+      "factor": "0.75",
+      "live": true,
+      "detail": "div x0.75 changes observed biology"
+    },
+    {
+      "config": "balanced",
+      "seed": "333333333",
+      "perturbation": "div+",
+      "axis": "div",
+      "factor": "1.25",
+      "live": true,
+      "detail": "div x1.25 changes observed biology"
+    },
+    {
+      "config": "balanced",
+      "seed": "333333333",
+      "perturbation": "press-",
+      "axis": "press",
+      "factor": "0.95",
+      "live": true,
+      "detail": "press x0.95 changes observed biology"
+    },
+    {
+      "config": "balanced",
+      "seed": "333333333",
+      "perturbation": "press+",
+      "axis": "press",
+      "factor": "1.05",
+      "live": true,
+      "detail": "press x1.05 changes observed biology"
+    },
+    {
+      "config": "balanced",
+      "seed": "444444444",
+      "perturbation": "mr-",
+      "axis": "mr",
+      "factor": "0.75",
+      "live": true,
+      "detail": "mr x0.75 changes observed biology"
+    },
+    {
+      "config": "balanced",
+      "seed": "444444444",
+      "perturbation": "mr+",
+      "axis": "mr",
+      "factor": "1.25",
+      "live": true,
+      "detail": "mr x1.25 changes observed biology"
+    },
+    {
+      "config": "balanced",
+      "seed": "444444444",
+      "perturbation": "ms-",
+      "axis": "ms",
+      "factor": "0.75",
+      "live": true,
+      "detail": "ms x0.75 changes observed biology"
+    },
+    {
+      "config": "balanced",
+      "seed": "444444444",
+      "perturbation": "ms+",
+      "axis": "ms",
+      "factor": "1.25",
+      "live": true,
+      "detail": "ms x1.25 changes observed biology"
+    },
+    {
+      "config": "balanced",
+      "seed": "444444444",
+      "perturbation": "div-",
+      "axis": "div",
+      "factor": "0.75",
+      "live": true,
+      "detail": "div x0.75 changes observed biology"
+    },
+    {
+      "config": "balanced",
+      "seed": "444444444",
+      "perturbation": "div+",
+      "axis": "div",
+      "factor": "1.25",
+      "live": true,
+      "detail": "div x1.25 changes observed biology"
+    },
+    {
+      "config": "balanced",
+      "seed": "444444444",
+      "perturbation": "press-",
+      "axis": "press",
+      "factor": "0.95",
+      "live": true,
+      "detail": "press x0.95 changes observed biology"
+    },
+    {
+      "config": "balanced",
+      "seed": "444444444",
+      "perturbation": "press+",
+      "axis": "press",
+      "factor": "1.05",
+      "live": true,
+      "detail": "press x1.05 changes observed biology"
+    },
+    {
+      "config": "balanced",
+      "seed": "555555555",
+      "perturbation": "mr-",
+      "axis": "mr",
+      "factor": "0.75",
+      "live": true,
+      "detail": "mr x0.75 changes observed biology"
+    },
+    {
+      "config": "balanced",
+      "seed": "555555555",
+      "perturbation": "mr+",
+      "axis": "mr",
+      "factor": "1.25",
+      "live": true,
+      "detail": "mr x1.25 changes observed biology"
+    },
+    {
+      "config": "balanced",
+      "seed": "555555555",
+      "perturbation": "ms-",
+      "axis": "ms",
+      "factor": "0.75",
+      "live": true,
+      "detail": "ms x0.75 changes observed biology"
+    },
+    {
+      "config": "balanced",
+      "seed": "555555555",
+      "perturbation": "ms+",
+      "axis": "ms",
+      "factor": "1.25",
+      "live": true,
+      "detail": "ms x1.25 changes observed biology"
+    },
+    {
+      "config": "balanced",
+      "seed": "555555555",
+      "perturbation": "div-",
+      "axis": "div",
+      "factor": "0.75",
+      "live": true,
+      "detail": "div x0.75 changes observed biology"
+    },
+    {
+      "config": "balanced",
+      "seed": "555555555",
+      "perturbation": "div+",
+      "axis": "div",
+      "factor": "1.25",
+      "live": true,
+      "detail": "div x1.25 changes observed biology"
+    },
+    {
+      "config": "balanced",
+      "seed": "555555555",
+      "perturbation": "press-",
+      "axis": "press",
+      "factor": "0.95",
+      "live": true,
+      "detail": "press x0.95 changes observed biology"
+    },
+    {
+      "config": "balanced",
+      "seed": "555555555",
+      "perturbation": "press+",
+      "axis": "press",
+      "factor": "1.05",
+      "live": true,
+      "detail": "press x1.05 changes observed biology"
+    }
+  ],
+  "qA1_concentrationWithCounters": [
+    {
+      "regime": "replete",
+      "seed": "111111111",
+      "organisms": "12826",
+      "births": "12796",
+      "everReproduced": "5492",
+      "share": "0.4282",
+      "repeatParents": "3077",
+      "repeatBirthShare": "0.8113",
+      "top1%lineages": "0.3946",
+      "top10%lineages": "0.8181",
+      "lineages": "3379",
+      "blocked": "18197",
+      "reproEligible": "30934"
+    },
+    {
+      "regime": "replete",
+      "seed": "222222222",
+      "organisms": "12973",
+      "births": "12943",
+      "everReproduced": "5673",
+      "share": "0.4373",
+      "repeatParents": "3016",
+      "repeatBirthShare": "0.7947",
+      "top1%lineages": "0.3797",
+      "top10%lineages": "0.8234",
+      "lineages": "3497",
+      "blocked": "31695",
+      "reproEligible": "44586"
+    },
+    {
+      "regime": "replete",
+      "seed": "333333333",
+      "organisms": "12503",
+      "births": "12473",
+      "everReproduced": "5404",
+      "share": "0.4322",
+      "repeatParents": "2975",
+      "repeatBirthShare": "0.8053",
+      "top1%lineages": "0.3864",
+      "top10%lineages": "0.8128",
+      "lineages": "3289",
+      "blocked": "21099",
+      "reproEligible": "33529"
+    },
+    {
+      "regime": "replete",
+      "seed": "444444444",
+      "organisms": "10789",
+      "births": "10759",
+      "everReproduced": "4588",
+      "share": "0.4252",
+      "repeatParents": "2483",
+      "repeatBirthShare": "0.8043",
+      "top1%lineages": "0.3314",
+      "top10%lineages": "0.8176",
+      "lineages": "2853",
+      "blocked": "27345",
+      "reproEligible": "38059"
+    },
+    {
+      "regime": "replete",
+      "seed": "555555555",
+      "organisms": "12646",
+      "births": "12616",
+      "everReproduced": "5488",
+      "share": "0.434",
+      "repeatParents": "2943",
+      "repeatBirthShare": "0.7983",
+      "top1%lineages": "0.3434",
+      "top10%lineages": "0.8253",
+      "lineages": "3284",
+      "blocked": "34785",
+      "reproEligible": "47338"
+    },
+    {
+      "regime": "marginal",
+      "seed": "111111111",
+      "organisms": "6012",
+      "births": "5982",
+      "everReproduced": "2663",
+      "share": "0.4429",
+      "repeatParents": "1538",
+      "repeatBirthShare": "0.8119",
+      "top1%lineages": "0.3278",
+      "top10%lineages": "0.7616",
+      "lineages": "1652",
+      "blocked": "461",
+      "reproEligible": "6427"
+    },
+    {
+      "regime": "marginal",
+      "seed": "222222222",
+      "organisms": "5770",
+      "births": "5740",
+      "everReproduced": "2520",
+      "share": "0.4367",
+      "repeatParents": "1454",
+      "repeatBirthShare": "0.8143",
+      "top1%lineages": "0.3007",
+      "top10%lineages": "0.7641",
+      "lineages": "1585",
+      "blocked": "803",
+      "reproEligible": "6526"
+    },
+    {
+      "regime": "marginal",
+      "seed": "333333333",
+      "organisms": "6101",
+      "births": "6071",
+      "everReproduced": "2728",
+      "share": "0.4471",
+      "repeatParents": "1580",
+      "repeatBirthShare": "0.8109",
+      "top1%lineages": "0.2873",
+      "top10%lineages": "0.7559",
+      "lineages": "1627",
+      "blocked": "346",
+      "reproEligible": "6394"
+    },
+    {
+      "regime": "marginal",
+      "seed": "444444444",
+      "organisms": "5617",
+      "births": "5587",
+      "everReproduced": "2401",
+      "share": "0.4275",
+      "repeatParents": "1372",
+      "repeatBirthShare": "0.8158",
+      "top1%lineages": "0.3345",
+      "top10%lineages": "0.7802",
+      "lineages": "1528",
+      "blocked": "1702",
+      "reproEligible": "7266"
+    },
+    {
+      "regime": "marginal",
+      "seed": "555555555",
+      "organisms": "5977",
+      "births": "5947",
+      "everReproduced": "2628",
+      "share": "0.4397",
+      "repeatParents": "1515",
+      "repeatBirthShare": "0.8128",
+      "top1%lineages": "0.2753",
+      "top10%lineages": "0.7469",
+      "lineages": "1605",
+      "blocked": "820",
+      "reproEligible": "6747"
+    },
+    {
+      "regime": "scarce",
+      "seed": "111111111",
+      "organisms": "1556",
+      "births": "1526",
+      "everReproduced": "701",
+      "share": "0.4505",
+      "repeatParents": "387",
+      "repeatBirthShare": "0.7942",
+      "top1%lineages": "0.287",
+      "top10%lineages": "0.7484",
+      "lineages": "438",
+      "blocked": "0",
+      "reproEligible": "1519"
+    },
+    {
+      "regime": "scarce",
+      "seed": "222222222",
+      "organisms": "1449",
+      "births": "1419",
+      "everReproduced": "653",
+      "share": "0.4507",
+      "repeatParents": "354",
+      "repeatBirthShare": "0.7893",
+      "top1%lineages": "0.2875",
+      "top10%lineages": "0.7216",
+      "lineages": "428",
+      "blocked": "0",
+      "reproEligible": "1410"
+    },
+    {
+      "regime": "scarce",
+      "seed": "333333333",
+      "organisms": "1322",
+      "births": "1292",
+      "everReproduced": "604",
+      "share": "0.4569",
+      "repeatParents": "338",
+      "repeatBirthShare": "0.7941",
+      "top1%lineages": "0.2252",
+      "top10%lineages": "0.6904",
+      "lineages": "367",
+      "blocked": "0",
+      "reproEligible": "1286"
+    },
+    {
+      "regime": "scarce",
+      "seed": "444444444",
+      "organisms": "1838",
+      "births": "1808",
+      "everReproduced": "821",
+      "share": "0.4467",
+      "repeatParents": "475",
+      "repeatBirthShare": "0.8086",
+      "top1%lineages": "0.2268",
+      "top10%lineages": "0.7528",
+      "lineages": "518",
+      "blocked": "0",
+      "reproEligible": "1802"
+    },
+    {
+      "regime": "scarce",
+      "seed": "555555555",
+      "organisms": "1571",
+      "births": "1541",
+      "everReproduced": "720",
+      "share": "0.4583",
+      "repeatParents": "391",
+      "repeatBirthShare": "0.7865",
+      "top1%lineages": "0.3245",
+      "top10%lineages": "0.7508",
+      "lineages": "439",
+      "blocked": "0",
+      "reproEligible": "1535"
+    }
+  ],
+  "qC_regimeReversalVerdicts": [
+    {
+      "trait": "movement speed",
+      "replete": "mixed (drift/noise)",
+      "marginal": "mixed (drift/noise)",
+      "scarce": "mixed (drift/noise)",
+      "verdict": "no opposing signal"
+    },
+    {
+      "trait": "reproduction threshold",
+      "replete": "mixed (drift/noise)",
+      "marginal": "mixed (drift/noise)",
+      "scarce": "mixed (drift/noise)",
+      "verdict": "no opposing signal"
+    },
+    {
+      "trait": "dormancy response",
+      "replete": "mixed (drift/noise)",
+      "marginal": "mixed (drift/noise)",
+      "scarce": "mixed (drift/noise)",
+      "verdict": "no opposing signal"
+    },
+    {
+      "trait": "waste tolerance",
+      "replete": "mixed (drift/noise)",
+      "marginal": "mixed (drift/noise)",
+      "scarce": "mixed (drift/noise)",
+      "verdict": "no opposing signal"
+    },
+    {
+      "trait": "waste cleanup",
+      "replete": "mixed (drift/noise)",
+      "marginal": "mixed (drift/noise)",
+      "scarce": "mixed (drift/noise)",
+      "verdict": "no opposing signal"
+    }
+  ]
+}
