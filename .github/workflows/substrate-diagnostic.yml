@@ -22,6 +22,18 @@ on:
         description: "Which question to run (a, b, c, d, or all)"
         required: true
         default: "all"
+  # `workflow_dispatch` can only be dispatched for a workflow that GitHub has
+  # registered on the default branch, and this diagnostic must never be merged
+  # to main. The push trigger below is scoped to the diagnostic branch alone so
+  # the probes can actually run before any merge decision exists. It cannot fire
+  # on a pull request and cannot affect merge readiness.
+  push:
+    branches:
+      - analysis/evolutionary-substrate-diagnostic
+    paths:
+      - 'tools/diagnostics/substrate/**'
+      - 'packages/sim-core/**'
+      - '.github/workflows/substrate-diagnostic.yml'
 
 permissions:
   contents: read
@@ -39,24 +51,26 @@ jobs:
       - name: Record substrate baseline
         run: echo "SUBSTRATE_COMMIT=${GITHUB_SHA::12} SUBSTRATE_BASE=origin/main" >> "$GITHUB_ENV"
 
+      # `inputs.question` is empty on a push trigger, so every step is also
+      # gated on "no input means run everything".
       - name: Q-A reproductive-value concentration
-        if: inputs.question == 'a' || inputs.question == 'all'
+        if: inputs.question == '' || inputs.question == 'a' || inputs.question == 'all'
         run: pnpm exec tsx tools/diagnostics/substrate/qA.ts
 
       - name: Q-A matched parent-vs-newborn value assay
-        if: inputs.question == 'a' || inputs.question == 'all'
+        if: inputs.question == '' || inputs.question == 'a' || inputs.question == 'all'
         run: pnpm exec tsx tools/diagnostics/substrate/qA.ts --value
 
       - name: Q-B opportunity-frequency map
-        if: inputs.question == 'b' || inputs.question == 'all'
+        if: inputs.question == '' || inputs.question == 'b' || inputs.question == 'all'
         run: pnpm exec tsx tools/diagnostics/substrate/qB.ts
 
       - name: Q-C selection gradients
-        if: inputs.question == 'c' || inputs.question == 'all'
+        if: inputs.question == '' || inputs.question == 'c' || inputs.question == 'all'
         run: pnpm exec tsx tools/diagnostics/substrate/qC.ts
 
       - name: Q-D protected-ecology sensitivity envelope
-        if: inputs.question == 'd' || inputs.question == 'all'
+        if: inputs.question == '' || inputs.question == 'd' || inputs.question == 'all'
         run: pnpm exec tsx tools/diagnostics/substrate/qD.ts
 
       # The diagnostic must not be able to affect merge readiness. This step is
@@ -68,7 +82,7 @@ jobs:
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: substrate-diagnostic-${{ inputs.question }}-${{ github.sha }}
+          name: substrate-diagnostic-${{ inputs.question || 'push' }}-${{ github.sha }}
           path: |
             testdata/substrate-diagnostic/
           if-no-files-found: error
